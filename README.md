@@ -34,6 +34,7 @@ Tier 1 incident-response actions available directly from the dashboard (capabili
 | **Pause webhook** | Webhook detail | Stops event deliveries; events silently dropped |
 | **Enable webhook** | Webhook detail | Resumes deliveries (resets failure counter) |
 | **Reset & re-enable webhook** | Webhook detail | Re-enables disabled/failing webhook, clears failures |
+| **Adjust budget allocation** | Budget detail | Inline form — uses fund endpoint with RESET operation |
 
 ## Architecture
 
@@ -124,6 +125,7 @@ The dashboard uses `AdminKeyAuth` exclusively (`X-Admin-API-Key` header). No ten
 | `PATCH /v1/admin/tenants/{id}` | Tenant Detail | Suspend / reactivate tenant |
 | `DELETE /v1/admin/api-keys/{key_id}` | API Keys, Tenant Detail | Revoke API key |
 | `PATCH /v1/admin/webhooks/{subscription_id}` | Webhook Detail | Pause/enable, reset failures |
+| `POST /v1/admin/budgets/fund` | Budget Detail | Adjust allocation (RESET operation) |
 
 ## Polling Strategy
 

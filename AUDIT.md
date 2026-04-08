@@ -167,7 +167,7 @@ All write operations audited against `complete-budget-governance-v0.1.25.yaml` a
 | Pause / enable webhook | `/v1/admin/webhooks/{subscription_id}` | PATCH `{ status: 'PAUSED'/'ACTIVE' }` | Spec enum is ACTIVE/PAUSED (not DISABLED); re-enabling resets `consecutive_failures` |
 | Reset & re-enable webhook | `/v1/admin/webhooks/{subscription_id}` | PATCH `{ status: 'ACTIVE' }` | Same as enable — spec resets failures on ACTIVE transition |
 | ~~Freeze/unfreeze budget~~ | — | — | **Removed** — no admin endpoint for budget status changes |
-| ~~Adjust budget allocation~~ | — | — | **Removed** — `POST /v1/admin/budgets/fund` uses `ApiKeyAuth` (tenant key), not `AdminKeyAuth` |
+| Adjust budget allocation | `POST /v1/admin/budgets/fund` | POST `BudgetFundingRequest` | UI implemented; **pending spec change** to add `AdminKeyAuth` to fund endpoint security block |
 
 **UX details:**
 - Webhook pause/enable and reset use `ConfirmAction` dialog with spec-accurate descriptions

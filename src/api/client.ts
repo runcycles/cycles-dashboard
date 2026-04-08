@@ -122,3 +122,31 @@ export function revokeApiKey(keyId: string, reason?: string): Promise<import('..
 export const updateWebhook = (id: string, body: Record<string, unknown>) =>
   patch<import('../types').WebhookSubscription>(`${BASE}/admin/webhooks/${id}`, body)
 
+// Write operations — Budget funding (POST /v1/admin/budgets/fund)
+// Spec change pending: adding AdminKeyAuth to this endpoint's security block
+export function fundBudget(scope: string, unit: string, operation: string, amount: number, idempotencyKey: string, reason?: string): Promise<import('../types').BudgetLedger> {
+  const auth = useAuthStore()
+  const url = new URL(`${BASE}/admin/budgets/fund`, window.location.origin)
+  url.searchParams.set('scope', scope)
+  url.searchParams.set('unit', unit)
+  const body: Record<string, unknown> = {
+    operation,
+    amount: { unit, amount },
+    idempotency_key: idempotencyKey,
+  }
+  if (reason) body.reason = reason
+  return fetch(url.toString(), {
+    method: 'POST',
+    headers: { 'X-Admin-API-Key': auth.apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(async (res) => {
+    if (res.status === 401 || res.status === 403) {
+      auth.logout()
+      router.push({ name: 'login', query: { redirect: router.currentRoute.value.fullPath } })
+      throw new Error('Unauthorized')
+    }
+    if (!res.ok) throw new Error(`API error: ${res.status}`)
+    try { return await res.json() } catch { throw new Error('Invalid response from server') }
+  })
+}
+
