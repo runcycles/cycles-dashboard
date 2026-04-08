@@ -27,7 +27,7 @@ function logout() {
       <img src="/runcycles-logo.svg" alt="Cycles" class="w-8 h-8" />
       <div>
         <h1 class="text-white font-semibold text-lg leading-tight">Cycles</h1>
-        <p class="text-xs text-gray-500">Admin Dashboard</p>
+        <p class="text-xs text-gray-400">Admin Dashboard</p>
       </div>
     </div>
     <nav class="flex-1 py-2">
