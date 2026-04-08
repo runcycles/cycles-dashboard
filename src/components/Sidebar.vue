@@ -23,9 +23,12 @@ function logout() {
 
 <template>
   <aside class="w-56 bg-gray-900 text-gray-300 flex flex-col">
-    <div class="p-4 border-b border-gray-700">
-      <h1 class="text-white font-semibold text-lg">Cycles</h1>
-      <p class="text-xs text-gray-500">Admin Dashboard</p>
+    <div class="p-4 border-b border-gray-700 flex items-center gap-3">
+      <img src="/runcycles-logo.svg" alt="Cycles" class="w-8 h-8" />
+      <div>
+        <h1 class="text-white font-semibold text-lg leading-tight">Cycles</h1>
+        <p class="text-xs text-gray-500">Admin Dashboard</p>
+      </div>
     </div>
     <nav class="flex-1 py-2">
       <router-link

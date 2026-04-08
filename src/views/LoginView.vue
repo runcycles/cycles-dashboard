@@ -25,7 +25,10 @@ async function submit() {
 <template>
   <div class="min-h-screen flex items-center justify-center bg-gray-50">
     <div class="bg-white rounded-lg shadow-md p-8 w-full max-w-sm">
-      <h1 class="text-xl font-semibold text-gray-900 mb-1">Cycles Admin</h1>
+      <div class="flex items-center gap-3 mb-4">
+        <img src="/runcycles-logo.svg" alt="Cycles" class="w-10 h-10" />
+        <h1 class="text-xl font-semibold text-gray-900">Cycles Admin</h1>
+      </div>
       <p class="text-sm text-gray-500 mb-6">Enter your admin API key to continue.</p>
       <form @submit.prevent="submit">
         <input
