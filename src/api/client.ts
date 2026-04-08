@@ -32,6 +32,23 @@ function get<T>(path: string, params?: Record<string, string>): Promise<T> {
   return request<T>('GET', path, params)
 }
 
+function patch<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  const auth = useAuthStore()
+  return fetch(`${window.location.origin}${path}`, {
+    method: 'PATCH',
+    headers: { 'X-Admin-API-Key': auth.apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(async (res) => {
+    if (res.status === 401 || res.status === 403) {
+      auth.logout()
+      router.push({ name: 'login', query: { redirect: router.currentRoute.value.fullPath } })
+      throw new Error('Unauthorized')
+    }
+    if (!res.ok) throw new Error(`API error: ${res.status}`)
+    try { return await res.json() } catch { throw new Error('Invalid response from server') }
+  })
+}
+
 // Auth
 export const introspect = () => get<import('../types').AuthIntrospectResponse>(`${BASE}/auth/introspect`)
 
@@ -77,3 +94,13 @@ export const listApiKeys = (params?: Record<string, string>) =>
 // Policies
 export const listPolicies = (params: Record<string, string>) =>
   get<import('../types').PolicyListResponse>(`${BASE}/admin/policies`, params)
+
+// Write operations (Tier 1 — incident response)
+export const updateTenantStatus = (id: string, status: string) =>
+  patch<import('../types').Tenant>(`${BASE}/admin/tenants/${id}`, { status })
+
+export const updateBudgetStatus = (ledgerId: string, status: string) =>
+  patch<import('../types').BudgetLedger>(`${BASE}/admin/budgets/${ledgerId}`, { status })
+
+export const updateApiKeyStatus = (keyId: string, status: string) =>
+  patch<import('../types').ApiKey>(`${BASE}/admin/api-keys/${keyId}`, { status })
