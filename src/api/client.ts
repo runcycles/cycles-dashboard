@@ -95,22 +95,77 @@ export const listApiKeys = (params?: Record<string, string>) =>
 export const listPolicies = (params: Record<string, string>) =>
   get<import('../types').PolicyListResponse>(`${BASE}/admin/policies`, params)
 
-// Write operations (Tier 1 — incident response)
+// Write operations — Tenant
 export const updateTenantStatus = (id: string, status: string) =>
   patch<import('../types').Tenant>(`${BASE}/admin/tenants/${id}`, { status })
 
-export const updateBudgetStatus = (ledgerId: string, status: string) =>
-  patch<import('../types').BudgetLedger>(`${BASE}/admin/budgets/${ledgerId}`, { status })
+// Write operations — API Keys (DELETE per spec, not PATCH)
+export function revokeApiKey(keyId: string, reason?: string): Promise<import('../types').ApiKey> {
+  const auth = useAuthStore()
+  const url = new URL(`${BASE}/admin/api-keys/${keyId}`, window.location.origin)
+  if (reason) url.searchParams.set('reason', reason)
+  return fetch(url.toString(), {
+    method: 'DELETE',
+    headers: { 'X-Admin-API-Key': auth.apiKey, 'Content-Type': 'application/json' },
+  }).then(async (res) => {
+    if (res.status === 401 || res.status === 403) {
+      auth.logout()
+      router.push({ name: 'login', query: { redirect: router.currentRoute.value.fullPath } })
+      throw new Error('Unauthorized')
+    }
+    if (!res.ok) throw new Error(`API error: ${res.status}`)
+    try { return await res.json() } catch { throw new Error('Invalid response from server') }
+  })
+}
 
-export const updateApiKeyStatus = (keyId: string, status: string) =>
-  patch<import('../types').ApiKey>(`${BASE}/admin/api-keys/${keyId}`, { status })
+// Write operations — Webhooks (PATCH with status ACTIVE/PAUSED per spec)
+export const updateWebhook = (id: string, body: Record<string, unknown>) =>
+  patch<import('../types').WebhookSubscription>(`${BASE}/admin/webhooks/${id}`, body)
 
-// Write operations (Tier 2 — operational convenience)
-export const updateWebhookStatus = (id: string, status: string) =>
-  patch<import('../types').WebhookSubscription>(`${BASE}/admin/webhooks/${id}`, { status })
+// Write operations — Budget funding (POST /v1/admin/budgets/fund with scope+unit query params)
+export function fundBudget(scope: string, unit: string, operation: string, amount: number, idempotencyKey: string, reason?: string): Promise<import('../types').BudgetLedger> {
+  const auth = useAuthStore()
+  const url = new URL(`${BASE}/admin/budgets/fund`, window.location.origin)
+  url.searchParams.set('scope', scope)
+  url.searchParams.set('unit', unit)
+  const body: Record<string, unknown> = {
+    operation,
+    amount: { unit, amount },
+    idempotency_key: idempotencyKey,
+  }
+  if (reason) body.reason = reason
+  return fetch(url.toString(), {
+    method: 'POST',
+    headers: { 'X-Admin-API-Key': auth.apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(async (res) => {
+    if (res.status === 401 || res.status === 403) {
+      auth.logout()
+      router.push({ name: 'login', query: { redirect: router.currentRoute.value.fullPath } })
+      throw new Error('Unauthorized')
+    }
+    if (!res.ok) throw new Error(`API error: ${res.status}`)
+    try { return await res.json() } catch { throw new Error('Invalid response from server') }
+  })
+}
 
-export const resetWebhookFailures = (id: string) =>
-  patch<import('../types').WebhookSubscription>(`${BASE}/admin/webhooks/${id}`, { consecutive_failures: 0 })
-
-export const adjustBudgetAllocation = (ledgerId: string, amount: number) =>
-  patch<import('../types').BudgetLedger>(`${BASE}/admin/budgets/${ledgerId}`, { allocated: { amount } })
+// Write operations — Budget metadata (PATCH /v1/admin/budgets with scope+unit query params)
+export function updateBudget(scope: string, unit: string, body: Record<string, unknown>): Promise<import('../types').BudgetLedger> {
+  const auth = useAuthStore()
+  const url = new URL(`${BASE}/admin/budgets`, window.location.origin)
+  url.searchParams.set('scope', scope)
+  url.searchParams.set('unit', unit)
+  return fetch(url.toString(), {
+    method: 'PATCH',
+    headers: { 'X-Admin-API-Key': auth.apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(async (res) => {
+    if (res.status === 401 || res.status === 403) {
+      auth.logout()
+      router.push({ name: 'login', query: { redirect: router.currentRoute.value.fullPath } })
+      throw new Error('Unauthorized')
+    }
+    if (!res.ok) throw new Error(`API error: ${res.status}`)
+    try { return await res.json() } catch { throw new Error('Invalid response from server') }
+  })
+}

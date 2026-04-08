@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
-import { getWebhook, listDeliveries, updateWebhookStatus, resetWebhookFailures } from '../api/client'
+import { getWebhook, listDeliveries, updateWebhook } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { WebhookSubscription, WebhookDelivery } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -21,15 +21,16 @@ const canManage = computed(() => auth.capabilities?.manage_webhooks !== false)
 const webhook = ref<WebhookSubscription | null>(null)
 const deliveries = ref<WebhookDelivery[]>([])
 const error = ref('')
-const pendingAction = ref<'ACTIVE' | 'DISABLED' | 'reset' | null>(null)
+const pendingAction = ref<'ACTIVE' | 'PAUSED' | 'reset' | null>(null)
 
 async function executeAction() {
   if (!pendingAction.value) return
   try {
     if (pendingAction.value === 'reset') {
-      await resetWebhookFailures(id)
+      // Re-enabling resets consecutive_failures per spec
+      await updateWebhook(id, { status: 'ACTIVE' })
     } else {
-      await updateWebhookStatus(id, pendingAction.value)
+      await updateWebhook(id, { status: pendingAction.value })
     }
     webhook.value = await getWebhook(id)
   } catch (e: any) { error.value = e.message }
@@ -65,9 +66,9 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           <StatusBadge :status="webhook.status" />
           <span v-if="(webhook.consecutive_failures ?? 0) > 0" class="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-medium">{{ webhook.consecutive_failures }} failures</span>
           <span class="flex-1" />
-          <button v-if="canManage && (webhook.consecutive_failures ?? 0) > 0" @click="pendingAction = 'reset'" class="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-2.5 py-1 hover:bg-blue-50 cursor-pointer transition-colors">Reset Failures</button>
-          <button v-if="canManage && webhook.status === 'ACTIVE'" @click="pendingAction = 'DISABLED'" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Disable</button>
-          <button v-if="canManage && webhook.status === 'DISABLED'" @click="pendingAction = 'ACTIVE'" class="text-xs text-green-700 hover:text-green-900 border border-green-200 rounded px-2.5 py-1 hover:bg-green-50 cursor-pointer transition-colors">Enable</button>
+          <button v-if="canManage && (webhook.consecutive_failures ?? 0) > 0 && webhook.status !== 'ACTIVE'" @click="pendingAction = 'reset'" class="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-2.5 py-1 hover:bg-blue-50 cursor-pointer transition-colors">Reset &amp; Re-enable</button>
+          <button v-if="canManage && webhook.status === 'ACTIVE'" @click="pendingAction = 'PAUSED'" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Pause</button>
+          <button v-if="canManage && (webhook.status === 'DISABLED' || webhook.status === 'PAUSED')" @click="pendingAction = 'ACTIVE'" class="text-xs text-green-700 hover:text-green-900 border border-green-200 rounded px-2.5 py-1 hover:bg-green-50 cursor-pointer transition-colors">Enable</button>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
           <div class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">URL</span><span class="font-mono text-xs break-all">{{ webhook.url }}</span></div>
@@ -110,10 +111,10 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     </template>
 
     <ConfirmAction
-      v-if="pendingAction === 'DISABLED'"
-      title="Disable this webhook?"
-      :message="`Disabling will stop all event deliveries to '${webhook?.url}'. No events will be queued — they will be silently dropped until the webhook is re-enabled.`"
-      confirm-label="Disable Webhook"
+      v-if="pendingAction === 'PAUSED'"
+      title="Pause this webhook?"
+      :message="`Pausing will stop all event deliveries to '${webhook?.url}'. Events that occur while paused are not queued and will be silently dropped.`"
+      confirm-label="Pause Webhook"
       :danger="true"
       @confirm="executeAction"
       @cancel="pendingAction = null"
@@ -122,7 +123,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <ConfirmAction
       v-if="pendingAction === 'ACTIVE'"
       title="Enable this webhook?"
-      :message="`Re-enabling will resume event deliveries to '${webhook?.url}'. Events that occurred while disabled are not retroactively delivered.`"
+      :message="`Re-enabling will resume event deliveries to '${webhook?.url}'. Events that occurred while paused/disabled are not retroactively delivered.`"
       confirm-label="Enable Webhook"
       @confirm="executeAction"
       @cancel="pendingAction = null"
@@ -130,9 +131,9 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
 
     <ConfirmAction
       v-if="pendingAction === 'reset'"
-      title="Reset failure counter?"
-      :message="`This will reset the consecutive failure count to 0 for '${webhook?.url}'. The webhook will be treated as healthy and delivery attempts will resume normally.`"
-      confirm-label="Reset Failures"
+      title="Reset and re-enable?"
+      :message="`This will re-enable the webhook and reset the consecutive failure count to 0 for '${webhook?.url}'. Delivery attempts will resume immediately.`"
+      confirm-label="Reset &amp; Re-enable"
       @confirm="executeAction"
       @cancel="pendingAction = null"
     />

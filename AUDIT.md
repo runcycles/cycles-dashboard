@@ -137,9 +137,8 @@ Comprehensive review addressing 8 security gaps and 12 usability improvements.
 
 | Action | Endpoint | Location | Capability gate |
 |--------|----------|----------|-----------------|
-| Freeze / unfreeze budget | `PATCH /v1/admin/budgets/{id}` | Budget detail view | `manage_budgets` |
 | Suspend / reactivate tenant | `PATCH /v1/admin/tenants/{id}` | Tenant detail view | `manage_tenants` |
-| Revoke API key | `PATCH /v1/admin/api-keys/{id}` | API Keys list + Tenant detail keys tab | `manage_api_keys` |
+| Revoke API key | `DELETE /v1/admin/api-keys/{id}` | API Keys list + Tenant detail keys tab | `manage_api_keys` |
 
 All actions require confirmation dialog with explicit description of impact. Revoke is marked as irreversible. Actions are capability-gated — buttons hidden when capability is `false`.
 
@@ -157,18 +156,23 @@ All actions require confirmation dialog with explicit description of impact. Rev
 
 Adds convenience write actions for day-to-day operations.
 
-**Actions:**
+**Spec-aligned corrections (from v0.1.25.6 review):**
 
-| Action | Endpoint | Location | Capability gate |
-|--------|----------|----------|-----------------|
-| Disable / enable webhook | `PATCH /v1/admin/webhooks/{id}` | Webhook detail view | `manage_webhooks` |
-| Reset webhook failure counter | `PATCH /v1/admin/webhooks/{id}` | Webhook detail view (shown when failures > 0) | `manage_webhooks` |
-| Adjust budget allocation | `PATCH /v1/admin/budgets/{id}` | Budget detail view (inline form) | `manage_budgets` |
+All write operations audited against `complete-budget-governance-v0.1.25.yaml` and corrected:
+
+| Action | Spec endpoint | Method | Key correction |
+|--------|---------------|--------|----------------|
+| Suspend/reactivate tenant | `/v1/admin/tenants/{tenant_id}` | PATCH `{ status }` | Correct as-is |
+| Revoke API key | `/v1/admin/api-keys/{key_id}` | **DELETE** (not PATCH) | Spec uses DELETE with optional `reason` query param |
+| Pause / enable webhook | `/v1/admin/webhooks/{subscription_id}` | PATCH `{ status: 'PAUSED'/'ACTIVE' }` | Spec enum is ACTIVE/PAUSED (not DISABLED); re-enabling resets `consecutive_failures` |
+| Reset & re-enable webhook | `/v1/admin/webhooks/{subscription_id}` | PATCH `{ status: 'ACTIVE' }` | Same as enable — spec resets failures on ACTIVE transition |
+| Adjust budget allocation | `/v1/admin/budgets/fund?scope=X&unit=Y` | **POST** `BudgetFundingRequest` | Spec uses POST fund endpoint with RESET operation, `idempotency_key` required |
+| ~~Freeze/unfreeze budget~~ | — | — | **Removed** — no spec endpoint for budget status changes |
 
 **UX details:**
-- Webhook disable/enable and reset failures use the same `ConfirmAction` dialog pattern as Tier 1
-- Budget allocation adjustment uses an inline form with the current amount pre-filled, number input with unit label, Save/Cancel buttons
-- All actions capability-gated — buttons hidden when capability is `false`
-- All actions refresh data inline after success
+- Webhook pause/enable and reset use `ConfirmAction` dialog with spec-accurate descriptions
+- Budget allocation uses inline form with RESET operation, auto-generated idempotency key, audit reason
+- API key revoke sends reason string for audit trail
+- All actions capability-gated and refresh data inline after success
 
 **Build:** Zero TypeScript errors. 15 tests pass. Version 0.1.25.7.
