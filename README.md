@@ -154,6 +154,105 @@ The dashboard itself has no server-side configuration — it's a static SPA. The
 - **Development:** Vite proxy in `vite.config.ts` (default: `localhost:7979`)
 - **Production:** nginx reverse proxy in `nginx.conf` (default: `cycles-admin:7979`)
 
+## HTTPS / TLS
+
+The dashboard transmits the admin API key on every request, so HTTPS is strongly recommended in production.
+
+### Option 1: Reverse proxy (recommended)
+
+Place the dashboard behind a TLS-terminating reverse proxy (e.g., Caddy, Traefik, or a cloud load balancer):
+
+```
+Client ──HTTPS──▶ Reverse Proxy ──HTTP──▶ Dashboard (port 80) ──HTTP──▶ Admin Server (port 7979)
+```
+
+**Caddy example** (automatic HTTPS with Let's Encrypt):
+```
+admin.example.com {
+    reverse_proxy dashboard:80
+}
+```
+
+**docker-compose with Caddy:**
+```yaml
+services:
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy-data:/data
+    networks:
+      - cycles
+
+  dashboard:
+    build: .
+    # No exposed ports — only accessible through Caddy
+    networks:
+      - cycles
+
+  # ... cycles-admin and redis as before
+
+volumes:
+  caddy-data:
+```
+
+### Option 2: TLS directly in nginx
+
+Mount your certificate and key into the dashboard container and use an HTTPS nginx config:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name admin.example.com;
+
+    ssl_certificate     /etc/ssl/certs/dashboard.crt;
+    ssl_certificate_key /etc/ssl/private/dashboard.key;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /v1/ {
+        resolver 127.0.0.11 valid=30s ipv6=off;
+        set $upstream http://cycles-admin:7979;
+        proxy_pass $upstream/v1/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+
+server {
+    listen 80;
+    return 301 https://$host$request_uri;
+}
+```
+
+Mount the certs in docker-compose:
+```yaml
+dashboard:
+  build: .
+  ports:
+    - "443:443"
+    - "80:80"
+  volumes:
+    - ./nginx-ssl.conf:/etc/nginx/conf.d/default.conf
+    - ./certs/dashboard.crt:/etc/ssl/certs/dashboard.crt:ro
+    - ./certs/dashboard.key:/etc/ssl/private/dashboard.key:ro
+```
+
+### Security notes
+
+- The admin API key is sent as an HTTP header (`X-Admin-API-Key`) on every request. Without TLS, it is visible to anyone on the network.
+- The key is stored in browser memory only (Pinia store) and cleared on tab close — it is never written to localStorage or cookies.
+- The admin server's `dashboard.cors.origin` should match your production URL (e.g., `https://admin.example.com`).
+
 ## Documentation
 
 - [Cycles Documentation](https://runcycles.io)
