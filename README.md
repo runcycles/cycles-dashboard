@@ -1,5 +1,165 @@
-# Vue 3 + TypeScript + Vite
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+# Cycles Admin Dashboard
 
-Learn more about the recommended Project Setup and IDE Support in the [Vue Docs TypeScript Guide](https://vuejs.org/guide/typescript/overview.html#project-setup).
+Operational admin dashboard for the [Cycles Budget Governance System](https://github.com/runcycles/cycles-server-admin), aligned with [governance spec v0.1.25.5](https://github.com/runcycles/cycles-server-admin/blob/main/complete-budget-governance-v0.1.25.yaml).
+
+## Overview
+
+Operations-first dashboard for monitoring and managing the Cycles budget enforcement platform. Designed around operator workflows, not CRUD entity lists.
+
+| Page | Purpose |
+|------|---------|
+| **Overview** | Operational health at a glance — single-request aggregated dashboard |
+| **Tenants** | Tenant list + detail with budgets, API keys, and policies tabs |
+| **Budgets** | Tenant-scoped budget list with utilization/debt bars + exact scope detail |
+| **Events** | Correlation-first investigation tool with expandable detail rows |
+| **Webhooks** | Subscription health (green/yellow/red) + delivery history |
+| **Audit** | Compliance query tool with CSV/JSON export (manual-only, no auto-refresh) |
+
+## Architecture
+
+```
+src/
+├── api/           # API client (X-Admin-API-Key only)
+├── components/    # Reusable UI: Sidebar, PageHeader, StatusBadge, UtilizationBar, etc.
+├── composables/   # usePolling (visibility API pause + exponential backoff)
+├── stores/        # Pinia: auth (introspect + capabilities)
+├── views/         # 9 route views (login, overview, budgets, events, webhooks, audit, tenants + detail views)
+└── types.ts       # TypeScript types matching governance spec schemas
+```
+
+- **Framework:** Vue 3 + TypeScript + Vite
+- **State:** Pinia
+- **Styling:** Tailwind CSS v4
+- **Testing:** Vitest + @vue/test-utils
+- **Router:** Vue Router 4 with auth guard
+
+## Quick Start
+
+### Development (with Vite proxy)
+
+Requires the admin server running at `localhost:7979`.
+
+```bash
+npm install
+npm run dev
+```
+
+Dashboard starts at `http://localhost:5173`. The Vite dev server proxies `/v1/*` to the admin server.
+
+### Development (full stack via Docker)
+
+```bash
+# Start admin server + Redis
+cd ../cycles-server-admin
+ADMIN_API_KEY=your-key docker compose up -d
+
+# Start dashboard
+cd ../cycles-dashboard
+npm install
+npm run dev
+```
+
+### Production (Docker)
+
+```bash
+docker compose up -d
+```
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| Dashboard | 8080 | nginx serving SPA + reverse proxy to admin |
+| Admin Server | 7979 | Budget governance API |
+| Redis | 6379 | Shared state store |
+
+## Authentication
+
+The dashboard uses `AdminKeyAuth` exclusively (`X-Admin-API-Key` header). No tenant API keys are used.
+
+1. User enters admin API key on the login page
+2. Dashboard calls `GET /v1/auth/introspect` to validate and retrieve capabilities
+3. Sidebar navigation is gated by capability booleans (`view_overview`, `view_budgets`, etc.)
+4. On 401/403 from any API call, the session is cleared and user is redirected to login
+5. API key is stored in memory only (Pinia store) — cleared on tab close
+
+## API Endpoints Used
+
+| Endpoint | Page | Notes |
+|----------|------|-------|
+| `GET /v1/auth/introspect` | Login | Auth validation + capability discovery |
+| `GET /v1/admin/overview` | Overview | Single-request aggregated dashboard payload |
+| `GET /v1/admin/tenants` | Tenants | Tenant list |
+| `GET /v1/admin/tenants/{id}` | Tenant Detail | Single tenant |
+| `GET /v1/admin/budgets` | Budgets | Tenant-scoped list (requires `tenant_id` param) |
+| `GET /v1/admin/budgets/lookup` | Budget Detail | Exact (scope, unit) lookup |
+| `GET /v1/admin/events` | Events | Filtered event stream |
+| `GET /v1/admin/webhooks` | Webhooks | Subscription list |
+| `GET /v1/admin/webhooks/{id}` | Webhook Detail | Single subscription |
+| `GET /v1/admin/webhooks/{id}/deliveries` | Webhook Detail | Delivery history |
+| `GET /v1/admin/audit/logs` | Audit | Manual query with export |
+| `GET /v1/admin/api-keys` | Tenant Detail | API keys per tenant |
+| `GET /v1/admin/policies` | Tenant Detail | Policies per tenant (requires `tenant_id`) |
+
+## Polling Strategy
+
+Each page manages its own polling lifecycle via the `usePolling` composable:
+
+| Page | Interval | Behavior |
+|------|----------|----------|
+| Overview | 30s | Pause on tab hidden, 2x backoff on error (max 5min) |
+| Budgets | 60s | Same |
+| Events | 15s | Same |
+| Webhooks | 60s | Same |
+| Tenants | 60s | Same |
+| Audit | Manual only | Explicit "Run Query" button |
+
+## Building
+
+```bash
+npm run build      # Type-check + production build → dist/
+npm run test       # Run Vitest tests
+npm run dev        # Development server with HMR
+npm run preview    # Preview production build locally
+```
+
+## Docker
+
+Multi-stage build: Node 20 for `npm run build`, then nginx:alpine to serve.
+
+```dockerfile
+# Build
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+# Serve
+FROM nginx:alpine
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+```
+
+The nginx config handles SPA routing (`try_files $uri /index.html`) and reverse-proxies `/v1/` to the admin server.
+
+## Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `ADMIN_API_KEY` | Yes | — | Admin API key (docker-compose only) |
+
+The dashboard itself has no server-side configuration — it's a static SPA. The admin server URL is configured via:
+- **Development:** Vite proxy in `vite.config.ts` (default: `localhost:7979`)
+- **Production:** nginx reverse proxy in `nginx.conf` (default: `cycles-admin:7979`)
+
+## Documentation
+
+- [Cycles Documentation](https://runcycles.io)
+- [Admin Server](https://github.com/runcycles/cycles-server-admin)
+- [Governance Spec](https://github.com/runcycles/cycles-server-admin/blob/main/complete-budget-governance-v0.1.25.yaml)
+
+## License
+
+[Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0)
