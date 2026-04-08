@@ -6,6 +6,7 @@ import { listBudgets, lookupBudget, listTenants, listEvents } from '../api/clien
 import type { BudgetLedger, Tenant, Event } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import UtilizationBar from '../components/UtilizationBar.vue'
+import RefreshButton from '../components/RefreshButton.vue'
 
 const route = useRoute()
 
@@ -70,7 +71,7 @@ async function tick() {
   else { await loadTenants(); await loadList() }
 }
 
-const { refresh } = usePolling(tick, 60000)
+const { refresh, isLoading } = usePolling(tick, 60000)
 
 watch(selectedTenant, loadList)
 watch(() => route.query, () => { if (isDetail.value) loadDetail() })
@@ -80,7 +81,7 @@ watch(() => route.query, () => { if (isDetail.value) loadDetail() })
   <div>
     <div class="flex items-center justify-between mb-6">
       <h1 class="text-2xl font-semibold text-gray-900">{{ isDetail ? 'Budget Detail' : 'Budgets' }}</h1>
-      <button @click="refresh" class="text-sm text-gray-500 hover:text-gray-700">Refresh</button>
+      <RefreshButton :loading="isLoading" @click="refresh" />
     </div>
 
     <p v-if="error" class="text-red-600 text-sm mb-4">{{ error }}</p>

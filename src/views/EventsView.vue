@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { listEvents } from '../api/client'
 import type { Event } from '../types'
+import RefreshButton from '../components/RefreshButton.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -51,14 +52,14 @@ function viewCorrelated(cid: string) {
   applyFilters()
 }
 
-const { refresh } = usePolling(load, 15000)
+const { refresh, isLoading } = usePolling(load, 15000)
 </script>
 
 <template>
   <div>
     <div class="flex items-center justify-between mb-6">
       <h1 class="text-2xl font-semibold text-gray-900">Events</h1>
-      <button @click="refresh" class="text-sm text-gray-500 hover:text-gray-700">Refresh</button>
+      <RefreshButton :loading="isLoading" @click="refresh" />
     </div>
 
     <p v-if="error" class="text-red-600 text-sm mb-4">{{ error }}</p>

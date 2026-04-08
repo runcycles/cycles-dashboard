@@ -4,6 +4,7 @@ import { usePolling } from '../composables/usePolling'
 import { listWebhooks } from '../api/client'
 import type { WebhookSubscription } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
+import RefreshButton from '../components/RefreshButton.vue'
 
 const webhooks = ref<WebhookSubscription[]>([])
 const error = ref('')
@@ -14,7 +15,7 @@ function healthColor(w: WebhookSubscription): string {
   return 'bg-green-500'
 }
 
-const { refresh } = usePolling(async () => {
+const { refresh, isLoading } = usePolling(async () => {
   try {
     const res = await listWebhooks()
     webhooks.value = res.subscriptions
@@ -27,7 +28,7 @@ const { refresh } = usePolling(async () => {
   <div>
     <div class="flex items-center justify-between mb-6">
       <h1 class="text-2xl font-semibold text-gray-900">Webhooks</h1>
-      <button @click="refresh" class="text-sm text-gray-500 hover:text-gray-700">Refresh</button>
+      <RefreshButton :loading="isLoading" @click="refresh" />
     </div>
     <p v-if="error" class="text-red-600 text-sm mb-4">{{ error }}</p>
     <div class="bg-white rounded-lg shadow overflow-hidden">

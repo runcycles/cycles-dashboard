@@ -3,10 +3,12 @@ import { ref } from 'vue'
 import { usePolling } from '../composables/usePolling'
 import { getOverview } from '../api/client'
 import type { AdminOverviewResponse } from '../types'
+import RefreshButton from '../components/RefreshButton.vue'
+
 const data = ref<AdminOverviewResponse | null>(null)
 const error = ref('')
 
-const { refresh } = usePolling(async () => {
+const { refresh, isLoading } = usePolling(async () => {
   try { data.value = await getOverview(); error.value = '' }
   catch (e: any) { error.value = e.message }
 }, 30000)
@@ -16,7 +18,7 @@ const { refresh } = usePolling(async () => {
   <div>
     <div class="flex items-center justify-between mb-6">
       <h1 class="text-2xl font-semibold text-gray-900">Overview</h1>
-      <button @click="refresh" class="text-sm text-gray-500 hover:text-gray-700">Refresh</button>
+      <RefreshButton :loading="isLoading" @click="refresh" />
     </div>
 
     <p v-if="error" class="text-red-600 text-sm mb-4">{{ error }}</p>

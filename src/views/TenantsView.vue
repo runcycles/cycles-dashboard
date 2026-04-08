@@ -4,11 +4,12 @@ import { usePolling } from '../composables/usePolling'
 import { listTenants } from '../api/client'
 import type { Tenant } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
+import RefreshButton from '../components/RefreshButton.vue'
 
 const tenants = ref<Tenant[]>([])
 const error = ref('')
 
-const { refresh } = usePolling(async () => {
+const { refresh, isLoading } = usePolling(async () => {
   try {
     const res = await listTenants()
     tenants.value = res.tenants
@@ -21,7 +22,7 @@ const { refresh } = usePolling(async () => {
   <div>
     <div class="flex items-center justify-between mb-6">
       <h1 class="text-2xl font-semibold text-gray-900">Tenants</h1>
-      <button @click="refresh" class="text-sm text-gray-500 hover:text-gray-700">Refresh</button>
+      <RefreshButton :loading="isLoading" @click="refresh" />
     </div>
     <p v-if="error" class="text-red-600 text-sm mb-4">{{ error }}</p>
     <div class="bg-white rounded-lg shadow overflow-hidden">

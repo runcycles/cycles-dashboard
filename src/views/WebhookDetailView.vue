@@ -5,6 +5,7 @@ import { usePolling } from '../composables/usePolling'
 import { getWebhook, listDeliveries } from '../api/client'
 import type { WebhookSubscription, WebhookDelivery } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
+import RefreshButton from '../components/RefreshButton.vue'
 
 const route = useRoute()
 const id = route.params.id as string
@@ -13,7 +14,7 @@ const webhook = ref<WebhookSubscription | null>(null)
 const deliveries = ref<WebhookDelivery[]>([])
 const error = ref('')
 
-const { refresh } = usePolling(async () => {
+const { refresh, isLoading } = usePolling(async () => {
   try {
     webhook.value = await getWebhook(id)
     const res = await listDeliveries(id)
@@ -27,7 +28,7 @@ const { refresh } = usePolling(async () => {
   <div>
     <div class="flex items-center justify-between mb-6">
       <h1 class="text-2xl font-semibold text-gray-900">Webhook Detail</h1>
-      <button @click="refresh" class="text-sm text-gray-500 hover:text-gray-700">Refresh</button>
+      <RefreshButton :loading="isLoading" @click="refresh" />
     </div>
     <p v-if="error" class="text-red-600 text-sm mb-4">{{ error }}</p>
     <template v-if="webhook">

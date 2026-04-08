@@ -2,6 +2,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 
 export function usePolling(callback: () => Promise<void>, intervalMs: number) {
   const isPolling = ref(true)
+  const isLoading = ref(false)
   let timer: ReturnType<typeof setInterval> | null = null
   let currentInterval = intervalMs
   const maxInterval = 300_000 // 5 min
@@ -15,11 +16,14 @@ export function usePolling(callback: () => Promise<void>, intervalMs: number) {
   }
 
   async function tick() {
+    isLoading.value = true
     try {
       await callback()
       currentInterval = intervalMs // reset on success
     } catch {
       currentInterval = Math.min(currentInterval * 2, maxInterval) // backoff on error
+    } finally {
+      isLoading.value = false
     }
     reschedule()
   }
@@ -55,5 +59,5 @@ export function usePolling(callback: () => Promise<void>, intervalMs: number) {
     stop()
   })
 
-  return { isPolling, refresh }
+  return { isPolling, isLoading, refresh }
 }
