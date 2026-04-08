@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { usePolling } from '../composables/usePolling'
+import { useSort } from '../composables/useSort'
 import { listTenants, listApiKeys } from '../api/client'
 import type { Tenant, ApiKey } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import MaskedValue from '../components/MaskedValue.vue'
 import PageHeader from '../components/PageHeader.vue'
 import TenantLink from '../components/TenantLink.vue'
+import SortHeader from '../components/SortHeader.vue'
+import EmptyState from '../components/EmptyState.vue'
 import { formatDateTime } from '../utils/format'
 
 interface KeyWithTenant extends ApiKey {
@@ -25,6 +28,7 @@ const filteredKeys = computed(() => {
   if (filterTenant.value) result = result.filter(k => k.tenant_id === filterTenant.value)
   return result
 })
+const { sortKey, sortDir, toggle, sorted: sortedKeys } = useSort(filteredKeys)
 
 const statusCounts = computed(() => {
   const counts: Record<string, number> = {}
@@ -69,42 +73,45 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <div class="bg-white rounded-lg shadow p-4 mb-4">
       <div class="flex gap-3 flex-wrap items-end">
         <div>
-          <label class="block text-xs text-gray-500 mb-1">Tenant</label>
-          <select v-model="filterTenant" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+          <label for="keys-tenant" class="block text-xs text-gray-500 mb-1">Tenant</label>
+          <select id="keys-tenant" v-model="filterTenant" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
             <option value="">All tenants</option>
             <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
           </select>
         </div>
         <div>
-          <label class="block text-xs text-gray-500 mb-1">Status</label>
-          <select v-model="filterStatus" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+          <label for="keys-status" class="block text-xs text-gray-500 mb-1">Status</label>
+          <select id="keys-status" v-model="filterStatus" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
             <option value="">All</option>
             <option>ACTIVE</option>
             <option>REVOKED</option>
             <option>EXPIRED</option>
           </select>
         </div>
+        <div v-if="isLoading" class="flex items-center">
+          <svg class="w-4 h-4 text-gray-400 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+        </div>
       </div>
     </div>
 
     <p v-if="filteredKeys.length > 0" class="text-xs text-gray-400 mb-2">{{ filteredKeys.length }} key{{ filteredKeys.length !== 1 ? 's' : '' }}</p>
 
-    <div class="bg-white rounded-lg shadow overflow-hidden">
-      <table class="w-full text-sm">
+    <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
+      <table class="w-full text-sm min-w-[900px]">
         <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
           <tr>
             <th class="px-4 py-3 text-left">Key ID</th>
-            <th class="px-4 py-3 text-left">Name</th>
-            <th class="px-4 py-3 text-left">Tenant</th>
-            <th class="px-4 py-3 text-left">Status</th>
+            <SortHeader label="Name" column="name" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+            <SortHeader label="Tenant" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+            <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <th class="px-4 py-3 text-left">Permissions</th>
             <th class="px-4 py-3 text-left">Scope Filter</th>
-            <th class="px-4 py-3 text-left">Created</th>
-            <th class="px-4 py-3 text-left">Expires</th>
+            <SortHeader label="Created" column="created_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+            <SortHeader label="Expires" column="expires_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
-          <tr v-for="k in filteredKeys" :key="k.key_id" class="hover:bg-gray-50 transition-colors">
+          <tr v-for="k in sortedKeys" :key="k.key_id" class="hover:bg-gray-50 transition-colors">
             <td class="px-4 py-3"><MaskedValue :value="k.key_id" /></td>
             <td class="px-4 py-3 text-gray-700">{{ k.name || '-' }}</td>
             <td class="px-4 py-3">
@@ -123,8 +130,8 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             </td>
           </tr>
           <tr v-if="filteredKeys.length === 0">
-            <td colspan="8" class="px-4 py-12 text-center text-gray-400">
-              {{ keys.length === 0 ? 'No API keys found' : 'No keys match filters' }}
+            <td colspan="8">
+              <EmptyState :message="keys.length === 0 ? 'No API keys found' : 'No keys match filters'" :hint="keys.length === 0 ? 'API keys will appear here once created' : undefined" />
             </td>
           </tr>
         </tbody>

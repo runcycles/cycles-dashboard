@@ -2,10 +2,13 @@
 import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
+import { useSort } from '../composables/useSort'
 import { listEvents } from '../api/client'
 import type { Event } from '../types'
 import PageHeader from '../components/PageHeader.vue'
 import TenantLink from '../components/TenantLink.vue'
+import SortHeader from '../components/SortHeader.vue'
+import EmptyState from '../components/EmptyState.vue'
 import { formatDateTime } from '../utils/format'
 
 const route = useRoute()
@@ -13,8 +16,11 @@ const router = useRouter()
 
 const events = ref<Event[]>([])
 const hasMore = ref(false)
+const nextCursor = ref('')
+const loadingMore = ref(false)
 const error = ref('')
 const expanded = ref<string | null>(null)
+const { sortKey, sortDir, toggle, sorted: sortedEvents } = useSort(events)
 
 const category = ref((route.query.category as string) || '')
 const eventType = ref((route.query.type as string) || '')
@@ -33,6 +39,7 @@ async function load() {
     const res = await listEvents(params)
     events.value = res.events
     hasMore.value = res.has_more
+    nextCursor.value = res.next_cursor ?? ''
     error.value = ''
   } catch (e: any) { error.value = e.message }
 }
@@ -51,6 +58,24 @@ function applyFilters() {
 function viewCorrelated(cid: string) {
   correlationId.value = cid
   applyFilters()
+}
+
+async function loadMore() {
+  if (!nextCursor.value || loadingMore.value) return
+  loadingMore.value = true
+  try {
+    const params: Record<string, string> = { cursor: nextCursor.value }
+    if (category.value) params.category = category.value
+    if (eventType.value) params.event_type = eventType.value
+    if (tenantId.value) params.tenant_id = tenantId.value
+    if (scope.value) params.scope = scope.value
+    if (correlationId.value) params.correlation_id = correlationId.value
+    const res = await listEvents(params)
+    events.value = [...events.value, ...res.events]
+    hasMore.value = res.has_more
+    nextCursor.value = res.next_cursor ?? ''
+  } catch (e: any) { error.value = e.message }
+  finally { loadingMore.value = false }
 }
 
 function clearFilters() {
@@ -73,24 +98,24 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
     <form @submit.prevent="applyFilters" class="bg-white rounded-lg shadow p-4 mb-4">
       <div class="flex gap-3 flex-wrap items-end">
         <div>
-          <label class="block text-xs text-gray-500 mb-1">Category</label>
-          <select v-model="category" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+          <label for="ev-category" class="block text-xs text-gray-500 mb-1">Category</label>
+          <select id="ev-category" v-model="category" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
             <option value="">All</option>
             <option>budget</option><option>reservation</option><option>tenant</option>
             <option>api_key</option><option>policy</option><option>system</option>
           </select>
         </div>
         <div>
-          <label class="block text-xs text-gray-500 mb-1">Tenant ID</label>
-          <input v-model="tenantId" placeholder="tenant id" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-32" />
+          <label for="ev-tenant" class="block text-xs text-gray-500 mb-1">Tenant ID</label>
+          <input id="ev-tenant" v-model="tenantId" placeholder="tenant id" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-32" />
         </div>
         <div>
-          <label class="block text-xs text-gray-500 mb-1">Scope</label>
-          <input v-model="scope" placeholder="scope prefix" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-40" />
+          <label for="ev-scope" class="block text-xs text-gray-500 mb-1">Scope</label>
+          <input id="ev-scope" v-model="scope" placeholder="scope prefix" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-40" />
         </div>
         <div>
-          <label class="block text-xs text-gray-500 mb-1">Correlation ID</label>
-          <input v-model="correlationId" placeholder="correlation_id" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-40" />
+          <label for="ev-correlation" class="block text-xs text-gray-500 mb-1">Correlation ID</label>
+          <input id="ev-correlation" v-model="correlationId" placeholder="correlation_id" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-40" />
         </div>
         <button type="submit" class="bg-gray-900 text-white px-3 py-1.5 rounded text-sm hover:bg-gray-800 cursor-pointer">Filter</button>
         <button v-if="hasActiveFilters" type="button" @click="clearFilters" class="text-sm text-gray-500 hover:text-gray-700 cursor-pointer">Clear</button>
@@ -98,24 +123,24 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
     </form>
 
     <!-- Results count -->
-    <p v-if="events.length > 0" class="text-xs text-gray-400 mb-2">{{ events.length }} events{{ hasMore ? ' (more available)' : '' }}</p>
+    <p v-if="events.length > 0" class="text-xs text-gray-400 mb-2">{{ events.length }} events</p>
 
     <!-- Event table -->
-    <div class="bg-white rounded-lg shadow overflow-hidden">
-      <table class="w-full text-sm">
+    <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
+      <table class="w-full text-sm min-w-[640px]">
         <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
           <tr>
             <th class="w-8"></th>
-            <th class="px-4 py-3 text-left">Type</th>
-            <th class="px-4 py-3 text-left">Category</th>
-            <th class="px-4 py-3 text-left">Scope</th>
-            <th class="px-4 py-3 text-left">Tenant</th>
-            <th class="px-4 py-3 text-left">Time</th>
+            <SortHeader label="Type" column="event_type" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+            <SortHeader label="Category" column="category" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+            <SortHeader label="Scope" column="scope" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+            <SortHeader label="Tenant" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+            <SortHeader label="Time" column="timestamp" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
-          <template v-for="e in events" :key="e.event_id">
-            <tr class="hover:bg-gray-50 cursor-pointer transition-colors" @click="expanded = expanded === e.event_id ? null : e.event_id">
+          <template v-for="e in sortedEvents" :key="e.event_id">
+            <tr class="hover:bg-gray-50 cursor-pointer transition-colors" role="button" tabindex="0" @click="expanded = expanded === e.event_id ? null : e.event_id" @keydown.enter.prevent="expanded = expanded === e.event_id ? null : e.event_id" @keydown.space.prevent="expanded = expanded === e.event_id ? null : e.event_id" :aria-expanded="expanded === e.event_id">
               <td class="pl-3 py-3 text-gray-400">
                 <svg class="w-3.5 h-3.5 transition-transform" :class="expanded === e.event_id ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
@@ -127,7 +152,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
               <td class="px-4 py-3">
                 <TenantLink v-if="e.tenant_id" :tenant-id="e.tenant_id" @click.stop />
               </td>
-              <td class="px-4 py-3 text-gray-400 whitespace-nowrap text-xs">{{ formatDateTime(e.timestamp) }}</td>
+              <td class="px-4 py-3 text-gray-400 whitespace-nowrap text-xs" :title="new Date(e.timestamp).toISOString()">{{ formatDateTime(e.timestamp) }}</td>
             </tr>
             <tr v-if="expanded === e.event_id" class="bg-gray-50/70">
               <td colspan="6" class="px-4 py-3 pl-11">
@@ -148,13 +173,19 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
             </tr>
           </template>
           <tr v-if="events.length === 0">
-            <td colspan="6" class="px-4 py-12 text-center text-gray-400">
-              <template v-if="hasActiveFilters">No events match your filters — <button @click="clearFilters" class="text-blue-600 hover:underline cursor-pointer">clear filters</button></template>
-              <template v-else>No events found</template>
+            <td colspan="6">
+              <EmptyState :message="hasActiveFilters ? 'No events match your filters' : 'No events found'" :hint="hasActiveFilters ? undefined : 'Events will appear here as they occur'">
+                <button v-if="hasActiveFilters" @click="clearFilters" class="mt-2 text-xs text-blue-600 hover:underline cursor-pointer">Clear filters</button>
+              </EmptyState>
             </td>
           </tr>
         </tbody>
       </table>
+      <div v-if="hasMore" class="px-4 py-3 border-t border-gray-100 text-center">
+        <button @click="loadMore" :disabled="loadingMore" class="text-xs text-blue-600 hover:text-blue-800 cursor-pointer disabled:opacity-50">
+          {{ loadingMore ? 'Loading...' : 'Load more events' }}
+        </button>
+      </div>
     </div>
   </div>
 </template>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onUnmounted } from 'vue'
 
 const props = defineProps<{ value: string; visibleChars?: number }>()
 const revealed = ref(false)
@@ -11,11 +11,24 @@ const masked = () => {
   return '•'.repeat(Math.min(8, props.value.length - n)) + props.value.slice(-n)
 }
 
+let clipboardClearTimer: ReturnType<typeof setTimeout> | null = null
+
 function copy() {
   navigator.clipboard.writeText(props.value)
   copied.value = true
   setTimeout(() => { copied.value = false }, 1500)
+  // Auto-clear clipboard after 30s for security
+  if (clipboardClearTimer) clearTimeout(clipboardClearTimer)
+  clipboardClearTimer = setTimeout(() => {
+    navigator.clipboard.readText().then(text => {
+      if (text === props.value) navigator.clipboard.writeText('')
+    }).catch(() => {})
+  }, 30_000)
 }
+
+onUnmounted(() => {
+  if (clipboardClearTimer) clearTimeout(clipboardClearTimer)
+})
 </script>
 
 <template>

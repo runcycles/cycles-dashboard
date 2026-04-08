@@ -1,12 +1,12 @@
 [![CI](https://github.com/runcycles/cycles-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/runcycles/cycles-dashboard/actions)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Spec](https://img.shields.io/badge/spec-v0.1.25.5-blue)](https://github.com/runcycles/cycles-server-admin/blob/main/complete-budget-governance-v0.1.25.yaml)
+[![Spec](https://img.shields.io/badge/spec-v0.1.25.6-blue)](https://github.com/runcycles/cycles-server-admin/blob/main/complete-budget-governance-v0.1.25.yaml)
 [![Vue](https://img.shields.io/badge/vue-3-brightgreen)](https://vuejs.org)
 [![TypeScript](https://img.shields.io/badge/typescript-strict-blue)](https://www.typescriptlang.org)
 
 # Cycles Admin Dashboard
 
-Operational admin dashboard for the [Cycles Budget Governance System](https://github.com/runcycles/cycles-server-admin), aligned with [governance spec v0.1.25.5](https://github.com/runcycles/cycles-server-admin/blob/main/complete-budget-governance-v0.1.25.yaml).
+Operational admin dashboard for the [Cycles Budget Governance System](https://github.com/runcycles/cycles-server-admin), aligned with [governance spec v0.1.25.6](https://github.com/runcycles/cycles-server-admin/blob/main/complete-budget-governance-v0.1.25.yaml).
 
 ## Overview
 
@@ -19,6 +19,7 @@ Operations-first dashboard for monitoring and managing the Cycles budget enforce
 | **Budgets** | Tenant-scoped budget list with utilization/debt bars + exact scope detail |
 | **Events** | Correlation-first investigation tool with expandable detail rows |
 | **Webhooks** | Subscription health (green/yellow/red) + delivery history |
+| **API Keys** | Cross-tenant key list with masked IDs, permissions, status filters |
 | **Audit** | Compliance query tool with CSV/JSON export (manual-only, no auto-refresh) |
 
 ## Architecture
@@ -26,18 +27,19 @@ Operations-first dashboard for monitoring and managing the Cycles budget enforce
 ```
 src/
 ├── api/           # API client (X-Admin-API-Key only)
-├── components/    # Reusable UI: Sidebar, PageHeader, StatusBadge, UtilizationBar, etc.
-├── composables/   # usePolling (visibility API pause + exponential backoff)
+├── components/    # Reusable UI: Sidebar, PageHeader, StatusBadge, SortHeader, EmptyState, etc.
+├── composables/   # usePolling, useSort, useDarkMode
 ├── stores/        # Pinia: auth (introspect + capabilities)
-├── views/         # 9 route views (login, overview, budgets, events, webhooks, audit, tenants + detail views)
+├── views/         # 10 route views (login, overview, budgets, events, api-keys, webhooks, audit, tenants + detail views)
 └── types.ts       # TypeScript types matching governance spec schemas
 ```
 
 - **Framework:** Vue 3 + TypeScript + Vite
 - **State:** Pinia
-- **Styling:** Tailwind CSS v4
+- **Styling:** Tailwind CSS v4 with dark mode support
 - **Testing:** Vitest + @vue/test-utils
 - **Router:** Vue Router 4 with auth guard
+- **Security:** SRI hashes (`vite-plugin-sri-gen`), CSP + HSTS headers, login rate limiting
 
 ## Quick Start
 
@@ -86,6 +88,8 @@ The dashboard uses `AdminKeyAuth` exclusively (`X-Admin-API-Key` header). No ten
 3. Sidebar navigation is gated by capability booleans (`view_overview`, `view_budgets`, etc.)
 4. On 401/403 from any API call, the session is cleared and user is redirected to login
 5. API key is stored in `sessionStorage` — survives page refresh, cleared on tab/browser close
+6. Session idle timeout (30 min) and absolute timeout (8 h) enforced client-side (checked every 15s)
+7. Login rate limiting — exponential backoff after 3 failed attempts (5s → 60s cap)
 
 ## API Endpoints Used
 
@@ -184,7 +188,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.5
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.6
     restart: unless-stopped
     # No exposed ports — only accessible through Caddy
     depends_on:
@@ -194,7 +198,7 @@ services:
       - cycles
 
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.5
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.6
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
@@ -309,19 +313,25 @@ CORS only matters when the browser talks directly to the admin server (e.g., dur
 
 ### nginx hardening
 
-Add these headers to the nginx config for defense in depth:
+The default `nginx.conf` already includes these security headers:
 
 ```nginx
-# Security headers
+# Security headers (included by default)
 add_header X-Frame-Options "DENY" always;
 add_header X-Content-Type-Options "nosniff" always;
 add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'" always;
 add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
-
-# Disable server version disclosure
 server_tokens off;
 ```
+
+The TLS config (`nginx-ssl.conf.example`) additionally includes HSTS:
+
+```nginx
+add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+```
+
+All production assets include Subresource Integrity (SRI) hashes via `vite-plugin-sri-gen`.
 
 ### Redis
 
