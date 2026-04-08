@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { listEvents } from '../api/client'
@@ -56,7 +56,7 @@ function clearFilters() {
   applyFilters()
 }
 
-const hasActiveFilters = () => !!(category.value || eventType.value || tenantId.value || scope.value || correlationId.value)
+const hasActiveFilters = computed(() => !!(category.value || eventType.value || tenantId.value || scope.value || correlationId.value))
 
 const { refresh, isLoading } = usePolling(load, 15000)
 </script>
@@ -91,7 +91,7 @@ const { refresh, isLoading } = usePolling(load, 15000)
           <input v-model="correlationId" placeholder="correlation_id" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-40" />
         </div>
         <button type="submit" class="bg-gray-900 text-white px-3 py-1.5 rounded text-sm hover:bg-gray-800 cursor-pointer">Filter</button>
-        <button v-if="hasActiveFilters()" type="button" @click="clearFilters" class="text-sm text-gray-500 hover:text-gray-700 cursor-pointer">Clear</button>
+        <button v-if="hasActiveFilters" type="button" @click="clearFilters" class="text-sm text-gray-500 hover:text-gray-700 cursor-pointer">Clear</button>
       </div>
     </form>
 
@@ -146,7 +146,10 @@ const { refresh, isLoading } = usePolling(load, 15000)
             </tr>
           </template>
           <tr v-if="events.length === 0">
-            <td colspan="6" class="px-4 py-12 text-center text-gray-400">No events found</td>
+            <td colspan="6" class="px-4 py-12 text-center text-gray-400">
+              <template v-if="hasActiveFilters">No events match your filters — <button @click="clearFilters" class="text-blue-600 hover:underline cursor-pointer">clear filters</button></template>
+              <template v-else>No events found</template>
+            </td>
           </tr>
         </tbody>
       </table>

@@ -38,22 +38,22 @@ function logout() {
       </div>
     </div>
     <nav class="flex-1 py-3 space-y-0.5">
-      <router-link
-        v-for="item in navItems"
-        :key="item.route"
-        v-show="item.cap !== false"
-        :to="item.route"
-        :class="isActive(item.route) ? 'bg-gray-800 text-white border-l-2 border-white' : 'border-l-2 border-transparent text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'"
-        class="flex items-center gap-3 px-4 py-2 text-sm transition-colors"
-      >
-        <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-          <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" />
-        </svg>
-        {{ item.name }}
-      </router-link>
+      <template v-for="item in navItems" :key="item.route">
+        <router-link
+          v-if="item.cap !== false"
+          :to="item.route"
+          :class="isActive(item.route) ? 'bg-gray-800 text-white border-l-2 border-white' : 'border-l-2 border-transparent text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'"
+          class="flex items-center gap-3 px-4 py-2 text-sm transition-colors"
+        >
+          <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+            <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" />
+          </svg>
+          {{ item.name }}
+        </router-link>
+      </template>
     </nav>
     <div class="p-4 border-t border-gray-700 space-y-3">
-      <button @click="logout" class="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors cursor-pointer">
+      <button @click="logout" aria-label="Logout" class="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors cursor-pointer">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
           <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
         </svg>

@@ -59,6 +59,16 @@ async function query() {
   } catch (e: any) { error.value = e.message }
   finally { loading.value = false }
 }
+
+function setTimeRange(hours: number) {
+  const now = new Date()
+  const from = new Date(now.getTime() - hours * 3600_000)
+  // Format for datetime-local input: YYYY-MM-DDTHH:MM
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  fromDate.value = fmt(from)
+  toDate.value = fmt(now)
+}
 </script>
 
 <template>
@@ -91,6 +101,13 @@ async function query() {
         </div>
         <button type="submit" :disabled="loading" class="bg-gray-900 text-white px-4 py-1.5 rounded text-sm hover:bg-gray-800 disabled:opacity-50 cursor-pointer">
           {{ loading ? 'Querying...' : 'Run Query' }}
+        </button>
+      </div>
+      <div class="flex gap-2 mt-3 pt-3 border-t border-gray-100">
+        <span class="text-xs text-gray-400 py-1">Quick range:</span>
+        <button v-for="h in [1, 6, 24, 168]" :key="h" type="button" @click="setTimeRange(h)"
+          class="text-xs text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 cursor-pointer">
+          {{ h < 24 ? `${h}h` : `${h / 24}d` }}
         </button>
       </div>
     </form>

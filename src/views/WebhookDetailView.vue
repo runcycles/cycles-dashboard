@@ -29,7 +29,7 @@ const { refresh, isLoading } = usePolling(async () => {
   <div>
     <PageHeader title="Webhook Detail" :loading="isLoading" @refresh="refresh">
       <template #back>
-        <button @click="router.push('/webhooks')" class="text-gray-400 hover:text-gray-700 cursor-pointer">
+        <button @click="router.push('/webhooks')" aria-label="Back to webhooks" class="text-gray-400 hover:text-gray-700 cursor-pointer">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
