@@ -10,15 +10,17 @@ defineEmits<{ confirm: []; cancel: [] }>()
 
 <template>
   <div class="fixed inset-0 bg-black/40 flex items-center justify-center z-50" @click.self="$emit('cancel')">
-    <div class="bg-white rounded-lg shadow-lg p-6 max-w-sm mx-4 dark:bg-gray-900 dark:border dark:border-gray-700">
+    <div class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 max-w-sm mx-4">
       <h3 class="text-sm font-semibold text-gray-900 mb-2">{{ title }}</h3>
       <p class="text-sm text-gray-600 mb-4">{{ message }}</p>
       <div class="flex justify-end gap-2">
         <button @click="$emit('cancel')" class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 rounded hover:bg-gray-100 cursor-pointer">Cancel</button>
         <button
           @click="$emit('confirm')"
-          :class="danger ? 'bg-red-600 hover:bg-red-700' : 'bg-gray-900 hover:bg-gray-800'"
-          class="px-3 py-1.5 text-sm text-white rounded cursor-pointer"
+          :class="danger
+            ? 'bg-red-600 hover:bg-red-700 text-white'
+            : 'bg-gray-900 hover:bg-gray-800 text-white dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-300'"
+          class="px-3 py-1.5 text-sm rounded cursor-pointer"
         >
           {{ confirmLabel }}
         </button>

@@ -109,5 +109,10 @@
   border-color: var(--color-gray-500);
 }
 
+/* Action button hover states */
+.dark .hover\:bg-red-50:hover { background-color: color-mix(in oklab, var(--color-red-800) 20%, transparent) !important; }
+.dark .hover\:bg-green-50:hover { background-color: color-mix(in oklab, var(--color-green-800) 20%, transparent) !important; }
+.dark .hover\:bg-blue-50:hover { background-color: color-mix(in oklab, var(--color-blue-800) 20%, transparent) !important; }
+
 /* Export dialog overlay */
 .dark .bg-black\/40 { background-color: rgba(0, 0, 0, 0.6); }

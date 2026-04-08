@@ -81,7 +81,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
 
     <template v-if="tenant">
       <div class="bg-white rounded-lg shadow p-6 mb-4">
-        <div class="flex items-center gap-3 mb-2">
+        <div class="flex items-center gap-3 mb-2 flex-wrap">
           <h2 class="text-lg font-medium text-gray-900">{{ tenant.name }}</h2>
           <StatusBadge :status="tenant.status" />
           <span class="flex-1" />

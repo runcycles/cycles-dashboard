@@ -198,13 +198,15 @@ watch(() => route.query, () => {
             <span class="text-xs text-gray-500">Need to adjust the allocation?</span>
             <button @click="openAdjustForm" class="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-2.5 py-1 hover:bg-blue-50 cursor-pointer transition-colors">Adjust Allocation</button>
           </div>
-          <form v-else @submit.prevent="submitAdjustment" class="flex items-end gap-3">
-            <div class="flex-1">
+          <form v-else @submit.prevent="submitAdjustment" class="flex items-end gap-3 flex-wrap">
+            <div class="flex-1 min-w-[200px]">
               <label for="adjust-amount" class="block text-xs text-gray-500 mb-1">New allocated amount ({{ detail.unit }})</label>
               <input id="adjust-amount" v-model="adjustAmount" type="number" min="0" step="1" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" autofocus />
             </div>
-            <button type="submit" :disabled="adjustLoading" class="bg-gray-900 text-white px-3 py-1.5 rounded text-sm hover:bg-gray-800 disabled:opacity-50 cursor-pointer">{{ adjustLoading ? 'Saving...' : 'Save' }}</button>
-            <button type="button" @click="showAdjustForm = false" class="text-sm text-gray-500 hover:text-gray-700 cursor-pointer">Cancel</button>
+            <div class="flex gap-2">
+              <button type="submit" :disabled="adjustLoading" class="bg-gray-900 text-white px-3 py-1.5 rounded text-sm hover:bg-gray-800 disabled:opacity-50 cursor-pointer">{{ adjustLoading ? 'Saving...' : 'Save' }}</button>
+              <button type="button" @click="showAdjustForm = false" class="text-sm text-gray-500 hover:text-gray-700 cursor-pointer">Cancel</button>
+            </div>
           </form>
         </div>
       </div>
