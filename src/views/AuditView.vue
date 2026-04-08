@@ -55,7 +55,7 @@ async function query() {
     if (fromDate.value) params.from = new Date(fromDate.value).toISOString()
     if (toDate.value) params.to = new Date(toDate.value).toISOString()
     const res = await listAuditLogs(params)
-    entries.value = res.entries
+    entries.value = res.logs
     error.value = ''
   } catch (e: any) { error.value = e.message }
   finally { loading.value = false }
@@ -141,7 +141,7 @@ function setTimeRange(hours: number) {
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
-          <tr v-for="e in entries" :key="e.entry_id" class="hover:bg-gray-50 transition-colors">
+          <tr v-for="e in entries" :key="e.log_id" class="hover:bg-gray-50 transition-colors">
             <td class="px-4 py-3 text-gray-400 whitespace-nowrap text-xs">{{ formatDateTime(e.timestamp) }}</td>
             <td class="px-4 py-3 font-mono text-xs">{{ e.operation }}</td>
             <td class="px-4 py-3 text-gray-500 text-xs">

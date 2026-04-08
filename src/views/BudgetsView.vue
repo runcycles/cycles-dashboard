@@ -104,10 +104,10 @@ watch(() => route.query, () => { if (isDetail.value) loadDetail() })
           <div class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Overdraft Limit</span><span class="font-semibold">{{ detail.overdraft_limit?.amount.toLocaleString() || '0' }}</span></div>
         </div>
         <div class="mt-4">
-          <UtilizationBar :used="detail.allocated.amount - detail.remaining.amount" :total="detail.allocated.amount" />
+          <UtilizationBar :remaining="detail.remaining.amount" :allocated="detail.allocated.amount" />
         </div>
         <div v-if="detail.debt && detail.debt.amount > 0 && detail.overdraft_limit" class="mt-2">
-          <UtilizationBar :used="detail.debt.amount" :total="detail.overdraft_limit.amount" label="Debt utilization" />
+          <UtilizationBar :remaining="detail.overdraft_limit.amount - detail.debt.amount" :allocated="detail.overdraft_limit.amount" label="Debt utilization" />
         </div>
       </div>
 
@@ -172,7 +172,7 @@ watch(() => route.query, () => { if (isDetail.value) loadDetail() })
               <td class="px-4 py-3 text-gray-500">{{ b.unit }}</td>
               <td class="px-4 py-3"><StatusBadge :status="b.status" /></td>
               <td class="px-4 py-3">
-                <UtilizationBar :used="b.allocated.amount - b.remaining.amount" :total="b.allocated.amount" />
+                <UtilizationBar :remaining="b.remaining.amount" :allocated="b.allocated.amount" />
               </td>
               <td class="px-4 py-3 text-right tabular-nums" :class="(b.debt?.amount ?? 0) > 0 ? 'text-red-600 font-medium' : 'text-gray-400'">{{ (b.debt?.amount ?? 0).toLocaleString() }}</td>
             </tr>

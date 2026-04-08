@@ -210,7 +210,7 @@ export interface ApiKeyListResponse {
 
 // Audit types
 export interface AuditLogEntry {
-  entry_id: string
+  log_id: string
   timestamp: string
   operation: string
   tenant_id?: string
@@ -218,10 +218,11 @@ export interface AuditLogEntry {
   status: number
   request_id?: string
   source_ip?: string
+  user_agent?: string
 }
 
 export interface AuditLogListResponse {
-  entries: AuditLogEntry[]
+  logs: AuditLogEntry[]
   has_more: boolean
   next_cursor?: string
 }
