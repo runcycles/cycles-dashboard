@@ -1,0 +1,13 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    uses: runcycles/.github/.github/workflows/ci-typescript.yml@main
+    with:
+      run-lint: false
