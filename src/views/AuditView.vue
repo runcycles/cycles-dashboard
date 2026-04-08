@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { listAuditLogs } from '../api/client'
 import type { AuditLogEntry } from '../types'
 import PageHeader from '../components/PageHeader.vue'
+import MaskedValue from '../components/MaskedValue.vue'
 import { formatDateTime } from '../utils/format'
 
 const entries = ref<AuditLogEntry[]>([])
@@ -149,7 +150,8 @@ onMounted(() => { query() })
               <span v-else>-</span>
             </td>
             <td class="px-4 py-3">
-              <span class="text-gray-500 font-mono text-xs">{{ e.key_id || '-' }}</span>
+              <MaskedValue v-if="e.key_id" :value="e.key_id" />
+              <span v-else class="text-gray-400 text-xs">-</span>
             </td>
             <td class="px-4 py-3">
               <span class="px-1.5 py-0.5 rounded text-xs font-medium" :class="e.status >= 400 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'">{{ e.status }}</span>
