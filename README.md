@@ -67,15 +67,15 @@ npm run dev
 
 ### Production (Docker)
 
+See [Production Deployment](#production-deployment) below. The recommended setup uses Caddy for automatic HTTPS:
+
 ```bash
-docker compose up -d
+cp Caddyfile.example Caddyfile   # edit domain
+# create .env with ADMIN_API_KEY, REDIS_PASSWORD, etc.
+docker compose -f docker-compose.prod.yml up -d
 ```
 
-| Service | Port | Purpose |
-|---------|------|---------|
-| Dashboard | 8080 | nginx serving SPA + reverse proxy to admin |
-| Admin Server | 7979 | Budget governance API |
-| Redis | 6379 | Shared state store |
+Only ports 443 and 80 are exposed. All internal services (dashboard, admin server, Redis) communicate over the Docker network.
 
 ## Authentication
 
@@ -266,7 +266,7 @@ docker compose -f docker-compose.prod.yml up -d
 | **TLS** | None (local only) | Required — admin key in headers |
 | **Admin key** | Any test value | Strong random key, rotated periodically |
 | **Redis password** | Empty (default) | Set via `REDIS_PASSWORD` |
-| **CORS origin** | `http://localhost:5173` | Matches production dashboard URL |
+| **CORS origin** | `http://localhost:5173` | Not needed (same-origin via nginx proxy) |
 | **Docker images** | Built from source | Pre-built from GHCR |
 | **Health checks** | Not needed | Redis + admin server health gates |
 | **Restart policy** | None | `unless-stopped` |
@@ -289,7 +289,10 @@ docker compose -f docker-compose.prod.yml up -d
 
 ### CORS
 
-- Set `DASHBOARD_CORS_ORIGIN` to the exact production URL (e.g., `https://admin.example.com`).
+In production, the dashboard's nginx reverse-proxies `/v1/` to the admin server, so all API calls are same-origin from the browser's perspective. **CORS is not involved in a standard production deployment.**
+
+CORS only matters when the browser talks directly to the admin server (e.g., during development with Vite's proxy, or non-standard deployments where the dashboard and API are on different origins). In that case:
+- Set `DASHBOARD_CORS_ORIGIN` to the exact dashboard URL (e.g., `https://admin.example.com`).
 - Do **not** use `*` — the admin server only allows the configured origin.
 - The admin server only permits `X-Admin-API-Key` and `Content-Type` headers through CORS.
 
@@ -346,7 +349,7 @@ server_tokens off;
 | `ADMIN_API_KEY` | Yes | — | Admin API key for `X-Admin-API-Key` header |
 | `REDIS_PASSWORD` | Recommended | (empty) | Redis authentication password |
 | `WEBHOOK_SECRET_ENCRYPTION_KEY` | Recommended | (empty) | AES-256-GCM key for webhook signing secrets at rest |
-| `DASHBOARD_CORS_ORIGIN` | Yes (prod) | `http://localhost:5173` | Allowed CORS origin for the dashboard |
+| `DASHBOARD_CORS_ORIGIN` | Dev only | `http://localhost:5173` | CORS origin — only needed when browser calls admin server directly (not via nginx proxy) |
 
 The dashboard itself has no server-side configuration — it's a static SPA. The admin server URL is configured via:
 - **Development:** Vite proxy in `vite.config.ts` (default: `localhost:7979`)
