@@ -3,7 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
-import { listBudgets, lookupBudget, listTenants, listEvents, fundBudget } from '../api/client'
+import { listBudgets, lookupBudget, listTenants, listEvents, fundBudget, freezeBudget, unfreezeBudget } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { BudgetLedger, Tenant, Event } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -11,6 +11,7 @@ import UtilizationBar from '../components/UtilizationBar.vue'
 import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import ConfirmAction from '../components/ConfirmAction.vue'
 import { formatDateTime } from '../utils/format'
 
 const route = useRoute()
@@ -123,6 +124,22 @@ async function tick() {
 
 const { refresh, isLoading, lastUpdated } = usePolling(tick, 60000)
 
+// Budget freeze/unfreeze
+const pendingAction = ref<'freeze' | 'unfreeze' | null>(null)
+
+async function executeBudgetAction() {
+  if (!detail.value || !pendingAction.value) return
+  try {
+    if (pendingAction.value === 'freeze') {
+      await freezeBudget(detail.value.scope, detail.value.unit, 'Frozen via admin dashboard')
+    } else {
+      await unfreezeBudget(detail.value.scope, detail.value.unit, 'Unfrozen via admin dashboard')
+    }
+    await loadDetail()
+  } catch (e: any) { error.value = e.message }
+  finally { pendingAction.value = null }
+}
+
 // Budget allocation adjustment
 const showAdjustForm = ref(false)
 const adjustAmount = ref('')
@@ -140,7 +157,7 @@ async function submitAdjustment() {
   adjustLoading.value = true
   try {
     const idempotencyKey = `dashboard-reset-${detail.value.scope}-${Date.now()}`
-    await fundBudget(detail.value.scope, detail.value.unit, 'RESET', newAmount, idempotencyKey, 'Allocation adjusted via admin dashboard')
+    await fundBudget(selectedTenant.value, detail.value.scope, detail.value.unit, 'RESET', newAmount, idempotencyKey, 'Allocation adjusted via admin dashboard')
     await loadDetail()
     showAdjustForm.value = false
   } catch (e: any) { error.value = e.message }
@@ -176,6 +193,9 @@ watch(() => route.query, () => {
           <StatusBadge :status="detail.status" />
           <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs font-medium">{{ detail.unit }}</span>
           <span v-if="detail.is_over_limit" class="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-medium">OVER LIMIT</span>
+          <span class="flex-1" />
+          <button v-if="canManage && detail.status === 'ACTIVE'" @click="pendingAction = 'freeze'" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Freeze</button>
+          <button v-if="canManage && detail.status === 'FROZEN'" @click="pendingAction = 'unfreeze'" class="text-xs text-green-700 hover:text-green-900 border border-green-200 rounded px-2.5 py-1 hover:bg-green-50 cursor-pointer transition-colors">Unfreeze</button>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
           <div class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Allocated</span><span class="font-semibold">{{ detail.allocated.amount.toLocaleString() }}</span></div>
@@ -300,5 +320,16 @@ watch(() => route.query, () => {
       </div>
     </template>
 
+    <ConfirmAction
+      v-if="pendingAction"
+      :title="pendingAction === 'freeze' ? 'Freeze this budget?' : 'Unfreeze this budget?'"
+      :message="pendingAction === 'freeze'
+        ? `Freezing will immediately block all reservations, commits, and fund operations against scope '${detail?.scope}'. This can be reversed by unfreezing.`
+        : `Unfreezing will re-enable reservations, commits, and fund operations against scope '${detail?.scope}'.`"
+      :confirm-label="pendingAction === 'freeze' ? 'Freeze Budget' : 'Unfreeze Budget'"
+      :danger="pendingAction === 'freeze'"
+      @confirm="executeBudgetAction"
+      @cancel="pendingAction = null"
+    />
   </div>
 </template>

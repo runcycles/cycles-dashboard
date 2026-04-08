@@ -28,6 +28,8 @@ Tier 1 incident-response actions available directly from the dashboard (capabili
 
 | Action | Where | Effect |
 |--------|-------|--------|
+| **Freeze budget** | Budget detail | Blocks all reservations, commits, and fund operations |
+| **Unfreeze budget** | Budget detail | Re-enables normal operations |
 | **Suspend tenant** | Tenant detail | Blocks all API access for the tenant |
 | **Reactivate tenant** | Tenant detail | Restores API access |
 | **Revoke API key** | API Keys list, Tenant detail | Immediately invalidates the key (irreversible) |
@@ -122,6 +124,8 @@ The dashboard uses `AdminKeyAuth` exclusively (`X-Admin-API-Key` header). No ten
 | `GET /v1/admin/audit/logs` | Audit | Manual query with export |
 | `GET /v1/admin/api-keys` | Tenant Detail | API keys per tenant |
 | `GET /v1/admin/policies` | Tenant Detail | Policies per tenant (requires `tenant_id`) |
+| `POST /v1/admin/budgets/freeze` | Budget Detail | Freeze budget (ACTIVE → FROZEN) |
+| `POST /v1/admin/budgets/unfreeze` | Budget Detail | Unfreeze budget (FROZEN → ACTIVE) |
 | `PATCH /v1/admin/tenants/{id}` | Tenant Detail | Suspend / reactivate tenant |
 | `DELETE /v1/admin/api-keys/{key_id}` | API Keys, Tenant Detail | Revoke API key |
 | `PATCH /v1/admin/webhooks/{subscription_id}` | Webhook Detail | Pause/enable, reset failures |

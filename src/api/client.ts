@@ -122,23 +122,35 @@ export function revokeApiKey(keyId: string, reason?: string): Promise<import('..
 export const updateWebhook = (id: string, body: Record<string, unknown>) =>
   patch<import('../types').WebhookSubscription>(`${BASE}/admin/webhooks/${id}`, body)
 
-// Write operations — Budget funding (POST /v1/admin/budgets/fund)
-// Spec change pending: adding AdminKeyAuth to this endpoint's security block
-export function fundBudget(scope: string, unit: string, operation: string, amount: number, idempotencyKey: string, reason?: string): Promise<import('../types').BudgetLedger> {
-  const auth = useAuthStore()
-  const url = new URL(`${BASE}/admin/budgets/fund`, window.location.origin)
-  url.searchParams.set('scope', scope)
-  url.searchParams.set('unit', unit)
+// Write operations — Budget freeze/unfreeze (POST, AdminKeyAuth, scope+unit query params)
+export function freezeBudget(scope: string, unit: string, reason?: string): Promise<import('../types').BudgetLedger> {
+  return postAction(`${BASE}/admin/budgets/freeze`, { scope, unit }, reason ? { reason } : undefined)
+}
+
+export function unfreezeBudget(scope: string, unit: string, reason?: string): Promise<import('../types').BudgetLedger> {
+  return postAction(`${BASE}/admin/budgets/unfreeze`, { scope, unit }, reason ? { reason } : undefined)
+}
+
+// Write operations — Budget funding (POST, dual-auth, scope+unit+tenant_id query params)
+export function fundBudget(tenantId: string, scope: string, unit: string, operation: string, amount: number, idempotencyKey: string, reason?: string): Promise<import('../types').BudgetLedger> {
   const body: Record<string, unknown> = {
     operation,
     amount: { unit, amount },
     idempotency_key: idempotencyKey,
   }
   if (reason) body.reason = reason
+  return postAction(`${BASE}/admin/budgets/fund`, { tenant_id: tenantId, scope, unit }, body)
+}
+
+// Shared POST helper for budget action endpoints
+function postAction<T>(path: string, params: Record<string, string>, body?: Record<string, unknown>): Promise<T> {
+  const auth = useAuthStore()
+  const url = new URL(path, window.location.origin)
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v)
   return fetch(url.toString(), {
     method: 'POST',
     headers: { 'X-Admin-API-Key': auth.apiKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: body ? JSON.stringify(body) : undefined,
   }).then(async (res) => {
     if (res.status === 401 || res.status === 403) {
       auth.logout()
