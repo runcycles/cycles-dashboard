@@ -6,6 +6,7 @@ import { getTenant, listBudgets, listApiKeys, listPolicies } from '../api/client
 import type { Tenant, BudgetLedger, ApiKey, Policy } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
+import MaskedValue from '../components/MaskedValue.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -94,7 +95,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           </thead>
           <tbody class="divide-y divide-gray-100">
             <tr v-for="k in apiKeys" :key="k.key_id" class="hover:bg-gray-50 transition-colors">
-              <td class="px-4 py-3 font-mono text-xs">{{ k.key_id }}</td>
+              <td class="px-4 py-3"><MaskedValue :value="k.key_id" /></td>
               <td class="px-4 py-3 text-gray-700">{{ k.name || '-' }}</td>
               <td class="px-4 py-3"><StatusBadge :status="k.status" /></td>
               <td class="px-4 py-3 text-xs text-gray-500">{{ k.permissions.join(', ') }}</td>
