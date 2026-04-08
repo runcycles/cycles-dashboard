@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import RefreshButton from './RefreshButton.vue'
+import { formatRelative } from '../utils/format'
 
 defineProps<{
   title: string
@@ -7,15 +8,6 @@ defineProps<{
   lastUpdated?: string | null
 }>()
 defineEmits<{ refresh: [] }>()
-
-function formatTime(iso: string): string {
-  const d = new Date(iso)
-  const now = new Date()
-  const diffMs = now.getTime() - d.getTime()
-  if (diffMs < 60000) return 'just now'
-  if (diffMs < 3600000) return `${Math.floor(diffMs / 60000)}m ago`
-  return d.toLocaleTimeString()
-}
 </script>
 
 <template>
@@ -26,7 +18,7 @@ function formatTime(iso: string): string {
     </div>
     <div class="flex items-center gap-3">
       <span v-if="lastUpdated" class="text-xs text-gray-400">
-        Updated {{ formatTime(lastUpdated) }}
+        Updated {{ formatRelative(lastUpdated) }}
       </span>
       <RefreshButton v-if="loading !== undefined" :loading="loading ?? false" @click="$emit('refresh')" />
     </div>

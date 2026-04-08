@@ -5,6 +5,7 @@ import { usePolling } from '../composables/usePolling'
 import { listEvents } from '../api/client'
 import type { Event } from '../types'
 import PageHeader from '../components/PageHeader.vue'
+import { formatDateTime } from '../utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -58,12 +59,12 @@ function clearFilters() {
 
 const hasActiveFilters = computed(() => !!(category.value || eventType.value || tenantId.value || scope.value || correlationId.value))
 
-const { refresh, isLoading } = usePolling(load, 15000)
+const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
 </script>
 
 <template>
   <div>
-    <PageHeader title="Events" :loading="isLoading" @refresh="refresh" />
+    <PageHeader title="Events" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh" />
 
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
 
@@ -125,7 +126,7 @@ const { refresh, isLoading } = usePolling(load, 15000)
               <td class="px-4 py-3">
                 <router-link v-if="e.tenant_id" :to="{ name: 'tenant-detail', params: { id: e.tenant_id } }" class="text-blue-600 hover:underline text-xs" @click.stop>{{ e.tenant_id }}</router-link>
               </td>
-              <td class="px-4 py-3 text-gray-400 whitespace-nowrap text-xs">{{ new Date(e.timestamp).toLocaleString() }}</td>
+              <td class="px-4 py-3 text-gray-400 whitespace-nowrap text-xs">{{ formatDateTime(e.timestamp) }}</td>
             </tr>
             <tr v-if="expanded === e.event_id" class="bg-gray-50/70">
               <td colspan="6" class="px-4 py-3 pl-11">

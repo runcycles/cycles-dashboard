@@ -21,7 +21,7 @@ function healthLabel(w: WebhookSubscription): string {
   return 'Healthy'
 }
 
-const { refresh, isLoading } = usePolling(async () => {
+const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
     const res = await listWebhooks()
     webhooks.value = res.subscriptions
@@ -32,7 +32,7 @@ const { refresh, isLoading } = usePolling(async () => {
 
 <template>
   <div>
-    <PageHeader title="Webhooks" :loading="isLoading" @refresh="refresh" />
+    <PageHeader title="Webhooks" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh" />
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
     <div class="bg-white rounded-lg shadow overflow-hidden">
       <table class="w-full text-sm">

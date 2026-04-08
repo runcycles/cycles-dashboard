@@ -1,4 +1,5 @@
 import { useAuthStore } from '../stores/auth'
+import router from '../router'
 
 const BASE = '/v1'
 
@@ -16,10 +17,15 @@ async function request<T>(method: string, path: string, params?: Record<string, 
   })
   if (res.status === 401 || res.status === 403) {
     auth.logout()
+    router.push({ name: 'login', query: { redirect: router.currentRoute.value.fullPath } })
     throw new Error('Unauthorized')
   }
   if (!res.ok) throw new Error(`API error: ${res.status}`)
-  return res.json()
+  try {
+    return await res.json()
+  } catch {
+    throw new Error('Invalid response from server')
+  }
 }
 
 function get<T>(path: string, params?: Record<string, string>): Promise<T> {

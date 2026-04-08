@@ -7,6 +7,7 @@ import type { BudgetLedger, Tenant, Event } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import UtilizationBar from '../components/UtilizationBar.vue'
 import PageHeader from '../components/PageHeader.vue'
+import { formatDateTime } from '../utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -65,7 +66,7 @@ async function tick() {
   else { await loadTenants(); await loadList() }
 }
 
-const { refresh, isLoading } = usePolling(tick, 60000)
+const { refresh, isLoading, lastUpdated } = usePolling(tick, 60000)
 
 watch(selectedTenant, loadList)
 watch(() => route.query, () => { if (isDetail.value) loadDetail() })
@@ -73,7 +74,7 @@ watch(() => route.query, () => { if (isDetail.value) loadDetail() })
 
 <template>
   <div>
-    <PageHeader :title="isDetail ? 'Budget Detail' : 'Budgets'" :loading="isLoading" @refresh="refresh">
+    <PageHeader :title="isDetail ? 'Budget Detail' : 'Budgets'" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
       <template #back>
         <button v-if="isDetail" @click="router.push('/budgets')" aria-label="Back to budgets" class="text-gray-400 hover:text-gray-700 cursor-pointer">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -115,7 +116,7 @@ watch(() => route.query, () => { if (isDetail.value) loadDetail() })
         <div v-if="detailEvents.length === 0" class="text-sm text-gray-400 py-6 text-center">No events for this scope</div>
         <div v-for="e in detailEvents" :key="e.event_id" class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0 text-sm">
           <span class="text-gray-700 font-mono text-xs">{{ e.event_type }}</span>
-          <span class="text-gray-400 text-xs">{{ new Date(e.timestamp).toLocaleString() }}</span>
+          <span class="text-gray-400 text-xs">{{ formatDateTime(e.timestamp) }}</span>
         </div>
       </div>
     </template>

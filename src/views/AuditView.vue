@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { listAuditLogs } from '../api/client'
 import type { AuditLogEntry } from '../types'
 import PageHeader from '../components/PageHeader.vue'
+import { formatDateTime } from '../utils/format'
 
 const entries = ref<AuditLogEntry[]>([])
 const error = ref('')
@@ -141,7 +142,7 @@ function setTimeRange(hours: number) {
         </thead>
         <tbody class="divide-y divide-gray-100">
           <tr v-for="e in entries" :key="e.entry_id" class="hover:bg-gray-50 transition-colors">
-            <td class="px-4 py-3 text-gray-400 whitespace-nowrap text-xs">{{ new Date(e.timestamp).toLocaleString() }}</td>
+            <td class="px-4 py-3 text-gray-400 whitespace-nowrap text-xs">{{ formatDateTime(e.timestamp) }}</td>
             <td class="px-4 py-3 font-mono text-xs">{{ e.operation }}</td>
             <td class="px-4 py-3 text-gray-500 text-xs">
               <router-link v-if="e.tenant_id" :to="{ name: 'tenant-detail', params: { id: e.tenant_id } }" class="text-blue-600 hover:underline">{{ e.tenant_id }}</router-link>

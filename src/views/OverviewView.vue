@@ -5,6 +5,7 @@ import { getOverview } from '../api/client'
 import type { AdminOverviewResponse } from '../types'
 import PageHeader from '../components/PageHeader.vue'
 import LoadingSkeleton from '../components/LoadingSkeleton.vue'
+import { formatTime } from '../utils/format'
 
 const data = ref<AdminOverviewResponse | null>(null)
 const error = ref('')
@@ -50,7 +51,10 @@ const { refresh, isLoading } = usePolling(async () => {
           <p class="text-sm text-gray-500 group-hover:text-gray-700">Events <span class="text-gray-400 font-normal">({{ Math.round(data.event_window_seconds / 60) }}m)</span></p>
           <p class="text-2xl font-semibold text-gray-900">{{ data.event_counts.total_recent }}</p>
           <p class="text-xs text-gray-400">
-            <span v-for="(count, cat) in data.event_counts.by_category" :key="cat" class="mr-2">{{ cat }}: {{ count }}</span>
+            <template v-if="Object.keys(data.event_counts.by_category).length">
+              <span v-for="(count, cat) in data.event_counts.by_category" :key="cat" class="mr-2">{{ cat }}: {{ count }}</span>
+            </template>
+            <span v-else>no events</span>
           </p>
         </router-link>
       </div>
@@ -67,7 +71,7 @@ const { refresh, isLoading } = usePolling(async () => {
           </div>
           <div v-if="data.over_limit_scopes.length === 0" class="text-sm text-gray-400 py-4 text-center">All budgets within limits</div>
           <div v-for="s in data.over_limit_scopes" :key="s.scope + s.unit" class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0">
-            <router-link :to="{ name: 'budgets', query: { scope: s.scope, unit: s.unit } }" class="text-sm text-blue-600 hover:underline truncate mr-2">{{ s.scope }}</router-link>
+            <router-link :to="{ name: 'budgets', query: { scope: s.scope, unit: s.unit } }" class="text-sm text-blue-600 hover:underline truncate mr-2" :title="s.scope">{{ s.scope }}</router-link>
             <span class="text-xs text-gray-500 shrink-0">{{ s.unit }}</span>
           </div>
         </div>
@@ -82,7 +86,7 @@ const { refresh, isLoading } = usePolling(async () => {
           </div>
           <div v-if="data.debt_scopes.length === 0" class="text-sm text-gray-400 py-4 text-center">No outstanding debt</div>
           <div v-for="s in data.debt_scopes" :key="s.scope + s.unit" class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0">
-            <router-link :to="{ name: 'budgets', query: { scope: s.scope, unit: s.unit } }" class="text-sm text-blue-600 hover:underline truncate mr-2">{{ s.scope }}</router-link>
+            <router-link :to="{ name: 'budgets', query: { scope: s.scope, unit: s.unit } }" class="text-sm text-blue-600 hover:underline truncate mr-2" :title="s.scope">{{ s.scope }}</router-link>
             <span class="text-xs text-gray-500 shrink-0">{{ s.debt.toLocaleString() }} / {{ s.overdraft_limit.toLocaleString() }}</span>
           </div>
         </div>
@@ -130,7 +134,7 @@ const { refresh, isLoading } = usePolling(async () => {
           <div v-for="e in data.recent_denials" :key="e.event_id" class="py-2 border-b border-gray-100 last:border-0">
             <div class="flex justify-between">
               <span class="text-sm text-gray-700 truncate">{{ e.scope || e.tenant_id }}</span>
-              <span class="text-xs text-gray-400 shrink-0 ml-2">{{ new Date(e.timestamp).toLocaleTimeString() }}</span>
+              <span class="text-xs text-gray-400 shrink-0 ml-2">{{ formatTime(e.timestamp) }}</span>
             </div>
             <p class="text-xs text-gray-500">{{ e.data?.reason_code || 'denied' }}</p>
           </div>
@@ -144,7 +148,7 @@ const { refresh, isLoading } = usePolling(async () => {
           <div v-for="e in data.recent_expiries" :key="e.event_id" class="py-2 border-b border-gray-100 last:border-0">
             <div class="flex justify-between">
               <span class="text-sm text-gray-700 truncate">{{ e.scope || e.tenant_id }}</span>
-              <span class="text-xs text-gray-400 shrink-0 ml-2">{{ new Date(e.timestamp).toLocaleTimeString() }}</span>
+              <span class="text-xs text-gray-400 shrink-0 ml-2">{{ formatTime(e.timestamp) }}</span>
             </div>
           </div>
         </div>

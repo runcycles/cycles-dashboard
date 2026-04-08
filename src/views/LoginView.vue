@@ -17,7 +17,8 @@ async function submit() {
   loading.value = false
   if (ok) {
     const redirect = (route.query.redirect as string) || '/'
-    router.push(redirect)
+    // Prevent open redirect — only allow relative paths
+    router.push(redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/')
   } else {
     error.value = 'Invalid admin key'
   }
