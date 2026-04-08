@@ -9,6 +9,7 @@ const route = useRoute()
 const key = ref('')
 const error = ref('')
 const loading = ref(false)
+const expired = route.query.expired === '1'
 
 async function submit() {
   error.value = ''
@@ -32,6 +33,7 @@ async function submit() {
         <img src="/runcycles-logo.svg" alt="Cycles" class="w-10 h-10" />
         <h1 class="text-xl font-semibold text-gray-900">Cycles Admin</h1>
       </div>
+      <p v-if="expired" class="text-sm text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 mb-4">Your session expired due to inactivity. Please log in again.</p>
       <p class="text-sm text-gray-500 mb-6">Enter your admin API key to continue.</p>
       <form @submit.prevent="submit">
         <input
