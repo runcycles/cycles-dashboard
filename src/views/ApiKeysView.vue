@@ -2,7 +2,8 @@
 import { ref, computed } from 'vue'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
-import { listTenants, listApiKeys } from '../api/client'
+import { listTenants, listApiKeys, updateApiKeyStatus } from '../api/client'
+import { useAuthStore } from '../stores/auth'
 import type { Tenant, ApiKey } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import MaskedValue from '../components/MaskedValue.vue'
@@ -10,17 +11,30 @@ import PageHeader from '../components/PageHeader.vue'
 import TenantLink from '../components/TenantLink.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import ConfirmAction from '../components/ConfirmAction.vue'
 import { formatDateTime } from '../utils/format'
 
 interface KeyWithTenant extends ApiKey {
   tenant_name?: string
 }
 
+const auth = useAuthStore()
+const canManage = computed(() => auth.capabilities?.manage_api_keys !== false)
 const keys = ref<KeyWithTenant[]>([])
 const error = ref('')
 const filterStatus = ref('')
 const filterTenant = ref('')
 const tenants = ref<Tenant[]>([])
+const pendingRevoke = ref<KeyWithTenant | null>(null)
+
+async function executeRevoke() {
+  if (!pendingRevoke.value) return
+  try {
+    await updateApiKeyStatus(pendingRevoke.value.key_id, 'REVOKED')
+    await refresh()
+  } catch (e: any) { error.value = e.message }
+  finally { pendingRevoke.value = null }
+}
 
 const filteredKeys = computed(() => {
   let result = keys.value
@@ -108,6 +122,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             <th class="px-4 py-3 text-left">Scope Filter</th>
             <SortHeader label="Created" column="created_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Expires" column="expires_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+            <th v-if="canManage" class="px-4 py-3 w-20"></th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
@@ -128,14 +143,27 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             <td class="px-4 py-3 text-xs whitespace-nowrap" :class="k.expires_at ? 'text-gray-500' : 'text-gray-400'">
               {{ k.expires_at ? formatDateTime(k.expires_at) : 'Never' }}
             </td>
+            <td v-if="canManage" class="px-4 py-3">
+              <button v-if="k.status === 'ACTIVE'" @click="pendingRevoke = k" class="text-xs text-red-600 hover:text-red-800 cursor-pointer hover:underline">Revoke</button>
+            </td>
           </tr>
           <tr v-if="filteredKeys.length === 0">
-            <td colspan="8">
+            <td :colspan="canManage ? 9 : 8">
               <EmptyState :message="keys.length === 0 ? 'No API keys found' : 'No keys match filters'" :hint="keys.length === 0 ? 'API keys will appear here once created' : undefined" />
             </td>
           </tr>
         </tbody>
       </table>
     </div>
+
+    <ConfirmAction
+      v-if="pendingRevoke"
+      title="Revoke this API key?"
+      :message="`Revoking key '${pendingRevoke.name || pendingRevoke.key_id}' (tenant: ${pendingRevoke.tenant_id}) will immediately invalidate it. Any services using this key will lose access. This cannot be undone.`"
+      confirm-label="Revoke Key"
+      :danger="true"
+      @confirm="executeRevoke"
+      @cancel="pendingRevoke = null"
+    />
   </div>
 </template>

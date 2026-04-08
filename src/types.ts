@@ -9,6 +9,9 @@ export interface Capabilities {
   view_tenants: boolean
   view_api_keys: boolean
   view_policies: boolean
+  manage_budgets?: boolean
+  manage_tenants?: boolean
+  manage_api_keys?: boolean
 }
 
 export interface AuthIntrospectResponse {

@@ -133,4 +133,20 @@ Comprehensive review addressing 8 security gaps and 12 usability improvements.
 | **Responsive** | Mobile sidebar — hamburger menu with slide-out drawer on `<md` screens; overlay dismiss; nav items emit `navigate` to auto-close drawer; mobile header bar with logo |
 | **Security** | HSTS header removed from HTTP-only `nginx.conf` (spec violation); kept in `nginx-ssl.conf.example` only |
 
+**Tier 1 operational actions (write):**
+
+| Action | Endpoint | Location | Capability gate |
+|--------|----------|----------|-----------------|
+| Freeze / unfreeze budget | `PATCH /v1/admin/budgets/{id}` | Budget detail view | `manage_budgets` |
+| Suspend / reactivate tenant | `PATCH /v1/admin/tenants/{id}` | Tenant detail view | `manage_tenants` |
+| Revoke API key | `PATCH /v1/admin/api-keys/{id}` | API Keys list + Tenant detail keys tab | `manage_api_keys` |
+
+All actions require confirmation dialog with explicit description of impact. Revoke is marked as irreversible. Actions are capability-gated — buttons hidden when capability is `false`.
+
+**New files:**
+
+| File | Purpose |
+|------|---------|
+| `src/components/ConfirmAction.vue` | Reusable confirmation dialog with danger/normal variants, dark mode support |
+
 **Build:** Zero TypeScript errors. 15 tests pass. Version 0.1.25.6.
