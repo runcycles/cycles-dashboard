@@ -1,4 +1,8 @@
+[![CI](https://github.com/runcycles/cycles-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/runcycles/cycles-dashboard/actions)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+[![Spec](https://img.shields.io/badge/spec-v0.1.25.5-blue)](https://github.com/runcycles/cycles-server-admin/blob/main/complete-budget-governance-v0.1.25.yaml)
+[![Vue](https://img.shields.io/badge/vue-3-brightgreen)](https://vuejs.org)
+[![TypeScript](https://img.shields.io/badge/typescript-strict-blue)](https://www.typescriptlang.org)
 
 # Cycles Admin Dashboard
 
