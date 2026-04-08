@@ -6,6 +6,7 @@ const routes = [
   { path: '/', name: 'overview', component: () => import('./views/OverviewView.vue') },
   { path: '/budgets', name: 'budgets', component: () => import('./views/BudgetsView.vue') },
   { path: '/events', name: 'events', component: () => import('./views/EventsView.vue') },
+  { path: '/api-keys', name: 'api-keys', component: () => import('./views/ApiKeysView.vue') },
   { path: '/webhooks', name: 'webhooks', component: () => import('./views/WebhooksView.vue') },
   { path: '/webhooks/:id', name: 'webhook-detail', component: () => import('./views/WebhookDetailView.vue') },
   { path: '/audit', name: 'audit', component: () => import('./views/AuditView.vue') },
