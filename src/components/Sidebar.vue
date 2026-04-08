@@ -1,19 +1,25 @@
 <script setup lang="ts">
 import { useAuthStore } from '../stores/auth'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
 const caps = auth.capabilities
 
 const navItems = [
-  { name: 'Overview', route: '/', cap: caps?.view_overview },
-  { name: 'Budgets', route: '/budgets', cap: caps?.view_budgets },
-  { name: 'Events', route: '/events', cap: caps?.view_events },
-  { name: 'Webhooks', route: '/webhooks', cap: caps?.view_webhooks },
-  { name: 'Audit', route: '/audit', cap: caps?.view_audit },
-  { name: 'Tenants', route: '/tenants', cap: caps?.view_tenants },
+  { name: 'Overview', route: '/', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4', cap: caps?.view_overview },
+  { name: 'Budgets', route: '/budgets', icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z', cap: caps?.view_budgets },
+  { name: 'Events', route: '/events', icon: 'M13 10V3L4 14h7v7l9-11h-7z', cap: caps?.view_events },
+  { name: 'Webhooks', route: '/webhooks', icon: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1', cap: caps?.view_webhooks },
+  { name: 'Audit', route: '/audit', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', cap: caps?.view_audit },
+  { name: 'Tenants', route: '/tenants', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z', cap: caps?.view_tenants },
 ]
+
+function isActive(itemRoute: string) {
+  if (itemRoute === '/') return route.path === '/'
+  return route.path.startsWith(itemRoute)
+}
 
 function logout() {
   auth.logout()
@@ -22,7 +28,7 @@ function logout() {
 </script>
 
 <template>
-  <aside class="w-56 bg-gray-900 text-gray-300 flex flex-col">
+  <aside class="w-56 bg-gray-900 text-gray-300 flex flex-col shrink-0">
     <div class="p-4 border-b border-gray-700 flex items-center gap-3">
       <img src="/runcycles-logo.svg" alt="Cycles" class="w-8 h-8" />
       <div>
@@ -30,20 +36,26 @@ function logout() {
         <p class="text-xs text-gray-400">Admin Dashboard</p>
       </div>
     </div>
-    <nav class="flex-1 py-2">
+    <nav class="flex-1 py-3 space-y-0.5">
       <router-link
         v-for="item in navItems"
         :key="item.route"
         v-show="item.cap !== false"
         :to="item.route"
-        class="block px-4 py-2 text-sm hover:bg-gray-800 hover:text-white transition-colors"
-        active-class="bg-gray-800 text-white"
+        :class="isActive(item.route) ? 'bg-gray-800 text-white border-l-2 border-white' : 'border-l-2 border-transparent text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'"
+        class="flex items-center gap-3 px-4 py-2 text-sm transition-colors"
       >
+        <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+          <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" />
+        </svg>
         {{ item.name }}
       </router-link>
     </nav>
     <div class="p-4 border-t border-gray-700">
-      <button @click="logout" class="text-sm text-gray-500 hover:text-white transition-colors">
+      <button @click="logout" class="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors cursor-pointer">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+        </svg>
         Logout
       </button>
     </div>

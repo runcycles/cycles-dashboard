@@ -4,7 +4,7 @@ import { usePolling } from '../composables/usePolling'
 import { listTenants } from '../api/client'
 import type { Tenant } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
-import RefreshButton from '../components/RefreshButton.vue'
+import PageHeader from '../components/PageHeader.vue'
 
 const tenants = ref<Tenant[]>([])
 const error = ref('')
@@ -20,14 +20,11 @@ const { refresh, isLoading } = usePolling(async () => {
 
 <template>
   <div>
-    <div class="flex items-center justify-between mb-6">
-      <h1 class="text-2xl font-semibold text-gray-900">Tenants</h1>
-      <RefreshButton :loading="isLoading" @click="refresh" />
-    </div>
-    <p v-if="error" class="text-red-600 text-sm mb-4">{{ error }}</p>
+    <PageHeader title="Tenants" :loading="isLoading" @refresh="refresh" />
+    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
     <div class="bg-white rounded-lg shadow overflow-hidden">
       <table class="w-full text-sm">
-        <thead class="bg-gray-50 text-gray-500 text-xs uppercase">
+        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
           <tr>
             <th class="px-4 py-3 text-left">Tenant ID</th>
             <th class="px-4 py-3 text-left">Name</th>
@@ -35,17 +32,17 @@ const { refresh, isLoading } = usePolling(async () => {
             <th class="px-4 py-3 text-left">Created</th>
           </tr>
         </thead>
-        <tbody>
-          <tr v-for="t in tenants" :key="t.tenant_id" class="border-t border-gray-100 hover:bg-gray-50">
+        <tbody class="divide-y divide-gray-100">
+          <tr v-for="t in tenants" :key="t.tenant_id" class="hover:bg-gray-50 transition-colors">
             <td class="px-4 py-3">
-              <router-link :to="{ name: 'tenant-detail', params: { id: t.tenant_id } }" class="text-blue-600 hover:underline">{{ t.tenant_id }}</router-link>
+              <router-link :to="{ name: 'tenant-detail', params: { id: t.tenant_id } }" class="text-blue-600 hover:underline font-mono text-xs">{{ t.tenant_id }}</router-link>
             </td>
             <td class="px-4 py-3 text-gray-700">{{ t.name }}</td>
             <td class="px-4 py-3"><StatusBadge :status="t.status" /></td>
-            <td class="px-4 py-3 text-gray-400">{{ new Date(t.created_at).toLocaleDateString() }}</td>
+            <td class="px-4 py-3 text-gray-400 text-xs">{{ new Date(t.created_at).toLocaleDateString() }}</td>
           </tr>
           <tr v-if="tenants.length === 0">
-            <td colspan="4" class="px-4 py-8 text-center text-gray-400">No tenants found</td>
+            <td colspan="4" class="px-4 py-12 text-center text-gray-400">No tenants found</td>
           </tr>
         </tbody>
       </table>
