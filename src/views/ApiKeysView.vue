@@ -6,6 +6,7 @@ import type { Tenant, ApiKey } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import MaskedValue from '../components/MaskedValue.vue'
 import PageHeader from '../components/PageHeader.vue'
+import TenantLink from '../components/TenantLink.vue'
 import { formatDateTime } from '../utils/format'
 
 interface KeyWithTenant extends ApiKey {
@@ -107,9 +108,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             <td class="px-4 py-3"><MaskedValue :value="k.key_id" /></td>
             <td class="px-4 py-3 text-gray-700">{{ k.name || '-' }}</td>
             <td class="px-4 py-3">
-              <router-link :to="{ name: 'tenant-detail', params: { id: k.tenant_id } }" class="text-blue-600 hover:underline text-xs">
-                {{ k.tenant_name || k.tenant_id }}
-              </router-link>
+              <TenantLink :tenant-id="k.tenant_id" />
             </td>
             <td class="px-4 py-3"><StatusBadge :status="k.status" /></td>
             <td class="px-4 py-3 text-xs text-gray-500">

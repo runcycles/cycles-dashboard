@@ -4,6 +4,7 @@ import { listAuditLogs } from '../api/client'
 import type { AuditLogEntry } from '../types'
 import PageHeader from '../components/PageHeader.vue'
 import MaskedValue from '../components/MaskedValue.vue'
+import TenantLink from '../components/TenantLink.vue'
 import { formatDateTime } from '../utils/format'
 
 const entries = ref<AuditLogEntry[]>([])
@@ -146,8 +147,8 @@ onMounted(() => { query() })
             <td class="px-4 py-3 text-gray-400 whitespace-nowrap text-xs">{{ formatDateTime(e.timestamp) }}</td>
             <td class="px-4 py-3 font-mono text-xs">{{ e.operation }}</td>
             <td class="px-4 py-3 text-gray-500 text-xs">
-              <router-link v-if="e.tenant_id" :to="{ name: 'tenant-detail', params: { id: e.tenant_id } }" class="text-blue-600 hover:underline">{{ e.tenant_id }}</router-link>
-              <span v-else>-</span>
+              <TenantLink v-if="e.tenant_id" :tenant-id="e.tenant_id" />
+              <span v-else class="text-gray-400 text-xs">-</span>
             </td>
             <td class="px-4 py-3">
               <MaskedValue v-if="e.key_id" :value="e.key_id" />

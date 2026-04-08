@@ -5,6 +5,7 @@ import { usePolling } from '../composables/usePolling'
 import { listEvents } from '../api/client'
 import type { Event } from '../types'
 import PageHeader from '../components/PageHeader.vue'
+import TenantLink from '../components/TenantLink.vue'
 import { formatDateTime } from '../utils/format'
 
 const route = useRoute()
@@ -124,7 +125,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
               <td class="px-4 py-3"><span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs">{{ e.category }}</span></td>
               <td class="px-4 py-3 text-gray-700 truncate max-w-[200px] font-mono text-xs">{{ e.scope || '-' }}</td>
               <td class="px-4 py-3">
-                <router-link v-if="e.tenant_id" :to="{ name: 'tenant-detail', params: { id: e.tenant_id } }" class="text-blue-600 hover:underline text-xs" @click.stop>{{ e.tenant_id }}</router-link>
+                <TenantLink v-if="e.tenant_id" :tenant-id="e.tenant_id" @click.stop />
               </td>
               <td class="px-4 py-3 text-gray-400 whitespace-nowrap text-xs">{{ formatDateTime(e.timestamp) }}</td>
             </tr>
