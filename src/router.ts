@@ -19,11 +19,16 @@ const router = createRouter({
   routes,
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const auth = useAuthStore()
-  if (!to.meta.public && !auth.isAuthenticated) {
-    return { name: 'login', query: { redirect: to.fullPath } }
+  if (to.meta.public) return
+  if (auth.isAuthenticated) return
+  // Try restoring session from sessionStorage
+  if (auth.apiKey) {
+    const ok = await auth.restore()
+    if (ok) return
   }
+  return { name: 'login', query: { redirect: to.fullPath } }
 })
 
 export default router

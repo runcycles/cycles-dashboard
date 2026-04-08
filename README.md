@@ -85,7 +85,7 @@ The dashboard uses `AdminKeyAuth` exclusively (`X-Admin-API-Key` header). No ten
 2. Dashboard calls `GET /v1/auth/introspect` to validate and retrieve capabilities
 3. Sidebar navigation is gated by capability booleans (`view_overview`, `view_budgets`, etc.)
 4. On 401/403 from any API call, the session is cleared and user is redirected to login
-5. API key is stored in memory only (Pinia store) — cleared on tab close
+5. API key is stored in `sessionStorage` — survives page refresh, cleared on tab/browser close
 
 ## API Endpoints Used
 
@@ -284,7 +284,7 @@ docker compose -f docker-compose.prod.yml up -d
 
 - **Rotate the admin API key** periodically. The key is the only credential for full system access.
 - Use a strong, random key (at minimum 32 characters): `openssl rand -base64 32`
-- The key is stored in browser memory only (Pinia store) — never in localStorage, cookies, or sessionStorage. Closing the tab clears it.
+- The key is stored in `sessionStorage` — survives page refresh but cleared when the tab or browser is closed. Never written to `localStorage` or cookies.
 - Consider placing the dashboard behind SSO or VPN in addition to the API key for defense in depth.
 
 ### CORS
