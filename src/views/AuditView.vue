@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { listAuditLogs } from '../api/client'
 import type { AuditLogEntry } from '../types'
 import PageHeader from '../components/PageHeader.vue'
+import { formatDateTime } from '../utils/format'
 
 const entries = ref<AuditLogEntry[]>([])
 const error = ref('')
@@ -59,6 +60,16 @@ async function query() {
   } catch (e: any) { error.value = e.message }
   finally { loading.value = false }
 }
+
+function setTimeRange(hours: number) {
+  const now = new Date()
+  const from = new Date(now.getTime() - hours * 3600_000)
+  // Format for datetime-local input: YYYY-MM-DDTHH:MM
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  fromDate.value = fmt(from)
+  toDate.value = fmt(now)
+}
 </script>
 
 <template>
@@ -93,6 +104,13 @@ async function query() {
           {{ loading ? 'Querying...' : 'Run Query' }}
         </button>
       </div>
+      <div class="flex gap-2 mt-3 pt-3 border-t border-gray-100">
+        <span class="text-xs text-gray-400 py-1">Quick range:</span>
+        <button v-for="h in [1, 6, 24, 168]" :key="h" type="button" @click="setTimeRange(h)"
+          class="text-xs text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 cursor-pointer">
+          {{ h < 24 ? `${h}h` : `${h / 24}d` }}
+        </button>
+      </div>
     </form>
 
     <div v-if="hasQueried && !loading" class="flex items-center justify-between mb-2">
@@ -124,7 +142,7 @@ async function query() {
         </thead>
         <tbody class="divide-y divide-gray-100">
           <tr v-for="e in entries" :key="e.entry_id" class="hover:bg-gray-50 transition-colors">
-            <td class="px-4 py-3 text-gray-400 whitespace-nowrap text-xs">{{ new Date(e.timestamp).toLocaleString() }}</td>
+            <td class="px-4 py-3 text-gray-400 whitespace-nowrap text-xs">{{ formatDateTime(e.timestamp) }}</td>
             <td class="px-4 py-3 font-mono text-xs">{{ e.operation }}</td>
             <td class="px-4 py-3 text-gray-500 text-xs">
               <router-link v-if="e.tenant_id" :to="{ name: 'tenant-detail', params: { id: e.tenant_id } }" class="text-blue-600 hover:underline">{{ e.tenant_id }}</router-link>

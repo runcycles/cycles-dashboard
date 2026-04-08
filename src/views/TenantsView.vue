@@ -5,11 +5,12 @@ import { listTenants } from '../api/client'
 import type { Tenant } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
+import { formatDate } from '../utils/format'
 
 const tenants = ref<Tenant[]>([])
 const error = ref('')
 
-const { refresh, isLoading } = usePolling(async () => {
+const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
     const res = await listTenants()
     tenants.value = res.tenants
@@ -20,7 +21,7 @@ const { refresh, isLoading } = usePolling(async () => {
 
 <template>
   <div>
-    <PageHeader title="Tenants" :loading="isLoading" @refresh="refresh" />
+    <PageHeader title="Tenants" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh" />
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
     <div class="bg-white rounded-lg shadow overflow-hidden">
       <table class="w-full text-sm">
@@ -39,7 +40,7 @@ const { refresh, isLoading } = usePolling(async () => {
             </td>
             <td class="px-4 py-3 text-gray-700">{{ t.name }}</td>
             <td class="px-4 py-3"><StatusBadge :status="t.status" /></td>
-            <td class="px-4 py-3 text-gray-400 text-xs">{{ new Date(t.created_at).toLocaleDateString() }}</td>
+            <td class="px-4 py-3 text-gray-400 text-xs">{{ formatDate(t.created_at) }}</td>
           </tr>
           <tr v-if="tenants.length === 0">
             <td colspan="4" class="px-4 py-12 text-center text-gray-400">No tenants found</td>

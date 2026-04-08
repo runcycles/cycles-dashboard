@@ -1,0 +1,68 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy-data:/data
+    depends_on:
+      - dashboard
+    networks:
+      - cycles
+
+  dashboard:
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.5
+    restart: unless-stopped
+    depends_on:
+      cycles-admin:
+        condition: service_healthy
+    networks:
+      - cycles
+
+  cycles-admin:
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.5
+    restart: unless-stopped
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:?ADMIN_API_KEY must be set}
+      WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:-}
+      DASHBOARD_CORS_ORIGIN: ${DASHBOARD_ORIGIN:-https://admin.example.com}
+      EVENT_TTL_DAYS: ${EVENT_TTL_DAYS:-90}
+      DELIVERY_TTL_DAYS: ${DELIVERY_TTL_DAYS:-14}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7979/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - cycles
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - cycles
+
+volumes:
+  redis-data:
+  caddy-data:
+
+networks:
+  cycles:

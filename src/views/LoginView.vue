@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useAuthStore } from '../stores/auth'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
 const key = ref('')
 const error = ref('')
 const loading = ref(false)
@@ -15,7 +16,9 @@ async function submit() {
   const ok = await auth.login(key.value)
   loading.value = false
   if (ok) {
-    router.push('/')
+    const redirect = (route.query.redirect as string) || '/'
+    // Prevent open redirect — only allow relative paths
+    router.push(redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/')
   } else {
     error.value = 'Invalid admin key'
   }

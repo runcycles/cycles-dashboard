@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 export function usePolling(callback: () => Promise<void>, intervalMs: number) {
   const isPolling = ref(true)
   const isLoading = ref(false)
+  const lastUpdated = ref<string | null>(null)
   let timer: ReturnType<typeof setInterval> | null = null
   let currentInterval = intervalMs
   const maxInterval = 300_000 // 5 min
@@ -19,9 +20,10 @@ export function usePolling(callback: () => Promise<void>, intervalMs: number) {
     isLoading.value = true
     try {
       await callback()
-      currentInterval = intervalMs // reset on success
+      currentInterval = intervalMs
+      lastUpdated.value = new Date().toISOString()
     } catch {
-      currentInterval = Math.min(currentInterval * 2, maxInterval) // backoff on error
+      currentInterval = Math.min(currentInterval * 2, maxInterval)
     } finally {
       isLoading.value = false
     }
@@ -59,5 +61,5 @@ export function usePolling(callback: () => Promise<void>, intervalMs: number) {
     stop()
   })
 
-  return { isPolling, isLoading, refresh }
+  return { isPolling, isLoading, lastUpdated, refresh }
 }

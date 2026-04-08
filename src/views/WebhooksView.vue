@@ -15,7 +15,13 @@ function healthColor(w: WebhookSubscription): string {
   return 'bg-green-500'
 }
 
-const { refresh, isLoading } = usePolling(async () => {
+function healthLabel(w: WebhookSubscription): string {
+  if (w.status === 'DISABLED') return 'Disabled'
+  if ((w.consecutive_failures ?? 0) >= 1) return 'Failing'
+  return 'Healthy'
+}
+
+const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
     const res = await listWebhooks()
     webhooks.value = res.subscriptions
@@ -26,7 +32,7 @@ const { refresh, isLoading } = usePolling(async () => {
 
 <template>
   <div>
-    <PageHeader title="Webhooks" :loading="isLoading" @refresh="refresh" />
+    <PageHeader title="Webhooks" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh" />
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
     <div class="bg-white rounded-lg shadow overflow-hidden">
       <table class="w-full text-sm">
@@ -41,7 +47,7 @@ const { refresh, isLoading } = usePolling(async () => {
         </thead>
         <tbody class="divide-y divide-gray-100">
           <tr v-for="w in webhooks" :key="w.subscription_id" class="hover:bg-gray-50 transition-colors">
-            <td class="px-4 py-3"><span :class="healthColor(w)" class="inline-block w-2.5 h-2.5 rounded-full" /></td>
+            <td class="px-4 py-3"><span :class="healthColor(w)" class="inline-block w-2.5 h-2.5 rounded-full" :title="healthLabel(w)" /></td>
             <td class="px-4 py-3">
               <router-link :to="{ name: 'webhook-detail', params: { id: w.subscription_id } }" class="text-blue-600 hover:underline truncate block max-w-[300px]">{{ w.url }}</router-link>
               <span v-if="w.name" class="text-xs text-gray-400">{{ w.name }}</span>

@@ -6,6 +6,7 @@ import { getWebhook, listDeliveries } from '../api/client'
 import type { WebhookSubscription, WebhookDelivery } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
+import { formatDateTime } from '../utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -15,7 +16,7 @@ const webhook = ref<WebhookSubscription | null>(null)
 const deliveries = ref<WebhookDelivery[]>([])
 const error = ref('')
 
-const { refresh, isLoading } = usePolling(async () => {
+const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
     webhook.value = await getWebhook(id)
     const res = await listDeliveries(id)
@@ -27,9 +28,9 @@ const { refresh, isLoading } = usePolling(async () => {
 
 <template>
   <div>
-    <PageHeader title="Webhook Detail" :loading="isLoading" @refresh="refresh">
+    <PageHeader title="Webhook Detail" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
       <template #back>
-        <button @click="router.push('/webhooks')" class="text-gray-400 hover:text-gray-700 cursor-pointer">
+        <button @click="router.push('/webhooks')" aria-label="Back to webhooks" class="text-gray-400 hover:text-gray-700 cursor-pointer">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
@@ -49,8 +50,8 @@ const { refresh, isLoading } = usePolling(async () => {
           <div class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Tenant</span><router-link :to="{ name: 'tenant-detail', params: { id: webhook.tenant_id } }" class="text-blue-600 hover:underline">{{ webhook.tenant_id }}</router-link></div>
           <div class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Events</span><span class="text-xs">{{ webhook.event_types?.join(', ') || 'all' }}</span></div>
           <div v-if="webhook.scope_filter" class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Scope Filter</span><span class="font-mono text-xs">{{ webhook.scope_filter }}</span></div>
-          <div v-if="webhook.last_success_at" class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Last Success</span>{{ new Date(webhook.last_success_at).toLocaleString() }}</div>
-          <div v-if="webhook.last_failure_at" class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Last Failure</span>{{ new Date(webhook.last_failure_at).toLocaleString() }}</div>
+          <div v-if="webhook.last_success_at" class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Last Success</span>{{ formatDateTime(webhook.last_success_at) }}</div>
+          <div v-if="webhook.last_failure_at" class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Last Failure</span>{{ formatDateTime(webhook.last_failure_at) }}</div>
         </div>
       </div>
       <div class="bg-white rounded-lg shadow overflow-hidden">
@@ -74,7 +75,7 @@ const { refresh, isLoading } = usePolling(async () => {
               <td class="px-4 py-3 font-mono text-xs" :class="d.http_status && d.http_status >= 400 ? 'text-red-600' : 'text-gray-500'">{{ d.http_status || '-' }}</td>
               <td class="px-4 py-3 text-right text-gray-500 tabular-nums">{{ d.attempts }}</td>
               <td class="px-4 py-3 font-mono text-xs text-gray-400">{{ d.event_id }}</td>
-              <td class="px-4 py-3 text-gray-400 text-xs">{{ new Date(d.created_at).toLocaleString() }}</td>
+              <td class="px-4 py-3 text-gray-400 text-xs">{{ formatDateTime(d.created_at) }}</td>
             </tr>
             <tr v-if="deliveries.length === 0">
               <td colspan="5" class="px-4 py-12 text-center text-gray-400">No deliveries yet</td>
