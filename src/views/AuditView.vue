@@ -16,11 +16,16 @@ const operation = ref('')
 const fromDate = ref('')
 const toDate = ref('')
 
+function maskKeyId(keyId: string | undefined): string {
+  if (!keyId) return ''
+  return keyId.length > 4 ? '••••' + keyId.slice(-4) : keyId
+}
+
 function exportCsv() {
   if (entries.value.length === 0) return
   const headers = ['timestamp', 'operation', 'tenant_id', 'key_id', 'status', 'request_id', 'source_ip']
   const rows = entries.value.map(e => [
-    e.timestamp, e.operation, e.tenant_id || '', e.key_id || '',
+    e.timestamp, e.operation, e.tenant_id || '', maskKeyId(e.key_id),
     String(e.status), e.request_id || '', e.source_ip || '',
   ])
   const csv = [headers.join(','), ...rows.map(r => r.map(v => `"${v.replace(/"/g, '""')}"`).join(','))].join('\n')
@@ -35,7 +40,8 @@ function exportCsv() {
 
 function exportJson() {
   if (entries.value.length === 0) return
-  const blob = new Blob([JSON.stringify(entries.value, null, 2)], { type: 'application/json' })
+  const masked = entries.value.map(e => ({ ...e, key_id: maskKeyId(e.key_id) }))
+  const blob = new Blob([JSON.stringify(masked, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
