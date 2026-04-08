@@ -1,7 +1,7 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-08 (v0.1.25.6)
-**Spec:** `complete-budget-governance-v0.1.25.yaml` (OpenAPI 3.1.0, v0.1.25.6)
+**Date:** 2026-04-08 (v0.1.25.7)
+**Spec:** `complete-budget-governance-v0.1.25.yaml` (OpenAPI 3.1.0, v0.1.25.7)
 **Stack:** Vue 3 + TypeScript + Vite + Pinia + Tailwind CSS v4
 
 ### 2026-04-08 — v0.1.25.5: Initial release
