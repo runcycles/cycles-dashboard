@@ -67,7 +67,7 @@ const { refresh, isLoading } = usePolling(async () => {
               Over-limit Budgets
               <span v-if="data.budget_counts.over_limit > 0" class="ml-1 bg-red-100 text-red-700 px-1.5 py-0.5 rounded text-xs">{{ data.budget_counts.over_limit }}</span>
             </h2>
-            <router-link to="/budgets" class="text-xs text-blue-600 hover:underline">View all</router-link>
+            <router-link :to="{ name: 'budgets', query: { filter: 'over_limit' } }" class="text-xs text-blue-600 hover:underline">View all</router-link>
           </div>
           <div v-if="data.over_limit_scopes.length === 0" class="text-sm text-gray-400 py-4 text-center">All budgets within limits</div>
           <div v-for="s in data.over_limit_scopes" :key="s.scope + s.unit" class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0">
@@ -82,7 +82,7 @@ const { refresh, isLoading } = usePolling(async () => {
               Budgets with Debt
               <span v-if="data.budget_counts.with_debt > 0" class="ml-1 bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded text-xs">{{ data.budget_counts.with_debt }}</span>
             </h2>
-            <router-link to="/budgets" class="text-xs text-blue-600 hover:underline">View all</router-link>
+            <router-link :to="{ name: 'budgets', query: { filter: 'has_debt' } }" class="text-xs text-blue-600 hover:underline">View all</router-link>
           </div>
           <div v-if="data.debt_scopes.length === 0" class="text-sm text-gray-400 py-4 text-center">No outstanding debt</div>
           <div v-for="s in data.debt_scopes" :key="s.scope + s.unit" class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0">

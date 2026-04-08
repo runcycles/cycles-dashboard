@@ -13,6 +13,8 @@ const route = useRoute()
 const router = useRouter()
 
 const isDetail = computed(() => !!route.query.scope && !!route.query.unit)
+const activeFilter = computed(() => (route.query.filter as string) || '')
+const isCrossTenantFilter = computed(() => activeFilter.value === 'over_limit' || activeFilter.value === 'has_debt')
 
 const tenants = ref<Tenant[]>([])
 const selectedTenant = ref('')
@@ -26,6 +28,13 @@ const filterStatus = ref((route.query.status as string) || '')
 const filterUnit = ref('')
 const filterScope = ref('')
 
+const pageTitle = computed(() => {
+  if (isDetail.value) return 'Budget Detail'
+  if (activeFilter.value === 'over_limit') return 'Over-limit Budgets'
+  if (activeFilter.value === 'has_debt') return 'Budgets with Debt'
+  return 'Budgets'
+})
+
 async function loadTenants() {
   try {
     const res = await listTenants()
@@ -37,15 +46,30 @@ async function loadTenants() {
 }
 
 async function loadList() {
-  if (!selectedTenant.value) return
   try {
-    const params: Record<string, string> = { tenant_id: selectedTenant.value }
-    if (filterStatus.value) params.status = filterStatus.value
-    if (filterUnit.value) params.unit = filterUnit.value
-    if (filterScope.value) params.scope_prefix = filterScope.value
-    const res = await listBudgets(params)
-    budgets.value = res.ledgers
-    hasMore.value = res.has_more
+    if (isCrossTenantFilter.value) {
+      // Cross-tenant: load budgets from ALL tenants and filter client-side
+      const allBudgets: BudgetLedger[] = []
+      for (const t of tenants.value) {
+        const res = await listBudgets({ tenant_id: t.tenant_id })
+        allBudgets.push(...res.ledgers)
+      }
+      if (activeFilter.value === 'over_limit') {
+        budgets.value = allBudgets.filter(b => b.is_over_limit)
+      } else if (activeFilter.value === 'has_debt') {
+        budgets.value = allBudgets.filter(b => (b.debt?.amount ?? 0) > 0)
+      }
+      hasMore.value = false
+    } else {
+      if (!selectedTenant.value) return
+      const params: Record<string, string> = { tenant_id: selectedTenant.value }
+      if (filterStatus.value) params.status = filterStatus.value
+      if (filterUnit.value) params.unit = filterUnit.value
+      if (filterScope.value) params.scope_prefix = filterScope.value
+      const res = await listBudgets(params)
+      budgets.value = res.ledgers
+      hasMore.value = res.has_more
+    }
     error.value = ''
   } catch (e: any) { error.value = e.message }
 }
@@ -61,6 +85,10 @@ async function loadDetail() {
   } catch (e: any) { error.value = e.message }
 }
 
+function clearFilter() {
+  router.push({ name: 'budgets' })
+}
+
 async function tick() {
   if (isDetail.value) await loadDetail()
   else { await loadTenants(); await loadList() }
@@ -68,13 +96,16 @@ async function tick() {
 
 const { refresh, isLoading, lastUpdated } = usePolling(tick, 60000)
 
-watch(selectedTenant, loadList)
-watch(() => route.query, () => { if (isDetail.value) loadDetail() })
+watch(selectedTenant, () => { if (!isCrossTenantFilter.value) loadList() })
+watch(() => route.query, () => {
+  if (isDetail.value) loadDetail()
+  else loadList()
+})
 </script>
 
 <template>
   <div>
-    <PageHeader :title="isDetail ? 'Budget Detail' : 'Budgets'" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
+    <PageHeader :title="pageTitle" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
       <template #back>
         <button v-if="isDetail" @click="router.push('/budgets')" aria-label="Back to budgets" class="text-gray-400 hover:text-gray-700 cursor-pointer">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -123,7 +154,13 @@ watch(() => route.query, () => { if (isDetail.value) loadDetail() })
 
     <!-- List mode -->
     <template v-else>
-      <div class="bg-white rounded-lg shadow p-4 mb-4">
+      <!-- Active filter banner -->
+      <div v-if="isCrossTenantFilter" class="flex items-center gap-2 mb-4 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+        <span>Showing {{ activeFilter === 'over_limit' ? 'over-limit' : 'budgets with debt' }} across all tenants</span>
+        <button @click="clearFilter" class="ml-auto text-xs text-blue-600 hover:underline cursor-pointer">Clear filter</button>
+      </div>
+
+      <div v-if="!isCrossTenantFilter" class="bg-white rounded-lg shadow p-4 mb-4">
         <div class="flex gap-3 flex-wrap items-end">
           <div>
             <label class="block text-xs text-gray-500 mb-1">Tenant</label>
