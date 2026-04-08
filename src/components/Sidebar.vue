@@ -6,6 +6,7 @@ const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute()
 const caps = auth.capabilities
+const version = __APP_VERSION__
 
 const navItems = [
   { name: 'Overview', route: '/', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4', cap: caps?.view_overview },
@@ -51,13 +52,14 @@ function logout() {
         {{ item.name }}
       </router-link>
     </nav>
-    <div class="p-4 border-t border-gray-700">
+    <div class="p-4 border-t border-gray-700 space-y-3">
       <button @click="logout" class="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors cursor-pointer">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
           <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
         </svg>
         Logout
       </button>
+      <p class="text-xs text-gray-600">v{{ version }}</p>
     </div>
   </aside>
 </template>
