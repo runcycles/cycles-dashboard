@@ -151,7 +151,7 @@ function openAdjustForm() {
 }
 
 async function submitAdjustment() {
-  if (!detail.value || !adjustAmount.value) return
+  if (!detail.value || !adjustAmount.value || !selectedTenant.value) return
   const newAmount = Number(adjustAmount.value)
   if (isNaN(newAmount) || newAmount < 0) { error.value = 'Invalid amount'; return }
   adjustLoading.value = true
