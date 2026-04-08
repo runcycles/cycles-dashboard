@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { listAuditLogs } from '../api/client'
 import type { AuditLogEntry } from '../types'
 import PageHeader from '../components/PageHeader.vue'
+import MaskedValue from '../components/MaskedValue.vue'
 import { formatDateTime } from '../utils/format'
 
 const entries = ref<AuditLogEntry[]>([])
 const error = ref('')
 const loading = ref(false)
-const hasQueried = ref(false)
 
 const tenantId = ref('')
 const keyId = ref('')
@@ -46,7 +46,6 @@ function exportJson() {
 
 async function query() {
   loading.value = true
-  hasQueried.value = true
   try {
     const params: Record<string, string> = {}
     if (tenantId.value) params.tenant_id = tenantId.value
@@ -64,12 +63,14 @@ async function query() {
 function setTimeRange(hours: number) {
   const now = new Date()
   const from = new Date(now.getTime() - hours * 3600_000)
-  // Format for datetime-local input: YYYY-MM-DDTHH:MM
   const pad = (n: number) => String(n).padStart(2, '0')
   const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
   fromDate.value = fmt(from)
   toDate.value = fmt(now)
 }
+
+// Auto-query on page load (recent 50 logs, no filters)
+onMounted(() => { query() })
 </script>
 
 <template>
@@ -113,7 +114,7 @@ function setTimeRange(hours: number) {
       </div>
     </form>
 
-    <div v-if="hasQueried && !loading" class="flex items-center justify-between mb-2">
+    <div v-if="!loading" class="flex items-center justify-between mb-2">
       <p class="text-xs text-gray-400">{{ entries.length }} result{{ entries.length !== 1 ? 's' : '' }}</p>
       <div v-if="entries.length > 0" class="flex gap-2">
         <button @click="exportCsv" class="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100">
@@ -148,17 +149,21 @@ function setTimeRange(hours: number) {
               <router-link v-if="e.tenant_id" :to="{ name: 'tenant-detail', params: { id: e.tenant_id } }" class="text-blue-600 hover:underline">{{ e.tenant_id }}</router-link>
               <span v-else>-</span>
             </td>
-            <td class="px-4 py-3 text-gray-500 font-mono text-xs">{{ e.key_id || '-' }}</td>
+            <td class="px-4 py-3">
+              <MaskedValue v-if="e.key_id" :value="e.key_id" />
+              <span v-else class="text-gray-400 text-xs">-</span>
+            </td>
             <td class="px-4 py-3">
               <span class="px-1.5 py-0.5 rounded text-xs font-medium" :class="e.status >= 400 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'">{{ e.status }}</span>
             </td>
             <td class="px-4 py-3 font-mono text-xs text-gray-400">{{ e.request_id || '-' }}</td>
             <td class="px-4 py-3 text-gray-400 text-xs">{{ e.source_ip || '-' }}</td>
           </tr>
-          <tr v-if="entries.length === 0">
-            <td colspan="7" class="px-4 py-12 text-center text-gray-400">
-              {{ hasQueried ? 'No results for this query' : 'Run a query to see audit logs' }}
-            </td>
+          <tr v-if="entries.length === 0 && !loading">
+            <td colspan="7" class="px-4 py-12 text-center text-gray-400">No audit logs found</td>
+          </tr>
+          <tr v-if="loading">
+            <td colspan="7" class="px-4 py-12 text-center text-gray-400">Loading...</td>
           </tr>
         </tbody>
       </table>
