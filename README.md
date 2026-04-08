@@ -144,114 +144,209 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 The nginx config handles SPA routing (`try_files $uri /index.html`) and reverse-proxies `/v1/` to the admin server.
 
-## Environment Variables
+## Production Deployment
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `ADMIN_API_KEY` | Yes | — | Admin API key (docker-compose only) |
-
-The dashboard itself has no server-side configuration — it's a static SPA. The admin server URL is configured via:
-- **Development:** Vite proxy in `vite.config.ts` (default: `localhost:7979`)
-- **Production:** nginx reverse proxy in `nginx.conf` (default: `cycles-admin:7979`)
-
-## HTTPS / TLS
-
-The dashboard transmits the admin API key on every request, so HTTPS is strongly recommended in production.
-
-### Option 1: Reverse proxy (recommended)
-
-Place the dashboard behind a TLS-terminating reverse proxy (e.g., Caddy, Traefik, or a cloud load balancer):
+### Architecture
 
 ```
-Client ──HTTPS──▶ Reverse Proxy ──HTTP──▶ Dashboard (port 80) ──HTTP──▶ Admin Server (port 7979)
+                     ┌─────────────┐
+  Browser ──HTTPS──▶ │  TLS Proxy  │──HTTP──▶ Dashboard (nginx:80)
+                     │ (Caddy/ALB) │                  │
+                     └─────────────┘           /v1/ proxy
+                                                      │
+                                               Admin Server (:7979)
+                                                      │
+                                                   Redis (:6379)
 ```
 
-**Caddy example** (automatic HTTPS with Let's Encrypt):
-```
-admin.example.com {
-    reverse_proxy dashboard:80
-}
-```
+The dashboard is a static SPA served by nginx. API calls are reverse-proxied through the same nginx to the admin server. In production, a TLS-terminating proxy sits in front.
 
-**docker-compose with Caddy:**
+### docker-compose (production)
+
 ```yaml
 services:
   caddy:
     image: caddy:2-alpine
+    restart: unless-stopped
     ports:
       - "443:443"
       - "80:80"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy-data:/data
+    depends_on:
+      - dashboard
     networks:
       - cycles
 
   dashboard:
-    build: .
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.5
+    restart: unless-stopped
     # No exposed ports — only accessible through Caddy
+    depends_on:
+      cycles-admin:
+        condition: service_healthy
     networks:
       - cycles
 
-  # ... cycles-admin and redis as before
+  cycles-admin:
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.5
+    restart: unless-stopped
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:?ADMIN_API_KEY must be set}
+      WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:-}
+      DASHBOARD_CORS_ORIGIN: ${DASHBOARD_ORIGIN:-https://admin.example.com}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7979/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - cycles
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - cycles
 
 volumes:
+  redis-data:
   caddy-data:
+
+networks:
+  cycles:
 ```
 
-### Option 2: TLS directly in nginx
+**Caddyfile** (automatic HTTPS via Let's Encrypt):
+```
+admin.example.com {
+    reverse_proxy dashboard:80
+}
+```
 
-Mount your certificate and key into the dashboard container and use an HTTPS nginx config:
+**Deploy:**
+```bash
+# Create .env with secrets (never commit this file)
+cat > .env << 'EOF'
+ADMIN_API_KEY=your-strong-admin-key-here
+REDIS_PASSWORD=your-redis-password
+WEBHOOK_SECRET_ENCRYPTION_KEY=$(openssl rand -base64 32)
+DASHBOARD_ORIGIN=https://admin.example.com
+EOF
+
+docker compose -f docker-compose.prod.yml up -d
+```
+
+### Development vs Production
+
+| Concern | Development | Production |
+|---------|------------|------------|
+| **Dashboard URL** | `http://localhost:5173` | `https://admin.example.com` |
+| **API proxy** | Vite dev proxy → `localhost:7979` | nginx → `cycles-admin:7979` |
+| **TLS** | None (local only) | Required — admin key in headers |
+| **Admin key** | Any test value | Strong random key, rotated periodically |
+| **Redis password** | Empty (default) | Set via `REDIS_PASSWORD` |
+| **CORS origin** | `http://localhost:5173` | Matches production dashboard URL |
+| **Docker images** | Built from source | Pre-built from GHCR |
+| **Health checks** | Not needed | Redis + admin server health gates |
+| **Restart policy** | None | `unless-stopped` |
+| **Ports exposed** | All (5173, 7979, 6379) | Only 443/80 via TLS proxy |
+
+## Hardening
+
+### Network
+
+- **Do not expose ports 7979 or 6379** to the public internet. Only the TLS proxy (443/80) should be reachable.
+- Place the admin server and Redis on an internal Docker network with no published ports.
+- Use firewall rules or security groups to restrict access to the dashboard's public port by IP range if possible.
+
+### Authentication
+
+- **Rotate the admin API key** periodically. The key is the only credential for full system access.
+- Use a strong, random key (at minimum 32 characters): `openssl rand -base64 32`
+- The key is stored in browser memory only (Pinia store) — never in localStorage, cookies, or sessionStorage. Closing the tab clears it.
+- Consider placing the dashboard behind SSO or VPN in addition to the API key for defense in depth.
+
+### CORS
+
+- Set `DASHBOARD_CORS_ORIGIN` to the exact production URL (e.g., `https://admin.example.com`).
+- Do **not** use `*` — the admin server only allows the configured origin.
+- The admin server only permits `X-Admin-API-Key` and `Content-Type` headers through CORS.
+
+### TLS
+
+- Always use HTTPS in production — the admin API key is transmitted as an HTTP header on every request.
+- Use TLS 1.2+ with modern cipher suites. Caddy handles this automatically.
+- For nginx, add:
+  ```nginx
+  ssl_protocols TLSv1.2 TLSv1.3;
+  ssl_prefer_server_ciphers on;
+  ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+  ```
+
+### nginx hardening
+
+Add these headers to the nginx config for defense in depth:
 
 ```nginx
-server {
-    listen 443 ssl;
-    server_name admin.example.com;
+# Security headers
+add_header X-Frame-Options "DENY" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'" always;
+add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
 
-    ssl_certificate     /etc/ssl/certs/dashboard.crt;
-    ssl_certificate_key /etc/ssl/private/dashboard.key;
-
-    root /usr/share/nginx/html;
-    index index.html;
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    location /v1/ {
-        resolver 127.0.0.11 valid=30s ipv6=off;
-        set $upstream http://cycles-admin:7979;
-        proxy_pass $upstream/v1/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    }
-}
-
-server {
-    listen 80;
-    return 301 https://$host$request_uri;
-}
+# Disable server version disclosure
+server_tokens off;
 ```
 
-Mount the certs in docker-compose:
-```yaml
-dashboard:
-  build: .
-  ports:
-    - "443:443"
-    - "80:80"
-  volumes:
-    - ./nginx-ssl.conf:/etc/nginx/conf.d/default.conf
-    - ./certs/dashboard.crt:/etc/ssl/certs/dashboard.crt:ro
-    - ./certs/dashboard.key:/etc/ssl/private/dashboard.key:ro
-```
+### Redis
 
-### Security notes
+- Set a password via `REDIS_PASSWORD` — the default has no authentication.
+- Use `appendonly yes` for durability (enabled in the docker-compose above).
+- Do not expose Redis port (6379) outside the Docker network.
+- For production, consider Redis Sentinel or Redis Cluster for high availability.
 
-- The admin API key is sent as an HTTP header (`X-Admin-API-Key`) on every request. Without TLS, it is visible to anyone on the network.
-- The key is stored in browser memory only (Pinia store) and cleared on tab close — it is never written to localStorage or cookies.
-- The admin server's `dashboard.cors.origin` should match your production URL (e.g., `https://admin.example.com`).
+### Secrets management
+
+- Store `ADMIN_API_KEY`, `REDIS_PASSWORD`, and `WEBHOOK_SECRET_ENCRYPTION_KEY` in a secrets manager (Vault, AWS Secrets Manager, etc.) — not in git.
+- Use Docker secrets or environment variable injection from your orchestrator.
+- The `.env` file should be in `.gitignore` and never committed.
+
+### Monitoring
+
+- The admin server exposes `/actuator/health` for health checks.
+- The dashboard's `GET /v1/admin/overview` endpoint is a good target for synthetic monitoring — if it returns 200, the entire stack (Redis + admin server + auth) is working.
+- Set up alerts on the overview endpoint's `failing_webhooks` and `over_limit_scopes` arrays.
+
+## Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `ADMIN_API_KEY` | Yes | — | Admin API key for `X-Admin-API-Key` header |
+| `REDIS_PASSWORD` | Recommended | (empty) | Redis authentication password |
+| `WEBHOOK_SECRET_ENCRYPTION_KEY` | Recommended | (empty) | AES-256-GCM key for webhook signing secrets at rest |
+| `DASHBOARD_CORS_ORIGIN` | Yes (prod) | `http://localhost:5173` | Allowed CORS origin for the dashboard |
+
+The dashboard itself has no server-side configuration — it's a static SPA. The admin server URL is configured via:
+- **Development:** Vite proxy in `vite.config.ts` (default: `localhost:7979`)
+- **Production:** nginx reverse proxy in `nginx.conf` (default: `cycles-admin:7979`)
 
 ## Documentation
 
