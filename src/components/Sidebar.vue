@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { useAuthStore } from '../stores/auth'
 import { useRouter, useRoute } from 'vue-router'
+import { useDarkMode } from '../composables/useDarkMode'
 
 const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute()
 const caps = auth.capabilities
 const version = __APP_VERSION__
+const { isDark, toggle: toggleDark } = useDarkMode()
 
 const navItems = [
   { name: 'Overview', route: '/', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4', cap: caps?.view_overview },
@@ -23,6 +25,8 @@ function isActive(itemRoute: string) {
   return route.path.startsWith(itemRoute)
 }
 
+const emit = defineEmits<{ navigate: [] }>()
+
 function logout() {
   auth.logout()
   router.push('/login')
@@ -30,7 +34,7 @@ function logout() {
 </script>
 
 <template>
-  <aside class="w-56 bg-gray-900 text-gray-300 flex flex-col shrink-0">
+  <aside class="w-56 h-full bg-gray-900 text-gray-300 flex flex-col shrink-0">
     <div class="p-4 border-b border-gray-700 flex items-center gap-3">
       <img src="/runcycles-logo.svg" alt="Cycles" class="w-8 h-8" />
       <div>
@@ -45,6 +49,7 @@ function logout() {
           :to="item.route"
           :class="isActive(item.route) ? 'bg-gray-800 text-white border-l-2 border-white' : 'border-l-2 border-transparent text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'"
           class="flex items-center gap-3 px-4 py-2 text-sm transition-colors"
+          @click="emit('navigate')"
         >
           <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
             <path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" />
@@ -54,12 +59,22 @@ function logout() {
       </template>
     </nav>
     <div class="p-4 border-t border-gray-700 space-y-3">
-      <button @click="logout" aria-label="Logout" class="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors cursor-pointer">
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-        </svg>
-        Logout
-      </button>
+      <div class="flex items-center justify-between">
+        <button @click="logout" aria-label="Logout" class="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors cursor-pointer">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+          </svg>
+          Logout
+        </button>
+        <button @click="toggleDark" :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'" class="text-gray-400 hover:text-white transition-colors cursor-pointer p-1 rounded hover:bg-gray-800">
+          <svg v-if="isDark" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+          </svg>
+          <svg v-else class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+          </svg>
+        </button>
+      </div>
       <p class="text-xs text-gray-600">v{{ version }}</p>
     </div>
   </aside>

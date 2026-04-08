@@ -31,7 +31,7 @@ const { refresh, isLoading } = usePolling(async () => {
 
     <template v-else>
       <!-- Summary counters -->
-      <div class="grid grid-cols-4 gap-4 mb-6">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <router-link to="/tenants" class="bg-white rounded-lg shadow p-4 hover:shadow-md transition-shadow block group">
           <p class="text-sm text-gray-500 group-hover:text-gray-700">Tenants</p>
           <p class="text-2xl font-semibold text-gray-900">{{ data.tenant_counts.total }}</p>
@@ -60,7 +60,7 @@ const { refresh, isLoading } = usePolling(async () => {
       </div>
 
       <!-- Alerts row -->
-      <div class="grid grid-cols-2 gap-4 mb-6">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <div class="bg-white rounded-lg shadow p-4">
           <div class="flex justify-between items-center mb-3">
             <h2 class="text-sm font-medium text-gray-700">
@@ -92,7 +92,7 @@ const { refresh, isLoading } = usePolling(async () => {
         </div>
       </div>
 
-      <div class="grid grid-cols-2 gap-4 mb-6">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <div class="bg-white rounded-lg shadow p-4">
           <div class="flex justify-between items-center mb-3">
             <h2 class="text-sm font-medium text-gray-700">
@@ -124,7 +124,7 @@ const { refresh, isLoading } = usePolling(async () => {
       </div>
 
       <!-- Recent events -->
-      <div class="grid grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="bg-white rounded-lg shadow p-4">
           <div class="flex justify-between items-center mb-3">
             <h2 class="text-sm font-medium text-gray-700">Recent Denials</h2>
@@ -134,7 +134,7 @@ const { refresh, isLoading } = usePolling(async () => {
           <div v-for="e in data.recent_denials" :key="e.event_id" class="py-2 border-b border-gray-100 last:border-0">
             <div class="flex justify-between">
               <span class="text-sm text-gray-700 truncate">{{ e.scope || e.tenant_id }}</span>
-              <span class="text-xs text-gray-400 shrink-0 ml-2">{{ formatTime(e.timestamp) }}</span>
+              <span class="text-xs text-gray-400 shrink-0 ml-2" :title="new Date(e.timestamp).toISOString()">{{ formatTime(e.timestamp) }}</span>
             </div>
             <p class="text-xs text-gray-500">{{ e.data?.reason_code || 'denied' }}</p>
           </div>
@@ -148,7 +148,7 @@ const { refresh, isLoading } = usePolling(async () => {
           <div v-for="e in data.recent_expiries" :key="e.event_id" class="py-2 border-b border-gray-100 last:border-0">
             <div class="flex justify-between">
               <span class="text-sm text-gray-700 truncate">{{ e.scope || e.tenant_id }}</span>
-              <span class="text-xs text-gray-400 shrink-0 ml-2">{{ formatTime(e.timestamp) }}</span>
+              <span class="text-xs text-gray-400 shrink-0 ml-2" :title="new Date(e.timestamp).toISOString()">{{ formatTime(e.timestamp) }}</span>
             </div>
           </div>
         </div>

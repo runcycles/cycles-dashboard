@@ -7,6 +7,7 @@ import type { Tenant, BudgetLedger, ApiKey, Policy } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import MaskedValue from '../components/MaskedValue.vue'
+import EmptyState from '../components/EmptyState.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -70,8 +71,8 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       </div>
 
       <!-- Budgets tab -->
-      <div v-if="tab === 'budgets'" class="bg-white rounded-lg shadow overflow-hidden">
-        <table class="w-full text-sm">
+      <div v-if="tab === 'budgets'" class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
+        <table class="w-full text-sm min-w-[520px]">
           <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
             <tr><th class="px-4 py-3 text-left">Scope</th><th class="px-4 py-3 text-left">Unit</th><th class="px-4 py-3 text-left">Status</th><th class="px-4 py-3 text-right">Allocated</th></tr>
           </thead>
@@ -82,14 +83,14 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
               <td class="px-4 py-3"><StatusBadge :status="b.status" /></td>
               <td class="px-4 py-3 text-right text-gray-500 tabular-nums">{{ b.allocated.amount.toLocaleString() }}</td>
             </tr>
-            <tr v-if="budgets.length === 0"><td colspan="4" class="px-4 py-8 text-center text-gray-400">No budgets</td></tr>
+            <tr v-if="budgets.length === 0"><td colspan="4"><EmptyState message="No budgets" hint="Budgets will appear here once allocated" /></td></tr>
           </tbody>
         </table>
       </div>
 
       <!-- API Keys tab -->
-      <div v-if="tab === 'keys'" class="bg-white rounded-lg shadow overflow-hidden">
-        <table class="w-full text-sm">
+      <div v-if="tab === 'keys'" class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
+        <table class="w-full text-sm min-w-[520px]">
           <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
             <tr><th class="px-4 py-3 text-left">Key ID</th><th class="px-4 py-3 text-left">Name</th><th class="px-4 py-3 text-left">Status</th><th class="px-4 py-3 text-left">Permissions</th></tr>
           </thead>
@@ -100,14 +101,14 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
               <td class="px-4 py-3"><StatusBadge :status="k.status" /></td>
               <td class="px-4 py-3 text-xs text-gray-500">{{ k.permissions.join(', ') }}</td>
             </tr>
-            <tr v-if="apiKeys.length === 0"><td colspan="4" class="px-4 py-8 text-center text-gray-400">No API keys</td></tr>
+            <tr v-if="apiKeys.length === 0"><td colspan="4"><EmptyState message="No API keys" hint="API keys will appear here once created" /></td></tr>
           </tbody>
         </table>
       </div>
 
       <!-- Policies tab -->
-      <div v-if="tab === 'policies'" class="bg-white rounded-lg shadow overflow-hidden">
-        <table class="w-full text-sm">
+      <div v-if="tab === 'policies'" class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
+        <table class="w-full text-sm min-w-[520px]">
           <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
             <tr><th class="px-4 py-3 text-left">Policy ID</th><th class="px-4 py-3 text-left">Name</th><th class="px-4 py-3 text-left">Scope</th><th class="px-4 py-3 text-left">Status</th></tr>
           </thead>
@@ -118,7 +119,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
               <td class="px-4 py-3 text-gray-500 font-mono text-xs">{{ p.scope_pattern }}</td>
               <td class="px-4 py-3"><StatusBadge :status="p.status" /></td>
             </tr>
-            <tr v-if="policies.length === 0"><td colspan="4" class="px-4 py-8 text-center text-gray-400">No policies</td></tr>
+            <tr v-if="policies.length === 0"><td colspan="4"><EmptyState message="No policies" hint="Policies will appear here once configured" /></td></tr>
           </tbody>
         </table>
       </div>

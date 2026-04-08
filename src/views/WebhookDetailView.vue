@@ -7,6 +7,7 @@ import type { WebhookSubscription, WebhookDelivery } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import TenantLink from '../components/TenantLink.vue'
+import EmptyState from '../components/EmptyState.vue'
 import { formatDateTime } from '../utils/format'
 
 const route = useRoute()
@@ -46,7 +47,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           <StatusBadge :status="webhook.status" />
           <span v-if="(webhook.consecutive_failures ?? 0) > 0" class="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-medium">{{ webhook.consecutive_failures }} failures</span>
         </div>
-        <div class="grid grid-cols-2 gap-3 text-sm">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
           <div class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">URL</span><span class="font-mono text-xs break-all">{{ webhook.url }}</span></div>
           <div class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Tenant</span><TenantLink :tenant-id="webhook.tenant_id" /></div>
           <div class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Events</span><span class="text-xs">{{ webhook.event_types?.join(', ') || 'all' }}</span></div>
@@ -55,12 +56,12 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           <div v-if="webhook.last_failure_at" class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Last Failure</span>{{ formatDateTime(webhook.last_failure_at) }}</div>
         </div>
       </div>
-      <div class="bg-white rounded-lg shadow overflow-hidden">
+      <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
         <div class="px-4 py-3 border-b border-gray-100 flex justify-between items-center">
           <h3 class="text-sm font-medium text-gray-700">Delivery History</h3>
           <span class="text-xs text-gray-400">{{ deliveries.length }} deliveries</span>
         </div>
-        <table class="w-full text-sm">
+        <table class="w-full text-sm min-w-[600px]">
           <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
             <tr>
               <th class="px-4 py-3 text-left">Status</th>
@@ -79,7 +80,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
               <td class="px-4 py-3 text-gray-400 text-xs">{{ formatDateTime(d.created_at) }}</td>
             </tr>
             <tr v-if="deliveries.length === 0">
-              <td colspan="5" class="px-4 py-12 text-center text-gray-400">No deliveries yet</td>
+              <td colspan="5"><EmptyState message="No deliveries yet" hint="Deliveries will appear here once events are dispatched" /></td>
             </tr>
           </tbody>
         </table>

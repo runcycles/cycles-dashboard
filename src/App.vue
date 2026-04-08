@@ -2,10 +2,12 @@
 import { onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from './stores/auth'
+import { useDarkMode } from './composables/useDarkMode'
 import AppLayout from './components/AppLayout.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
+useDarkMode()
 
 // Track user activity for idle timeout
 const activityEvents = ['mousedown', 'keydown', 'scroll', 'touchstart'] as const
@@ -22,7 +24,7 @@ onMounted(() => {
     if (auth.checkTimeout()) {
       router.push({ name: 'login', query: { expired: '1' } })
     }
-  }, 60_000) // check every minute
+  }, 15_000) // check every 15 seconds
 })
 
 onUnmounted(() => {
