@@ -15,6 +15,34 @@ const operation = ref('')
 const fromDate = ref('')
 const toDate = ref('')
 
+function exportCsv() {
+  if (entries.value.length === 0) return
+  const headers = ['timestamp', 'operation', 'tenant_id', 'key_id', 'status', 'request_id', 'source_ip']
+  const rows = entries.value.map(e => [
+    e.timestamp, e.operation, e.tenant_id || '', e.key_id || '',
+    String(e.status), e.request_id || '', e.source_ip || '',
+  ])
+  const csv = [headers.join(','), ...rows.map(r => r.map(v => `"${v.replace(/"/g, '""')}"`).join(','))].join('\n')
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `audit-logs-${new Date().toISOString().slice(0, 10)}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function exportJson() {
+  if (entries.value.length === 0) return
+  const blob = new Blob([JSON.stringify(entries.value, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `audit-logs-${new Date().toISOString().slice(0, 10)}.json`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 async function query() {
   loading.value = true
   hasQueried.value = true
@@ -67,7 +95,19 @@ async function query() {
       </div>
     </form>
 
-    <p v-if="hasQueried && !loading" class="text-xs text-gray-400 mb-2">{{ entries.length }} result{{ entries.length !== 1 ? 's' : '' }}</p>
+    <div v-if="hasQueried && !loading" class="flex items-center justify-between mb-2">
+      <p class="text-xs text-gray-400">{{ entries.length }} result{{ entries.length !== 1 ? 's' : '' }}</p>
+      <div v-if="entries.length > 0" class="flex gap-2">
+        <button @click="exportCsv" class="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export CSV
+        </button>
+        <button @click="exportJson" class="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export JSON
+        </button>
+      </div>
+    </div>
 
     <div class="bg-white rounded-lg shadow overflow-hidden">
       <table class="w-full text-sm">
