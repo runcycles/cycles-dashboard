@@ -4,21 +4,31 @@ services:
     ports:
       - "8080:80"
     depends_on:
-      - cycles-admin
+      cycles-admin:
+        condition: service_healthy
     networks:
       - cycles
 
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-admin:latest
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.5
+    restart: unless-stopped
     ports:
       - "7979:7979"
     environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - ADMIN_API_KEY=${ADMIN_API_KEY:-admin-key}
-      - DASHBOARD_CORS_ORIGIN=http://localhost:8080
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-admin-key}
+      DASHBOARD_CORS_ORIGIN: http://localhost:8080
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7979/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     networks:
       - cycles
 
@@ -26,8 +36,19 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     networks:
       - cycles
+
+volumes:
+  redis-data:
 
 networks:
   cycles:
