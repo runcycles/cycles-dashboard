@@ -112,7 +112,11 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
               </router-link>
             </td>
             <td class="px-4 py-3"><StatusBadge :status="k.status" /></td>
-            <td class="px-4 py-3 text-xs text-gray-500 max-w-[200px] truncate" :title="k.permissions.join(', ')">{{ k.permissions.join(', ') }}</td>
+            <td class="px-4 py-3 text-xs text-gray-500">
+              <div class="flex flex-wrap gap-1">
+                <span v-for="p in k.permissions" :key="p" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{{ p }}</span>
+              </div>
+            </td>
             <td class="px-4 py-3 text-xs text-gray-500 font-mono">{{ k.scope_filter?.join(', ') || '-' }}</td>
             <td class="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">{{ formatDateTime(k.created_at) }}</td>
             <td class="px-4 py-3 text-xs whitespace-nowrap" :class="k.expires_at ? 'text-gray-500' : 'text-gray-400'">
