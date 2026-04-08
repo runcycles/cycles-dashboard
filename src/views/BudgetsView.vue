@@ -3,7 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
-import { listBudgets, lookupBudget, listTenants, listEvents, updateBudgetStatus } from '../api/client'
+import { listBudgets, lookupBudget, listTenants, listEvents, updateBudgetStatus, adjustBudgetAllocation } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { BudgetLedger, Tenant, Event } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -138,6 +138,29 @@ async function executeBudgetAction() {
   finally { actionLoading.value = false; pendingAction.value = null }
 }
 
+// Budget allocation adjustment
+const showAdjustForm = ref(false)
+const adjustAmount = ref('')
+const adjustLoading = ref(false)
+
+function openAdjustForm() {
+  adjustAmount.value = String(detail.value?.allocated.amount ?? '')
+  showAdjustForm.value = true
+}
+
+async function submitAdjustment() {
+  if (!detail.value || !adjustAmount.value) return
+  const newAmount = Number(adjustAmount.value)
+  if (isNaN(newAmount) || newAmount < 0) { error.value = 'Invalid amount'; return }
+  adjustLoading.value = true
+  try {
+    await adjustBudgetAllocation(detail.value.ledger_id, newAmount)
+    await loadDetail()
+    showAdjustForm.value = false
+  } catch (e: any) { error.value = e.message }
+  finally { adjustLoading.value = false }
+}
+
 watch(selectedTenant, () => { if (!isCrossTenantFilter.value) loadList() })
 watch(() => route.query, () => {
   if (isDetail.value) loadDetail()
@@ -184,6 +207,22 @@ watch(() => route.query, () => {
         </div>
         <div v-if="detail.debt && detail.debt.amount > 0 && detail.overdraft_limit" class="mt-2">
           <UtilizationBar :remaining="detail.overdraft_limit.amount - detail.debt.amount" :allocated="detail.overdraft_limit.amount" label="Debt utilization" />
+        </div>
+
+        <!-- Adjust allocation -->
+        <div v-if="canManage && detail.status === 'ACTIVE'" class="mt-4 pt-4 border-t border-gray-200">
+          <div v-if="!showAdjustForm" class="flex items-center justify-between">
+            <span class="text-xs text-gray-500">Need to adjust the allocation?</span>
+            <button @click="openAdjustForm" class="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-2.5 py-1 hover:bg-blue-50 cursor-pointer transition-colors">Adjust Allocation</button>
+          </div>
+          <form v-else @submit.prevent="submitAdjustment" class="flex items-end gap-3">
+            <div class="flex-1">
+              <label for="adjust-amount" class="block text-xs text-gray-500 mb-1">New allocated amount ({{ detail.unit }})</label>
+              <input id="adjust-amount" v-model="adjustAmount" type="number" min="0" step="1" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" autofocus />
+            </div>
+            <button type="submit" :disabled="adjustLoading" class="bg-gray-900 text-white px-3 py-1.5 rounded text-sm hover:bg-gray-800 disabled:opacity-50 cursor-pointer">{{ adjustLoading ? 'Saving...' : 'Save' }}</button>
+            <button type="button" @click="showAdjustForm = false" class="text-sm text-gray-500 hover:text-gray-700 cursor-pointer">Cancel</button>
+          </form>
         </div>
       </div>
 

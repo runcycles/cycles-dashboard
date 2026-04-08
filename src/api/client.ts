@@ -104,3 +104,13 @@ export const updateBudgetStatus = (ledgerId: string, status: string) =>
 
 export const updateApiKeyStatus = (keyId: string, status: string) =>
   patch<import('../types').ApiKey>(`${BASE}/admin/api-keys/${keyId}`, { status })
+
+// Write operations (Tier 2 — operational convenience)
+export const updateWebhookStatus = (id: string, status: string) =>
+  patch<import('../types').WebhookSubscription>(`${BASE}/admin/webhooks/${id}`, { status })
+
+export const resetWebhookFailures = (id: string) =>
+  patch<import('../types').WebhookSubscription>(`${BASE}/admin/webhooks/${id}`, { consecutive_failures: 0 })
+
+export const adjustBudgetAllocation = (ledgerId: string, amount: number) =>
+  patch<import('../types').BudgetLedger>(`${BASE}/admin/budgets/${ledgerId}`, { allocated: { amount } })

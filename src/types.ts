@@ -12,6 +12,7 @@ export interface Capabilities {
   manage_budgets?: boolean
   manage_tenants?: boolean
   manage_api_keys?: boolean
+  manage_webhooks?: boolean
 }
 
 export interface AuthIntrospectResponse {

@@ -150,3 +150,25 @@ All actions require confirmation dialog with explicit description of impact. Rev
 | `src/components/ConfirmAction.vue` | Reusable confirmation dialog with danger/normal variants, dark mode support |
 
 **Build:** Zero TypeScript errors. 15 tests pass. Version 0.1.25.6.
+
+---
+
+### 2026-04-08 — v0.1.25.7: Tier 2 operational actions
+
+Adds convenience write actions for day-to-day operations.
+
+**Actions:**
+
+| Action | Endpoint | Location | Capability gate |
+|--------|----------|----------|-----------------|
+| Disable / enable webhook | `PATCH /v1/admin/webhooks/{id}` | Webhook detail view | `manage_webhooks` |
+| Reset webhook failure counter | `PATCH /v1/admin/webhooks/{id}` | Webhook detail view (shown when failures > 0) | `manage_webhooks` |
+| Adjust budget allocation | `PATCH /v1/admin/budgets/{id}` | Budget detail view (inline form) | `manage_budgets` |
+
+**UX details:**
+- Webhook disable/enable and reset failures use the same `ConfirmAction` dialog pattern as Tier 1
+- Budget allocation adjustment uses an inline form with the current amount pre-filled, number input with unit label, Save/Cancel buttons
+- All actions capability-gated — buttons hidden when capability is `false`
+- All actions refresh data inline after success
+
+**Build:** Zero TypeScript errors. 15 tests pass. Version 0.1.25.7.
