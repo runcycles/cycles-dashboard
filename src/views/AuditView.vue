@@ -14,19 +14,22 @@ const entries = ref<AuditLogEntry[]>([])
 const error = ref('')
 const loading = ref(false)
 const showExportConfirm = ref<'csv' | 'json' | null>(null)
+const expanded = ref<string | null>(null)
 const { sortKey, sortDir, toggle, sorted: sortedEntries } = useSort(entries)
 
 const tenantId = ref('')
 const keyId = ref('')
 const operation = ref('')
+const resourceType = ref('')
 const fromDate = ref('')
 const toDate = ref('')
 
 function doExportCsv() {
-  const headers = ['timestamp', 'operation', 'tenant_id', 'key_id', 'status', 'request_id', 'source_ip']
+  const headers = ['timestamp', 'operation', 'resource_type', 'resource_id', 'tenant_id', 'key_id', 'status', 'error_code', 'request_id', 'source_ip']
   const rows = entries.value.map(e => [
-    e.timestamp, e.operation, e.tenant_id || '', e.key_id || '',
-    String(e.status), e.request_id || '', e.source_ip || '',
+    e.timestamp, e.operation, e.resource_type || '', e.resource_id || '',
+    e.tenant_id || '', e.key_id || '', String(e.status), e.error_code || '',
+    e.request_id || '', e.source_ip || '',
   ])
   const csv = [headers.join(','), ...rows.map(r => r.map(v => `"${v.replace(/"/g, '""')}"`).join(','))].join('\n')
   const blob = new Blob([csv], { type: 'text/csv' })
@@ -66,6 +69,7 @@ async function query() {
     if (tenantId.value) params.tenant_id = tenantId.value
     if (keyId.value) params.key_id = keyId.value
     if (operation.value) params.operation = operation.value
+    if (resourceType.value) params.resource_type = resourceType.value
     if (fromDate.value) params.from = new Date(fromDate.value).toISOString()
     if (toDate.value) params.to = new Date(toDate.value).toISOString()
     const res = await listAuditLogs(params)
@@ -84,7 +88,10 @@ function setTimeRange(hours: number) {
   toDate.value = fmt(now)
 }
 
-// Auto-query on page load (recent 50 logs, no filters)
+function hasDetail(e: AuditLogEntry): boolean {
+  return !!(e.resource_type || e.resource_id || e.metadata || e.error_code || e.request_id || e.source_ip || e.user_agent)
+}
+
 onMounted(() => { query() })
 </script>
 
@@ -107,6 +114,14 @@ onMounted(() => { query() })
         <div>
           <label for="audit-operation" class="block text-xs text-gray-500 mb-1">Operation</label>
           <input id="audit-operation" v-model="operation" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-32" placeholder="createBudget" />
+        </div>
+        <div>
+          <label for="audit-resource" class="block text-xs text-gray-500 mb-1">Resource Type</label>
+          <select id="audit-resource" v-model="resourceType" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+            <option value="">All</option>
+            <option>tenant</option><option>budget</option><option>api_key</option>
+            <option>policy</option><option>webhook</option><option>config</option>
+          </select>
         </div>
         <div>
           <label for="audit-from" class="block text-xs text-gray-500 mb-1">From</label>
@@ -144,36 +159,73 @@ onMounted(() => { query() })
     </div>
 
     <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
-      <table class="w-full text-sm min-w-[800px]">
+      <table class="w-full text-sm min-w-[900px]">
         <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
           <tr>
+            <th class="w-8"></th>
             <SortHeader label="Time" column="timestamp" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Operation" column="operation" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+            <SortHeader label="Resource" column="resource_type" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Tenant" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <th class="px-4 py-3 text-left">Key ID</th>
             <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <th class="px-4 py-3 text-left">Request ID</th>
-            <SortHeader label="IP" column="source_ip" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
-          <tr v-for="e in sortedEntries" :key="e.log_id" class="hover:bg-gray-50 transition-colors">
-            <td class="px-4 py-3 text-gray-400 whitespace-nowrap text-xs" :title="new Date(e.timestamp).toISOString()">{{ formatDateTime(e.timestamp) }}</td>
-            <td class="px-4 py-3 font-mono text-xs">{{ e.operation }}</td>
-            <td class="px-4 py-3 text-gray-500 text-xs">
-              <TenantLink v-if="e.tenant_id" :tenant-id="e.tenant_id" />
-              <span v-else class="text-gray-400 text-xs">-</span>
-            </td>
-            <td class="px-4 py-3">
-              <MaskedValue v-if="e.key_id" :value="e.key_id" />
-              <span v-else class="text-gray-400 text-xs">-</span>
-            </td>
-            <td class="px-4 py-3">
-              <span class="px-1.5 py-0.5 rounded text-xs font-medium" :class="e.status >= 400 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'">{{ e.status }}</span>
-            </td>
-            <td class="px-4 py-3 font-mono text-xs text-gray-400">{{ e.request_id || '-' }}</td>
-            <td class="px-4 py-3 text-gray-400 text-xs">{{ e.source_ip || '-' }}</td>
-          </tr>
+          <template v-for="e in sortedEntries" :key="e.log_id">
+            <tr
+              class="hover:bg-gray-50 transition-colors"
+              :class="hasDetail(e) ? 'cursor-pointer' : ''"
+              @click="hasDetail(e) ? (expanded = expanded === e.log_id ? null : e.log_id) : null"
+              :role="hasDetail(e) ? 'button' : undefined"
+              :tabindex="hasDetail(e) ? 0 : undefined"
+              @keydown.enter.prevent="hasDetail(e) ? (expanded = expanded === e.log_id ? null : e.log_id) : null"
+              @keydown.space.prevent="hasDetail(e) ? (expanded = expanded === e.log_id ? null : e.log_id) : null"
+              :aria-expanded="hasDetail(e) ? expanded === e.log_id : undefined"
+            >
+              <td class="pl-3 py-3 text-gray-400">
+                <svg v-if="hasDetail(e)" class="w-3.5 h-3.5 transition-transform" :class="expanded === e.log_id ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </td>
+              <td class="px-4 py-3 text-gray-400 whitespace-nowrap text-xs" :title="new Date(e.timestamp).toISOString()">{{ formatDateTime(e.timestamp) }}</td>
+              <td class="px-4 py-3 font-mono text-xs">{{ e.operation }}</td>
+              <td class="px-4 py-3 text-xs">
+                <span v-if="e.resource_type" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{{ e.resource_type }}</span>
+                <span v-if="e.resource_id" class="ml-1 font-mono text-gray-400">{{ e.resource_id }}</span>
+                <span v-if="!e.resource_type && !e.resource_id" class="text-gray-400">-</span>
+              </td>
+              <td class="px-4 py-3 text-gray-500 text-xs">
+                <TenantLink v-if="e.tenant_id" :tenant-id="e.tenant_id" />
+                <span v-else class="text-gray-400 text-xs">-</span>
+              </td>
+              <td class="px-4 py-3">
+                <MaskedValue v-if="e.key_id" :value="e.key_id" />
+                <span v-else class="text-gray-400 text-xs">-</span>
+              </td>
+              <td class="px-4 py-3">
+                <span class="px-1.5 py-0.5 rounded text-xs font-medium" :class="e.status >= 400 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'">{{ e.status }}</span>
+                <span v-if="e.error_code" class="ml-1 text-xs text-red-500 font-mono">{{ e.error_code }}</span>
+              </td>
+            </tr>
+            <!-- Expanded detail row -->
+            <tr v-if="expanded === e.log_id" class="bg-gray-50/70">
+              <td :colspan="7" class="px-4 py-3 pl-11">
+                <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3">
+                  <div v-if="e.request_id"><span class="text-gray-400">Request ID:</span> <span class="font-mono">{{ e.request_id }}</span></div>
+                  <div v-if="e.source_ip"><span class="text-gray-400">Source IP:</span> <span class="font-mono">{{ e.source_ip }}</span></div>
+                  <div v-if="e.user_agent"><span class="text-gray-400">User Agent:</span> {{ e.user_agent }}</div>
+                  <div v-if="e.error_code"><span class="text-gray-400">Error Code:</span> <span class="font-mono text-red-500">{{ e.error_code }}</span></div>
+                  <div v-if="e.resource_type"><span class="text-gray-400">Resource Type:</span> {{ e.resource_type }}</div>
+                  <div v-if="e.resource_id"><span class="text-gray-400">Resource ID:</span> <span class="font-mono">{{ e.resource_id }}</span></div>
+                </div>
+                <div v-if="e.metadata && Object.keys(e.metadata).length > 0" class="bg-white border border-gray-200 rounded p-3 text-xs font-mono overflow-auto max-h-48">
+                  <div class="text-gray-400 mb-1 font-sans text-xs">Metadata</div>
+                  <pre class="whitespace-pre-wrap">{{ JSON.stringify(e.metadata, null, 2) }}</pre>
+                </div>
+              </td>
+            </tr>
+          </template>
           <tr v-if="entries.length === 0 && !loading">
             <td colspan="7"><EmptyState message="No audit logs found" hint="Adjust your filters or time range and run the query again" /></td>
           </tr>
@@ -186,9 +238,9 @@ onMounted(() => { query() })
 
     <!-- Export confirmation dialog -->
     <div v-if="showExportConfirm" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50" @click.self="showExportConfirm = null">
-      <div class="bg-white rounded-lg shadow-lg p-6 max-w-sm mx-4">
+      <div class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 max-w-sm mx-4">
         <h3 class="text-sm font-semibold text-gray-900 mb-2">Export audit data?</h3>
-        <p class="text-sm text-gray-600 mb-1">This export contains <strong>{{ entries.length }}</strong> audit log entries including key IDs and IP addresses.</p>
+        <p class="text-sm text-gray-600 mb-1">This export contains <strong>{{ entries.length }}</strong> audit log entries including key IDs, IP addresses, and metadata.</p>
         <p class="text-xs text-gray-400 mb-4">Exported files contain unmasked sensitive data. Handle with care.</p>
         <div class="flex justify-end gap-2">
           <button @click="showExportConfirm = null" class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 rounded hover:bg-gray-100 cursor-pointer">Cancel</button>

@@ -336,6 +336,10 @@ export interface AuditLogEntry {
   request_id?: string
   source_ip?: string
   user_agent?: string
+  error_code?: string
+  resource_type?: string
+  resource_id?: string
+  metadata?: Record<string, unknown>
 }
 
 export interface AuditLogListResponse {
