@@ -152,6 +152,9 @@ export const replayWebhookEvents = (id: string, body: import('../types').ReplayE
   post<import('../types').ReplayEventsResponse>(`${BASE}/admin/webhooks/${id}/replay`, body as unknown as Record<string, unknown>)
 
 // Budgets
+export const updateBudgetConfig = (scope: string, unit: string, body: Record<string, unknown>) =>
+  mutate<import('../types').BudgetLedger>('PATCH', `${BASE}/admin/budgets`, body, { scope, unit })
+
 export const freezeBudget = (scope: string, unit: string, reason?: string) =>
   post<import('../types').BudgetLedger>(`${BASE}/admin/budgets/freeze`, reason ? { reason } : {}, { scope, unit })
 

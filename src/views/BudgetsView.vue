@@ -3,7 +3,8 @@ import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
-import { listBudgets, lookupBudget, listTenants, listEvents, fundBudget, freezeBudget, unfreezeBudget } from '../api/client'
+import { listBudgets, lookupBudget, listTenants, listEvents, fundBudget, freezeBudget, unfreezeBudget, updateBudgetConfig } from '../api/client'
+import { COMMIT_OVERAGE_POLICIES } from '../types'
 import { useAuthStore } from '../stores/auth'
 import type { BudgetLedger, Tenant, Event } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -197,6 +198,39 @@ async function submitFund() {
   finally { fundLoading.value = false }
 }
 
+// Edit budget config (overdraft_limit, commit_overage_policy)
+const showEditBudget = ref(false)
+const editBudgetLoading = ref(false)
+const editBudgetError = ref('')
+const editBudgetForm = ref({ overdraft_limit: '', commit_overage_policy: '' })
+
+function openEditBudget() {
+  if (!detail.value) return
+  editBudgetForm.value = {
+    overdraft_limit: String(detail.value.overdraft_limit?.amount ?? '0'),
+    commit_overage_policy: detail.value.commit_overage_policy || '',
+  }
+  editBudgetError.value = ''
+  showEditBudget.value = true
+}
+
+async function submitEditBudget() {
+  if (!detail.value) return
+  editBudgetError.value = ''
+  editBudgetLoading.value = true
+  try {
+    const body: Record<string, unknown> = {}
+    const odLimit = Number(editBudgetForm.value.overdraft_limit)
+    if (!isNaN(odLimit) && odLimit >= 0) body.overdraft_limit = { unit: detail.value.unit, amount: odLimit }
+    if (editBudgetForm.value.commit_overage_policy) body.commit_overage_policy = editBudgetForm.value.commit_overage_policy
+    await updateBudgetConfig(detail.value.scope, detail.value.unit, body)
+    await loadDetail()
+    showEditBudget.value = false
+    toast.success('Budget config updated')
+  } catch (e: any) { editBudgetError.value = e.message }
+  finally { editBudgetLoading.value = false }
+}
+
 watch(selectedTenant, () => { if (!isCrossTenantFilter.value && !isDetail.value) loadList() })
 watch(() => route.query, () => {
   if (isDetail.value) loadDetail()
@@ -227,6 +261,7 @@ watch(() => route.query, () => {
           <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs font-medium">{{ detail.unit }}</span>
           <span v-if="detail.is_over_limit" class="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-medium">OVER LIMIT</span>
           <span class="flex-1" />
+          <button v-if="canManage" @click="openEditBudget" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Edit</button>
           <button v-if="canManage && detail.status === 'ACTIVE'" @click="requestFreeze(detail.scope, detail.unit, 'freeze')" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Freeze</button>
           <button v-if="canManage && detail.status === 'FROZEN'" @click="requestFreeze(detail.scope, detail.unit, 'unfreeze')" class="text-xs text-green-700 hover:text-green-900 border border-green-200 rounded px-2.5 py-1 hover:bg-green-50 cursor-pointer transition-colors">Unfreeze</button>
         </div>
@@ -378,6 +413,22 @@ watch(() => route.query, () => {
       <div>
         <label for="fund-reason" class="block text-xs text-gray-500 mb-1">Reason (optional, for audit trail)</label>
         <input id="fund-reason" v-model="fundForm.reason" maxlength="512" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" placeholder="Emergency top-up for production" />
+      </div>
+    </FormDialog>
+
+    <FormDialog v-if="showEditBudget" title="Edit Budget Config" submit-label="Save Changes" :loading="editBudgetLoading" :error="editBudgetError" @submit="submitEditBudget" @cancel="showEditBudget = false">
+      <p class="text-xs text-gray-500">Edit overdraft limit and commit overage policy for <span class="font-mono">{{ detail?.scope }}</span> ({{ detail?.unit }}).</p>
+      <div>
+        <label for="eb-overdraft" class="block text-xs text-gray-500 mb-1">Overdraft Limit ({{ detail?.unit }})</label>
+        <input id="eb-overdraft" v-model="editBudgetForm.overdraft_limit" type="number" min="0" step="1" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
+        <p class="text-xs text-gray-400 mt-0.5">Maximum debt allowed. Set to 0 to disable overdraft.</p>
+      </div>
+      <div>
+        <label for="eb-overage" class="block text-xs text-gray-500 mb-1">Commit Overage Policy</label>
+        <select id="eb-overage" v-model="editBudgetForm.commit_overage_policy" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
+          <option value="">Inherit from tenant</option>
+          <option v-for="p in COMMIT_OVERAGE_POLICIES" :key="p" :value="p">{{ p }}</option>
+        </select>
       </div>
     </FormDialog>
   </div>
