@@ -32,21 +32,39 @@ function get<T>(path: string, params?: Record<string, string>): Promise<T> {
   return request<T>('GET', path, params)
 }
 
-function patch<T>(path: string, body: Record<string, unknown>): Promise<T> {
+async function mutate<T>(method: string, path: string, body?: Record<string, unknown>, params?: Record<string, string>): Promise<T> {
   const auth = useAuthStore()
-  return fetch(`${window.location.origin}${path}`, {
-    method: 'PATCH',
-    headers: { 'X-Admin-API-Key': auth.apiKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  }).then(async (res) => {
-    if (res.status === 401 || res.status === 403) {
-      auth.logout()
-      router.push({ name: 'login', query: { redirect: router.currentRoute.value.fullPath } })
-      throw new Error('Unauthorized')
+  const url = new URL(path, window.location.origin)
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v)
     }
-    if (!res.ok) throw new Error(`API error: ${res.status}`)
-    try { return await res.json() } catch { throw new Error('Invalid response from server') }
+  }
+  const res = await fetch(url.toString(), {
+    method,
+    headers: { 'X-Admin-API-Key': auth.apiKey, 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
   })
+  if (res.status === 401 || res.status === 403) {
+    auth.logout()
+    router.push({ name: 'login', query: { redirect: router.currentRoute.value.fullPath } })
+    throw new Error('Unauthorized')
+  }
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  if (res.status === 204) return undefined as T
+  try { return await res.json() } catch { throw new Error('Invalid response from server') }
+}
+
+function patch<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  return mutate<T>('PATCH', path, body)
+}
+
+function post<T>(path: string, body: Record<string, unknown>, params?: Record<string, string>): Promise<T> {
+  return mutate<T>('POST', path, body, params)
+}
+
+function del<T>(path: string, params?: Record<string, string>): Promise<T> {
+  return mutate<T>('DELETE', path, undefined, params)
 }
 
 // Auth
@@ -95,70 +113,54 @@ export const listApiKeys = (params?: Record<string, string>) =>
 export const listPolicies = (params: Record<string, string>) =>
   get<import('../types').PolicyListResponse>(`${BASE}/admin/policies`, params)
 
-// Write operations — Tenant
+// ── Write operations ────────────────────────────────────────────────
+
+// Tenants
+export const createTenant = (body: import('../types').TenantCreateRequest) =>
+  post<import('../types').Tenant>(`${BASE}/admin/tenants`, body as unknown as Record<string, unknown>)
+
+export const updateTenant = (id: string, body: import('../types').TenantUpdateRequest) =>
+  patch<import('../types').Tenant>(`${BASE}/admin/tenants/${id}`, body as unknown as Record<string, unknown>)
+
 export const updateTenantStatus = (id: string, status: string) =>
   patch<import('../types').Tenant>(`${BASE}/admin/tenants/${id}`, { status })
 
-// Write operations — API Keys (DELETE per spec, not PATCH)
-export function revokeApiKey(keyId: string, reason?: string): Promise<import('../types').ApiKey> {
-  const auth = useAuthStore()
-  const url = new URL(`${BASE}/admin/api-keys/${keyId}`, window.location.origin)
-  if (reason) url.searchParams.set('reason', reason)
-  return fetch(url.toString(), {
-    method: 'DELETE',
-    headers: { 'X-Admin-API-Key': auth.apiKey, 'Content-Type': 'application/json' },
-  }).then(async (res) => {
-    if (res.status === 401 || res.status === 403) {
-      auth.logout()
-      router.push({ name: 'login', query: { redirect: router.currentRoute.value.fullPath } })
-      throw new Error('Unauthorized')
-    }
-    if (!res.ok) throw new Error(`API error: ${res.status}`)
-    try { return await res.json() } catch { throw new Error('Invalid response from server') }
-  })
-}
+// API Keys
+export const createApiKey = (body: import('../types').ApiKeyCreateRequest) =>
+  post<import('../types').ApiKeyCreateResponse>(`${BASE}/admin/api-keys`, body as unknown as Record<string, unknown>)
 
-// Write operations — Webhooks (PATCH with status ACTIVE/PAUSED per spec)
+export const updateApiKey = (keyId: string, body: import('../types').ApiKeyUpdateRequest) =>
+  patch<import('../types').ApiKey>(`${BASE}/admin/api-keys/${keyId}`, body as unknown as Record<string, unknown>)
+
+export const revokeApiKey = (keyId: string, reason?: string) =>
+  del<import('../types').ApiKey>(`${BASE}/admin/api-keys/${keyId}`, reason ? { reason } : undefined)
+
+// Webhooks
+export const createWebhook = (body: import('../types').WebhookCreateRequest, tenantId?: string) =>
+  post<import('../types').WebhookCreateResponse>(`${BASE}/admin/webhooks`, body as unknown as Record<string, unknown>, tenantId ? { tenant_id: tenantId } : undefined)
+
 export const updateWebhook = (id: string, body: Record<string, unknown>) =>
   patch<import('../types').WebhookSubscription>(`${BASE}/admin/webhooks/${id}`, body)
 
-// Write operations — Budget freeze/unfreeze (POST, AdminKeyAuth, scope+unit query params)
-export function freezeBudget(scope: string, unit: string, reason?: string): Promise<import('../types').BudgetLedger> {
-  return postAction(`${BASE}/admin/budgets/freeze`, { scope, unit }, reason ? { reason } : undefined)
-}
+export const deleteWebhook = (id: string) =>
+  del<void>(`${BASE}/admin/webhooks/${id}`)
 
-export function unfreezeBudget(scope: string, unit: string, reason?: string): Promise<import('../types').BudgetLedger> {
-  return postAction(`${BASE}/admin/budgets/unfreeze`, { scope, unit }, reason ? { reason } : undefined)
-}
+export const testWebhook = (id: string) =>
+  post<import('../types').WebhookTestResponse>(`${BASE}/admin/webhooks/${id}/test`, {})
 
-// Write operations — Budget funding (POST, dual-auth, scope+unit+tenant_id query params)
+export const replayWebhookEvents = (id: string, body: import('../types').ReplayEventsRequest) =>
+  post<import('../types').ReplayEventsResponse>(`${BASE}/admin/webhooks/${id}/replay`, body as unknown as Record<string, unknown>)
+
+// Budgets
+export const freezeBudget = (scope: string, unit: string, reason?: string) =>
+  post<import('../types').BudgetLedger>(`${BASE}/admin/budgets/freeze`, reason ? { reason } : {}, { scope, unit })
+
+export const unfreezeBudget = (scope: string, unit: string, reason?: string) =>
+  post<import('../types').BudgetLedger>(`${BASE}/admin/budgets/unfreeze`, reason ? { reason } : {}, { scope, unit })
+
 export function fundBudget(tenantId: string, scope: string, unit: string, operation: string, amount: number, idempotencyKey: string, reason?: string): Promise<import('../types').BudgetLedger> {
-  const body: Record<string, unknown> = {
-    operation,
-    amount: { unit, amount },
-    idempotency_key: idempotencyKey,
-  }
+  const body: Record<string, unknown> = { operation, amount: { unit, amount }, idempotency_key: idempotencyKey }
   if (reason) body.reason = reason
-  return postAction(`${BASE}/admin/budgets/fund`, { tenant_id: tenantId, scope, unit }, body)
-}
-
-// Shared POST helper for budget action endpoints
-function postAction<T>(path: string, params: Record<string, string>, body?: Record<string, unknown>): Promise<T> {
-  const auth = useAuthStore()
-  const url = new URL(path, window.location.origin)
-  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v)
-  return fetch(url.toString(), {
-    method: 'POST',
-    headers: { 'X-Admin-API-Key': auth.apiKey, 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
-  }).then(async (res) => {
-    if (res.status === 401 || res.status === 403) {
-      auth.logout()
-      router.push({ name: 'login', query: { redirect: router.currentRoute.value.fullPath } })
-      throw new Error('Unauthorized')
-    }
-    if (!res.ok) throw new Error(`API error: ${res.status}`)
-    try { return await res.json() } catch { throw new Error('Invalid response from server') }
-  })
+  return post<import('../types').BudgetLedger>(`${BASE}/admin/budgets/fund`, body, { tenant_id: tenantId, scope, unit })
 }
 

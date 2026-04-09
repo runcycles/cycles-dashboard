@@ -1,18 +1,54 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
-import { listTenants } from '../api/client'
+import { listTenants, createTenant } from '../api/client'
+import { useAuthStore } from '../stores/auth'
 import type { Tenant } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import FormDialog from '../components/FormDialog.vue'
 import { formatDate } from '../utils/format'
+
+const router = useRouter()
+const auth = useAuthStore()
+const canManage = computed(() => auth.capabilities?.manage_tenants !== false)
 
 const tenants = ref<Tenant[]>([])
 const error = ref('')
 const { sortKey, sortDir, toggle, sorted: sortedTenants } = useSort(tenants)
+
+// Create tenant
+const showCreate = ref(false)
+const createLoading = ref(false)
+const createError = ref('')
+const createForm = ref({ tenant_id: '', name: '', parent_tenant_id: '' })
+
+function openCreate() {
+  createForm.value = { tenant_id: '', name: '', parent_tenant_id: '' }
+  createError.value = ''
+  showCreate.value = true
+}
+
+async function submitCreate() {
+  createError.value = ''
+  if (!/^[a-z0-9-]+$/.test(createForm.value.tenant_id)) {
+    createError.value = 'Tenant ID must contain only lowercase letters, numbers, and hyphens'
+    return
+  }
+  createLoading.value = true
+  try {
+    const body: Record<string, unknown> = { tenant_id: createForm.value.tenant_id, name: createForm.value.name }
+    if (createForm.value.parent_tenant_id) body.parent_tenant_id = createForm.value.parent_tenant_id
+    await createTenant(body as any)
+    showCreate.value = false
+    router.push({ name: 'tenant-detail', params: { id: createForm.value.tenant_id } })
+  } catch (e: any) { createError.value = e.message }
+  finally { createLoading.value = false }
+}
 
 const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
@@ -25,7 +61,10 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
 
 <template>
   <div>
-    <PageHeader title="Tenants" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh" />
+    <div class="flex items-center justify-between mb-6">
+      <PageHeader title="Tenants" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh" />
+      <button v-if="canManage" @click="openCreate" class="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-3 py-1.5 hover:bg-blue-50 cursor-pointer transition-colors">Create Tenant</button>
+    </div>
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
     <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
       <table class="w-full text-sm min-w-[480px]">
@@ -52,5 +91,24 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         </tbody>
       </table>
     </div>
+
+    <FormDialog v-if="showCreate" title="Create Tenant" submit-label="Create Tenant" :loading="createLoading" :error="createError" @submit="submitCreate" @cancel="showCreate = false">
+      <div>
+        <label for="ct-id" class="block text-xs text-gray-500 mb-1">Tenant ID</label>
+        <input id="ct-id" v-model="createForm.tenant_id" required pattern="^[a-z0-9-]+$" minlength="3" maxlength="64" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="acme-corp" />
+        <p class="text-xs text-gray-400 mt-0.5">Lowercase letters, numbers, and hyphens only</p>
+      </div>
+      <div>
+        <label for="ct-name" class="block text-xs text-gray-500 mb-1">Display Name</label>
+        <input id="ct-name" v-model="createForm.name" required maxlength="256" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" placeholder="Acme Corporation" />
+      </div>
+      <div>
+        <label for="ct-parent" class="block text-xs text-gray-500 mb-1">Parent Tenant (optional)</label>
+        <select id="ct-parent" v-model="createForm.parent_tenant_id" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
+          <option value="">None</option>
+          <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
+        </select>
+      </div>
+    </FormDialog>
   </div>
 </template>

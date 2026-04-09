@@ -37,6 +37,14 @@ Tier 1 incident-response actions available directly from the dashboard (capabili
 | **Enable webhook** | Webhook detail | Resumes deliveries (resets failure counter) |
 | **Reset & re-enable webhook** | Webhook detail | Re-enables disabled/failing webhook, clears failures |
 | **Adjust budget allocation** | Budget detail | Inline form — uses fund endpoint with RESET operation |
+| **Create tenant** | Tenants list | Modal form, navigates to new tenant on success |
+| **Edit tenant** | Tenant detail | Edit display name |
+| **Create API key** | API Keys list, Tenant detail | Modal form with permissions, shows secret once |
+| **Edit API key** | API Keys list | Edit name, permissions, scope filter |
+| **Create webhook** | Webhooks list | Modal form, shows signing secret once |
+| **Delete webhook** | Webhook detail | Permanent deletion with confirmation |
+| **Test webhook** | Webhook detail | Sends synthetic test event, shows result inline |
+| **Replay events** | Webhook detail | Re-deliver events for a time range |
 
 ## Architecture
 
@@ -129,6 +137,9 @@ The dashboard uses `AdminKeyAuth` exclusively (`X-Admin-API-Key` header). No ten
 | `PATCH /v1/admin/tenants/{id}` | Tenant Detail | Suspend / reactivate tenant |
 | `DELETE /v1/admin/api-keys/{key_id}` | API Keys, Tenant Detail | Revoke API key |
 | `PATCH /v1/admin/webhooks/{subscription_id}` | Webhook Detail | Pause/enable, reset failures |
+| `DELETE /v1/admin/webhooks/{subscription_id}` | Webhook Detail | Delete webhook subscription |
+| `POST /v1/admin/webhooks/{subscription_id}/test` | Webhook Detail | Send test event |
+| `POST /v1/admin/webhooks/{subscription_id}/replay` | Webhook Detail | Replay historical events |
 | `POST /v1/admin/budgets/fund` | Budget Detail | Adjust allocation (RESET operation) |
 
 ## Polling Strategy

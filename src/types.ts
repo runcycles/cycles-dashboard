@@ -212,6 +212,119 @@ export interface ApiKeyListResponse {
   next_cursor?: string
 }
 
+// Create/update request types
+
+export interface ApiKeyCreateRequest {
+  tenant_id: string
+  name: string
+  description?: string
+  permissions?: string[]
+  scope_filter?: string[]
+  expires_at?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface ApiKeyCreateResponse {
+  key_id: string
+  key_secret: string
+  key_prefix: string
+  tenant_id: string
+  name?: string
+  permissions?: string[]
+  created_at: string
+  expires_at?: string
+}
+
+export interface ApiKeyUpdateRequest {
+  name?: string
+  description?: string
+  permissions?: string[]
+  scope_filter?: string[]
+  metadata?: Record<string, unknown>
+}
+
+export interface TenantCreateRequest {
+  tenant_id: string
+  name: string
+  parent_tenant_id?: string
+  metadata?: Record<string, string>
+  default_commit_overage_policy?: string
+  default_reservation_ttl_ms?: number
+}
+
+export interface TenantUpdateRequest {
+  name?: string
+  status?: string
+  metadata?: Record<string, string>
+  default_commit_overage_policy?: string
+  default_reservation_ttl_ms?: number
+}
+
+export interface WebhookCreateRequest {
+  url: string
+  event_types: string[]
+  event_categories?: string[]
+  name?: string
+  description?: string
+  scope_filter?: string
+  signing_secret?: string
+  headers?: Record<string, string>
+  disable_after_failures?: number
+  metadata?: Record<string, unknown>
+}
+
+export interface WebhookCreateResponse {
+  subscription: WebhookSubscription
+  signing_secret?: string
+}
+
+export interface WebhookTestResponse {
+  success: boolean
+  response_status?: number
+  response_time_ms?: number
+  error_message?: string
+  event_id?: string
+}
+
+export interface ReplayEventsRequest {
+  from?: string
+  to?: string
+  event_types?: string[]
+  max_events?: number
+}
+
+export interface ReplayEventsResponse {
+  replay_id: string
+  events_queued: number
+}
+
+// Well-known enums
+
+export const PERMISSIONS = [
+  'reservations:create', 'reservations:commit', 'reservations:release', 'reservations:extend', 'reservations:list',
+  'balances:read', 'budgets:read', 'budgets:write', 'policies:read', 'policies:write',
+  'webhooks:read', 'webhooks:write', 'events:read',
+] as const
+
+export const EVENT_TYPES = [
+  'budget.created', 'budget.updated', 'budget.funded', 'budget.debited', 'budget.reset',
+  'budget.debt_repaid', 'budget.frozen', 'budget.unfrozen', 'budget.closed',
+  'budget.threshold_crossed', 'budget.exhausted', 'budget.over_limit_entered', 'budget.over_limit_exited',
+  'budget.debt_incurred', 'budget.burn_rate_anomaly',
+  'reservation.denied', 'reservation.denial_rate_spike', 'reservation.expired',
+  'reservation.expiry_rate_spike', 'reservation.commit_overage',
+  'tenant.created', 'tenant.updated', 'tenant.suspended', 'tenant.reactivated', 'tenant.closed', 'tenant.settings_changed',
+  'api_key.created', 'api_key.revoked', 'api_key.expired', 'api_key.permissions_changed',
+  'api_key.auth_failed', 'api_key.auth_failure_rate_spike',
+  'policy.created', 'policy.updated', 'policy.deleted',
+  'system.store_connection_lost', 'system.store_connection_restored', 'system.high_latency',
+  'system.webhook_delivery_failed', 'system.webhook_test',
+] as const
+
+export const EVENT_CATEGORIES = ['budget', 'tenant', 'api_key', 'policy', 'reservation', 'system'] as const
+
+export const COMMIT_OVERAGE_POLICIES = ['REJECT', 'ALLOW_IF_AVAILABLE', 'ALLOW_WITH_OVERDRAFT'] as const
+
 // Audit types
 export interface AuditLogEntry {
   log_id: string

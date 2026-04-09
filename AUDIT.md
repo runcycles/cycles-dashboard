@@ -187,3 +187,49 @@ All write operations audited against `complete-budget-governance-v0.1.25.yaml` a
 | **Defensive** | `submitAdjustment` guards against empty `selectedTenant` |
 
 **Build:** Zero TypeScript errors. 15 tests pass. Version 0.1.25.7.
+
+---
+
+### 2026-04-08 — v0.1.25.8: Admin CRUD operations
+
+Full admin management UI — create, update, and delete resources directly from the dashboard.
+
+**New shared components:**
+
+| Component | Purpose |
+|-----------|---------|
+| `FormDialog.vue` | Reusable modal form with Escape dismiss, dark mode, loading/error states |
+| `SecretReveal.vue` | One-time secret display with copy button, confirmation checkbox, auto-clear |
+
+**New CRUD operations:**
+
+| Action | Endpoint | Location |
+|--------|----------|----------|
+| Create tenant | `POST /v1/admin/tenants` | Tenants list |
+| Edit tenant (name) | `PATCH /v1/admin/tenants/{id}` | Tenant detail |
+| Create API key | `POST /v1/admin/api-keys` | API Keys list + Tenant detail keys tab |
+| Edit API key (name, permissions, scope) | `PATCH /v1/admin/api-keys/{id}` | API Keys list |
+| Create webhook | `POST /v1/admin/webhooks` | Webhooks list |
+| Delete webhook | `DELETE /v1/admin/webhooks/{id}` | Webhook detail |
+| Test webhook | `POST /v1/admin/webhooks/{id}/test` | Webhook detail |
+| Replay events | `POST /v1/admin/webhooks/{id}/replay` | Webhook detail |
+
+**UX details:**
+- Create API key and create webhook show one-time secret via SecretReveal (copy + confirm before close)
+- Create tenant navigates to the new tenant detail page on success
+- Create webhook navigates to webhook detail after secret is acknowledged
+- Tenant edit is a simple name edit modal
+- API key edit supports permissions checkbox grid and scope filter
+- Webhook delete uses ConfirmAction danger dialog (irreversible)
+- Test webhook shows inline result (success/fail badge, HTTP status, response time)
+- Replay uses FormDialog with from/to datetime range and max_events
+- All create/edit actions use FormDialog with inline error display
+- All actions capability-gated (`manage_tenants`, `manage_api_keys`, `manage_webhooks`)
+
+**Infrastructure:**
+- New `mutate<T>` helper in api/client.ts consolidates POST/PATCH/DELETE with consistent auth/error handling
+- New `post<T>` and `del<T>` wrappers
+- New types: `ApiKeyCreateRequest/Response`, `ApiKeyUpdateRequest`, `TenantCreateRequest/UpdateRequest`, `WebhookCreateRequest/Response`, `WebhookTestResponse`, `ReplayEventsRequest/Response`
+- Well-known enums exported: `PERMISSIONS`, `EVENT_TYPES`, `EVENT_CATEGORIES`, `COMMIT_OVERAGE_POLICIES`
+
+**Build:** Zero TypeScript errors. 15 tests pass. Version 0.1.25.8.
