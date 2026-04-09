@@ -1,7 +1,7 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-08 (v0.1.25.6)
-**Spec:** `complete-budget-governance-v0.1.25.yaml` (OpenAPI 3.1.0, v0.1.25.6)
+**Date:** 2026-04-08 (v0.1.25.7)
+**Spec:** `complete-budget-governance-v0.1.25.yaml` (OpenAPI 3.1.0, v0.1.25.7)
 **Stack:** Vue 3 + TypeScript + Vite + Pinia + Tailwind CSS v4
 
 ### 2026-04-08 — v0.1.25.5: Initial release
@@ -137,9 +137,8 @@ Comprehensive review addressing 8 security gaps and 12 usability improvements.
 
 | Action | Endpoint | Location | Capability gate |
 |--------|----------|----------|-----------------|
-| Freeze / unfreeze budget | `PATCH /v1/admin/budgets/{id}` | Budget detail view | `manage_budgets` |
 | Suspend / reactivate tenant | `PATCH /v1/admin/tenants/{id}` | Tenant detail view | `manage_tenants` |
-| Revoke API key | `PATCH /v1/admin/api-keys/{id}` | API Keys list + Tenant detail keys tab | `manage_api_keys` |
+| Revoke API key | `DELETE /v1/admin/api-keys/{id}` | API Keys list + Tenant detail keys tab | `manage_api_keys` |
 
 All actions require confirmation dialog with explicit description of impact. Revoke is marked as irreversible. Actions are capability-gated — buttons hidden when capability is `false`.
 
@@ -150,3 +149,31 @@ All actions require confirmation dialog with explicit description of impact. Rev
 | `src/components/ConfirmAction.vue` | Reusable confirmation dialog with danger/normal variants, dark mode support |
 
 **Build:** Zero TypeScript errors. 15 tests pass. Version 0.1.25.6.
+
+---
+
+### 2026-04-08 — v0.1.25.7: Tier 2 operational actions
+
+Adds convenience write actions for day-to-day operations.
+
+**Spec-aligned corrections (from v0.1.25.6 review):**
+
+All write operations audited against `complete-budget-governance-v0.1.25.yaml` and corrected:
+
+| Action | Spec endpoint | Method | Key correction |
+|--------|---------------|--------|----------------|
+| Suspend/reactivate tenant | `/v1/admin/tenants/{tenant_id}` | PATCH `{ status }` | Correct as-is |
+| Revoke API key | `/v1/admin/api-keys/{key_id}` | **DELETE** (not PATCH) | Spec uses DELETE with optional `reason` query param |
+| Pause / enable webhook | `/v1/admin/webhooks/{subscription_id}` | PATCH `{ status: 'PAUSED'/'ACTIVE' }` | Spec enum is ACTIVE/PAUSED (not DISABLED); re-enabling resets `consecutive_failures` |
+| Reset & re-enable webhook | `/v1/admin/webhooks/{subscription_id}` | PATCH `{ status: 'ACTIVE' }` | Same as enable — spec resets failures on ACTIVE transition |
+| Freeze budget | `POST /v1/admin/budgets/freeze?scope&unit` | POST (optional `{ reason }`) | Spec v0.1.25 added dedicated freeze endpoint with `AdminKeyAuth` |
+| Unfreeze budget | `POST /v1/admin/budgets/unfreeze?scope&unit` | POST (optional `{ reason }`) | Spec v0.1.25 added dedicated unfreeze endpoint with `AdminKeyAuth` |
+| Adjust budget allocation | `POST /v1/admin/budgets/fund?tenant_id&scope&unit` | POST `BudgetFundingRequest` | Spec v0.1.25 added `AdminKeyAuth` to fund endpoint (dual-auth); `tenant_id` required for admin callers |
+
+**UX details:**
+- Webhook pause/enable and reset use `ConfirmAction` dialog with spec-accurate descriptions
+- Budget allocation uses inline form with RESET operation, auto-generated idempotency key, audit reason
+- API key revoke sends reason string for audit trail
+- All actions capability-gated and refresh data inline after success
+
+**Build:** Zero TypeScript errors. 15 tests pass. Version 0.1.25.7.

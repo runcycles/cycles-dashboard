@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
-import { listTenants, listApiKeys, updateApiKeyStatus } from '../api/client'
+import { listTenants, listApiKeys, revokeApiKey } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { Tenant, ApiKey } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -30,7 +30,7 @@ const pendingRevoke = ref<KeyWithTenant | null>(null)
 async function executeRevoke() {
   if (!pendingRevoke.value) return
   try {
-    await updateApiKeyStatus(pendingRevoke.value.key_id, 'REVOKED')
+    await revokeApiKey(pendingRevoke.value.key_id, 'Revoked via admin dashboard')
     await refresh()
   } catch (e: any) { error.value = e.message }
   finally { pendingRevoke.value = null }

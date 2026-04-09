@@ -3,7 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
-import { listBudgets, lookupBudget, listTenants, listEvents, updateBudgetStatus } from '../api/client'
+import { listBudgets, lookupBudget, listTenants, listEvents, fundBudget, freezeBudget, unfreezeBudget } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { BudgetLedger, Tenant, Event } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -124,18 +124,44 @@ async function tick() {
 
 const { refresh, isLoading, lastUpdated } = usePolling(tick, 60000)
 
-// Budget status actions
-const pendingAction = ref<'FROZEN' | 'ACTIVE' | null>(null)
-const actionLoading = ref(false)
+// Budget freeze/unfreeze
+const pendingAction = ref<'freeze' | 'unfreeze' | null>(null)
 
 async function executeBudgetAction() {
   if (!detail.value || !pendingAction.value) return
-  actionLoading.value = true
   try {
-    await updateBudgetStatus(detail.value.ledger_id, pendingAction.value)
+    if (pendingAction.value === 'freeze') {
+      await freezeBudget(detail.value.scope, detail.value.unit, 'Frozen via admin dashboard')
+    } else {
+      await unfreezeBudget(detail.value.scope, detail.value.unit, 'Unfrozen via admin dashboard')
+    }
     await loadDetail()
   } catch (e: any) { error.value = e.message }
-  finally { actionLoading.value = false; pendingAction.value = null }
+  finally { pendingAction.value = null }
+}
+
+// Budget allocation adjustment
+const showAdjustForm = ref(false)
+const adjustAmount = ref('')
+const adjustLoading = ref(false)
+
+function openAdjustForm() {
+  adjustAmount.value = String(detail.value?.allocated.amount ?? '')
+  showAdjustForm.value = true
+}
+
+async function submitAdjustment() {
+  if (!detail.value || !adjustAmount.value || !selectedTenant.value) return
+  const newAmount = Number(adjustAmount.value)
+  if (isNaN(newAmount) || newAmount < 0) { error.value = 'Invalid amount'; return }
+  adjustLoading.value = true
+  try {
+    const idempotencyKey = `dashboard-reset-${detail.value.scope}-${Date.now()}`
+    await fundBudget(selectedTenant.value, detail.value.scope, detail.value.unit, 'RESET', newAmount, idempotencyKey, 'Allocation adjusted via admin dashboard')
+    await loadDetail()
+    showAdjustForm.value = false
+  } catch (e: any) { error.value = e.message }
+  finally { adjustLoading.value = false }
 }
 
 watch(selectedTenant, () => { if (!isCrossTenantFilter.value) loadList() })
@@ -168,8 +194,8 @@ watch(() => route.query, () => {
           <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs font-medium">{{ detail.unit }}</span>
           <span v-if="detail.is_over_limit" class="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-medium">OVER LIMIT</span>
           <span class="flex-1" />
-          <button v-if="canManage && detail.status === 'ACTIVE'" @click="pendingAction = 'FROZEN'" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Freeze</button>
-          <button v-if="canManage && detail.status === 'FROZEN'" @click="pendingAction = 'ACTIVE'" class="text-xs text-green-700 hover:text-green-900 border border-green-200 rounded px-2.5 py-1 hover:bg-green-50 cursor-pointer transition-colors">Unfreeze</button>
+          <button v-if="canManage && detail.status === 'ACTIVE'" @click="pendingAction = 'freeze'" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Freeze</button>
+          <button v-if="canManage && detail.status === 'FROZEN'" @click="pendingAction = 'unfreeze'" class="text-xs text-green-700 hover:text-green-900 border border-green-200 rounded px-2.5 py-1 hover:bg-green-50 cursor-pointer transition-colors">Unfreeze</button>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
           <div class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Allocated</span><span class="font-semibold">{{ detail.allocated.amount.toLocaleString() }}</span></div>
@@ -184,6 +210,24 @@ watch(() => route.query, () => {
         </div>
         <div v-if="detail.debt && detail.debt.amount > 0 && detail.overdraft_limit" class="mt-2">
           <UtilizationBar :remaining="detail.overdraft_limit.amount - detail.debt.amount" :allocated="detail.overdraft_limit.amount" label="Debt utilization" />
+        </div>
+
+        <!-- Adjust allocation -->
+        <div v-if="canManage && detail.status === 'ACTIVE'" class="mt-4 pt-4 border-t border-gray-200">
+          <div v-if="!showAdjustForm" class="flex items-center justify-between">
+            <span class="text-xs text-gray-500">Need to adjust the allocation?</span>
+            <button @click="openAdjustForm" class="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-2.5 py-1 hover:bg-blue-50 cursor-pointer transition-colors">Adjust Allocation</button>
+          </div>
+          <form v-else @submit.prevent="submitAdjustment" class="flex items-end gap-3 flex-wrap">
+            <div class="flex-1 min-w-[200px]">
+              <label for="adjust-amount" class="block text-xs text-gray-500 mb-1">New allocated amount ({{ detail.unit }})</label>
+              <input id="adjust-amount" v-model="adjustAmount" type="number" min="0" step="1" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" autofocus />
+            </div>
+            <div class="flex gap-2">
+              <button type="submit" :disabled="adjustLoading" class="bg-gray-900 text-white px-3 py-1.5 rounded text-sm hover:bg-gray-800 disabled:opacity-50 cursor-pointer">{{ adjustLoading ? 'Saving...' : 'Save' }}</button>
+              <button type="button" @click="showAdjustForm = false" class="text-sm text-gray-500 hover:text-gray-700 cursor-pointer">Cancel</button>
+            </div>
+          </form>
         </div>
       </div>
 
@@ -278,12 +322,12 @@ watch(() => route.query, () => {
 
     <ConfirmAction
       v-if="pendingAction"
-      :title="pendingAction === 'FROZEN' ? 'Freeze this budget?' : 'Unfreeze this budget?'"
-      :message="pendingAction === 'FROZEN'
-        ? `Freezing will immediately block all reservations and commits against scope '${detail?.scope}'. This can be reversed by unfreezing.`
-        : `Unfreezing will re-enable reservations and commits against scope '${detail?.scope}'.`"
-      :confirm-label="pendingAction === 'FROZEN' ? 'Freeze Budget' : 'Unfreeze Budget'"
-      :danger="pendingAction === 'FROZEN'"
+      :title="pendingAction === 'freeze' ? 'Freeze this budget?' : 'Unfreeze this budget?'"
+      :message="pendingAction === 'freeze'
+        ? `Freezing will immediately block all reservations, commits, and fund operations against scope '${detail?.scope}'. This can be reversed by unfreezing.`
+        : `Unfreezing will re-enable reservations, commits, and fund operations against scope '${detail?.scope}'.`"
+      :confirm-label="pendingAction === 'freeze' ? 'Freeze Budget' : 'Unfreeze Budget'"
+      :danger="pendingAction === 'freeze'"
       @confirm="executeBudgetAction"
       @cancel="pendingAction = null"
     />

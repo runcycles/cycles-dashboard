@@ -1,12 +1,12 @@
 [![CI](https://github.com/runcycles/cycles-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/runcycles/cycles-dashboard/actions)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Spec](https://img.shields.io/badge/spec-v0.1.25.6-blue)](https://github.com/runcycles/cycles-server-admin/blob/main/complete-budget-governance-v0.1.25.yaml)
+[![Spec](https://img.shields.io/badge/spec-v0.1.25.7-blue)](https://github.com/runcycles/cycles-server-admin/blob/main/complete-budget-governance-v0.1.25.yaml)
 [![Vue](https://img.shields.io/badge/vue-3-brightgreen)](https://vuejs.org)
 [![TypeScript](https://img.shields.io/badge/typescript-strict-blue)](https://www.typescriptlang.org)
 
 # Cycles Admin Dashboard
 
-Operational admin dashboard for the [Cycles Budget Governance System](https://github.com/runcycles/cycles-server-admin), aligned with [governance spec v0.1.25.6](https://github.com/runcycles/cycles-server-admin/blob/main/complete-budget-governance-v0.1.25.yaml).
+Operational admin dashboard for the [Cycles Budget Governance System](https://github.com/runcycles/cycles-server-admin), aligned with [governance spec v0.1.25.7](https://github.com/runcycles/cycles-server-admin/blob/main/complete-budget-governance-v0.1.25.yaml).
 
 ## Overview
 
@@ -28,11 +28,15 @@ Tier 1 incident-response actions available directly from the dashboard (capabili
 
 | Action | Where | Effect |
 |--------|-------|--------|
-| **Freeze budget** | Budget detail | Blocks all reservations/commits against the scope |
-| **Unfreeze budget** | Budget detail | Re-enables reservations/commits |
+| **Freeze budget** | Budget detail | Blocks all reservations, commits, and fund operations |
+| **Unfreeze budget** | Budget detail | Re-enables normal operations |
 | **Suspend tenant** | Tenant detail | Blocks all API access for the tenant |
 | **Reactivate tenant** | Tenant detail | Restores API access |
 | **Revoke API key** | API Keys list, Tenant detail | Immediately invalidates the key (irreversible) |
+| **Pause webhook** | Webhook detail | Stops event deliveries; events silently dropped |
+| **Enable webhook** | Webhook detail | Resumes deliveries (resets failure counter) |
+| **Reset & re-enable webhook** | Webhook detail | Re-enables disabled/failing webhook, clears failures |
+| **Adjust budget allocation** | Budget detail | Inline form — uses fund endpoint with RESET operation |
 
 ## Architecture
 
@@ -120,9 +124,12 @@ The dashboard uses `AdminKeyAuth` exclusively (`X-Admin-API-Key` header). No ten
 | `GET /v1/admin/audit/logs` | Audit | Manual query with export |
 | `GET /v1/admin/api-keys` | Tenant Detail | API keys per tenant |
 | `GET /v1/admin/policies` | Tenant Detail | Policies per tenant (requires `tenant_id`) |
+| `POST /v1/admin/budgets/freeze` | Budget Detail | Freeze budget (ACTIVE → FROZEN) |
+| `POST /v1/admin/budgets/unfreeze` | Budget Detail | Unfreeze budget (FROZEN → ACTIVE) |
 | `PATCH /v1/admin/tenants/{id}` | Tenant Detail | Suspend / reactivate tenant |
-| `PATCH /v1/admin/budgets/{id}` | Budget Detail | Freeze / unfreeze budget |
-| `PATCH /v1/admin/api-keys/{id}` | API Keys, Tenant Detail | Revoke API key |
+| `DELETE /v1/admin/api-keys/{key_id}` | API Keys, Tenant Detail | Revoke API key |
+| `PATCH /v1/admin/webhooks/{subscription_id}` | Webhook Detail | Pause/enable, reset failures |
+| `POST /v1/admin/budgets/fund` | Budget Detail | Adjust allocation (RESET operation) |
 
 ## Polling Strategy
 
@@ -203,7 +210,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.6
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.7
     restart: unless-stopped
     # No exposed ports — only accessible through Caddy
     depends_on:
@@ -213,7 +220,7 @@ services:
       - cycles
 
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.6
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.7
     restart: unless-stopped
     environment:
       REDIS_HOST: redis

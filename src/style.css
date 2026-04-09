@@ -56,6 +56,7 @@
 .dark .border-red-200  { border-color: var(--color-red-800); }
 .dark .border-yellow-200 { border-color: var(--color-yellow-800); }
 .dark .border-blue-200 { border-color: var(--color-blue-800); }
+.dark .border-green-200 { border-color: var(--color-green-800); }
 
 .dark .divide-gray-100 > :not(:last-child) {
   border-color: var(--color-gray-800);
@@ -76,7 +77,10 @@
 }
 
 .dark .hover\:text-gray-900:hover { color: var(--color-gray-100) !important; }
+.dark .hover\:text-gray-800:hover { color: var(--color-gray-200) !important; }
 .dark .hover\:text-gray-700:hover { color: var(--color-gray-200) !important; }
+.dark .hover\:text-red-800:hover { color: var(--color-red-500) !important; }
+.dark .hover\:text-green-900:hover { color: var(--color-green-500) !important; }
 
 /* Expanded event row bg */
 .dark .bg-gray-50\/70 {
@@ -108,6 +112,11 @@
   background-color: var(--color-gray-800);
   border-color: var(--color-gray-500);
 }
+
+/* Action button hover states */
+.dark .hover\:bg-red-50:hover { background-color: color-mix(in oklab, var(--color-red-800) 20%, transparent) !important; }
+.dark .hover\:bg-green-50:hover { background-color: color-mix(in oklab, var(--color-green-800) 20%, transparent) !important; }
+.dark .hover\:bg-blue-50:hover { background-color: color-mix(in oklab, var(--color-blue-800) 20%, transparent) !important; }
 
 /* Export dialog overlay */
 .dark .bg-black\/40 { background-color: rgba(0, 0, 0, 0.6); }

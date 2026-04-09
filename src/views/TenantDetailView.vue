@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
-import { getTenant, listBudgets, listApiKeys, listPolicies, updateTenantStatus, updateApiKeyStatus } from '../api/client'
+import { getTenant, listBudgets, listApiKeys, listPolicies, updateTenantStatus, revokeApiKey } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { Tenant, BudgetLedger, ApiKey, Policy } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -43,7 +43,7 @@ const pendingKeyRevoke = ref<ApiKey | null>(null)
 async function executeKeyRevoke() {
   if (!pendingKeyRevoke.value) return
   try {
-    await updateApiKeyStatus(pendingKeyRevoke.value.key_id, 'REVOKED')
+    await revokeApiKey(pendingKeyRevoke.value.key_id, 'Revoked via admin dashboard')
     const kRes = await listApiKeys({ tenant_id: id })
     apiKeys.value = kRes.keys
   } catch (e: any) { error.value = e.message }
@@ -81,7 +81,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
 
     <template v-if="tenant">
       <div class="bg-white rounded-lg shadow p-6 mb-4">
-        <div class="flex items-center gap-3 mb-2">
+        <div class="flex items-center gap-3 mb-2 flex-wrap">
           <h2 class="text-lg font-medium text-gray-900">{{ tenant.name }}</h2>
           <StatusBadge :status="tenant.status" />
           <span class="flex-1" />
