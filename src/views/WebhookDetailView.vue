@@ -144,7 +144,10 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           </span>
         </p>
         <p v-if="!testResult.success && !testResult.error_message" class="mt-1 text-xs">The endpoint did not return a 2xx status. Verify the URL is correct and the service is running.</p>
-        <p v-if="testResult.event_id" class="mt-1 text-xs opacity-75">Event ID: <span class="font-mono">{{ testResult.event_id }}</span></p>
+        <details v-if="testResult.event_id" class="mt-1 text-xs opacity-75">
+          <summary class="cursor-pointer hover:opacity-100">Details</summary>
+          <span class="font-mono">Event ID: {{ testResult.event_id }}</span>
+        </details>
       </div>
 
       <!-- Replay result -->
