@@ -13,6 +13,9 @@ import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
+import { useToast } from '../composables/useToast'
+
+const toast = useToast()
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -66,6 +69,7 @@ async function submitCreate() {
     const res = await createWebhook(body as any, createForm.value.tenant_id || undefined)
     createdWebhook.value = res
     showCreate.value = false
+    toast.success('Webhook created')
   } catch (e: any) { createError.value = e.message }
   finally { createLoading.value = false }
 }
@@ -84,7 +88,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   <div>
     <div class="flex items-center justify-between">
       <PageHeader title="Webhooks" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh" />
-      <button v-if="canManage" @click="openCreate" class="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-3 py-1.5 hover:bg-blue-50 cursor-pointer transition-colors">Create Webhook</button>
+      <button v-if="canManage" @click="openCreate" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Webhook</button>
     </div>
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
     <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
