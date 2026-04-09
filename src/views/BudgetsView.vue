@@ -161,32 +161,40 @@ async function executeBudgetAction() {
   finally { pendingAction.value = null }
 }
 
-// Budget allocation adjustment
-const showAdjust = ref(false)
-const adjustAmount = ref('')
-const adjustLoading = ref(false)
-const adjustError = ref('')
+// Budget fund operations
+const showFund = ref(false)
+const fundForm = ref({ operation: 'CREDIT', amount: '', reason: '' })
+const fundLoading = ref(false)
+const fundError = ref('')
 
-function openAdjust() {
-  adjustAmount.value = String(detail.value?.allocated.amount ?? '')
-  adjustError.value = ''
-  showAdjust.value = true
+const fundHints: Record<string, string> = {
+  CREDIT: 'Adds funds to allocated and remaining balance.',
+  DEBIT: 'Removes funds. Fails if remaining would go negative.',
+  RESET: 'Sets allocated to exact amount, recalculates remaining.',
+  REPAY_DEBT: 'Reduces outstanding debt by this amount.',
 }
 
-async function submitAdjustment() {
-  if (!detail.value || !adjustAmount.value || !selectedTenant.value) return
-  const newAmount = Number(adjustAmount.value)
-  if (isNaN(newAmount) || newAmount < 0) { adjustError.value = 'Invalid amount'; return }
-  adjustLoading.value = true
-  adjustError.value = ''
+function openFund() {
+  fundForm.value = { operation: 'CREDIT', amount: '', reason: '' }
+  fundError.value = ''
+  showFund.value = true
+}
+
+async function submitFund() {
+  if (!detail.value || !fundForm.value.amount || !selectedTenant.value) return
+  const amount = Number(fundForm.value.amount)
+  if (isNaN(amount) || amount < 0) { fundError.value = 'Invalid amount'; return }
+  fundLoading.value = true
+  fundError.value = ''
   try {
-    const idempotencyKey = `dashboard-reset-${detail.value.scope}-${Date.now()}`
-    await fundBudget(selectedTenant.value, detail.value.scope, detail.value.unit, 'RESET', newAmount, idempotencyKey, 'Allocation adjusted via admin dashboard')
+    const idempotencyKey = `dashboard-${fundForm.value.operation.toLowerCase()}-${detail.value.scope}-${Date.now()}`
+    await fundBudget(selectedTenant.value, detail.value.scope, detail.value.unit, fundForm.value.operation, amount, idempotencyKey, fundForm.value.reason || `${fundForm.value.operation} via admin dashboard`)
     await loadDetail()
-    showAdjust.value = false
-    toast.success('Budget allocation updated')
-  } catch (e: any) { adjustError.value = e.message }
-  finally { adjustLoading.value = false }
+    showFund.value = false
+    const labels: Record<string, string> = { CREDIT: 'Budget credited', DEBIT: 'Budget debited', RESET: 'Budget allocation reset', REPAY_DEBT: 'Debt repaid' }
+    toast.success(labels[fundForm.value.operation] || 'Budget updated')
+  } catch (e: any) { fundError.value = e.message }
+  finally { fundLoading.value = false }
 }
 
 watch(selectedTenant, () => { if (!isCrossTenantFilter.value && !isDetail.value) loadList() })
@@ -237,10 +245,10 @@ watch(() => route.query, () => {
           <UtilizationBar :remaining="detail.overdraft_limit.amount - detail.debt.amount" :allocated="detail.overdraft_limit.amount" label="Debt utilization" />
         </div>
 
-        <!-- Adjust allocation -->
+        <!-- Fund budget -->
         <div v-if="canManage && detail.status === 'ACTIVE'" class="mt-4 pt-4 border-t border-gray-200 flex items-center justify-between">
-          <span class="text-xs text-gray-500">Need to adjust the allocation?</span>
-          <button @click="openAdjust" class="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-2.5 py-1 hover:bg-blue-50 cursor-pointer transition-colors">Adjust Allocation</button>
+          <span class="text-xs text-gray-500">Credit, debit, reset allocation, or repay debt</span>
+          <button @click="openFund" class="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-2.5 py-1 hover:bg-blue-50 cursor-pointer transition-colors">Fund Budget</button>
         </div>
       </div>
 
@@ -351,11 +359,29 @@ watch(() => route.query, () => {
       @cancel="pendingAction = null"
     />
 
-    <FormDialog v-if="showAdjust" title="Adjust Budget Allocation" submit-label="Update Allocation" :loading="adjustLoading" :error="adjustError" @submit="submitAdjustment" @cancel="showAdjust = false">
-      <p class="text-xs text-gray-500">This will reset the allocated amount for <span class="font-mono">{{ detail?.scope }}</span> ({{ detail?.unit }}). The remaining balance will be recalculated.</p>
+    <FormDialog v-if="showFund" title="Fund Budget" submit-label="Execute" :loading="fundLoading" :error="fundError" @submit="submitFund" @cancel="showFund = false">
+      <div class="bg-gray-50 rounded p-3 text-xs grid grid-cols-3 gap-2 mb-1">
+        <div><span class="text-gray-400 block">Allocated</span><span class="font-semibold">{{ detail?.allocated.amount.toLocaleString() }}</span></div>
+        <div><span class="text-gray-400 block">Remaining</span><span class="font-semibold">{{ detail?.remaining.amount.toLocaleString() }}</span></div>
+        <div><span class="text-gray-400 block">Debt</span><span class="font-semibold" :class="(detail?.debt?.amount ?? 0) > 0 ? 'text-red-600' : ''">{{ (detail?.debt?.amount ?? 0).toLocaleString() }}</span></div>
+      </div>
       <div>
-        <label for="adjust-amount" class="block text-xs text-gray-500 mb-1">New allocated amount</label>
-        <input id="adjust-amount" v-model="adjustAmount" type="number" min="0" step="1" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
+        <label for="fund-op" class="block text-xs text-gray-500 mb-1">Operation</label>
+        <select id="fund-op" v-model="fundForm.operation" required class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
+          <option value="CREDIT">Credit — add funds</option>
+          <option value="DEBIT">Debit — remove funds</option>
+          <option value="RESET">Reset — set exact amount</option>
+          <option value="REPAY_DEBT">Repay Debt — reduce debt</option>
+        </select>
+        <p class="text-xs text-gray-400 mt-0.5">{{ fundHints[fundForm.operation] }}</p>
+      </div>
+      <div>
+        <label for="fund-amount" class="block text-xs text-gray-500 mb-1">Amount ({{ detail?.unit }})</label>
+        <input id="fund-amount" v-model="fundForm.amount" type="number" min="0" step="1" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
+      </div>
+      <div>
+        <label for="fund-reason" class="block text-xs text-gray-500 mb-1">Reason (optional, for audit trail)</label>
+        <input id="fund-reason" v-model="fundForm.reason" maxlength="512" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" placeholder="Emergency top-up for production" />
       </div>
     </FormDialog>
   </div>
