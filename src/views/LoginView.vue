@@ -35,19 +35,17 @@ async function submit() {
   if (isLocked.value) return
   error.value = ''
   loading.value = true
-  const ok = await auth.login(key.value)
-  if (ok) {
-    failedAttempts.value = 0
-    if (lockTimer) { clearInterval(lockTimer); lockTimer = null }
-    const redirect = (route.query.redirect as string) || '/'
-    // Navigate BEFORE setting loading=false so AppLayout renders with correct route
-    await router.push(redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/')
-    loading.value = false
-    return
-  } else {
+  try {
+    const ok = await auth.login(key.value)
+    if (ok) {
+      failedAttempts.value = 0
+      if (lockTimer) { clearInterval(lockTimer); lockTimer = null }
+      const redirect = (route.query.redirect as string) || '/'
+      await router.push(redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/')
+      return
+    }
     failedAttempts.value++
     if (failedAttempts.value >= 3) {
-      // Exponential backoff: 5s, 10s, 20s, 40s... capped at 60s
       const delaySec = Math.min(60, 5 * Math.pow(2, failedAttempts.value - 3))
       lockedUntil.value = Date.now() + delaySec * 1000
       lockRemaining.value = delaySec
@@ -56,6 +54,10 @@ async function submit() {
     } else {
       error.value = 'Invalid admin key'
     }
+  } catch {
+    error.value = 'Connection failed. Please try again.'
+  } finally {
+    loading.value = false
   }
 }
 
