@@ -28,11 +28,11 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
           <slot />
         </div>
         <div class="flex justify-end gap-2 mt-5 pt-4 border-t border-gray-200">
-          <button type="button" @click="$emit('cancel')" class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 rounded hover:bg-gray-100 cursor-pointer">Cancel</button>
+          <button type="button" @click="$emit('cancel')" class="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100 rounded hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer">Cancel</button>
           <button
             type="submit"
             :disabled="loading"
-            class="px-4 py-1.5 text-sm rounded cursor-pointer bg-gray-900 hover:bg-gray-800 text-white dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-300 disabled:opacity-50"
+            class="px-4 py-1.5 text-sm rounded cursor-pointer bg-gray-900 hover:bg-gray-800 text-white dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {{ loading ? 'Saving...' : (submitLabel || 'Save') }}
           </button>

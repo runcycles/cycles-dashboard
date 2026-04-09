@@ -48,6 +48,13 @@ function openCreate() {
   showCreate.value = true
 }
 
+async function onSecretClose() {
+  const subId = createdWebhook.value?.subscription?.subscription_id
+  createdWebhook.value = null
+  if (subId) router.push({ name: 'webhook-detail', params: { id: subId } })
+  else await refresh()
+}
+
 async function submitCreate() {
   createError.value = ''
   if (!createForm.value.event_types.length) { createError.value = 'Select at least one event type'; return }
@@ -75,7 +82,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
 
 <template>
   <div>
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex items-center justify-between">
       <PageHeader title="Webhooks" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh" />
       <button v-if="canManage" @click="openCreate" class="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-3 py-1.5 hover:bg-blue-50 cursor-pointer transition-colors">Create Webhook</button>
     </div>
@@ -145,7 +152,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       title="Webhook Created"
       :secret="createdWebhook.signing_secret"
       label="Signing Secret"
-      @close="router.push({ name: 'webhook-detail', params: { id: createdWebhook!.subscription.subscription_id } }); createdWebhook = null"
+      @close="onSecretClose"
     />
   </div>
 </template>
