@@ -138,10 +138,11 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
 
 <template>
   <div>
-    <div class="flex items-center justify-between">
-      <PageHeader title="API Keys" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh" />
-      <button v-if="canManage" @click="openCreate" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create API Key</button>
-    </div>
+    <PageHeader title="API Keys" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
+      <template #actions>
+        <button v-if="canManage" @click="openCreate" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create API Key</button>
+      </template>
+    </PageHeader>
 
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
 
