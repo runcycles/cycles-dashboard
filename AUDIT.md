@@ -1,7 +1,7 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-08 (v0.1.25.8)
-**Spec:** `complete-budget-governance-v0.1.25.yaml` (OpenAPI 3.1.0, v0.1.25.8)
+**Date:** 2026-04-08 (v0.1.25.9)
+**Spec:** `complete-budget-governance-v0.1.25.yaml` (OpenAPI 3.1.0, v0.1.25.9)
 **Stack:** Vue 3 + TypeScript + Vite + Pinia + Tailwind CSS v4
 
 ### 2026-04-08 — v0.1.25.5: Initial release
@@ -190,7 +190,7 @@ All write operations audited against `complete-budget-governance-v0.1.25.yaml` a
 
 ---
 
-### 2026-04-08 — v0.1.25.8: Admin CRUD operations
+### 2026-04-08 — v0.1.25.9: Admin CRUD operations
 
 Full admin management UI — create, update, and delete resources directly from the dashboard.
 
@@ -232,4 +232,4 @@ Full admin management UI — create, update, and delete resources directly from 
 - New types: `ApiKeyCreateRequest/Response`, `ApiKeyUpdateRequest`, `TenantCreateRequest/UpdateRequest`, `WebhookCreateRequest/Response`, `WebhookTestResponse`, `ReplayEventsRequest/Response`
 - Well-known enums exported: `PERMISSIONS`, `EVENT_TYPES`, `EVENT_CATEGORIES`, `COMMIT_OVERAGE_POLICIES`
 
-**Build:** Zero TypeScript errors. 15 tests pass. Version 0.1.25.8.
+**Build:** Zero TypeScript errors. 15 tests pass. Version 0.1.25.9.
