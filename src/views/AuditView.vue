@@ -236,7 +236,7 @@ onMounted(() => { query() })
             </tr>
           </template>
           <tr v-if="entries.length === 0 && !loading">
-            <td colspan="7"><EmptyState message="No audit logs found" hint="Adjust your filters or time range and run the query again" /></td>
+            <td colspan="7"><EmptyState message="No audit logs found" hint="Try a broader time range (e.g. Last 24h) or clear your filters" /></td>
           </tr>
           <tr v-if="loading">
             <td colspan="7" class="px-4 py-12 text-center text-gray-400">Loading...</td>
