@@ -11,6 +11,9 @@ import TenantLink from '../components/TenantLink.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
+import { useToast } from '../composables/useToast'
+
+const toast = useToast()
 import { formatDateTime } from '../utils/format'
 
 const route = useRoute()
@@ -34,6 +37,8 @@ async function executeAction() {
       await updateWebhook(id, { status: pendingAction.value })
     }
     webhook.value = await getWebhook(id)
+    const label = pendingAction.value === 'reset' ? 'Webhook re-enabled' : pendingAction.value === 'PAUSED' ? 'Webhook paused' : 'Webhook enabled'
+    toast.success(label)
   } catch (e: any) { error.value = e.message }
   finally { pendingAction.value = null }
 }
@@ -43,6 +48,7 @@ const pendingDelete = ref(false)
 async function executeDelete() {
   try {
     await deleteWebhook(id)
+    toast.success('Webhook deleted')
     router.push('/webhooks')
   } catch (e: any) { error.value = e.message; pendingDelete.value = false }
 }

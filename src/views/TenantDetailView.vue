@@ -13,6 +13,9 @@ import EmptyState from '../components/EmptyState.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
+import { useToast } from '../composables/useToast'
+
+const toast = useToast()
 
 const route = useRoute()
 const router = useRouter()
@@ -35,6 +38,7 @@ async function executeTenantAction() {
   if (!pendingTenantAction.value) return
   try {
     await updateTenantStatus(id, pendingTenantAction.value)
+    toast.success(`Tenant ${pendingTenantAction.value === 'SUSPENDED' ? 'suspended' : 'reactivated'}`)
     tenant.value = await getTenant(id)
   } catch (e: any) { error.value = e.message }
   finally { pendingTenantAction.value = null }
@@ -47,6 +51,7 @@ async function executeKeyRevoke() {
   if (!pendingKeyRevoke.value) return
   try {
     await revokeApiKey(pendingKeyRevoke.value.key_id, 'Revoked via admin dashboard')
+    toast.success('API key revoked')
     const kRes = await listApiKeys({ tenant_id: id })
     apiKeys.value = kRes.keys
   } catch (e: any) { error.value = e.message }
@@ -70,6 +75,7 @@ async function submitEditTenant() {
   editTenantLoading.value = true
   try {
     await updateTenant(id, { name: editTenantForm.value.name })
+    toast.success('Tenant updated')
     tenant.value = await getTenant(id)
     showEditTenant.value = false
   } catch (e: any) { editTenantError.value = e.message }
@@ -180,7 +186,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
 
       <!-- API Keys tab -->
       <div v-if="tab === 'keys' && canManageKeys" class="flex justify-end mb-2">
-        <button @click="openCreateKey" class="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-3 py-1.5 hover:bg-blue-50 cursor-pointer transition-colors">Create API Key</button>
+        <button @click="openCreateKey" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create API Key</button>
       </div>
       <div v-if="tab === 'keys'" class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
         <table class="w-full text-sm min-w-[520px]">
