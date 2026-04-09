@@ -1,7 +1,7 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-08 (v0.1.25.9)
-**Spec:** `complete-budget-governance-v0.1.25.yaml` (OpenAPI 3.1.0, v0.1.25.9)
+**Date:** 2026-04-08 (v0.1.25.10)
+**Spec:** `complete-budget-governance-v0.1.25.yaml` (OpenAPI 3.1.0, v0.1.25.10)
 **Stack:** Vue 3 + TypeScript + Vite + Pinia + Tailwind CSS v4
 
 ### 2026-04-08 — v0.1.25.5: Initial release
@@ -190,7 +190,7 @@ All write operations audited against `complete-budget-governance-v0.1.25.yaml` a
 
 ---
 
-### 2026-04-08 — v0.1.25.9: Admin CRUD operations
+### 2026-04-08 — v0.1.25.10: Admin CRUD operations
 
 Full admin management UI — create, update, and delete resources directly from the dashboard.
 
@@ -232,4 +232,47 @@ Full admin management UI — create, update, and delete resources directly from 
 - New types: `ApiKeyCreateRequest/Response`, `ApiKeyUpdateRequest`, `TenantCreateRequest/UpdateRequest`, `WebhookCreateRequest/Response`, `WebhookTestResponse`, `ReplayEventsRequest/Response`
 - Well-known enums exported: `PERMISSIONS`, `EVENT_TYPES`, `EVENT_CATEGORIES`, `COMMIT_OVERAGE_POLICIES`
 
-**Build:** Zero TypeScript errors. 15 tests pass. Version 0.1.25.9.
+**Build:** Zero TypeScript errors. 15 tests pass. Version 0.1.25.10.
+
+---
+
+### 2026-04-09 — v0.1.25.10: Full ops coverage + UX polish
+
+**Operational coverage (closes all AdminKeyAuth spec gaps):**
+
+| Category | Actions added |
+|----------|-------------|
+| **Budgets** | Fund (credit/debit/reset/repay_debt), edit config (overdraft limit, overage policy), sortable utilization + debt columns |
+| **Tenants** | Close (irreversible, GitHub-style name confirmation), expanded edit (TTL, overage policy), list suspend/reactivate |
+| **Webhooks** | Edit (name, URL, events, scope, failure threshold), rotate signing secret, pause/enable on list, security config (CIDR, URL patterns, allow_http) |
+| **Audit** | Server-side resource_type + resource_id filters |
+
+**UX improvements:**
+
+| Feature | Details |
+|---------|---------|
+| Toast notifications | Success toast on all write actions (4s auto-dismiss, animated) |
+| Detail page subtitles | Tenant ID, webhook name, budget scope shown below page title |
+| Tenant search | Filter by ID or name on tenants list |
+| Create button prominence | Solid blue buttons for primary create actions |
+| PageHeader #actions slot | Create buttons inside header flex (fixes spacing) |
+| EventTimeline component | Shared rich expandable event display (replaces bare list on budget detail) |
+| Budget sort accessors | `useSort` extended with custom value accessors for computed/nested fields |
+| Audit hint | Improved empty state guidance |
+| Webhook label fix | "Subscribed Event Types" with badges (was ambiguous "Events") |
+| Webhook secret strength | `crypto.getRandomValues(32)` instead of `crypto.randomUUID()` |
+
+**New components:**
+
+| Component | Purpose |
+|-----------|---------|
+| `ToastContainer.vue` | Fixed-position toast notifications with enter/exit transitions |
+| `EventTimeline.vue` | Reusable expandable event list with full detail (ID, source, actor, JSON data) |
+
+**New composable:**
+
+| Composable | Purpose |
+|-----------|---------|
+| `useToast.ts` | Global toast notification state with auto-dismiss |
+
+**Build:** Zero TypeScript errors. 15 tests pass. Version 0.1.25.10.
