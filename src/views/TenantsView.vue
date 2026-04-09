@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
-import { listTenants, createTenant } from '../api/client'
+import { listTenants, createTenant, updateTenantStatus } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { Tenant } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -11,6 +11,7 @@ import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
 import FormDialog from '../components/FormDialog.vue'
+import ConfirmAction from '../components/ConfirmAction.vue'
 import { formatDate } from '../utils/format'
 import { useToast } from '../composables/useToast'
 
@@ -60,6 +61,20 @@ async function submitCreate() {
   finally { createLoading.value = false }
 }
 
+// Suspend/reactivate
+const pendingStatusAction = ref<{ tenantId: string; name: string; action: 'SUSPENDED' | 'ACTIVE' } | null>(null)
+
+async function executeStatusAction() {
+  if (!pendingStatusAction.value) return
+  const { tenantId, action } = pendingStatusAction.value
+  try {
+    await updateTenantStatus(tenantId, action)
+    toast.success(action === 'SUSPENDED' ? 'Tenant suspended' : 'Tenant reactivated')
+    await refresh()
+  } catch (e: any) { error.value = e.message }
+  finally { pendingStatusAction.value = null }
+}
+
 const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
     const res = await listTenants()
@@ -71,10 +86,11 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
 
 <template>
   <div>
-    <div class="flex items-center justify-between">
-      <PageHeader title="Tenants" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh" />
-      <button v-if="canManage" @click="openCreate" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Tenant</button>
-    </div>
+    <PageHeader title="Tenants" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
+      <template #actions>
+        <button v-if="canManage" @click="openCreate" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Tenant</button>
+      </template>
+    </PageHeader>
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
     <div class="mb-4">
       <input v-model="search" placeholder="Search tenants by ID or name..." class="border border-gray-300 rounded px-3 py-1.5 text-sm w-full max-w-xs" />
@@ -87,6 +103,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             <SortHeader label="Name" column="name" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Created" column="created_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+            <th v-if="canManage" class="px-4 py-3 w-24"></th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
@@ -97,13 +114,29 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             <td class="px-4 py-3 text-gray-700">{{ t.name }}</td>
             <td class="px-4 py-3"><StatusBadge :status="t.status" /></td>
             <td class="px-4 py-3 text-gray-400 text-xs">{{ formatDate(t.created_at) }}</td>
+            <td v-if="canManage" class="px-4 py-3">
+              <button v-if="t.status === 'ACTIVE'" @click="pendingStatusAction = { tenantId: t.tenant_id, name: t.name, action: 'SUSPENDED' }" class="text-xs text-red-600 hover:text-red-800 cursor-pointer hover:underline">Suspend</button>
+              <button v-if="t.status === 'SUSPENDED'" @click="pendingStatusAction = { tenantId: t.tenant_id, name: t.name, action: 'ACTIVE' }" class="text-xs text-green-700 hover:text-green-900 cursor-pointer hover:underline">Reactivate</button>
+            </td>
           </tr>
           <tr v-if="filteredTenants.length === 0">
-            <td colspan="4"><EmptyState :message="search ? 'No tenants match your search' : 'No tenants found'" :hint="search ? undefined : 'Tenants will appear here once created'" /></td>
+            <td :colspan="canManage ? 5 : 4"><EmptyState :message="search ? 'No tenants match your search' : 'No tenants found'" :hint="search ? undefined : 'Tenants will appear here once created'" /></td>
           </tr>
         </tbody>
       </table>
     </div>
+
+    <ConfirmAction
+      v-if="pendingStatusAction"
+      :title="pendingStatusAction.action === 'SUSPENDED' ? 'Suspend this tenant?' : 'Reactivate this tenant?'"
+      :message="pendingStatusAction.action === 'SUSPENDED'
+        ? `Suspending '${pendingStatusAction.name}' will block all API access for this tenant and its keys.`
+        : `Reactivating '${pendingStatusAction.name}' will restore API access.`"
+      :confirm-label="pendingStatusAction.action === 'SUSPENDED' ? 'Suspend' : 'Reactivate'"
+      :danger="pendingStatusAction.action === 'SUSPENDED'"
+      @confirm="executeStatusAction"
+      @cancel="pendingStatusAction = null"
+    />
 
     <FormDialog v-if="showCreate" title="Create Tenant" submit-label="Create Tenant" :loading="createLoading" :error="createError" @submit="submitCreate" @cancel="showCreate = false">
       <div>

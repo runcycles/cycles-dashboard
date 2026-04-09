@@ -21,6 +21,7 @@ defineEmits<{ refresh: [] }>()
         Updated {{ formatRelative(lastUpdated) }}
       </span>
       <RefreshButton v-if="loading !== undefined" :loading="loading ?? false" @click="$emit('refresh')" />
+      <slot name="actions" />
     </div>
   </div>
 </template>
