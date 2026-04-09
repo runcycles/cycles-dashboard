@@ -36,13 +36,14 @@ async function submit() {
   error.value = ''
   loading.value = true
   const ok = await auth.login(key.value)
-  loading.value = false
   if (ok) {
     failedAttempts.value = 0
     if (lockTimer) { clearInterval(lockTimer); lockTimer = null }
     const redirect = (route.query.redirect as string) || '/'
-    // Prevent open redirect — only allow relative paths
-    router.push(redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/')
+    // Navigate BEFORE setting loading=false so AppLayout renders with correct route
+    await router.push(redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/')
+    loading.value = false
+    return
   } else {
     failedAttempts.value++
     if (failedAttempts.value >= 3) {

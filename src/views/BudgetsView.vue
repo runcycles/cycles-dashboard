@@ -49,30 +49,40 @@ async function loadTenants() {
   try {
     const res = await listTenants()
     tenants.value = res.tenants
-    if (!selectedTenant.value && tenants.value.length > 0) {
-      selectedTenant.value = tenants.value[0].tenant_id
-    }
   } catch {}
+}
+
+function applyClientFilters(items: BudgetLedger[], extra?: (b: BudgetLedger) => boolean): BudgetLedger[] {
+  let result = items
+  if (filterStatus.value) result = result.filter(b => b.status === filterStatus.value)
+  if (filterUnit.value) result = result.filter(b => b.unit === filterUnit.value)
+  if (filterScope.value) result = result.filter(b => b.scope.startsWith(filterScope.value))
+  if (extra) result = result.filter(extra)
+  return result
+}
+
+async function loadAllTenantBudgets(filterFn?: (b: BudgetLedger) => boolean) {
+  const allBudgets: BudgetLedger[] = []
+  for (const t of tenants.value) {
+    const res = await listBudgets({ tenant_id: t.tenant_id })
+    allBudgets.push(...res.ledgers)
+  }
+  budgets.value = applyClientFilters(allBudgets, filterFn)
+  hasMore.value = false
+  nextCursor.value = ''
 }
 
 async function loadList() {
   try {
     if (isCrossTenantFilter.value) {
-      // Cross-tenant: load budgets from ALL tenants and filter client-side
-      const allBudgets: BudgetLedger[] = []
-      for (const t of tenants.value) {
-        const res = await listBudgets({ tenant_id: t.tenant_id })
-        allBudgets.push(...res.ledgers)
-      }
       if (activeFilter.value === 'over_limit') {
-        budgets.value = allBudgets.filter(b => b.is_over_limit)
+        await loadAllTenantBudgets(b => !!b.is_over_limit)
       } else if (activeFilter.value === 'has_debt') {
-        budgets.value = allBudgets.filter(b => (b.debt?.amount ?? 0) > 0)
+        await loadAllTenantBudgets(b => (b.debt?.amount ?? 0) > 0)
       }
-      hasMore.value = false
-      nextCursor.value = ''
+    } else if (!selectedTenant.value) {
+      await loadAllTenantBudgets()
     } else {
-      if (!selectedTenant.value) return
       const params: Record<string, string> = { tenant_id: selectedTenant.value }
       if (filterStatus.value) params.status = filterStatus.value
       if (filterUnit.value) params.unit = filterUnit.value
@@ -164,7 +174,7 @@ async function submitAdjustment() {
   finally { adjustLoading.value = false }
 }
 
-watch(selectedTenant, () => { if (!isCrossTenantFilter.value) loadList() })
+watch(selectedTenant, () => { if (!isCrossTenantFilter.value && !isDetail.value) loadList() })
 watch(() => route.query, () => {
   if (isDetail.value) loadDetail()
   else loadList()
@@ -254,6 +264,7 @@ watch(() => route.query, () => {
           <div>
             <label for="budget-tenant" class="block text-xs text-gray-500 mb-1">Tenant</label>
             <select id="budget-tenant" v-model="selectedTenant" @change="loadList" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+              <option value="">All tenants</option>
               <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
             </select>
           </div>
