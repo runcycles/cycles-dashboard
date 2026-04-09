@@ -164,9 +164,13 @@ export function fundBudget(tenantId: string, scope: string, unit: string, operat
   return post<import('../types').BudgetLedger>(`${BASE}/admin/budgets/fund`, body, { tenant_id: tenantId, scope, unit })
 }
 
-// Webhook — rotate signing secret
-export const rotateWebhookSecret = (id: string) =>
-  patch<import('../types').WebhookSubscription & { signing_secret?: string }>(`${BASE}/admin/webhooks/${id}`, { signing_secret: crypto.randomUUID() })
+// Webhook — rotate signing secret (generate cryptographically strong secret)
+export function rotateWebhookSecret(id: string): Promise<import('../types').WebhookSubscription & { signing_secret?: string }> {
+  const bytes = new Uint8Array(32)
+  crypto.getRandomValues(bytes)
+  const secret = 'whsec_' + Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')
+  return patch<import('../types').WebhookSubscription & { signing_secret?: string }>(`${BASE}/admin/webhooks/${id}`, { signing_secret: secret })
+}
 
 // Webhook security config
 export const getWebhookSecurityConfig = () =>
