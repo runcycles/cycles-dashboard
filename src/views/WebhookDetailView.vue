@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
-import { getWebhook, listDeliveries, updateWebhook, deleteWebhook, testWebhook, replayWebhookEvents } from '../api/client'
+import { getWebhook, listDeliveries, updateWebhook, deleteWebhook, testWebhook, replayWebhookEvents, rotateWebhookSecret } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { WebhookSubscription, WebhookDelivery, WebhookTestResponse } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -11,6 +11,7 @@ import TenantLink from '../components/TenantLink.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
+import SecretReveal from '../components/SecretReveal.vue'
 import { useToast } from '../composables/useToast'
 
 const toast = useToast()
@@ -51,6 +52,22 @@ async function executeDelete() {
     toast.success('Webhook deleted')
     router.push('/webhooks')
   } catch (e: any) { error.value = e.message; pendingDelete.value = false }
+}
+
+// Rotate signing secret
+const pendingRotate = ref(false)
+const rotatedSecret = ref<string | null>(null)
+
+async function executeRotate() {
+  pendingRotate.value = false
+  try {
+    const res = await rotateWebhookSecret(id)
+    if (res.signing_secret) {
+      rotatedSecret.value = res.signing_secret
+    }
+    toast.success('Signing secret rotated')
+    webhook.value = await getWebhook(id)
+  } catch (e: any) { error.value = e.message }
 }
 
 // Test webhook
@@ -119,6 +136,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           <span class="flex-1" />
           <div v-if="canManage" class="flex gap-2 flex-wrap">
             <button @click="runTest" :disabled="testLoading" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors disabled:opacity-50">{{ testLoading ? 'Testing...' : 'Send Test' }}</button>
+            <button @click="pendingRotate = true" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Rotate Secret</button>
             <button @click="showReplay = true" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Replay</button>
             <button v-if="(webhook.consecutive_failures ?? 0) > 0 && webhook.status !== 'ACTIVE'" @click="pendingAction = 'reset'" class="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-2.5 py-1 hover:bg-blue-50 cursor-pointer transition-colors">Reset &amp; Re-enable</button>
             <button v-if="webhook.status === 'ACTIVE'" @click="pendingAction = 'PAUSED'" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Pause</button>
@@ -243,5 +261,17 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         <input id="rp-max" v-model="replayForm.max_events" type="number" min="1" max="1000" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-32" />
       </div>
     </FormDialog>
+
+    <ConfirmAction
+      v-if="pendingRotate"
+      title="Rotate signing secret?"
+      :message="`This will generate a new signing secret for '${webhook?.name || webhook?.url}'. The old secret will be immediately invalidated. Any consumers verifying webhook signatures will need to update their secret.`"
+      confirm-label="Rotate Secret"
+      :danger="true"
+      @confirm="executeRotate"
+      @cancel="pendingRotate = false"
+    />
+
+    <SecretReveal v-if="rotatedSecret" title="New Signing Secret" :secret="rotatedSecret" label="Signing Secret" @close="rotatedSecret = null" />
   </div>
 </template>

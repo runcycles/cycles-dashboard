@@ -32,13 +32,14 @@ const error = ref('')
 const tab = ref<'budgets' | 'keys' | 'policies'>('budgets')
 
 // Tenant status action
-const pendingTenantAction = ref<'SUSPENDED' | 'ACTIVE' | null>(null)
+const pendingTenantAction = ref<'SUSPENDED' | 'ACTIVE' | 'CLOSED' | null>(null)
 
 async function executeTenantAction() {
   if (!pendingTenantAction.value) return
   try {
     await updateTenantStatus(id, pendingTenantAction.value)
-    toast.success(`Tenant ${pendingTenantAction.value === 'SUSPENDED' ? 'suspended' : 'reactivated'}`)
+    const labels: Record<string, string> = { SUSPENDED: 'Tenant suspended', ACTIVE: 'Tenant reactivated', CLOSED: 'Tenant permanently closed' }
+    toast.success(labels[pendingTenantAction.value])
     tenant.value = await getTenant(id)
   } catch (e: any) { error.value = e.message }
   finally { pendingTenantAction.value = null }
@@ -62,10 +63,16 @@ async function executeKeyRevoke() {
 const showEditTenant = ref(false)
 const editTenantLoading = ref(false)
 const editTenantError = ref('')
-const editTenantForm = ref({ name: '' })
+const editTenantForm = ref({ name: '', default_commit_overage_policy: '', default_reservation_ttl_ms: '', max_reservation_ttl_ms: '' })
 
 function openEditTenant() {
-  editTenantForm.value = { name: tenant.value?.name || '' }
+  const t = tenant.value
+  editTenantForm.value = {
+    name: t?.name || '',
+    default_commit_overage_policy: (t as any)?.default_commit_overage_policy || '',
+    default_reservation_ttl_ms: (t as any)?.default_reservation_ttl_ms ? String((t as any).default_reservation_ttl_ms) : '',
+    max_reservation_ttl_ms: (t as any)?.max_reservation_ttl_ms ? String((t as any).max_reservation_ttl_ms) : '',
+  }
   editTenantError.value = ''
   showEditTenant.value = true
 }
@@ -74,7 +81,11 @@ async function submitEditTenant() {
   editTenantError.value = ''
   editTenantLoading.value = true
   try {
-    await updateTenant(id, { name: editTenantForm.value.name })
+    const body: Record<string, unknown> = { name: editTenantForm.value.name }
+    if (editTenantForm.value.default_commit_overage_policy) body.default_commit_overage_policy = editTenantForm.value.default_commit_overage_policy
+    if (editTenantForm.value.default_reservation_ttl_ms) body.default_reservation_ttl_ms = Number(editTenantForm.value.default_reservation_ttl_ms)
+    if (editTenantForm.value.max_reservation_ttl_ms) body.max_reservation_ttl_ms = Number(editTenantForm.value.max_reservation_ttl_ms)
+    await updateTenant(id, body as any)
     toast.success('Tenant updated')
     tenant.value = await getTenant(id)
     showEditTenant.value = false
@@ -149,6 +160,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             <button @click="openEditTenant" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Edit</button>
             <button v-if="tenant.status === 'ACTIVE'" @click="pendingTenantAction = 'SUSPENDED'" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Suspend</button>
             <button v-if="tenant.status === 'SUSPENDED'" @click="pendingTenantAction = 'ACTIVE'" class="text-xs text-green-700 hover:text-green-900 border border-green-200 rounded px-2.5 py-1 hover:bg-green-50 cursor-pointer transition-colors">Reactivate</button>
+            <button v-if="tenant.status !== 'CLOSED'" @click="pendingTenantAction = 'CLOSED'" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Close</button>
           </div>
         </div>
         <p class="text-sm text-gray-500 font-mono">{{ tenant.tenant_id }}</p>
@@ -229,12 +241,14 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
 
     <ConfirmAction
       v-if="pendingTenantAction"
-      :title="pendingTenantAction === 'SUSPENDED' ? 'Suspend this tenant?' : 'Reactivate this tenant?'"
-      :message="pendingTenantAction === 'SUSPENDED'
-        ? `Suspending '${tenant?.name || id}' will block all API access for this tenant and its keys. Budgets and webhooks will be unaffected but unusable until reactivated.`
-        : `Reactivating '${tenant?.name || id}' will restore API access for this tenant.`"
-      :confirm-label="pendingTenantAction === 'SUSPENDED' ? 'Suspend Tenant' : 'Reactivate Tenant'"
-      :danger="pendingTenantAction === 'SUSPENDED'"
+      :title="pendingTenantAction === 'CLOSED' ? 'Permanently close this tenant?' : pendingTenantAction === 'SUSPENDED' ? 'Suspend this tenant?' : 'Reactivate this tenant?'"
+      :message="pendingTenantAction === 'CLOSED'
+        ? `IRREVERSIBLE: Closing '${tenant?.name || id}' will permanently archive this tenant. All API access will be blocked and cannot be restored. Keys, budgets, and webhooks will become unusable.`
+        : pendingTenantAction === 'SUSPENDED'
+          ? `Suspending '${tenant?.name || id}' will block all API access for this tenant and its keys. Budgets and webhooks will be unaffected but unusable until reactivated.`
+          : `Reactivating '${tenant?.name || id}' will restore API access for this tenant.`"
+      :confirm-label="pendingTenantAction === 'CLOSED' ? 'Close Permanently' : pendingTenantAction === 'SUSPENDED' ? 'Suspend Tenant' : 'Reactivate Tenant'"
+      :danger="pendingTenantAction === 'SUSPENDED' || pendingTenantAction === 'CLOSED'"
       @confirm="executeTenantAction"
       @cancel="pendingTenantAction = null"
     />
@@ -254,6 +268,25 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       <div>
         <label for="et-name" class="block text-xs text-gray-500 mb-1">Display Name</label>
         <input id="et-name" v-model="editTenantForm.name" required maxlength="256" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
+      </div>
+      <div>
+        <label for="et-overage" class="block text-xs text-gray-500 mb-1">Default Commit Overage Policy</label>
+        <select id="et-overage" v-model="editTenantForm.default_commit_overage_policy" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
+          <option value="">Inherit</option>
+          <option value="REJECT">Reject</option>
+          <option value="ALLOW_IF_AVAILABLE">Allow if available</option>
+          <option value="ALLOW_WITH_OVERDRAFT">Allow with overdraft</option>
+        </select>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label for="et-ttl" class="block text-xs text-gray-500 mb-1">Default Reservation TTL (ms)</label>
+          <input id="et-ttl" v-model="editTenantForm.default_reservation_ttl_ms" type="number" min="1000" max="86400000" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" placeholder="60000" />
+        </div>
+        <div>
+          <label for="et-max-ttl" class="block text-xs text-gray-500 mb-1">Max Reservation TTL (ms)</label>
+          <input id="et-max-ttl" v-model="editTenantForm.max_reservation_ttl_ms" type="number" min="1000" max="86400000" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" placeholder="3600000" />
+        </div>
       </div>
     </FormDialog>
 

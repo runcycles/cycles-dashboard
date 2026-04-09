@@ -3,9 +3,9 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
-import { listWebhooks, listTenants, createWebhook } from '../api/client'
+import { listWebhooks, listTenants, createWebhook, getWebhookSecurityConfig, updateWebhookSecurityConfig } from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import type { WebhookSubscription, WebhookCreateResponse, Tenant } from '../types'
+import type { WebhookSubscription, WebhookCreateResponse, Tenant, WebhookSecurityConfig } from '../types'
 import { EVENT_TYPES } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -74,6 +74,45 @@ async function submitCreate() {
   finally { createLoading.value = false }
 }
 
+// Webhook security config
+const showSecurityConfig = ref(false)
+const securityConfig = ref<WebhookSecurityConfig | null>(null)
+const securityForm = ref({ blocked_cidr: '', allowed_patterns: '', allow_http: false })
+const securityLoading = ref(false)
+const securityError = ref('')
+
+async function openSecurityConfig() {
+  securityError.value = ''
+  securityLoading.value = true
+  showSecurityConfig.value = true
+  try {
+    const cfg = await getWebhookSecurityConfig()
+    securityConfig.value = cfg
+    securityForm.value = {
+      blocked_cidr: (cfg.blocked_cidr_ranges || []).join('\n'),
+      allowed_patterns: (cfg.allowed_url_patterns || []).join('\n'),
+      allow_http: cfg.allow_http || false,
+    }
+  } catch (e: any) { securityError.value = e.message }
+  finally { securityLoading.value = false }
+}
+
+async function submitSecurityConfig() {
+  securityError.value = ''
+  securityLoading.value = true
+  try {
+    const body: WebhookSecurityConfig = {
+      blocked_cidr_ranges: securityForm.value.blocked_cidr.split('\n').map(s => s.trim()).filter(Boolean),
+      allowed_url_patterns: securityForm.value.allowed_patterns.split('\n').map(s => s.trim()).filter(Boolean),
+      allow_http: securityForm.value.allow_http,
+    }
+    await updateWebhookSecurityConfig(body)
+    showSecurityConfig.value = false
+    toast.success('Webhook security config updated')
+  } catch (e: any) { securityError.value = e.message }
+  finally { securityLoading.value = false }
+}
+
 const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
     const [wRes, tRes] = await Promise.all([listWebhooks(), listTenants()])
@@ -88,6 +127,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   <div>
     <PageHeader title="Webhooks" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
       <template #actions>
+        <button v-if="canManage" @click="openSecurityConfig" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Security Config</button>
         <button v-if="canManage" @click="openCreate" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Webhook</button>
       </template>
     </PageHeader>
@@ -159,5 +199,24 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       label="Signing Secret"
       @close="onSecretClose"
     />
+
+    <!-- Webhook security config dialog -->
+    <FormDialog v-if="showSecurityConfig" title="Webhook Security Config" submit-label="Save Config" :loading="securityLoading" :error="securityError" @submit="submitSecurityConfig" @cancel="showSecurityConfig = false">
+      <p class="text-xs text-gray-500">Server-level security rules applied to all webhook create/update operations. Changes take effect immediately. Existing subscriptions are not retroactively validated.</p>
+      <div>
+        <label for="sc-cidr" class="block text-xs text-gray-500 mb-1">Blocked CIDR ranges (one per line)</label>
+        <textarea id="sc-cidr" v-model="securityForm.blocked_cidr" rows="4" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="10.0.0.0/8&#10;172.16.0.0/12&#10;192.168.0.0/16" />
+        <p class="text-xs text-gray-400 mt-0.5">Webhook URLs resolving to these ranges will be blocked (SSRF protection)</p>
+      </div>
+      <div>
+        <label for="sc-patterns" class="block text-xs text-gray-500 mb-1">Allowed URL patterns (one per line, glob syntax)</label>
+        <textarea id="sc-patterns" v-model="securityForm.allowed_patterns" rows="3" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="https://*.example.com/*" />
+        <p class="text-xs text-gray-400 mt-0.5">If non-empty, only URLs matching at least one pattern are allowed</p>
+      </div>
+      <label class="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+        <input v-model="securityForm.allow_http" type="checkbox" class="rounded" />
+        Allow HTTP (non-HTTPS) webhook URLs
+      </label>
+    </FormDialog>
   </div>
 </template>

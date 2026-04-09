@@ -325,6 +325,12 @@ export const EVENT_CATEGORIES = ['budget', 'tenant', 'api_key', 'policy', 'reser
 
 export const COMMIT_OVERAGE_POLICIES = ['REJECT', 'ALLOW_IF_AVAILABLE', 'ALLOW_WITH_OVERDRAFT'] as const
 
+export interface WebhookSecurityConfig {
+  blocked_cidr_ranges?: string[]
+  allowed_url_patterns?: string[]
+  allow_http?: boolean
+}
+
 // Audit types
 export interface AuditLogEntry {
   log_id: string
