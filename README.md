@@ -4,7 +4,7 @@
 [![Vue](https://img.shields.io/badge/vue-3-brightgreen)](https://vuejs.org)
 [![TypeScript](https://img.shields.io/badge/typescript-strict-blue)](https://www.typescriptlang.org)
 
-# Cycles Admin Dashboard
+# Runcycles Admin Dashboard
 
 Operational admin dashboard for the [Cycles Budget Governance System](https://github.com/runcycles/cycles-server-admin), aligned with [governance spec v0.1.25.7](https://github.com/runcycles/cycles-server-admin/blob/main/complete-budget-governance-v0.1.25.yaml).
 
