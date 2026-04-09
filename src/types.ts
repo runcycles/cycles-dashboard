@@ -149,11 +149,14 @@ export interface WebhookListResponse {
 
 export interface WebhookDelivery {
   delivery_id: string
+  subscription_id?: string
   event_id: string
+  event_type?: string
   status: string
   http_status?: number
   attempts: number
-  created_at: string
+  attempted_at?: string
+  created_at?: string
   delivered_at?: string
 }
 
