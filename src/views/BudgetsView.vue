@@ -35,7 +35,10 @@ const hasMore = ref(false)
 const nextCursor = ref('')
 const loadingMore = ref(false)
 const error = ref('')
-const { sortKey, sortDir, toggle, sorted: sortedBudgets } = useSort(budgets)
+const { sortKey, sortDir, toggle, sorted: sortedBudgets } = useSort(budgets, undefined, 'asc', {
+  utilization: (b: BudgetLedger) => b.allocated.amount > 0 ? (b.allocated.amount - b.remaining.amount) / b.allocated.amount : 0,
+  debt: (b: BudgetLedger) => b.debt?.amount ?? 0,
+})
 const detail = ref<BudgetLedger | null>(null)
 const detailEvents = ref<Event[]>([])
 
@@ -342,8 +345,8 @@ watch(() => route.query, () => {
               <SortHeader label="Scope" column="scope" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
               <SortHeader label="Unit" column="unit" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
               <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-              <th class="px-4 py-3 text-left w-44">Utilization</th>
-              <th class="px-4 py-3 text-right">Debt</th>
+              <SortHeader label="Utilization" column="utilization" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+              <SortHeader label="Debt" column="debt" :active-column="sortKey" :direction="sortDir" @sort="toggle" align="right" />
               <th v-if="canManage" class="px-4 py-3 w-20"></th>
             </tr>
           </thead>
