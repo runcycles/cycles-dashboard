@@ -176,4 +176,14 @@ All write operations audited against `complete-budget-governance-v0.1.25.yaml` a
 - API key revoke sends reason string for audit trail
 - All actions capability-gated and refresh data inline after success
 
+**Post-review fixes (same version):**
+
+| Category | Fix |
+|----------|-----|
+| **Bug** | Login→logout→login showed blank layout — `App.vue` now checks `$route.name !== 'login'` before rendering `AppLayout`; `LoginView` awaits `router.push` before clearing loading state |
+| **Bug** | ConfirmAction dialog not dismissable via Escape — added `keydown` listener with cleanup, `role="dialog"`, `aria-modal`, `aria-label` |
+| **Bug** | Budget tenant filter defaulted to first tenant instead of "All tenants" — dropdown now starts empty with "All tenants" option; loads across all tenants when none selected |
+| **Bug** | Status/Unit/Scope filters had no effect in all-tenant mode — filters now applied client-side via `applyClientFilters()` after cross-tenant aggregation |
+| **Defensive** | `submitAdjustment` guards against empty `selectedTenant` |
+
 **Build:** Zero TypeScript errors. 15 tests pass. Version 0.1.25.7.
