@@ -137,8 +137,13 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           <span v-if="testResult.response_status" class="font-mono">HTTP {{ testResult.response_status }}</span>
           <span v-if="testResult.response_time_ms" class="text-xs opacity-75">({{ testResult.response_time_ms }}ms)</span>
         </div>
-        <p v-if="testResult.error_message" class="mt-1 text-xs">{{ testResult.error_message }}</p>
-        <p v-if="!testResult.success && !testResult.error_message" class="mt-1 text-xs">The webhook endpoint did not respond successfully. Check that the URL is reachable and returns a 2xx status.</p>
+        <p v-if="testResult.error_message" class="mt-1">
+          {{ testResult.error_message }}
+          <span v-if="testResult.error_message.includes('Delivery failed') && !testResult.response_status" class="block mt-1 text-xs opacity-75">
+            The server could not reach the webhook URL. Common causes: the endpoint is not running, the URL is incorrect, DNS cannot resolve the hostname, or the server cannot access the network.
+          </span>
+        </p>
+        <p v-if="!testResult.success && !testResult.error_message" class="mt-1 text-xs">The endpoint did not return a 2xx status. Verify the URL is correct and the service is running.</p>
         <p v-if="testResult.event_id" class="mt-1 text-xs opacity-75">Event ID: <span class="font-mono">{{ testResult.event_id }}</span></p>
       </div>
 
