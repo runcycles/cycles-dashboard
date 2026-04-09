@@ -11,12 +11,12 @@ import UtilizationBar from '../components/UtilizationBar.vue'
 import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import EventTimeline from '../components/EventTimeline.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import { useToast } from '../composables/useToast'
 
 const toast = useToast()
-import { formatDateTime } from '../utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -254,11 +254,7 @@ watch(() => route.query, () => {
 
       <div class="bg-white rounded-lg shadow p-4">
         <h3 class="text-sm font-medium text-gray-700 mb-3">Event Timeline</h3>
-        <div v-if="detailEvents.length === 0" class="text-sm text-gray-400 py-6 text-center">No events for this scope</div>
-        <div v-for="e in detailEvents" :key="e.event_id" class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0 text-sm">
-          <span class="text-gray-700 font-mono text-xs">{{ e.event_type }}</span>
-          <span class="text-gray-400 text-xs" :title="new Date(e.timestamp).toISOString()">{{ formatDateTime(e.timestamp) }}</span>
-        </div>
+        <EventTimeline :events="detailEvents" />
       </div>
     </template>
 
