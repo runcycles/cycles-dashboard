@@ -239,7 +239,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
               <td class="px-4 py-3 font-mono text-xs" :class="d.http_status && d.http_status >= 400 ? 'text-red-600' : 'text-gray-500'">{{ d.http_status || '-' }}</td>
               <td class="px-4 py-3 text-right text-gray-500 tabular-nums">{{ d.attempts }}</td>
               <td class="px-4 py-3 font-mono text-xs text-gray-400">{{ d.event_id }}</td>
-              <td class="px-4 py-3 text-gray-400 text-xs">{{ formatDateTime(d.created_at) }}</td>
+              <td class="px-4 py-3 text-gray-400 text-xs">{{ d.attempted_at ? formatDateTime(d.attempted_at) : d.created_at ? formatDateTime(d.created_at) : '-' }}</td>
             </tr>
             <tr v-if="deliveries.length === 0">
               <td colspan="5"><EmptyState message="No deliveries yet" hint="Deliveries will appear here once events are dispatched" /></td>
