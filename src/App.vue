@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 import { useDarkMode } from './composables/useDarkMode'
 import AppLayout from './components/AppLayout.vue'
+import ToastContainer from './components/ToastContainer.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -38,4 +39,5 @@ onUnmounted(() => {
 <template>
   <AppLayout v-if="auth.isAuthenticated && $route.name !== 'login'" />
   <router-view v-else />
+  <ToastContainer />
 </template>

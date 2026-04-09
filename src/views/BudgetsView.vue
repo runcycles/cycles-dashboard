@@ -12,6 +12,9 @@ import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
+import { useToast } from '../composables/useToast'
+
+const toast = useToast()
 import { formatDateTime } from '../utils/format'
 
 const route = useRoute()
@@ -146,6 +149,7 @@ async function executeBudgetAction() {
       await unfreezeBudget(detail.value.scope, detail.value.unit, 'Unfrozen via admin dashboard')
     }
     await loadDetail()
+    toast.success(pendingAction.value === 'freeze' ? 'Budget frozen' : 'Budget unfrozen')
   } catch (e: any) { error.value = e.message }
   finally { pendingAction.value = null }
 }
@@ -170,6 +174,7 @@ async function submitAdjustment() {
     await fundBudget(selectedTenant.value, detail.value.scope, detail.value.unit, 'RESET', newAmount, idempotencyKey, 'Allocation adjusted via admin dashboard')
     await loadDetail()
     showAdjustForm.value = false
+    toast.success('Budget allocation updated')
   } catch (e: any) { error.value = e.message }
   finally { adjustLoading.value = false }
 }

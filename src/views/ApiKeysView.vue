@@ -16,6 +16,9 @@ import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
 import { formatDateTime } from '../utils/format'
+import { useToast } from '../composables/useToast'
+
+const toast = useToast()
 
 interface KeyWithTenant extends ApiKey {
   tenant_name?: string
@@ -34,6 +37,7 @@ async function executeRevoke() {
   if (!pendingRevoke.value) return
   try {
     await revokeApiKey(pendingRevoke.value.key_id, 'Revoked via admin dashboard')
+    toast.success('API key revoked')
     await refresh()
   } catch (e: any) { error.value = e.message }
   finally { pendingRevoke.value = null }
@@ -89,6 +93,7 @@ async function submitEdit() {
     const scopes = editForm.value.scope_filter ? editForm.value.scope_filter.split(',').map(s => s.trim()).filter(Boolean) : []
     if (scopes.length) body.scope_filter = scopes
     await updateApiKey(editingKey.value.key_id, body as any)
+    toast.success('API key updated')
     editingKey.value = null
     await refresh()
   } catch (e: any) { editError.value = e.message }
@@ -111,6 +116,9 @@ const statusCounts = computed(() => {
   return counts
 })
 
+const hasActiveFilters = computed(() => !!(filterStatus.value || filterTenant.value))
+function clearFilters() { filterStatus.value = ''; filterTenant.value = '' }
+
 const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
     const tRes = await listTenants()
@@ -132,7 +140,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   <div>
     <div class="flex items-center justify-between">
       <PageHeader title="API Keys" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh" />
-      <button v-if="canManage" @click="openCreate" class="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-3 py-1.5 hover:bg-blue-50 cursor-pointer transition-colors">Create API Key</button>
+      <button v-if="canManage" @click="openCreate" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create API Key</button>
     </div>
 
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
@@ -164,6 +172,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             <option>EXPIRED</option>
           </select>
         </div>
+        <button v-if="hasActiveFilters" @click="clearFilters" class="text-xs text-gray-500 hover:text-gray-700 cursor-pointer">Clear</button>
         <div v-if="isLoading" class="flex items-center">
           <svg class="w-4 h-4 text-gray-400 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
         </div>
