@@ -33,6 +33,7 @@ const tab = ref<'budgets' | 'keys' | 'policies'>('budgets')
 
 // Tenant status action
 const pendingTenantAction = ref<'SUSPENDED' | 'ACTIVE' | 'CLOSED' | null>(null)
+const closeConfirmInput = ref('')
 
 async function executeTenantAction() {
   if (!pendingTenantAction.value) return
@@ -240,18 +241,30 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     </template>
 
     <ConfirmAction
-      v-if="pendingTenantAction"
-      :title="pendingTenantAction === 'CLOSED' ? 'Permanently close this tenant?' : pendingTenantAction === 'SUSPENDED' ? 'Suspend this tenant?' : 'Reactivate this tenant?'"
-      :message="pendingTenantAction === 'CLOSED'
-        ? `IRREVERSIBLE: Closing '${tenant?.name || id}' will permanently archive this tenant. All API access will be blocked and cannot be restored. Keys, budgets, and webhooks will become unusable.`
-        : pendingTenantAction === 'SUSPENDED'
-          ? `Suspending '${tenant?.name || id}' will block all API access for this tenant and its keys. Budgets and webhooks will be unaffected but unusable until reactivated.`
-          : `Reactivating '${tenant?.name || id}' will restore API access for this tenant.`"
-      :confirm-label="pendingTenantAction === 'CLOSED' ? 'Close Permanently' : pendingTenantAction === 'SUSPENDED' ? 'Suspend Tenant' : 'Reactivate Tenant'"
-      :danger="pendingTenantAction === 'SUSPENDED' || pendingTenantAction === 'CLOSED'"
+      v-if="pendingTenantAction && pendingTenantAction !== 'CLOSED'"
+      :title="pendingTenantAction === 'SUSPENDED' ? 'Suspend this tenant?' : 'Reactivate this tenant?'"
+      :message="pendingTenantAction === 'SUSPENDED'
+        ? `Suspending '${tenant?.name || id}' will block all API access for this tenant and its keys. Budgets and webhooks will be unaffected but unusable until reactivated.`
+        : `Reactivating '${tenant?.name || id}' will restore API access for this tenant.`"
+      :confirm-label="pendingTenantAction === 'SUSPENDED' ? 'Suspend Tenant' : 'Reactivate Tenant'"
+      :danger="pendingTenantAction === 'SUSPENDED'"
       @confirm="executeTenantAction"
       @cancel="pendingTenantAction = null"
     />
+
+    <!-- Close tenant — requires typing tenant name -->
+    <div v-if="pendingTenantAction === 'CLOSED'" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50" @click.self="pendingTenantAction = null">
+      <div class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 max-w-sm mx-4" role="dialog" aria-modal="true" aria-label="Close tenant permanently">
+        <h3 class="text-sm font-semibold text-red-600 mb-2">Permanently close this tenant?</h3>
+        <p class="text-sm text-gray-600 mb-3">This action is <strong>irreversible</strong>. Closing <strong>{{ tenant?.name || id }}</strong> will permanently archive this tenant. All API access, keys, budgets, and webhooks will become unusable and cannot be restored.</p>
+        <p class="text-sm text-gray-600 mb-2">To confirm, type the tenant name below:</p>
+        <input v-model="closeConfirmInput" type="text" :placeholder="tenant?.name || id" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full mb-4 font-mono" autocomplete="off" />
+        <div class="flex justify-end gap-2">
+          <button @click="pendingTenantAction = null; closeConfirmInput = ''" class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 rounded hover:bg-gray-100 cursor-pointer">Cancel</button>
+          <button @click="executeTenantAction(); closeConfirmInput = ''" :disabled="closeConfirmInput !== (tenant?.name || id)" class="px-3 py-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Close Permanently</button>
+        </div>
+      </div>
+    </div>
 
     <ConfirmAction
       v-if="pendingKeyRevoke"
