@@ -36,6 +36,6 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <AppLayout v-if="auth.isAuthenticated" />
+  <AppLayout v-if="auth.isAuthenticated && $route.name !== 'login'" />
   <router-view v-else />
 </template>
