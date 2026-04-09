@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
-import { listWebhooks, listTenants, createWebhook, getWebhookSecurityConfig, updateWebhookSecurityConfig } from '../api/client'
+import { listWebhooks, listTenants, createWebhook, updateWebhook, getWebhookSecurityConfig, updateWebhookSecurityConfig } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { WebhookSubscription, WebhookCreateResponse, Tenant, WebhookSecurityConfig } from '../types'
 import { EVENT_TYPES } from '../types'
@@ -11,6 +11,7 @@ import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
 import { useToast } from '../composables/useToast'
@@ -72,6 +73,20 @@ async function submitCreate() {
     toast.success('Webhook created')
   } catch (e: any) { createError.value = e.message }
   finally { createLoading.value = false }
+}
+
+// Pause/enable from list
+const pendingStatusAction = ref<{ id: string; url: string; action: 'PAUSED' | 'ACTIVE' } | null>(null)
+
+async function executeStatusAction() {
+  if (!pendingStatusAction.value) return
+  const { id, action } = pendingStatusAction.value
+  try {
+    await updateWebhook(id, { status: action })
+    toast.success(action === 'PAUSED' ? 'Webhook paused' : 'Webhook enabled')
+    await refresh()
+  } catch (e: any) { error.value = e.message }
+  finally { pendingStatusAction.value = null }
 }
 
 // Webhook security config
@@ -141,6 +156,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Failures" column="consecutive_failures" :active-column="sortKey" :direction="sortDir" @sort="toggle" align="right" />
             <th class="px-4 py-3 text-left">Events</th>
+            <th v-if="canManage" class="px-4 py-3 w-20"></th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
@@ -153,13 +169,29 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             <td class="px-4 py-3"><StatusBadge :status="w.status" /></td>
             <td class="px-4 py-3 text-right tabular-nums" :class="(w.consecutive_failures ?? 0) > 0 ? 'text-red-600 font-medium' : 'text-gray-400'">{{ w.consecutive_failures ?? 0 }}</td>
             <td class="px-4 py-3 text-xs text-gray-500">{{ w.event_types?.join(', ') || w.event_categories?.join(', ') || 'all' }}</td>
+            <td v-if="canManage" class="px-4 py-3">
+              <button v-if="w.status === 'ACTIVE'" @click="pendingStatusAction = { id: w.subscription_id, url: w.url, action: 'PAUSED' }" class="text-xs text-red-600 hover:text-red-800 cursor-pointer hover:underline">Pause</button>
+              <button v-if="w.status === 'PAUSED' || w.status === 'DISABLED'" @click="pendingStatusAction = { id: w.subscription_id, url: w.url, action: 'ACTIVE' }" class="text-xs text-green-700 hover:text-green-900 cursor-pointer hover:underline">Enable</button>
+            </td>
           </tr>
           <tr v-if="webhooks.length === 0">
-            <td colspan="5"><EmptyState message="No webhook subscriptions" hint="Webhook subscriptions will appear here once configured" /></td>
+            <td :colspan="canManage ? 6 : 5"><EmptyState message="No webhook subscriptions" hint="Webhook subscriptions will appear here once configured" /></td>
           </tr>
         </tbody>
       </table>
     </div>
+
+    <ConfirmAction
+      v-if="pendingStatusAction"
+      :title="pendingStatusAction.action === 'PAUSED' ? 'Pause this webhook?' : 'Enable this webhook?'"
+      :message="pendingStatusAction.action === 'PAUSED'
+        ? `Pausing will stop all event deliveries to '${pendingStatusAction.url}'. Events will be silently dropped.`
+        : `Enabling will resume event deliveries to '${pendingStatusAction.url}'.`"
+      :confirm-label="pendingStatusAction.action === 'PAUSED' ? 'Pause' : 'Enable'"
+      :danger="pendingStatusAction.action === 'PAUSED'"
+      @confirm="executeStatusAction"
+      @cancel="pendingStatusAction = null"
+    />
 
     <FormDialog v-if="showCreate" title="Create Webhook" submit-label="Create Webhook" :loading="createLoading" :error="createError" @submit="submitCreate" @cancel="showCreate = false" :wide="true">
       <div>
