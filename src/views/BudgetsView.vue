@@ -52,13 +52,22 @@ async function loadTenants() {
   } catch {}
 }
 
+function applyClientFilters(items: BudgetLedger[], extra?: (b: BudgetLedger) => boolean): BudgetLedger[] {
+  let result = items
+  if (filterStatus.value) result = result.filter(b => b.status === filterStatus.value)
+  if (filterUnit.value) result = result.filter(b => b.unit === filterUnit.value)
+  if (filterScope.value) result = result.filter(b => b.scope.startsWith(filterScope.value))
+  if (extra) result = result.filter(extra)
+  return result
+}
+
 async function loadAllTenantBudgets(filterFn?: (b: BudgetLedger) => boolean) {
   const allBudgets: BudgetLedger[] = []
   for (const t of tenants.value) {
     const res = await listBudgets({ tenant_id: t.tenant_id })
     allBudgets.push(...res.ledgers)
   }
-  budgets.value = filterFn ? allBudgets.filter(filterFn) : allBudgets
+  budgets.value = applyClientFilters(allBudgets, filterFn)
   hasMore.value = false
   nextCursor.value = ''
 }
@@ -72,7 +81,6 @@ async function loadList() {
         await loadAllTenantBudgets(b => (b.debt?.amount ?? 0) > 0)
       }
     } else if (!selectedTenant.value) {
-      // No tenant selected — show all budgets across all tenants
       await loadAllTenantBudgets()
     } else {
       const params: Record<string, string> = { tenant_id: selectedTenant.value }
