@@ -5,6 +5,7 @@ import { usePolling } from '../composables/usePolling'
 import { getWebhook, listDeliveries, updateWebhook, deleteWebhook, testWebhook, replayWebhookEvents, rotateWebhookSecret } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { WebhookSubscription, WebhookDelivery, WebhookTestResponse } from '../types'
+import { EVENT_TYPES } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import TenantLink from '../components/TenantLink.vue'
@@ -68,6 +69,45 @@ async function executeRotate() {
     toast.success('Signing secret rotated')
     webhook.value = await getWebhook(id)
   } catch (e: any) { error.value = e.message }
+}
+
+// Edit webhook
+const showEdit = ref(false)
+const editLoading = ref(false)
+const editError = ref('')
+const editForm = ref({ name: '', url: '', event_types: [] as string[], scope_filter: '', disable_after_failures: '' })
+
+function openEdit() {
+  if (!webhook.value) return
+  editForm.value = {
+    name: webhook.value.name || '',
+    url: webhook.value.url,
+    event_types: [...(webhook.value.event_types || [])],
+    scope_filter: webhook.value.scope_filter || '',
+    disable_after_failures: String((webhook.value as any).disable_after_failures ?? '10'),
+  }
+  editError.value = ''
+  showEdit.value = true
+}
+
+async function submitEdit() {
+  editError.value = ''
+  if (!editForm.value.event_types.length) { editError.value = 'Select at least one event type'; return }
+  editLoading.value = true
+  try {
+    const body: Record<string, unknown> = {
+      url: editForm.value.url,
+      event_types: editForm.value.event_types,
+    }
+    if (editForm.value.name) body.name = editForm.value.name
+    if (editForm.value.scope_filter) body.scope_filter = editForm.value.scope_filter
+    if (editForm.value.disable_after_failures) body.disable_after_failures = Number(editForm.value.disable_after_failures)
+    await updateWebhook(id, body)
+    toast.success('Webhook updated')
+    webhook.value = await getWebhook(id)
+    showEdit.value = false
+  } catch (e: any) { editError.value = e.message }
+  finally { editLoading.value = false }
 }
 
 // Test webhook
@@ -135,6 +175,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           <span v-if="(webhook.consecutive_failures ?? 0) > 0" class="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-medium">{{ webhook.consecutive_failures }} failures</span>
           <span class="flex-1" />
           <div v-if="canManage" class="flex gap-2 flex-wrap">
+            <button @click="openEdit"class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Edit</button>
             <button @click="runTest" :disabled="testLoading" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors disabled:opacity-50">{{ testLoading ? 'Testing...' : 'Send Test' }}</button>
             <button @click="pendingRotate = true" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Rotate Secret</button>
             <button @click="showReplay = true" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Replay</button>
@@ -273,5 +314,36 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     />
 
     <SecretReveal v-if="rotatedSecret" title="New Signing Secret" :secret="rotatedSecret" label="Signing Secret" @close="rotatedSecret = null" />
+
+    <!-- Edit webhook dialog -->
+    <FormDialog v-if="showEdit" title="Edit Webhook" submit-label="Save Changes" :loading="editLoading" :error="editError" @submit="submitEdit" @cancel="showEdit = false" :wide="true">
+      <div>
+        <label for="ew-name" class="block text-xs text-gray-500 mb-1">Name</label>
+        <input id="ew-name" v-model="editForm.name" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
+      </div>
+      <div>
+        <label for="ew-url" class="block text-xs text-gray-500 mb-1">URL</label>
+        <input id="ew-url" v-model="editForm.url" type="url" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Event types</label>
+        <div class="grid grid-cols-2 gap-1 max-h-48 overflow-y-auto border border-gray-200 rounded p-2">
+          <label v-for="et in EVENT_TYPES" :key="et" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+            <input type="checkbox" :value="et" v-model="editForm.event_types" class="rounded" />
+            {{ et }}
+          </label>
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label for="ew-scope" class="block text-xs text-gray-500 mb-1">Scope filter</label>
+          <input id="ew-scope" v-model="editForm.scope_filter" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="tenant:acme/*" />
+        </div>
+        <div>
+          <label for="ew-failures" class="block text-xs text-gray-500 mb-1">Disable after failures</label>
+          <input id="ew-failures" v-model="editForm.disable_after_failures" type="number" min="1" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
+        </div>
+      </div>
+    </FormDialog>
   </div>
 </template>
