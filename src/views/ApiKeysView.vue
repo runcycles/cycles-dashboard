@@ -85,9 +85,9 @@ async function submitEdit() {
   editLoading.value = true
   try {
     const body: Record<string, unknown> = { name: editForm.value.name }
-    body.permissions = editForm.value.permissions
-    if (editForm.value.scope_filter) body.scope_filter = editForm.value.scope_filter.split(',').map(s => s.trim()).filter(Boolean)
-    else body.scope_filter = []
+    if (editForm.value.permissions.length) body.permissions = editForm.value.permissions
+    const scopes = editForm.value.scope_filter ? editForm.value.scope_filter.split(',').map(s => s.trim()).filter(Boolean) : []
+    if (scopes.length) body.scope_filter = scopes
     await updateApiKey(editingKey.value.key_id, body as any)
     editingKey.value = null
     await refresh()
