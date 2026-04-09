@@ -128,7 +128,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
 
 <template>
   <div>
-    <PageHeader title="Tenant Detail" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
+    <PageHeader title="Tenant Detail" :subtitle="tenant?.tenant_id" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
       <template #back>
         <button @click="router.push('/tenants')" aria-label="Back to tenants" class="text-gray-400 hover:text-gray-700 cursor-pointer">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

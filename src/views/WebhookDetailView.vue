@@ -100,7 +100,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
 
 <template>
   <div>
-    <PageHeader title="Webhook Detail" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
+    <PageHeader title="Webhook Detail" :subtitle="webhook?.name || webhook?.subscription_id" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
       <template #back>
         <button @click="router.push('/webhooks')" aria-label="Back to webhooks" class="text-gray-400 hover:text-gray-700 cursor-pointer">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

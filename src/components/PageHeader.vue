@@ -4,6 +4,7 @@ import { formatRelative } from '../utils/format'
 
 defineProps<{
   title: string
+  subtitle?: string
   loading?: boolean
   lastUpdated?: string | null
 }>()
@@ -14,7 +15,10 @@ defineEmits<{ refresh: [] }>()
   <div class="flex items-center justify-between mb-6">
     <div class="flex items-center gap-3">
       <slot name="back" />
-      <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">{{ title }}</h1>
+      <div>
+        <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">{{ title }}</h1>
+        <p v-if="subtitle" class="text-xs text-gray-400 font-mono mt-0.5">{{ subtitle }}</p>
+      </div>
     </div>
     <div class="flex items-center gap-3">
       <span v-if="lastUpdated" class="text-xs text-gray-400" :title="new Date(lastUpdated).toLocaleString()">
