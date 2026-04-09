@@ -152,6 +152,9 @@ export const replayWebhookEvents = (id: string, body: import('../types').ReplayE
   post<import('../types').ReplayEventsResponse>(`${BASE}/admin/webhooks/${id}/replay`, body as unknown as Record<string, unknown>)
 
 // Budgets
+export const updateBudgetConfig = (scope: string, unit: string, body: Record<string, unknown>) =>
+  mutate<import('../types').BudgetLedger>('PATCH', `${BASE}/admin/budgets`, body, { scope, unit })
+
 export const freezeBudget = (scope: string, unit: string, reason?: string) =>
   post<import('../types').BudgetLedger>(`${BASE}/admin/budgets/freeze`, reason ? { reason } : {}, { scope, unit })
 
@@ -163,4 +166,19 @@ export function fundBudget(tenantId: string, scope: string, unit: string, operat
   if (reason) body.reason = reason
   return post<import('../types').BudgetLedger>(`${BASE}/admin/budgets/fund`, body, { tenant_id: tenantId, scope, unit })
 }
+
+// Webhook — rotate signing secret (generate cryptographically strong secret)
+export function rotateWebhookSecret(id: string): Promise<import('../types').WebhookSubscription & { signing_secret?: string }> {
+  const bytes = new Uint8Array(32)
+  crypto.getRandomValues(bytes)
+  const secret = 'whsec_' + Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')
+  return patch<import('../types').WebhookSubscription & { signing_secret?: string }>(`${BASE}/admin/webhooks/${id}`, { signing_secret: secret })
+}
+
+// Webhook security config
+export const getWebhookSecurityConfig = () =>
+  get<import('../types').WebhookSecurityConfig>(`${BASE}/admin/config/webhook-security`)
+
+export const updateWebhookSecurityConfig = (body: import('../types').WebhookSecurityConfig) =>
+  mutate<import('../types').WebhookSecurityConfig>('PUT', `${BASE}/admin/config/webhook-security`, body as unknown as Record<string, unknown>)
 

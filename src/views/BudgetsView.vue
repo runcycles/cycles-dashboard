@@ -3,7 +3,8 @@ import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
-import { listBudgets, lookupBudget, listTenants, listEvents, fundBudget, freezeBudget, unfreezeBudget } from '../api/client'
+import { listBudgets, lookupBudget, listTenants, listEvents, fundBudget, freezeBudget, unfreezeBudget, updateBudgetConfig } from '../api/client'
+import { COMMIT_OVERAGE_POLICIES } from '../types'
 import { useAuthStore } from '../stores/auth'
 import type { BudgetLedger, Tenant, Event } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -11,12 +12,12 @@ import UtilizationBar from '../components/UtilizationBar.vue'
 import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import EventTimeline from '../components/EventTimeline.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import { useToast } from '../composables/useToast'
 
 const toast = useToast()
-import { formatDateTime } from '../utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -161,32 +162,73 @@ async function executeBudgetAction() {
   finally { pendingAction.value = null }
 }
 
-// Budget allocation adjustment
-const showAdjust = ref(false)
-const adjustAmount = ref('')
-const adjustLoading = ref(false)
-const adjustError = ref('')
+// Budget fund operations
+const showFund = ref(false)
+const fundForm = ref({ operation: 'CREDIT', amount: '', reason: '' })
+const fundLoading = ref(false)
+const fundError = ref('')
 
-function openAdjust() {
-  adjustAmount.value = String(detail.value?.allocated.amount ?? '')
-  adjustError.value = ''
-  showAdjust.value = true
+const fundHints: Record<string, string> = {
+  CREDIT: 'Adds funds to allocated and remaining balance.',
+  DEBIT: 'Removes funds. Fails if remaining would go negative.',
+  RESET: 'Sets allocated to exact amount, recalculates remaining.',
+  REPAY_DEBT: 'Reduces outstanding debt by this amount.',
 }
 
-async function submitAdjustment() {
-  if (!detail.value || !adjustAmount.value || !selectedTenant.value) return
-  const newAmount = Number(adjustAmount.value)
-  if (isNaN(newAmount) || newAmount < 0) { adjustError.value = 'Invalid amount'; return }
-  adjustLoading.value = true
-  adjustError.value = ''
+function openFund() {
+  fundForm.value = { operation: 'CREDIT', amount: '', reason: '' }
+  fundError.value = ''
+  showFund.value = true
+}
+
+async function submitFund() {
+  if (!detail.value || !fundForm.value.amount || !selectedTenant.value) return
+  const amount = Number(fundForm.value.amount)
+  if (isNaN(amount) || amount < 0) { fundError.value = 'Invalid amount'; return }
+  fundLoading.value = true
+  fundError.value = ''
   try {
-    const idempotencyKey = `dashboard-reset-${detail.value.scope}-${Date.now()}`
-    await fundBudget(selectedTenant.value, detail.value.scope, detail.value.unit, 'RESET', newAmount, idempotencyKey, 'Allocation adjusted via admin dashboard')
+    const idempotencyKey = `dashboard-${fundForm.value.operation.toLowerCase()}-${detail.value.scope}-${Date.now()}`
+    await fundBudget(selectedTenant.value, detail.value.scope, detail.value.unit, fundForm.value.operation, amount, idempotencyKey, fundForm.value.reason || `${fundForm.value.operation} via admin dashboard`)
     await loadDetail()
-    showAdjust.value = false
-    toast.success('Budget allocation updated')
-  } catch (e: any) { adjustError.value = e.message }
-  finally { adjustLoading.value = false }
+    showFund.value = false
+    const labels: Record<string, string> = { CREDIT: 'Budget credited', DEBIT: 'Budget debited', RESET: 'Budget allocation reset', REPAY_DEBT: 'Debt repaid' }
+    toast.success(labels[fundForm.value.operation] || 'Budget updated')
+  } catch (e: any) { fundError.value = e.message }
+  finally { fundLoading.value = false }
+}
+
+// Edit budget config (overdraft_limit, commit_overage_policy)
+const showEditBudget = ref(false)
+const editBudgetLoading = ref(false)
+const editBudgetError = ref('')
+const editBudgetForm = ref({ overdraft_limit: '', commit_overage_policy: '' })
+
+function openEditBudget() {
+  if (!detail.value) return
+  editBudgetForm.value = {
+    overdraft_limit: String(detail.value.overdraft_limit?.amount ?? '0'),
+    commit_overage_policy: detail.value.commit_overage_policy || '',
+  }
+  editBudgetError.value = ''
+  showEditBudget.value = true
+}
+
+async function submitEditBudget() {
+  if (!detail.value) return
+  editBudgetError.value = ''
+  editBudgetLoading.value = true
+  try {
+    const body: Record<string, unknown> = {}
+    const odLimit = Number(editBudgetForm.value.overdraft_limit)
+    if (!isNaN(odLimit) && odLimit >= 0) body.overdraft_limit = { unit: detail.value.unit, amount: odLimit }
+    if (editBudgetForm.value.commit_overage_policy) body.commit_overage_policy = editBudgetForm.value.commit_overage_policy
+    await updateBudgetConfig(detail.value.scope, detail.value.unit, body)
+    await loadDetail()
+    showEditBudget.value = false
+    toast.success('Budget config updated')
+  } catch (e: any) { editBudgetError.value = e.message }
+  finally { editBudgetLoading.value = false }
 }
 
 watch(selectedTenant, () => { if (!isCrossTenantFilter.value && !isDetail.value) loadList() })
@@ -198,7 +240,7 @@ watch(() => route.query, () => {
 
 <template>
   <div>
-    <PageHeader :title="pageTitle" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
+    <PageHeader :title="pageTitle" :subtitle="isDetail && detail ? `${detail.scope} · ${detail.unit}` : undefined" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
       <template #back>
         <button v-if="isDetail" @click="router.push('/budgets')" aria-label="Back to budgets" class="text-gray-400 hover:text-gray-700 cursor-pointer">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -219,6 +261,7 @@ watch(() => route.query, () => {
           <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs font-medium">{{ detail.unit }}</span>
           <span v-if="detail.is_over_limit" class="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-medium">OVER LIMIT</span>
           <span class="flex-1" />
+          <button v-if="canManage" @click="openEditBudget" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Edit</button>
           <button v-if="canManage && detail.status === 'ACTIVE'" @click="requestFreeze(detail.scope, detail.unit, 'freeze')" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Freeze</button>
           <button v-if="canManage && detail.status === 'FROZEN'" @click="requestFreeze(detail.scope, detail.unit, 'unfreeze')" class="text-xs text-green-700 hover:text-green-900 border border-green-200 rounded px-2.5 py-1 hover:bg-green-50 cursor-pointer transition-colors">Unfreeze</button>
         </div>
@@ -229,6 +272,7 @@ watch(() => route.query, () => {
           <div class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Spent</span><span class="font-semibold">{{ detail.spent?.amount.toLocaleString() || '0' }}</span></div>
           <div class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Debt</span><span class="font-semibold" :class="detail.debt && detail.debt.amount > 0 ? 'text-red-600' : ''">{{ detail.debt?.amount.toLocaleString() || '0' }}</span></div>
           <div class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Overdraft Limit</span><span class="font-semibold">{{ detail.overdraft_limit?.amount.toLocaleString() || '0' }}</span></div>
+          <div class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Overage Policy</span><span class="font-semibold text-xs">{{ detail.commit_overage_policy || 'Inherit' }}</span></div>
         </div>
         <div class="mt-4">
           <UtilizationBar :remaining="detail.remaining.amount" :allocated="detail.allocated.amount" />
@@ -237,20 +281,16 @@ watch(() => route.query, () => {
           <UtilizationBar :remaining="detail.overdraft_limit.amount - detail.debt.amount" :allocated="detail.overdraft_limit.amount" label="Debt utilization" />
         </div>
 
-        <!-- Adjust allocation -->
+        <!-- Fund budget -->
         <div v-if="canManage && detail.status === 'ACTIVE'" class="mt-4 pt-4 border-t border-gray-200 flex items-center justify-between">
-          <span class="text-xs text-gray-500">Need to adjust the allocation?</span>
-          <button @click="openAdjust" class="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-2.5 py-1 hover:bg-blue-50 cursor-pointer transition-colors">Adjust Allocation</button>
+          <span class="text-xs text-gray-500">Credit, debit, reset allocation, or repay debt</span>
+          <button @click="openFund" class="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-2.5 py-1 hover:bg-blue-50 cursor-pointer transition-colors">Fund Budget</button>
         </div>
       </div>
 
       <div class="bg-white rounded-lg shadow p-4">
         <h3 class="text-sm font-medium text-gray-700 mb-3">Event Timeline</h3>
-        <div v-if="detailEvents.length === 0" class="text-sm text-gray-400 py-6 text-center">No events for this scope</div>
-        <div v-for="e in detailEvents" :key="e.event_id" class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0 text-sm">
-          <span class="text-gray-700 font-mono text-xs">{{ e.event_type }}</span>
-          <span class="text-gray-400 text-xs" :title="new Date(e.timestamp).toISOString()">{{ formatDateTime(e.timestamp) }}</span>
-        </div>
+        <EventTimeline :events="detailEvents" />
       </div>
     </template>
 
@@ -351,11 +391,45 @@ watch(() => route.query, () => {
       @cancel="pendingAction = null"
     />
 
-    <FormDialog v-if="showAdjust" title="Adjust Budget Allocation" submit-label="Update Allocation" :loading="adjustLoading" :error="adjustError" @submit="submitAdjustment" @cancel="showAdjust = false">
-      <p class="text-xs text-gray-500">This will reset the allocated amount for <span class="font-mono">{{ detail?.scope }}</span> ({{ detail?.unit }}). The remaining balance will be recalculated.</p>
+    <FormDialog v-if="showFund" title="Fund Budget" submit-label="Execute" :loading="fundLoading" :error="fundError" @submit="submitFund" @cancel="showFund = false">
+      <div class="bg-gray-50 rounded p-3 text-xs grid grid-cols-3 gap-2 mb-1">
+        <div><span class="text-gray-400 block">Allocated</span><span class="font-semibold">{{ detail?.allocated.amount.toLocaleString() }}</span></div>
+        <div><span class="text-gray-400 block">Remaining</span><span class="font-semibold">{{ detail?.remaining.amount.toLocaleString() }}</span></div>
+        <div><span class="text-gray-400 block">Debt</span><span class="font-semibold" :class="(detail?.debt?.amount ?? 0) > 0 ? 'text-red-600' : ''">{{ (detail?.debt?.amount ?? 0).toLocaleString() }}</span></div>
+      </div>
       <div>
-        <label for="adjust-amount" class="block text-xs text-gray-500 mb-1">New allocated amount</label>
-        <input id="adjust-amount" v-model="adjustAmount" type="number" min="0" step="1" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
+        <label for="fund-op" class="block text-xs text-gray-500 mb-1">Operation</label>
+        <select id="fund-op" v-model="fundForm.operation" required class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
+          <option value="CREDIT">Credit — add funds</option>
+          <option value="DEBIT">Debit — remove funds</option>
+          <option value="RESET">Reset — set exact amount</option>
+          <option value="REPAY_DEBT">Repay Debt — reduce debt</option>
+        </select>
+        <p class="text-xs text-gray-400 mt-0.5">{{ fundHints[fundForm.operation] }}</p>
+      </div>
+      <div>
+        <label for="fund-amount" class="block text-xs text-gray-500 mb-1">Amount ({{ detail?.unit }})</label>
+        <input id="fund-amount" v-model="fundForm.amount" type="number" min="0" step="1" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
+      </div>
+      <div>
+        <label for="fund-reason" class="block text-xs text-gray-500 mb-1">Reason (optional, for audit trail)</label>
+        <input id="fund-reason" v-model="fundForm.reason" maxlength="512" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" placeholder="Emergency top-up for production" />
+      </div>
+    </FormDialog>
+
+    <FormDialog v-if="showEditBudget" title="Edit Budget Config" submit-label="Save Changes" :loading="editBudgetLoading" :error="editBudgetError" @submit="submitEditBudget" @cancel="showEditBudget = false">
+      <p class="text-xs text-gray-500">Edit overdraft limit and commit overage policy for <span class="font-mono">{{ detail?.scope }}</span> ({{ detail?.unit }}).</p>
+      <div>
+        <label for="eb-overdraft" class="block text-xs text-gray-500 mb-1">Overdraft Limit ({{ detail?.unit }})</label>
+        <input id="eb-overdraft" v-model="editBudgetForm.overdraft_limit" type="number" min="0" step="1" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
+        <p class="text-xs text-gray-400 mt-0.5">Maximum debt allowed. Set to 0 to disable overdraft.</p>
+      </div>
+      <div>
+        <label for="eb-overage" class="block text-xs text-gray-500 mb-1">Commit Overage Policy</label>
+        <select id="eb-overage" v-model="editBudgetForm.commit_overage_policy" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
+          <option value="">Inherit from tenant</option>
+          <option v-for="p in COMMIT_OVERAGE_POLICIES" :key="p" :value="p">{{ p }}</option>
+        </select>
       </div>
     </FormDialog>
   </div>

@@ -21,6 +21,7 @@ const tenantId = ref('')
 const keyId = ref('')
 const operation = ref('')
 const resourceType = ref('')
+const resourceId = ref('')
 const fromDate = ref('')
 const toDate = ref('')
 
@@ -63,14 +64,6 @@ function executeExport() {
   showExportConfirm.value = null
 }
 
-const allEntries = ref<AuditLogEntry[]>([])
-
-// Client-side filter for resource_type (not a server query param)
-function applyClientFilter(logs: AuditLogEntry[]): AuditLogEntry[] {
-  if (!resourceType.value) return logs
-  return logs.filter(e => e.resource_type === resourceType.value)
-}
-
 async function query() {
   loading.value = true
   try {
@@ -78,11 +71,12 @@ async function query() {
     if (tenantId.value) params.tenant_id = tenantId.value
     if (keyId.value) params.key_id = keyId.value
     if (operation.value) params.operation = operation.value
+    if (resourceType.value) params.resource_type = resourceType.value
+    if (resourceId.value) params.resource_id = resourceId.value
     if (fromDate.value) params.from = new Date(fromDate.value).toISOString()
     if (toDate.value) params.to = new Date(toDate.value).toISOString()
     const res = await listAuditLogs(params)
-    allEntries.value = res.logs
-    entries.value = applyClientFilter(res.logs)
+    entries.value = res.logs
     error.value = ''
   } catch (e: any) { error.value = e.message }
   finally { loading.value = false }
@@ -126,11 +120,15 @@ onMounted(() => { query() })
         </div>
         <div>
           <label for="audit-resource" class="block text-xs text-gray-500 mb-1">Resource Type</label>
-          <select id="audit-resource" v-model="resourceType" @change="entries = applyClientFilter(allEntries)" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+          <select id="audit-resource" v-model="resourceType" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
             <option value="">All</option>
             <option>tenant</option><option>budget</option><option>api_key</option>
             <option>policy</option><option>webhook</option><option>config</option>
           </select>
+        </div>
+        <div>
+          <label for="audit-resource-id" class="block text-xs text-gray-500 mb-1">Resource ID</label>
+          <input id="audit-resource-id" v-model="resourceId" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-36" placeholder="key_abc123..." />
         </div>
         <div>
           <label for="audit-from" class="block text-xs text-gray-500 mb-1">From</label>
@@ -236,7 +234,7 @@ onMounted(() => { query() })
             </tr>
           </template>
           <tr v-if="entries.length === 0 && !loading">
-            <td colspan="7"><EmptyState message="No audit logs found" hint="Adjust your filters or time range and run the query again" /></td>
+            <td colspan="7"><EmptyState message="No audit logs found" hint="Try a broader time range (e.g. Last 24h) or clear your filters" /></td>
           </tr>
           <tr v-if="loading">
             <td colspan="7" class="px-4 py-12 text-center text-gray-400">Loading...</td>
