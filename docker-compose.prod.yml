@@ -14,7 +14,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.8
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.9
     restart: unless-stopped
     depends_on:
       cycles-admin:
@@ -23,7 +23,7 @@ services:
       - cycles
 
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.8
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.9
     restart: unless-stopped
     environment:
       REDIS_HOST: redis

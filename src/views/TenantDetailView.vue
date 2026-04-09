@@ -2,14 +2,17 @@
 import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
-import { getTenant, listBudgets, listApiKeys, listPolicies, updateTenantStatus, revokeApiKey } from '../api/client'
+import { getTenant, listBudgets, listApiKeys, listPolicies, updateTenantStatus, updateTenant, revokeApiKey, createApiKey } from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import type { Tenant, BudgetLedger, ApiKey, Policy } from '../types'
+import type { Tenant, BudgetLedger, ApiKey, Policy, ApiKeyCreateResponse } from '../types'
+import { PERMISSIONS } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import MaskedValue from '../components/MaskedValue.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
+import FormDialog from '../components/FormDialog.vue'
+import SecretReveal from '../components/SecretReveal.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -50,6 +53,57 @@ async function executeKeyRevoke() {
   finally { pendingKeyRevoke.value = null }
 }
 
+// Edit tenant
+const showEditTenant = ref(false)
+const editTenantLoading = ref(false)
+const editTenantError = ref('')
+const editTenantForm = ref({ name: '' })
+
+function openEditTenant() {
+  editTenantForm.value = { name: tenant.value?.name || '' }
+  editTenantError.value = ''
+  showEditTenant.value = true
+}
+
+async function submitEditTenant() {
+  editTenantError.value = ''
+  editTenantLoading.value = true
+  try {
+    await updateTenant(id, { name: editTenantForm.value.name })
+    tenant.value = await getTenant(id)
+    showEditTenant.value = false
+  } catch (e: any) { editTenantError.value = e.message }
+  finally { editTenantLoading.value = false }
+}
+
+// Create API key for this tenant
+const showCreateKey = ref(false)
+const createKeyLoading = ref(false)
+const createKeyError = ref('')
+const createKeyForm = ref({ name: '', permissions: [] as string[], scope_filter: '', expires_at: '' })
+const createdKeySecret = ref<ApiKeyCreateResponse | null>(null)
+
+function openCreateKey() {
+  createKeyForm.value = { name: '', permissions: [], scope_filter: '', expires_at: '' }
+  createKeyError.value = ''
+  showCreateKey.value = true
+}
+
+async function submitCreateKey() {
+  createKeyError.value = ''
+  createKeyLoading.value = true
+  try {
+    const body: Record<string, unknown> = { tenant_id: id, name: createKeyForm.value.name }
+    if (createKeyForm.value.permissions.length) body.permissions = createKeyForm.value.permissions
+    if (createKeyForm.value.scope_filter) body.scope_filter = createKeyForm.value.scope_filter.split(',').map(s => s.trim()).filter(Boolean)
+    if (createKeyForm.value.expires_at) body.expires_at = new Date(createKeyForm.value.expires_at).toISOString()
+    const res = await createApiKey(body as any)
+    createdKeySecret.value = res
+    showCreateKey.value = false
+  } catch (e: any) { createKeyError.value = e.message }
+  finally { createKeyLoading.value = false }
+}
+
 const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
     tenant.value = await getTenant(id)
@@ -85,8 +139,11 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           <h2 class="text-lg font-medium text-gray-900">{{ tenant.name }}</h2>
           <StatusBadge :status="tenant.status" />
           <span class="flex-1" />
-          <button v-if="canManageTenants && tenant.status === 'ACTIVE'" @click="pendingTenantAction = 'SUSPENDED'" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Suspend</button>
-          <button v-if="canManageTenants && tenant.status === 'SUSPENDED'" @click="pendingTenantAction = 'ACTIVE'" class="text-xs text-green-700 hover:text-green-900 border border-green-200 rounded px-2.5 py-1 hover:bg-green-50 cursor-pointer transition-colors">Reactivate</button>
+          <div v-if="canManageTenants" class="flex gap-2">
+            <button @click="openEditTenant" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Edit</button>
+            <button v-if="tenant.status === 'ACTIVE'" @click="pendingTenantAction = 'SUSPENDED'" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Suspend</button>
+            <button v-if="tenant.status === 'SUSPENDED'" @click="pendingTenantAction = 'ACTIVE'" class="text-xs text-green-700 hover:text-green-900 border border-green-200 rounded px-2.5 py-1 hover:bg-green-50 cursor-pointer transition-colors">Reactivate</button>
+          </div>
         </div>
         <p class="text-sm text-gray-500 font-mono">{{ tenant.tenant_id }}</p>
         <p v-if="tenant.parent_tenant_id" class="text-sm text-gray-400 mt-1">Parent: <router-link :to="{ name: 'tenant-detail', params: { id: tenant.parent_tenant_id } }" class="text-blue-600 hover:underline">{{ tenant.parent_tenant_id }}</router-link></p>
@@ -122,6 +179,9 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       </div>
 
       <!-- API Keys tab -->
+      <div v-if="tab === 'keys' && canManageKeys" class="flex justify-end mb-2">
+        <button @click="openCreateKey" class="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-3 py-1.5 hover:bg-blue-50 cursor-pointer transition-colors">Create API Key</button>
+      </div>
       <div v-if="tab === 'keys'" class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
         <table class="w-full text-sm min-w-[520px]">
           <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
@@ -182,5 +242,40 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       @confirm="executeKeyRevoke"
       @cancel="pendingKeyRevoke = null"
     />
+
+    <!-- Edit tenant dialog -->
+    <FormDialog v-if="showEditTenant" title="Edit Tenant" submit-label="Save Changes" :loading="editTenantLoading" :error="editTenantError" @submit="submitEditTenant" @cancel="showEditTenant = false">
+      <div>
+        <label for="et-name" class="block text-xs text-gray-500 mb-1">Display Name</label>
+        <input id="et-name" v-model="editTenantForm.name" required maxlength="256" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
+      </div>
+    </FormDialog>
+
+    <!-- Create API key for this tenant -->
+    <FormDialog v-if="showCreateKey" title="Create API Key" submit-label="Create Key" :loading="createKeyLoading" :error="createKeyError" @submit="submitCreateKey" @cancel="showCreateKey = false">
+      <div>
+        <label for="ck2-name" class="block text-xs text-gray-500 mb-1">Name</label>
+        <input id="ck2-name" v-model="createKeyForm.name" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" placeholder="my-service-key" />
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Permissions</label>
+        <div class="grid grid-cols-2 gap-1 max-h-40 overflow-y-auto border border-gray-200 rounded p-2">
+          <label v-for="p in PERMISSIONS" :key="p" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+            <input type="checkbox" :value="p" v-model="createKeyForm.permissions" class="rounded" />
+            {{ p }}
+          </label>
+        </div>
+      </div>
+      <div>
+        <label for="ck2-scope" class="block text-xs text-gray-500 mb-1">Scope filter (comma-separated, optional)</label>
+        <input id="ck2-scope" v-model="createKeyForm.scope_filter" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
+      </div>
+      <div>
+        <label for="ck2-expires" class="block text-xs text-gray-500 mb-1">Expires at (optional)</label>
+        <input id="ck2-expires" v-model="createKeyForm.expires_at" type="datetime-local" class="border border-gray-300 rounded px-2 py-1.5 text-sm" />
+      </div>
+    </FormDialog>
+
+    <SecretReveal v-if="createdKeySecret" title="API Key Created" :secret="createdKeySecret.key_secret" label="API Key Secret" @close="createdKeySecret = null; refresh()" />
   </div>
 </template>

@@ -2,9 +2,10 @@
 import { ref, computed } from 'vue'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
-import { listTenants, listApiKeys, revokeApiKey } from '../api/client'
+import { listTenants, listApiKeys, revokeApiKey, createApiKey, updateApiKey } from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import type { Tenant, ApiKey } from '../types'
+import type { Tenant, ApiKey, ApiKeyCreateResponse } from '../types'
+import { PERMISSIONS } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import MaskedValue from '../components/MaskedValue.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -12,6 +13,8 @@ import TenantLink from '../components/TenantLink.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
+import FormDialog from '../components/FormDialog.vue'
+import SecretReveal from '../components/SecretReveal.vue'
 import { formatDateTime } from '../utils/format'
 
 interface KeyWithTenant extends ApiKey {
@@ -34,6 +37,62 @@ async function executeRevoke() {
     await refresh()
   } catch (e: any) { error.value = e.message }
   finally { pendingRevoke.value = null }
+}
+
+// Create API key
+const showCreate = ref(false)
+const createLoading = ref(false)
+const createError = ref('')
+const createForm = ref({ tenant_id: '', name: '', permissions: [] as string[], scope_filter: '', expires_at: '' })
+const createdSecret = ref<ApiKeyCreateResponse | null>(null)
+
+async function submitCreate() {
+  createError.value = ''
+  createLoading.value = true
+  try {
+    const body: Record<string, unknown> = { tenant_id: createForm.value.tenant_id, name: createForm.value.name }
+    if (createForm.value.permissions.length) body.permissions = createForm.value.permissions
+    if (createForm.value.scope_filter) body.scope_filter = createForm.value.scope_filter.split(',').map(s => s.trim()).filter(Boolean)
+    if (createForm.value.expires_at) body.expires_at = new Date(createForm.value.expires_at).toISOString()
+    const res = await createApiKey(body as any)
+    createdSecret.value = res
+    showCreate.value = false
+  } catch (e: any) { createError.value = e.message }
+  finally { createLoading.value = false }
+}
+
+function openCreate() {
+  createForm.value = { tenant_id: tenants.value[0]?.tenant_id || '', name: '', permissions: [], scope_filter: '', expires_at: '' }
+  createError.value = ''
+  showCreate.value = true
+}
+
+// Edit API key
+const editingKey = ref<KeyWithTenant | null>(null)
+const editLoading = ref(false)
+const editError = ref('')
+const editForm = ref({ name: '', permissions: [] as string[], scope_filter: '' })
+
+function openEdit(k: KeyWithTenant) {
+  editForm.value = { name: k.name || '', permissions: [...k.permissions], scope_filter: k.scope_filter?.join(', ') || '' }
+  editError.value = ''
+  editingKey.value = k
+}
+
+async function submitEdit() {
+  if (!editingKey.value) return
+  editError.value = ''
+  editLoading.value = true
+  try {
+    const body: Record<string, unknown> = { name: editForm.value.name }
+    body.permissions = editForm.value.permissions
+    if (editForm.value.scope_filter) body.scope_filter = editForm.value.scope_filter.split(',').map(s => s.trim()).filter(Boolean)
+    else body.scope_filter = []
+    await updateApiKey(editingKey.value.key_id, body as any)
+    editingKey.value = null
+    await refresh()
+  } catch (e: any) { editError.value = e.message }
+  finally { editLoading.value = false }
 }
 
 const filteredKeys = computed(() => {
@@ -71,7 +130,10 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
 
 <template>
   <div>
-    <PageHeader title="API Keys" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh" />
+    <div class="flex items-center justify-between">
+      <PageHeader title="API Keys" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh" />
+      <button v-if="canManage" @click="openCreate" class="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-3 py-1.5 hover:bg-blue-50 cursor-pointer transition-colors">Create API Key</button>
+    </div>
 
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
 
@@ -144,7 +206,10 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
               {{ k.expires_at ? formatDateTime(k.expires_at) : 'Never' }}
             </td>
             <td v-if="canManage" class="px-4 py-3">
-              <button v-if="k.status === 'ACTIVE'" @click="pendingRevoke = k" class="text-xs text-red-600 hover:text-red-800 cursor-pointer hover:underline">Revoke</button>
+              <div class="flex gap-2">
+                <button v-if="k.status === 'ACTIVE'" @click="openEdit(k)" class="text-xs text-blue-600 hover:text-blue-800 cursor-pointer hover:underline">Edit</button>
+                <button v-if="k.status === 'ACTIVE'" @click="pendingRevoke = k" class="text-xs text-red-600 hover:text-red-800 cursor-pointer hover:underline">Revoke</button>
+              </div>
             </td>
           </tr>
           <tr v-if="filteredKeys.length === 0">
@@ -155,6 +220,61 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         </tbody>
       </table>
     </div>
+
+    <!-- Create API Key dialog -->
+    <FormDialog v-if="showCreate" title="Create API Key" submit-label="Create Key" :loading="createLoading" :error="createError" @submit="submitCreate" @cancel="showCreate = false">
+      <div>
+        <label for="ck-tenant" class="block text-xs text-gray-500 mb-1">Tenant</label>
+        <select id="ck-tenant" v-model="createForm.tenant_id" required class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
+          <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
+        </select>
+      </div>
+      <div>
+        <label for="ck-name" class="block text-xs text-gray-500 mb-1">Name</label>
+        <input id="ck-name" v-model="createForm.name" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" placeholder="my-service-key" />
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Permissions</label>
+        <div class="grid grid-cols-2 gap-1 max-h-40 overflow-y-auto border border-gray-200 rounded p-2">
+          <label v-for="p in PERMISSIONS" :key="p" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+            <input type="checkbox" :value="p" v-model="createForm.permissions" class="rounded" />
+            {{ p }}
+          </label>
+        </div>
+      </div>
+      <div>
+        <label for="ck-scope" class="block text-xs text-gray-500 mb-1">Scope filter (comma-separated, optional)</label>
+        <input id="ck-scope" v-model="createForm.scope_filter" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="tenant:acme, tenant:acme/*" />
+      </div>
+      <div>
+        <label for="ck-expires" class="block text-xs text-gray-500 mb-1">Expires at (optional)</label>
+        <input id="ck-expires" v-model="createForm.expires_at" type="datetime-local" class="border border-gray-300 rounded px-2 py-1.5 text-sm" />
+      </div>
+    </FormDialog>
+
+    <!-- Secret reveal after creation -->
+    <SecretReveal v-if="createdSecret" title="API Key Created" :secret="createdSecret.key_secret" label="API Key Secret" @close="createdSecret = null; refresh()" />
+
+    <!-- Edit API Key dialog -->
+    <FormDialog v-if="editingKey" title="Edit API Key" submit-label="Save Changes" :loading="editLoading" :error="editError" @submit="submitEdit" @cancel="editingKey = null">
+      <div>
+        <label for="ek-name" class="block text-xs text-gray-500 mb-1">Name</label>
+        <input id="ek-name" v-model="editForm.name" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Permissions</label>
+        <div class="grid grid-cols-2 gap-1 max-h-40 overflow-y-auto border border-gray-200 rounded p-2">
+          <label v-for="p in PERMISSIONS" :key="p" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+            <input type="checkbox" :value="p" v-model="editForm.permissions" class="rounded" />
+            {{ p }}
+          </label>
+        </div>
+      </div>
+      <div>
+        <label for="ek-scope" class="block text-xs text-gray-500 mb-1">Scope filter (comma-separated)</label>
+        <input id="ek-scope" v-model="editForm.scope_filter" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
+      </div>
+    </FormDialog>
 
     <ConfirmAction
       v-if="pendingRevoke"

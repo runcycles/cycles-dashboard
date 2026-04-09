@@ -94,6 +94,7 @@
 
 /* Form inputs */
 .dark select,
+.dark textarea,
 .dark input:not([type=checkbox]):not([type=radio]) {
   background-color: var(--color-gray-800);
   border-color: var(--color-gray-600);
