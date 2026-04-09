@@ -272,6 +272,7 @@ watch(() => route.query, () => {
           <div class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Spent</span><span class="font-semibold">{{ detail.spent?.amount.toLocaleString() || '0' }}</span></div>
           <div class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Debt</span><span class="font-semibold" :class="detail.debt && detail.debt.amount > 0 ? 'text-red-600' : ''">{{ detail.debt?.amount.toLocaleString() || '0' }}</span></div>
           <div class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Overdraft Limit</span><span class="font-semibold">{{ detail.overdraft_limit?.amount.toLocaleString() || '0' }}</span></div>
+          <div class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Overage Policy</span><span class="font-semibold text-xs">{{ detail.commit_overage_policy || 'Inherit' }}</span></div>
         </div>
         <div class="mt-4">
           <UtilizationBar :remaining="detail.remaining.amount" :allocated="detail.allocated.amount" />
