@@ -25,11 +25,12 @@ const fromDate = ref('')
 const toDate = ref('')
 
 function doExportCsv() {
-  const headers = ['timestamp', 'operation', 'resource_type', 'resource_id', 'tenant_id', 'key_id', 'status', 'error_code', 'request_id', 'source_ip']
+  const headers = ['timestamp', 'operation', 'resource_type', 'resource_id', 'tenant_id', 'key_id', 'status', 'error_code', 'request_id', 'source_ip', 'user_agent', 'metadata']
   const rows = entries.value.map(e => [
     e.timestamp, e.operation, e.resource_type || '', e.resource_id || '',
     e.tenant_id || '', e.key_id || '', String(e.status), e.error_code || '',
-    e.request_id || '', e.source_ip || '',
+    e.request_id || '', e.source_ip || '', e.user_agent || '',
+    e.metadata ? JSON.stringify(e.metadata) : '',
   ])
   const csv = [headers.join(','), ...rows.map(r => r.map(v => `"${v.replace(/"/g, '""')}"`).join(','))].join('\n')
   const blob = new Blob([csv], { type: 'text/csv' })
