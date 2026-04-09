@@ -132,10 +132,14 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
 
       <!-- Test result -->
       <div v-if="testResult" class="mb-4 px-4 py-3 rounded-lg text-sm" :class="testResult.success ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-red-50 border border-red-200 text-red-700'">
-        {{ testResult.success ? 'Test passed' : 'Test failed' }}
-        <span v-if="testResult.response_status"> — HTTP {{ testResult.response_status }}</span>
-        <span v-if="testResult.response_time_ms"> ({{ testResult.response_time_ms }}ms)</span>
-        <span v-if="testResult.error_message"> — {{ testResult.error_message }}</span>
+        <div class="flex items-center gap-2">
+          <span class="font-medium">{{ testResult.success ? 'Test passed' : 'Test failed' }}</span>
+          <span v-if="testResult.response_status" class="font-mono">HTTP {{ testResult.response_status }}</span>
+          <span v-if="testResult.response_time_ms" class="text-xs opacity-75">({{ testResult.response_time_ms }}ms)</span>
+        </div>
+        <p v-if="testResult.error_message" class="mt-1 text-xs">{{ testResult.error_message }}</p>
+        <p v-if="!testResult.success && !testResult.error_message" class="mt-1 text-xs">The webhook endpoint did not respond successfully. Check that the URL is reachable and returns a 2xx status.</p>
+        <p v-if="testResult.event_id" class="mt-1 text-xs opacity-75">Event ID: <span class="font-mono">{{ testResult.event_id }}</span></p>
       </div>
 
       <!-- Replay result -->
