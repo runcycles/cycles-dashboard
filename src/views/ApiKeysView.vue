@@ -17,6 +17,7 @@ import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
 import { formatDateTime } from '../utils/format'
 import { useToast } from '../composables/useToast'
+import { toMessage } from '../utils/errors'
 
 const toast = useToast()
 
@@ -39,7 +40,11 @@ async function executeRevoke() {
     await revokeApiKey(pendingRevoke.value.key_id, 'Revoked via admin dashboard')
     toast.success('API key revoked')
     await refresh()
-  } catch (e: any) { error.value = e.message }
+  } catch (e) {
+    const msg = toMessage(e)
+    error.value = msg
+    toast.error(`Revoke failed: ${msg}`)
+  }
   finally { pendingRevoke.value = null }
 }
 
@@ -61,7 +66,7 @@ async function submitCreate() {
     const res = await createApiKey(body as any)
     createdSecret.value = res
     showCreate.value = false
-  } catch (e: any) { createError.value = e.message }
+  } catch (e) { createError.value = toMessage(e) }
   finally { createLoading.value = false }
 }
 
@@ -96,7 +101,7 @@ async function submitEdit() {
     toast.success('API key updated')
     editingKey.value = null
     await refresh()
-  } catch (e: any) { editError.value = e.message }
+  } catch (e) { editError.value = toMessage(e) }
   finally { editLoading.value = false }
 }
 
@@ -132,7 +137,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     }
     keys.value = allKeys
     error.value = ''
-  } catch (e: any) { error.value = e.message }
+  } catch (e) { error.value = toMessage(e) }
 }, 60000)
 </script>
 

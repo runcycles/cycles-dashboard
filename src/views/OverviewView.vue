@@ -6,13 +6,14 @@ import type { AdminOverviewResponse } from '../types'
 import PageHeader from '../components/PageHeader.vue'
 import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import { formatTime } from '../utils/format'
+import { toMessage } from '../utils/errors'
 
 const data = ref<AdminOverviewResponse | null>(null)
 const error = ref('')
 
 const { refresh, isLoading } = usePolling(async () => {
   try { data.value = await getOverview(); error.value = '' }
-  catch (e: any) { error.value = e.message }
+  catch (e) { error.value = toMessage(e) }
 }, 30000)
 </script>
 

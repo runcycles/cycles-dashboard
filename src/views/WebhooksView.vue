@@ -15,6 +15,7 @@ import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
 import { useToast } from '../composables/useToast'
+import { toMessage } from '../utils/errors'
 
 const toast = useToast()
 
@@ -71,7 +72,7 @@ async function submitCreate() {
     createdWebhook.value = res
     showCreate.value = false
     toast.success('Webhook created')
-  } catch (e: any) { createError.value = e.message }
+  } catch (e) { createError.value = toMessage(e) }
   finally { createLoading.value = false }
 }
 
@@ -85,7 +86,11 @@ async function executeStatusAction() {
     await updateWebhook(id, { status: action })
     toast.success(action === 'PAUSED' ? 'Webhook paused' : 'Webhook enabled')
     await refresh()
-  } catch (e: any) { error.value = e.message }
+  } catch (e) {
+    const msg = toMessage(e)
+    error.value = msg
+    toast.error(`${action === 'PAUSED' ? 'Pause' : 'Enable'} failed: ${msg}`)
+  }
   finally { pendingStatusAction.value = null }
 }
 
@@ -108,7 +113,7 @@ async function openSecurityConfig() {
       allowed_patterns: (cfg.allowed_url_patterns || []).join('\n'),
       allow_http: cfg.allow_http || false,
     }
-  } catch (e: any) { securityError.value = e.message }
+  } catch (e) { securityError.value = toMessage(e) }
   finally { securityLoading.value = false }
 }
 
@@ -124,7 +129,7 @@ async function submitSecurityConfig() {
     await updateWebhookSecurityConfig(body)
     showSecurityConfig.value = false
     toast.success('Webhook security config updated')
-  } catch (e: any) { securityError.value = e.message }
+  } catch (e) { securityError.value = toMessage(e) }
   finally { securityLoading.value = false }
 }
 
@@ -134,7 +139,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     webhooks.value = wRes.subscriptions
     tenants.value = tRes.tenants
     error.value = ''
-  } catch (e: any) { error.value = e.message }
+  } catch (e) { error.value = toMessage(e) }
 }, 60000)
 </script>
 

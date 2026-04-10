@@ -18,11 +18,21 @@ vi.mock('../router', () => ({
 }))
 
 // Import after mocks are registered.
+import * as api from '../api/client'
 import { fetchWithTimeout, handleUnauthorized } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 
 function mockFetchOnce(response: Partial<Response> & { json?: () => Promise<unknown> }) {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response))
+}
+
+// Build a JSON-returning Response mock.
+function jsonResponse(body: unknown, status = 200): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: () => Promise.resolve(body),
+  } as unknown as Response
 }
 
 describe('fetchWithTimeout', () => {
@@ -140,3 +150,194 @@ describe('handleUnauthorized', () => {
 
 // Suppress unused warning for helper.
 void mockFetchOnce
+
+// ────────────────────────────────────────────────────────────────────
+// Smoke tests for endpoint exports — verifies each wrapper builds the
+// correct URL, method, and body. Not exhaustive; covers the operations
+// most likely to break silently (write operations + a few reads).
+// ────────────────────────────────────────────────────────────────────
+
+describe('endpoint wrappers — smoke', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    const auth = useAuthStore()
+    auth.apiKey = 'smoke-test-key'
+    routerPush.mockClear()
+    currentRoute.value = { name: 'overview', fullPath: '/' }
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function lastCall() {
+    const mock = fetch as unknown as ReturnType<typeof vi.fn>
+    return mock.mock.calls[mock.mock.calls.length - 1]
+  }
+
+  it('introspect → GET /v1/auth/introspect', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ authenticated: true })))
+    await api.introspect()
+    const [url, init] = lastCall()
+    expect(String(url)).toContain('/v1/auth/introspect')
+    expect(init.method).toBe('GET')
+    expect(init.headers['X-Admin-API-Key']).toBe('smoke-test-key')
+  })
+
+  it('getOverview → GET /v1/admin/overview', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({})))
+    await api.getOverview()
+    expect(String(lastCall()[0])).toContain('/v1/admin/overview')
+  })
+
+  it('listBudgets → GET /v1/admin/budgets with query params', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ ledgers: [] })))
+    await api.listBudgets({ tenant_id: 'acme', status: 'ACTIVE' })
+    const url = new URL(String(lastCall()[0]))
+    expect(url.pathname).toBe('/v1/admin/budgets')
+    expect(url.searchParams.get('tenant_id')).toBe('acme')
+    expect(url.searchParams.get('status')).toBe('ACTIVE')
+  })
+
+  it('listBudgets → skips empty/undefined params', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ ledgers: [] })))
+    await api.listBudgets({ tenant_id: 'acme', status: '' })
+    const url = new URL(String(lastCall()[0]))
+    expect(url.searchParams.get('status')).toBeNull()
+  })
+
+  it('createTenant → POST /v1/admin/tenants with JSON body', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ tenant_id: 'acme' })))
+    await api.createTenant({ tenant_id: 'acme', name: 'Acme Corp' })
+    const [url, init] = lastCall()
+    expect(String(url)).toContain('/v1/admin/tenants')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toEqual({ tenant_id: 'acme', name: 'Acme Corp' })
+  })
+
+  it('updateTenant → PATCH /v1/admin/tenants/{id}', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({})))
+    await api.updateTenant('acme', { name: 'Acme Inc' })
+    const [url, init] = lastCall()
+    expect(String(url)).toContain('/v1/admin/tenants/acme')
+    expect(init.method).toBe('PATCH')
+    expect(JSON.parse(init.body)).toEqual({ name: 'Acme Inc' })
+  })
+
+  it('updateTenantStatus → PATCH with only { status }', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({})))
+    await api.updateTenantStatus('acme', 'SUSPENDED')
+    const init = lastCall()[1]
+    expect(init.method).toBe('PATCH')
+    expect(JSON.parse(init.body)).toEqual({ status: 'SUSPENDED' })
+  })
+
+  it('createApiKey → POST /v1/admin/api-keys', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ key_id: 'k1' })))
+    await api.createApiKey({ tenant_id: 'acme', name: 'dev' })
+    const [url, init] = lastCall()
+    expect(String(url)).toContain('/v1/admin/api-keys')
+    expect(init.method).toBe('POST')
+  })
+
+  it('revokeApiKey → DELETE /v1/admin/api-keys/{id} with reason query', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 204 } as Response))
+    await api.revokeApiKey('key_123', 'compromised')
+    const [url, init] = lastCall()
+    const parsed = new URL(String(url))
+    expect(parsed.pathname).toBe('/v1/admin/api-keys/key_123')
+    expect(parsed.searchParams.get('reason')).toBe('compromised')
+    expect(init.method).toBe('DELETE')
+  })
+
+  it('revokeApiKey without reason → no query params', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 204 } as Response))
+    await api.revokeApiKey('key_123')
+    const url = new URL(String(lastCall()[0]))
+    expect(url.searchParams.get('reason')).toBeNull()
+  })
+
+  it('createWebhook → POST with tenant_id query param', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ subscription: {} })))
+    await api.createWebhook({ url: 'https://x/hook', event_types: ['budget.created'] }, 'acme')
+    const parsed = new URL(String(lastCall()[0]))
+    expect(parsed.pathname).toBe('/v1/admin/webhooks')
+    expect(parsed.searchParams.get('tenant_id')).toBe('acme')
+  })
+
+  it('deleteWebhook → DELETE', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 204 } as Response))
+    await api.deleteWebhook('sub_1')
+    const [url, init] = lastCall()
+    expect(String(url)).toContain('/v1/admin/webhooks/sub_1')
+    expect(init.method).toBe('DELETE')
+  })
+
+  it('testWebhook → POST with empty body', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ success: true })))
+    await api.testWebhook('sub_1')
+    const [url, init] = lastCall()
+    expect(String(url)).toContain('/v1/admin/webhooks/sub_1/test')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toEqual({})
+  })
+
+  it('freezeBudget → POST /v1/admin/budgets/freeze with scope+unit query', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({})))
+    await api.freezeBudget('tenant:acme', 'USD', 'investigation')
+    const parsed = new URL(String(lastCall()[0]))
+    expect(parsed.pathname).toBe('/v1/admin/budgets/freeze')
+    expect(parsed.searchParams.get('scope')).toBe('tenant:acme')
+    expect(parsed.searchParams.get('unit')).toBe('USD')
+    expect(JSON.parse(lastCall()[1].body)).toEqual({ reason: 'investigation' })
+  })
+
+  it('unfreezeBudget → POST /v1/admin/budgets/unfreeze', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({})))
+    await api.unfreezeBudget('tenant:acme', 'USD')
+    const parsed = new URL(String(lastCall()[0]))
+    expect(parsed.pathname).toBe('/v1/admin/budgets/unfreeze')
+  })
+
+  it('fundBudget → POST /v1/admin/budgets/fund with full body', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({})))
+    await api.fundBudget('acme', 'tenant:acme', 'USD', 'CREDIT', 100, 'idem-1', 'monthly')
+    const parsed = new URL(String(lastCall()[0]))
+    expect(parsed.pathname).toBe('/v1/admin/budgets/fund')
+    expect(parsed.searchParams.get('tenant_id')).toBe('acme')
+    const body = JSON.parse(lastCall()[1].body)
+    expect(body.operation).toBe('CREDIT')
+    expect(body.amount).toEqual({ unit: 'USD', amount: 100 })
+    expect(body.idempotency_key).toBe('idem-1')
+    expect(body.reason).toBe('monthly')
+  })
+
+  it('rotateWebhookSecret → generates a whsec_-prefixed secret and PATCHes it', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({})))
+    await api.rotateWebhookSecret('sub_1')
+    const init = lastCall()[1]
+    expect(init.method).toBe('PATCH')
+    const body = JSON.parse(init.body)
+    expect(body.signing_secret).toMatch(/^whsec_[a-f0-9]{64}$/)
+  })
+
+  it('propagates non-2xx as thrown Error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500 } as Response))
+    await expect(api.getOverview()).rejects.toThrow(/API error: 500/)
+  })
+
+  it('204 no-content returns undefined (mutate path)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 204 } as Response))
+    const result = await api.deleteWebhook('sub_1')
+    expect(result).toBeUndefined()
+  })
+
+  it('invalid JSON response throws "Invalid response from server"', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.reject(new SyntaxError('bad json')),
+    } as unknown as Response))
+    await expect(api.getOverview()).rejects.toThrow(/Invalid response from server/)
+  })
+})

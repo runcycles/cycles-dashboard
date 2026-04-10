@@ -14,6 +14,7 @@ import FormDialog from '../components/FormDialog.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import { formatDate } from '../utils/format'
 import { useToast } from '../composables/useToast'
+import { toMessage } from '../utils/errors'
 
 const toast = useToast()
 
@@ -57,7 +58,7 @@ async function submitCreate() {
     showCreate.value = false
     toast.success(`Tenant '${createForm.value.name}' created`)
     router.push({ name: 'tenant-detail', params: { id: createForm.value.tenant_id } })
-  } catch (e: any) { createError.value = e.message }
+  } catch (e) { createError.value = toMessage(e) }
   finally { createLoading.value = false }
 }
 
@@ -71,7 +72,11 @@ async function executeStatusAction() {
     await updateTenantStatus(tenantId, action)
     toast.success(action === 'SUSPENDED' ? 'Tenant suspended' : 'Tenant reactivated')
     await refresh()
-  } catch (e: any) { error.value = e.message }
+  } catch (e) {
+    const msg = toMessage(e)
+    error.value = msg
+    toast.error(`${action === 'SUSPENDED' ? 'Suspend' : 'Reactivate'} failed: ${msg}`)
+  }
   finally { pendingStatusAction.value = null }
 }
 
@@ -80,7 +85,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     const res = await listTenants()
     tenants.value = res.tenants
     error.value = ''
-  } catch (e: any) { error.value = e.message }
+  } catch (e) { error.value = toMessage(e) }
 }, 60000)
 </script>
 

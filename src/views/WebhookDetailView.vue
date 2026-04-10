@@ -14,6 +14,7 @@ import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
 import { useToast } from '../composables/useToast'
+import { toMessage } from '../utils/errors'
 
 const toast = useToast()
 import { formatDateTime } from '../utils/format'
@@ -41,7 +42,11 @@ async function executeAction() {
     webhook.value = await getWebhook(id)
     const label = pendingAction.value === 'reset' ? 'Webhook re-enabled' : pendingAction.value === 'PAUSED' ? 'Webhook paused' : 'Webhook enabled'
     toast.success(label)
-  } catch (e: any) { error.value = e.message }
+  } catch (e) {
+    const msg = toMessage(e)
+    error.value = msg
+    toast.error(`Status change failed: ${msg}`)
+  }
   finally { pendingAction.value = null }
 }
 
@@ -52,7 +57,12 @@ async function executeDelete() {
     await deleteWebhook(id)
     toast.success('Webhook deleted')
     router.push('/webhooks')
-  } catch (e: any) { error.value = e.message; pendingDelete.value = false }
+  } catch (e) {
+    const msg = toMessage(e)
+    error.value = msg
+    toast.error(`Delete failed: ${msg}`)
+    pendingDelete.value = false
+  }
 }
 
 // Rotate signing secret
@@ -68,7 +78,11 @@ async function executeRotate() {
     }
     toast.success('Signing secret rotated')
     webhook.value = await getWebhook(id)
-  } catch (e: any) { error.value = e.message }
+  } catch (e) {
+    const msg = toMessage(e)
+    error.value = msg
+    toast.error(`Rotate secret failed: ${msg}`)
+  }
 }
 
 // Edit webhook
@@ -106,7 +120,7 @@ async function submitEdit() {
     toast.success('Webhook updated')
     webhook.value = await getWebhook(id)
     showEdit.value = false
-  } catch (e: any) { editError.value = e.message }
+  } catch (e) { editError.value = toMessage(e) }
   finally { editLoading.value = false }
 }
 
@@ -118,7 +132,11 @@ async function runTest() {
   testResult.value = null
   try {
     testResult.value = await testWebhook(id)
-  } catch (e: any) { error.value = e.message }
+  } catch (e) {
+    const msg = toMessage(e)
+    error.value = msg
+    toast.error(`Test failed: ${msg}`)
+  }
   finally { testLoading.value = false }
 }
 
@@ -141,7 +159,7 @@ async function submitReplay() {
     replayResult.value = `${res.events_queued} events queued for replay`
     showReplay.value = false
     setTimeout(() => { replayResult.value = null }, 5000)
-  } catch (e: any) { replayError.value = e.message }
+  } catch (e) { replayError.value = toMessage(e) }
   finally { replayLoading.value = false }
 }
 
@@ -151,7 +169,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     const res = await listDeliveries(id)
     deliveries.value = res.deliveries
     error.value = ''
-  } catch (e: any) { error.value = e.message }
+  } catch (e) { error.value = toMessage(e) }
 }, 30000)
 </script>
 
