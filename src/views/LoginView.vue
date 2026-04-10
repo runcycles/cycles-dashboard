@@ -18,6 +18,22 @@ let lockTimer: ReturnType<typeof setInterval> | null = null
 
 const isLocked = computed(() => lockRemaining.value > 0)
 
+// Sanitize post-login redirect target to prevent open-redirect attacks.
+// Resolves the redirect against the current origin and only accepts same-origin
+// results. This catches `//evil.com`, `/\evil.com`, `/%2Fevil.com`,
+// `https://evil.com`, and similar parser-difference tricks that a naive
+// startsWith('/') check would miss.
+function sanitizeRedirect(raw: string): string {
+  if (!raw || typeof raw !== 'string') return '/'
+  try {
+    const url = new URL(raw, window.location.origin)
+    if (url.origin !== window.location.origin) return '/'
+    return url.pathname + url.search + url.hash
+  } catch {
+    return '/'
+  }
+}
+
 function startLockCountdown() {
   if (lockTimer) clearInterval(lockTimer)
   lockTimer = setInterval(() => {
@@ -40,7 +56,7 @@ async function submit() {
       failedAttempts.value = 0
       if (lockTimer) { clearInterval(lockTimer); lockTimer = null }
       const redirect = (route.query.redirect as string) || '/'
-      const target = redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/'
+      const target = sanitizeRedirect(redirect)
       // Use full page navigation to guarantee clean state — avoids stale
       // router query params (expired=1) and session checker race conditions
       window.location.href = target
@@ -78,10 +94,13 @@ onUnmounted(() => {
       <p v-if="expired" class="text-sm text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 mb-4">Your session expired due to inactivity. Please log in again.</p>
       <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">Enter your admin API key to continue.</p>
       <form @submit.prevent="submit">
+        <label for="admin-api-key" class="sr-only">Admin API Key</label>
         <input
+          id="admin-api-key"
           v-model="key"
           type="password"
           placeholder="X-Admin-API-Key"
+          aria-label="Admin API Key"
           class="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
           autofocus
         />
