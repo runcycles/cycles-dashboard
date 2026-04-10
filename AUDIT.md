@@ -276,3 +276,28 @@ Full admin management UI — create, update, and delete resources directly from 
 | `useToast.ts` | Global toast notification state with auto-dismiss |
 
 **Build:** Zero TypeScript errors. 15 tests pass. Version 0.1.25.10.
+
+---
+
+### 2026-04-10 — v0.1.25.11: Bug fixes (dashboard-only minor)
+
+No spec changes — dashboard-only patch bundle.
+
+**Fixes:**
+
+| # | Area | Issue | Fix |
+|---|------|-------|-----|
+| 1 | Audit tab | Clicking Reveal icon on masked Key ID also toggled parent row expansion (#19) | Added `.stop` modifier on the Reveal button in `MaskedValue.vue`; also added `type="button"` to both Reveal and Copy buttons |
+| 2 | Logout flow | After sidebar logout, URL became `/login?redirect=/login` and login looped back to login page | Centralized 401/403 handler in `api/client.ts` now skips the redirect push if current route is already `/login`; `LoginView.submit` additionally rejects `/login` as a redirect target |
+| 3 | Login button | Visible flicker on click (dim + "Connecting..." text) when the backend responded faster than perception threshold | `showLoading` visual state is now delayed 200ms; fast responses never flip it. Opacity moved to class binding with `transition-opacity duration-150` for smooth change |
+| 4 | Dark mode | Webhook test-success banner rendered in bright `bg-green-50` while test-failure banner correctly tinted via global override | Added `.dark .bg-green-50` rule to `style.css` matching the existing red/yellow/blue banner overrides |
+
+**Files touched:**
+
+- `src/components/MaskedValue.vue` — fix #1
+- `src/api/client.ts` — fix #2 (extracted `handleUnauthorized()`)
+- `src/views/LoginView.vue` — fixes #2, #3
+- `src/style.css` — fix #4
+- `package.json`, `README.md` — version bump
+
+**Build:** Zero TypeScript errors. 15 tests pass. Version 0.1.25.11.

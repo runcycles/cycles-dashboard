@@ -48,6 +48,7 @@
 .dark .bg-red-50    { background-color: color-mix(in oklab, var(--color-red-800) 20%, transparent); }
 .dark .bg-yellow-50 { background-color: color-mix(in oklab, var(--color-yellow-800) 20%, transparent); }
 .dark .bg-blue-50   { background-color: color-mix(in oklab, var(--color-blue-800) 20%, transparent); }
+.dark .bg-green-50  { background-color: color-mix(in oklab, var(--color-green-800) 20%, transparent); }
 
 /* Borders */
 .dark .border-gray-100 { border-color: var(--color-gray-800); }

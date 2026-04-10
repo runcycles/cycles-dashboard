@@ -16,8 +16,7 @@ async function request<T>(method: string, path: string, params?: Record<string, 
     headers: { 'X-Admin-API-Key': auth.apiKey, 'Content-Type': 'application/json' },
   })
   if (res.status === 401 || res.status === 403) {
-    auth.logout()
-    router.push({ name: 'login', query: { redirect: router.currentRoute.value.fullPath } })
+    handleUnauthorized()
     throw new Error('Unauthorized')
   }
   if (!res.ok) throw new Error(`API error: ${res.status}`)
@@ -26,6 +25,18 @@ async function request<T>(method: string, path: string, params?: Record<string, 
   } catch {
     throw new Error('Invalid response from server')
   }
+}
+
+// Centralized 401/403 handling. Logs out and redirects to /login — but only
+// if we're not already there. This avoids a race where an in-flight fetch
+// from an unmounting protected view resolves *after* logout has already
+// navigated to /login, producing `/login?redirect=/login`.
+function handleUnauthorized() {
+  const auth = useAuthStore()
+  auth.logout()
+  const current = router.currentRoute.value
+  if (current.name === 'login') return
+  router.push({ name: 'login', query: { redirect: current.fullPath } })
 }
 
 function get<T>(path: string, params?: Record<string, string>): Promise<T> {
@@ -46,8 +57,7 @@ async function mutate<T>(method: string, path: string, body?: Record<string, unk
     body: body ? JSON.stringify(body) : undefined,
   })
   if (res.status === 401 || res.status === 403) {
-    auth.logout()
-    router.push({ name: 'login', query: { redirect: router.currentRoute.value.fullPath } })
+    handleUnauthorized()
     throw new Error('Unauthorized')
   }
   if (!res.ok) throw new Error(`API error: ${res.status}`)

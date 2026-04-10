@@ -8,6 +8,11 @@ const route = useRoute()
 const key = ref('')
 const error = ref('')
 const loading = ref(false)
+// `showLoading` is the *visual* loading state, delayed by 200ms so fast
+// responses (local dev, warm cache) don't flash "Connecting..." + dim before
+// the page navigates away.
+const showLoading = ref(false)
+let loadingVisualTimer: ReturnType<typeof setTimeout> | null = null
 const expired = route.query.expired === '1'
 
 // Rate limiting: exponential backoff after failed attempts
@@ -18,16 +23,21 @@ let lockTimer: ReturnType<typeof setInterval> | null = null
 
 const isLocked = computed(() => lockRemaining.value > 0)
 
-// Sanitize post-login redirect target to prevent open-redirect attacks.
-// Resolves the redirect against the current origin and only accepts same-origin
-// results. This catches `//evil.com`, `/\evil.com`, `/%2Fevil.com`,
-// `https://evil.com`, and similar parser-difference tricks that a naive
-// startsWith('/') check would miss.
-function sanitizeRedirect(raw: string): string {
+// Sanitize post-login redirect target.
+// Two protections:
+//  1. Open-redirect: resolve against current origin and only accept same-origin
+//     results. Catches `//evil.com`, `/\evil.com`, `/%2Fevil.com`,
+//     `https://evil.com`, and similar parser-difference tricks that a naive
+//     startsWith('/') check would miss.
+//  2. Login loop: reject any /login target. If a logout-race produces
+//     `?redirect=/login` we'd trap the user on the login screen after
+//     successful auth.
+export function sanitizeRedirect(raw: string): string {
   if (!raw || typeof raw !== 'string') return '/'
   try {
     const url = new URL(raw, window.location.origin)
     if (url.origin !== window.location.origin) return '/'
+    if (url.pathname === '/login' || url.pathname.startsWith('/login/')) return '/'
     return url.pathname + url.search + url.hash
   } catch {
     return '/'
@@ -50,9 +60,14 @@ async function submit() {
   if (isLocked.value || loading.value) return
   error.value = ''
   loading.value = true
+  // Only flip the visual loading state if the request is slow enough to
+  // warrant feedback — avoids a sub-perceptual flash on fast responses.
+  loadingVisualTimer = setTimeout(() => { showLoading.value = true }, 200)
+  let navigating = false
   try {
     const ok = await auth.login(key.value)
     if (ok) {
+      navigating = true
       failedAttempts.value = 0
       if (lockTimer) { clearInterval(lockTimer); lockTimer = null }
       const redirect = (route.query.redirect as string) || '/'
@@ -75,12 +90,19 @@ async function submit() {
   } catch {
     error.value = 'Connection failed. Please try again.'
   } finally {
-    loading.value = false
+    if (loadingVisualTimer) { clearTimeout(loadingVisualTimer); loadingVisualTimer = null }
+    // When we're navigating away, leave the visual state as-is so the button
+    // doesn't pop back to "Login" during the browser's unload delay.
+    if (!navigating) {
+      showLoading.value = false
+      loading.value = false
+    }
   }
 }
 
 onUnmounted(() => {
   if (lockTimer) { clearInterval(lockTimer); lockTimer = null }
+  if (loadingVisualTimer) { clearTimeout(loadingVisualTimer); loadingVisualTimer = null }
 })
 </script>
 
@@ -108,9 +130,10 @@ onUnmounted(() => {
         <button
           type="submit"
           :disabled="!key || loading || isLocked"
-          class="mt-4 w-full bg-gray-900 text-white py-2 rounded-md text-sm font-medium hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+          class="mt-4 w-full bg-gray-900 text-white py-2 rounded-md text-sm font-medium hover:bg-gray-800 disabled:cursor-not-allowed transition-opacity duration-150"
+          :class="{ 'opacity-50': !key || showLoading || isLocked }"
         >
-          {{ isLocked ? `Locked (${lockRemaining}s)` : loading ? 'Connecting...' : 'Login' }}
+          {{ isLocked ? `Locked (${lockRemaining}s)` : showLoading ? 'Connecting...' : 'Login' }}
         </button>
       </form>
     </div>
