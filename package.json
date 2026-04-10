@@ -1,8 +1,11 @@
 {
   "name": "cycles-dashboard",
   "private": true,
-  "version": "0.1.25.13",
+  "version": "0.1.25.14",
   "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
