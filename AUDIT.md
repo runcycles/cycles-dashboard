@@ -438,10 +438,19 @@ Small cleanup PR to address release-shipping findings from the pre-release audit
 |---|------|-----|
 | 1 | `AUDIT.md` header | Updated stale `Date` line (was 2026-04-08 / v0.1.25.10) to reflect current version |
 | 2 | `package-lock.json` | Regenerated via `npm install` to match `package.json` version (was stuck at 0.1.25.10) |
-| 3 | `Dockerfile` | Pinned base images to specific minor versions: `node:20-alpine` → `node:20.18-alpine`, `nginx:alpine` → `nginx:1.27-alpine`. Prevents silent supply-chain drift between builds. |
+| 3 | `Dockerfile` | Pinned base images to specific minor versions: `node:20-alpine` → `node:20.19-alpine`, `nginx:alpine` → `nginx:1.27-alpine`. Prevents silent supply-chain drift between builds. Node 20.19 is the floor required by vite 8 / rolldown (caught during local Docker build — 20.18 fails with `MODULE_NOT_FOUND` on rolldown's native binding). |
 | 4 | `.dockerignore` | **NEW.** Excludes `node_modules`, `dist`, `coverage`, tests, `.env*`, `.git`, docs, and `.github` from the Docker build context. Smaller build context, prevents leaking dev/CI artifacts into image layers. |
-| 5 | `package.json` | Added `"engines": { "node": ">=20.0.0" }` to self-document the Node version requirement (CI already tests 20 + 22). |
+| 5 | `package.json` | Added `"engines": { "node": ">=20.19.0" }` to self-document the Node version requirement (matches rolldown's `engines` constraint). |
 | — | `README.md` | Docker image tag bumped to 0.1.25.14 |
+
+**Verification** (first PR to include an end-to-end local Docker test):
+
+- `vue-tsc -b --noEmit` — clean
+- `vitest run` — 141/141 pass
+- `npm run test:coverage` — all thresholds pass (exit 0)
+- `vite build` — clean
+- **`docker build .`** — succeeds end-to-end (caught the rolldown engines bug that unpinned `node:20-alpine` was silently hiding)
+- **`docker run`** — container serves HTTP 200, security headers present (`X-Frame-Options`, `X-Content-Type-Options`, CSP from `nginx.conf`)
 
 **Release version jump:** This PR is the fourth dashboard-only minor since v0.1.25.10, the last GitHub release. The next GitHub release (v0.1.25.14) will cover all the work from v0.1.25.11 through v0.1.25.14 in a single release:
 
