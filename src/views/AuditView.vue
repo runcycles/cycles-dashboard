@@ -9,6 +9,7 @@ import TenantLink from '../components/TenantLink.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
 import { formatDateTime } from '../utils/format'
+import { toMessage } from '../utils/errors'
 
 const entries = ref<AuditLogEntry[]>([])
 const error = ref('')
@@ -78,7 +79,7 @@ async function query() {
     const res = await listAuditLogs(params)
     entries.value = res.logs
     error.value = ''
-  } catch (e: any) { error.value = e.message }
+  } catch (e) { error.value = toMessage(e) }
   finally { loading.value = false }
 }
 

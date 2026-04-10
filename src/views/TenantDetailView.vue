@@ -14,6 +14,7 @@ import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
 import { useToast } from '../composables/useToast'
+import { toMessage } from '../utils/errors'
 
 const toast = useToast()
 
@@ -42,7 +43,11 @@ async function executeTenantAction() {
     const labels: Record<string, string> = { SUSPENDED: 'Tenant suspended', ACTIVE: 'Tenant reactivated', CLOSED: 'Tenant permanently closed' }
     toast.success(labels[pendingTenantAction.value])
     tenant.value = await getTenant(id)
-  } catch (e: any) { error.value = e.message }
+  } catch (e) {
+    const msg = toMessage(e)
+    error.value = msg
+    toast.error(`Tenant status change failed: ${msg}`)
+  }
   finally { pendingTenantAction.value = null }
 }
 
@@ -56,7 +61,11 @@ async function executeKeyRevoke() {
     toast.success('API key revoked')
     const kRes = await listApiKeys({ tenant_id: id })
     apiKeys.value = kRes.keys
-  } catch (e: any) { error.value = e.message }
+  } catch (e) {
+    const msg = toMessage(e)
+    error.value = msg
+    toast.error(`Revoke failed: ${msg}`)
+  }
   finally { pendingKeyRevoke.value = null }
 }
 
@@ -90,7 +99,7 @@ async function submitEditTenant() {
     toast.success('Tenant updated')
     tenant.value = await getTenant(id)
     showEditTenant.value = false
-  } catch (e: any) { editTenantError.value = e.message }
+  } catch (e) { editTenantError.value = toMessage(e) }
   finally { editTenantLoading.value = false }
 }
 
@@ -118,7 +127,7 @@ async function submitCreateKey() {
     const res = await createApiKey(body as any)
     createdKeySecret.value = res
     showCreateKey.value = false
-  } catch (e: any) { createKeyError.value = e.message }
+  } catch (e) { createKeyError.value = toMessage(e) }
   finally { createKeyLoading.value = false }
 }
 
@@ -134,7 +143,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     apiKeys.value = kRes.keys
     policies.value = pRes.policies
     error.value = ''
-  } catch (e: any) { error.value = e.message }
+  } catch (e) { error.value = toMessage(e) }
 }, 60000)
 </script>
 

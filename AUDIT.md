@@ -340,3 +340,88 @@ No spec changes. Addresses the fetch-timeout gap and establishes the test-covera
 - **95%+ overall coverage** — diminishing returns on view templates. Target 95%+ on logic-heavy files (stores, composables, API client) incrementally. Round 2 will target `auth.ts` race scenarios and `composables/*`.
 
 **Build:** Zero TypeScript errors. 50 tests pass (was 15). Version 0.1.25.12.
+
+---
+
+### 2026-04-10 — v0.1.25.13: CI hygiene + error handling + test coverage round 2
+
+Three independent improvements in one bundle, covering the open code-review gaps by category (C → B → A).
+
+#### C. CI / branch hygiene
+
+Prevents the silent-revert class of bug that hit PR #22 when PR #21 merged on an older base.
+
+- **Branch protection on `main`** updated via `gh api` with `required_status_checks.strict: true`. Branches must be up to date with main before merge, and both CI checks (`ci / Test (Node 20)`, `ci / Test (Node 22)`) must pass.
+- **Coverage thresholds** added to `vitest.config.ts`. Scoped to logic-heavy directories (`src/api/**`, `src/stores/**`, `src/composables/**`, `src/utils/**`) — view templates are excluded because declarative Vue templates have diminishing returns on tests. Thresholds: 70% lines/functions/branches/statements. CI will now fail on coverage regressions.
+
+#### B. Error handling + focus management
+
+Addresses HIGH-priority gaps from the code review.
+
+- **`src/utils/errors.ts`** — new `toMessage(e, fallback)` helper that normalizes `unknown` caught values (`Error`, strings, plain objects with `message`, anything else) into a readable string. Kills the `e.message` → `undefined` class of bug in catch blocks.
+- **Mutation-failure toasts** — swept every view (~26 catch sites) to:
+  - Replace `catch (e: any) { error.value = e.message }` with `catch (e) { error.value = toMessage(e) }`
+  - Add `toast.error(...)` on every mutation failure path (freeze/unfreeze, tenant suspend/reactivate, API key revoke, webhook pause/enable/delete/rotate/test). Mutations with dialog-level error banners (create/edit flows) keep their inline error but can extend later.
+- **`src/composables/useFocusTrap.ts`** — new composable providing proper modal accessibility:
+  - Focuses the first focusable child on mount
+  - Cycles focus within the container on Tab / Shift+Tab
+  - Restores focus to the previously-focused element on unmount
+  - Falls back to a `tabindex=-1` container focus when no focusable children
+- **`FormDialog.vue`** and **`ConfirmAction.vue`** now use `useFocusTrap` and gain proper dark-mode text colors on title/body. Affects every CRUD dialog across the app.
+
+#### A. Test coverage round 2
+
+Tests for the highest-risk logic files. The concurrent-login test documents the current imperfect behavior as a regression guard — it settles whether the "single-flight auth login" deferred item from the code review is a real need (yes, but only when LoginView's re-entrancy guard is bypassed, which is not currently reachable).
+
+| Suite | Count | Covers |
+|-------|-------|--------|
+| `auth-extended.test.ts` | 16 | `restore()` (happy path, absolute timeout, idle timeout, network failure during re-introspect), `checkTimeout()` (fresh, expired, exact-boundary strict comparison), `touchActivity()` (no-op when logged out, updates timestamp when logged in), concurrent login behavior (two successes, success-races-failure documented), sessionStorage clear on logout |
+| `errors.test.ts` | 14 | `toMessage` on Error / string / plain-object-with-message / null / undefined / number / boolean / custom fallback / Error subclasses |
+| `useSort.test.ts` | 13 | asc/desc/toggle, switching columns, numeric vs lexicographic, null placement (asc/desc), both-null stability, custom accessors, default key/dir, non-mutation of source, reactivity to source changes |
+| `useToast.test.ts` | 7 | show/success/error, 4s auto-dismiss, stacking, independent FIFO dismissal, unique ids, return-value exposure |
+| `useDarkMode.test.ts` | 4 | default light when system light, default dark when system dark, stored preference overrides system, toggle flips state + persists |
+| `format.test.ts` | 9 | `formatDateTime` / `formatDate` / `formatTime` happy paths, `Invalid Date` handling, `formatRelative` boundaries (< 60s = "just now", < 1h = "Nm ago", < 24h = "Nh ago", > 24h = date fallback, exact 60s) |
+| `useFocusTrap.test.ts` | 8 | first-focusable on mount, container-fallback, restore-on-unmount, Tab wrap from last to first, Shift+Tab wrap from first to last, non-Tab keys ignored, disabled element skip, keydown listener cleanup |
+| `client.test.ts` (expanded) | +20 | Endpoint smoke tests: URL + method + body for introspect, overview, listBudgets (with empty-param skip), createTenant, updateTenant, updateTenantStatus, createApiKey, revokeApiKey (with/without reason), createWebhook, deleteWebhook, testWebhook, freezeBudget, unfreezeBudget, fundBudget, rotateWebhookSecret (verifies `whsec_` prefix + 32-byte hex), 500 error, 204 no-content, invalid JSON |
+
+**Test suite total:** 50 → **141** (2.8× increase).
+
+**Coverage (scoped to logic dirs):**
+
+| Directory | Lines | Branches | Functions | Statements |
+|-----------|-------|----------|-----------|------------|
+| `api/` (client.ts) | 81.3% | 83.3% | 61.0% | 81.7% |
+| `stores/` (auth.ts) | **100%** | 86.8% | **100%** | 96.6% |
+| `composables/` | 70.8% | 74.3% | 69.7% | 69.3% |
+| `utils/` | **100%** | **100%** | **100%** | **100%** |
+| **All files** | **81.7%** | **83.7%** | **70.5%** | **80.9%** |
+
+All four metrics clear the 70% floor. CI will now block regressions.
+
+**Deferred to round 3:**
+- `usePolling.ts` — 0% coverage. Requires component mounting + fake timers + visibility API mocking. Doable but non-trivial.
+- `FormDialog`/`ConfirmAction`/`SecretReveal`/`MaskedValue` component tests — behavioral tests (escape close, copy button, reveal clean DOM). Round 3.
+- **Single-flight auth login** — the `auth-extended.test.ts > concurrent login where one fails` test documents the race as a real gap. Still deferred until it's reachable from the UI (currently blocked by LoginView's loading guard).
+
+**Files touched:**
+
+New:
+- `src/utils/errors.ts`
+- `src/composables/useFocusTrap.ts`
+- `src/__tests__/errors.test.ts`
+- `src/__tests__/auth-extended.test.ts`
+- `src/__tests__/useSort.test.ts`
+- `src/__tests__/useToast.test.ts`
+- `src/__tests__/useDarkMode.test.ts`
+- `src/__tests__/format.test.ts`
+- `src/__tests__/useFocusTrap.test.ts`
+
+Modified:
+- `vitest.config.ts` — coverage config + thresholds
+- `src/components/FormDialog.vue` — focus trap + dark-mode text fix
+- `src/components/ConfirmAction.vue` — focus trap + dark-mode text fix
+- `src/views/*.vue` (9 files) — `toMessage(e)` + mutation error toasts
+- `src/__tests__/client.test.ts` — +20 endpoint smoke tests
+- `package.json`, `README.md` — version bump
+
+**Build:** Zero TypeScript errors. **141 tests pass** (was 50). Coverage gate enforced at 70%. Version 0.1.25.13.

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
+import { useFocusTrap } from '../composables/useFocusTrap'
 
 defineProps<{
   title: string
@@ -9,6 +10,9 @@ defineProps<{
   wide?: boolean
 }>()
 const emit = defineEmits<{ submit: []; cancel: [] }>()
+
+const dialogRef = ref<HTMLElement | null>(null)
+useFocusTrap(dialogRef)
 
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') emit('cancel')
@@ -20,7 +24,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
 
 <template>
   <div class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 overflow-y-auto py-8" @click.self="$emit('cancel')">
-    <div :class="wide ? 'max-w-xl' : 'max-w-lg'" class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 mx-4 w-full" role="dialog" aria-modal="true" :aria-label="title">
+    <div ref="dialogRef" :class="wide ? 'max-w-xl' : 'max-w-lg'" class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 mx-4 w-full" role="dialog" aria-modal="true" :aria-label="title">
       <h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-4">{{ title }}</h3>
       <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded px-3 py-2 mb-4">{{ error }}</p>
       <form @submit.prevent="$emit('submit')">

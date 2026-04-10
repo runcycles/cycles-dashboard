@@ -16,6 +16,7 @@ import EventTimeline from '../components/EventTimeline.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import { useToast } from '../composables/useToast'
+import { toMessage } from '../utils/errors'
 
 const toast = useToast()
 
@@ -103,7 +104,7 @@ async function loadList() {
       nextCursor.value = res.next_cursor ?? ''
     }
     error.value = ''
-  } catch (e: any) { error.value = e.message }
+  } catch (e) { error.value = toMessage(e) }
 }
 
 async function loadDetail() {
@@ -114,7 +115,7 @@ async function loadDetail() {
     const evRes = await listEvents({ scope, limit: '20' })
     detailEvents.value = evRes.events.filter(e => e.scope === scope)
     error.value = ''
-  } catch (e: any) { error.value = e.message }
+  } catch (e) { error.value = toMessage(e) }
 }
 
 async function loadMore() {
@@ -129,7 +130,7 @@ async function loadMore() {
     budgets.value = [...budgets.value, ...res.ledgers]
     hasMore.value = res.has_more
     nextCursor.value = res.next_cursor ?? ''
-  } catch (e: any) { error.value = e.message }
+  } catch (e) { error.value = toMessage(e) }
   finally { loadingMore.value = false }
 }
 
@@ -163,7 +164,11 @@ async function executeBudgetAction() {
     if (isDetail.value) await loadDetail()
     else await loadList()
     toast.success(action === 'freeze' ? 'Budget frozen' : 'Budget unfrozen')
-  } catch (e: any) { error.value = e.message }
+  } catch (e) {
+    const msg = toMessage(e)
+    error.value = msg
+    toast.error(`${action === 'freeze' ? 'Freeze' : 'Unfreeze'} failed: ${msg}`)
+  }
   finally { pendingAction.value = null }
 }
 
@@ -199,7 +204,7 @@ async function submitFund() {
     showFund.value = false
     const labels: Record<string, string> = { CREDIT: 'Budget credited', DEBIT: 'Budget debited', RESET: 'Budget allocation reset', REPAY_DEBT: 'Debt repaid' }
     toast.success(labels[fundForm.value.operation] || 'Budget updated')
-  } catch (e: any) { fundError.value = e.message }
+  } catch (e) { fundError.value = toMessage(e) }
   finally { fundLoading.value = false }
 }
 
@@ -232,7 +237,7 @@ async function submitEditBudget() {
     await loadDetail()
     showEditBudget.value = false
     toast.success('Budget config updated')
-  } catch (e: any) { editBudgetError.value = e.message }
+  } catch (e) { editBudgetError.value = toMessage(e) }
   finally { editBudgetLoading.value = false }
 }
 

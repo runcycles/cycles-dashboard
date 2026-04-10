@@ -10,6 +10,7 @@ import TenantLink from '../components/TenantLink.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
 import { formatDateTime } from '../utils/format'
+import { toMessage } from '../utils/errors'
 
 const route = useRoute()
 const router = useRouter()
@@ -41,7 +42,7 @@ async function load() {
     hasMore.value = res.has_more
     nextCursor.value = res.next_cursor ?? ''
     error.value = ''
-  } catch (e: any) { error.value = e.message }
+  } catch (e) { error.value = toMessage(e) }
 }
 
 function applyFilters() {
@@ -74,7 +75,7 @@ async function loadMore() {
     events.value = [...events.value, ...res.events]
     hasMore.value = res.has_more
     nextCursor.value = res.next_cursor ?? ''
-  } catch (e: any) { error.value = e.message }
+  } catch (e) { error.value = toMessage(e) }
   finally { loadingMore.value = false }
 }
 
