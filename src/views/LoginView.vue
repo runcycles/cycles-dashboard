@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onUnmounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
-import { useRouter, useRoute } from 'vue-router'
+import { useRoute } from 'vue-router'
 
 const auth = useAuthStore()
-const router = useRouter()
 const route = useRoute()
 const key = ref('')
 const error = ref('')
@@ -32,7 +31,7 @@ function startLockCountdown() {
 }
 
 async function submit() {
-  if (isLocked.value) return
+  if (isLocked.value || loading.value) return
   error.value = ''
   loading.value = true
   try {
@@ -41,7 +40,10 @@ async function submit() {
       failedAttempts.value = 0
       if (lockTimer) { clearInterval(lockTimer); lockTimer = null }
       const redirect = (route.query.redirect as string) || '/'
-      await router.push(redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/')
+      const target = redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/'
+      // Use full page navigation to guarantee clean state — avoids stale
+      // router query params (expired=1) and session checker race conditions
+      window.location.href = target
       return
     }
     failedAttempts.value++
