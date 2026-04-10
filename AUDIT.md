@@ -276,3 +276,67 @@ Full admin management UI — create, update, and delete resources directly from 
 | `useToast.ts` | Global toast notification state with auto-dismiss |
 
 **Build:** Zero TypeScript errors. 15 tests pass. Version 0.1.25.10.
+
+---
+
+### 2026-04-10 — v0.1.25.11: Bug fixes (dashboard-only minor)
+
+No spec changes — dashboard-only patch bundle.
+
+**Fixes:**
+
+| # | Area | Issue | Fix |
+|---|------|-------|-----|
+| 1 | Audit tab | Clicking Reveal icon on masked Key ID also toggled parent row expansion (#19) | Added `.stop` modifier on the Reveal button in `MaskedValue.vue`; also added `type="button"` to both Reveal and Copy buttons |
+| 2 | Logout flow | After sidebar logout, URL became `/login?redirect=/login` and login looped back to login page | Centralized 401/403 handler in `api/client.ts` now skips the redirect push if current route is already `/login`; `LoginView.submit` additionally rejects `/login` as a redirect target |
+| 3 | Login button | Visible flicker on click (dim + "Connecting..." text) when the backend responded faster than perception threshold | `showLoading` visual state is now delayed 200ms; fast responses never flip it. Opacity moved to class binding with `transition-opacity duration-150` for smooth change |
+| 4 | Dark mode | Webhook test-success banner rendered in bright `bg-green-50` while test-failure banner correctly tinted via global override | Added `.dark .bg-green-50` rule to `style.css` matching the existing red/yellow/blue banner overrides |
+
+**Files touched:**
+
+- `src/components/MaskedValue.vue` — fix #1
+- `src/api/client.ts` — fix #2 (extracted `handleUnauthorized()`)
+- `src/views/LoginView.vue` — fixes #2, #3
+- `src/style.css` — fix #4
+- `package.json`, `README.md` — version bump
+
+**Build:** Zero TypeScript errors. 15 tests pass. Version 0.1.25.11.
+
+---
+
+### 2026-04-10 — v0.1.25.12: API client hardening + test coverage (round 1)
+
+No spec changes. Addresses the fetch-timeout gap and establishes the test-coverage baseline for the API client and the redirect sanitizer.
+
+**Code changes:**
+
+| Area | Change |
+|------|--------|
+| `src/api/client.ts` | New `fetchWithTimeout()` helper backed by `AbortController` with a 30s default timeout. Translates `AbortError` → clear `Request timed out after Nms` message. Wired into both `request()` and `mutate()`. `handleUnauthorized` is now exported for testing. |
+| `src/utils/sanitize.ts` | **NEW.** Extracted `sanitizeRedirect()` from `LoginView.vue` into a pure module. Accepts `(raw: unknown, origin: string)` so it can be tested without `window.location`. |
+| `src/views/LoginView.vue` | Import `sanitizeRedirect` from `utils/sanitize`; pass `window.location.origin` explicitly. |
+
+**New tests (+35):**
+
+| Suite | Count | Covers |
+|-------|-------|--------|
+| `sanitize.test.ts` | 25 | Happy path (path/search/hash preservation), empty/null/undefined/non-string inputs, open-redirect attack vectors (`//evil.com`, `javascript:`, `data:`, absolute URLs), `/login` loop rejection, edge cases (URL-encoded slashes, malformed input, arbitrary origins) |
+| `client.test.ts` | 10 | `fetchWithTimeout` success, signal injection, timeout via `AbortController`, non-abort error propagation, timer cleanup on success; `handleUnauthorized` logout effect, redirect push on protected routes, **no** push when already on `/login` (the logout-loop regression from v0.1.25.11 is now guarded by a test) |
+
+**Test suite total:** 15 → **50** (3.3× increase). Focus on the highest-bug-density module (`api/client.ts`) per the code-review recommendation — the logout-loop and 401-race bugs that shipped in earlier PRs would all have been caught by these tests.
+
+**Files touched:**
+
+- `src/api/client.ts` — timeout helper, export `handleUnauthorized`
+- `src/utils/sanitize.ts` — new file
+- `src/views/LoginView.vue` — import extracted util
+- `src/__tests__/sanitize.test.ts` — new file
+- `src/__tests__/client.test.ts` — new file
+- `package.json`, `README.md` — version bump
+
+**Deferred from the code review (explicit non-goals for this PR):**
+
+- **Single-flight login + serialize checkTimeout/restore** — the two real bugs we hit in this area (2-click login, logout loop) were both fixed without introducing concurrency primitives. The narrow theoretical race in `auth.ts` should be motivated by a failing test before adding mutexes.
+- **95%+ overall coverage** — diminishing returns on view templates. Target 95%+ on logic-heavy files (stores, composables, API client) incrementally. Round 2 will target `auth.ts` race scenarios and `composables/*`.
+
+**Build:** Zero TypeScript errors. 50 tests pass (was 15). Version 0.1.25.12.
