@@ -1,0 +1,52 @@
+# Keep the build context small and avoid leaking dev/CI artifacts into
+# the image layer cache. Mirrors .gitignore plus a few build-specific
+# entries.
+
+# Dependencies — reinstalled via `npm ci` inside the build stage
+node_modules
+
+# Build artifacts — regenerated inside the build stage
+dist
+dist-ssr
+*.local
+
+# Test + coverage artifacts
+coverage
+**/*.test.ts
+**/*.spec.ts
+**/__tests__
+
+# Config + secrets (never ship these into the image)
+.env
+.env.*
+!.env.example
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# CI / tooling
+.github
+.vscode
+.idea
+.claude
+
+# Editor / OS cruft
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+
+# Docs that aren't needed at runtime
+README.md
+AUDIT.md
+LICENSE
+
+# Docker compose — not used inside the image
+docker-compose.yml
+docker-compose.prod.yml
+Dockerfile
+.dockerignore
