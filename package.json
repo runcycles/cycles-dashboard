@@ -1,7 +1,7 @@
 {
   "name": "cycles-dashboard",
   "private": true,
-  "version": "0.1.25.11",
+  "version": "0.1.25.12",
   "type": "module",
   "scripts": {
     "dev": "vite",

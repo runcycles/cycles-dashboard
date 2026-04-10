@@ -2,6 +2,7 @@
 import { ref, computed, onUnmounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useRoute } from 'vue-router'
+import { sanitizeRedirect } from '../utils/sanitize'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -22,27 +23,6 @@ const lockRemaining = ref(0)
 let lockTimer: ReturnType<typeof setInterval> | null = null
 
 const isLocked = computed(() => lockRemaining.value > 0)
-
-// Sanitize post-login redirect target.
-// Two protections:
-//  1. Open-redirect: resolve against current origin and only accept same-origin
-//     results. Catches `//evil.com`, `/\evil.com`, `/%2Fevil.com`,
-//     `https://evil.com`, and similar parser-difference tricks that a naive
-//     startsWith('/') check would miss.
-//  2. Login loop: reject any /login target. If a logout-race produces
-//     `?redirect=/login` we'd trap the user on the login screen after
-//     successful auth.
-export function sanitizeRedirect(raw: string): string {
-  if (!raw || typeof raw !== 'string') return '/'
-  try {
-    const url = new URL(raw, window.location.origin)
-    if (url.origin !== window.location.origin) return '/'
-    if (url.pathname === '/login' || url.pathname.startsWith('/login/')) return '/'
-    return url.pathname + url.search + url.hash
-  } catch {
-    return '/'
-  }
-}
 
 function startLockCountdown() {
   if (lockTimer) clearInterval(lockTimer)
@@ -71,7 +51,7 @@ async function submit() {
       failedAttempts.value = 0
       if (lockTimer) { clearInterval(lockTimer); lockTimer = null }
       const redirect = (route.query.redirect as string) || '/'
-      const target = sanitizeRedirect(redirect)
+      const target = sanitizeRedirect(redirect, window.location.origin)
       // Use full page navigation to guarantee clean state — avoids stale
       // router query params (expired=1) and session checker race conditions
       window.location.href = target

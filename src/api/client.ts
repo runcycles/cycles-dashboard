@@ -2,6 +2,30 @@ import { useAuthStore } from '../stores/auth'
 import router from '../router'
 
 const BASE = '/v1'
+const DEFAULT_TIMEOUT_MS = 30_000
+
+// Wraps `fetch` with an AbortController-backed timeout. A hung backend should
+// fail after `timeoutMs` rather than spin the UI forever. Translates the
+// AbortError into a clear error message so callers don't need to pattern-match
+// on the low-level DOMException.
+export async function fetchWithTimeout(
+  url: string,
+  init: RequestInit = {},
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      throw new Error(`Request timed out after ${timeoutMs}ms`)
+    }
+    throw e
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 async function request<T>(method: string, path: string, params?: Record<string, string>): Promise<T> {
   const auth = useAuthStore()
@@ -11,7 +35,7 @@ async function request<T>(method: string, path: string, params?: Record<string, 
       if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v)
     }
   }
-  const res = await fetch(url.toString(), {
+  const res = await fetchWithTimeout(url.toString(), {
     method,
     headers: { 'X-Admin-API-Key': auth.apiKey, 'Content-Type': 'application/json' },
   })
@@ -31,7 +55,7 @@ async function request<T>(method: string, path: string, params?: Record<string, 
 // if we're not already there. This avoids a race where an in-flight fetch
 // from an unmounting protected view resolves *after* logout has already
 // navigated to /login, producing `/login?redirect=/login`.
-function handleUnauthorized() {
+export function handleUnauthorized() {
   const auth = useAuthStore()
   auth.logout()
   const current = router.currentRoute.value
@@ -51,7 +75,7 @@ async function mutate<T>(method: string, path: string, body?: Record<string, unk
       if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v)
     }
   }
-  const res = await fetch(url.toString(), {
+  const res = await fetchWithTimeout(url.toString(), {
     method,
     headers: { 'X-Admin-API-Key': auth.apiKey, 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
