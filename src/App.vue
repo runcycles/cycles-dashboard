@@ -10,8 +10,11 @@ const auth = useAuthStore()
 const router = useRouter()
 useDarkMode()
 
-// Track user activity for idle timeout
-const activityEvents = ['mousedown', 'keydown', 'scroll', 'touchstart'] as const
+// Track user activity for idle timeout.
+// Intentionally excludes 'scroll' — passive scroll (auto-scroll, animated
+// layout, iframes) should not extend an idle session. mousedown / keydown /
+// touchstart are reliable signals of user intent.
+const activityEvents = ['mousedown', 'keydown', 'touchstart'] as const
 function onActivity() { auth.touchActivity() }
 
 // Periodically check for session timeout

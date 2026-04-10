@@ -57,7 +57,9 @@ async function loadTenants() {
   try {
     const res = await listTenants()
     tenants.value = res.tenants
-  } catch {}
+  } catch (e) {
+    console.error('Failed to load tenants for budget filter', e)
+  }
 }
 
 function applyClientFilters(items: BudgetLedger[], extra?: (b: BudgetLedger) => boolean): BudgetLedger[] {
