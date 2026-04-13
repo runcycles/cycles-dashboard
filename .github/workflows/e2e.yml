@@ -57,34 +57,22 @@ jobs:
       - name: Build dashboard image
         run: docker compose -f docker-compose.yml build dashboard
 
-      - name: Start compose stack
+      # `--wait` blocks until every service is "ready" — healthy for
+      # services with a healthcheck defined, started for ones without.
+      # This is exactly the semantics we want, and matches what
+      # `depends_on: condition: service_healthy` uses internally.
+      # `--wait-timeout 120` caps cold-start waits at 2 minutes; each
+      # JVM service declares start_period: 30s + interval: 10s, so 120s
+      # is a comfortable ceiling on a CI runner. Without --wait, we
+      # previously hand-rolled a polling loop that misread services
+      # lacking a healthcheck (e.g. dashboard) as "never healthy" and
+      # looped forever.
+      - name: Start compose stack (waits for ready)
         env:
           ADMIN_API_KEY: admin-bootstrap-key
-        run: docker compose -f docker-compose.yml up -d
-
-      # Wait for all services to report healthy. `docker compose ps`
-      # doesn't have a wait-for-all-healthy flag, so poll with a timeout.
-      # Each service's healthcheck has start_period: 30s and interval: 10s,
-      # so ~90s is a safe ceiling for a cold start on a CI runner.
-      - name: Wait for healthchecks
         run: |
-          set -e
-          for i in $(seq 1 18); do
-            unhealthy=$(docker compose -f docker-compose.yml ps \
-              --format '{{.Name}} {{.Health}}' \
-              | grep -v 'healthy$' | grep -v '^$' || true)
-            if [ -z "$unhealthy" ]; then
-              echo "All services healthy after $((i*5))s."
-              docker compose -f docker-compose.yml ps
-              exit 0
-            fi
-            echo "Waiting for healthchecks (attempt $i/18)..."
-            echo "$unhealthy"
-            sleep 5
-          done
-          echo "ERROR: services did not become healthy in time."
+          docker compose -f docker-compose.yml up -d --wait --wait-timeout 120
           docker compose -f docker-compose.yml ps
-          exit 1
 
       - name: Run E2E probes
         env:
