@@ -10,6 +10,7 @@ import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
 import { formatDateTime } from '../utils/format'
 import { toMessage } from '../utils/errors'
+import { csvEscape, safeJsonStringify } from '../utils/safe'
 
 const entries = ref<AuditLogEntry[]>([])
 const error = ref('')
@@ -29,12 +30,19 @@ const toDate = ref('')
 function doExportCsv() {
   const headers = ['timestamp', 'operation', 'resource_type', 'resource_id', 'tenant_id', 'key_id', 'status', 'error_code', 'request_id', 'source_ip', 'user_agent', 'metadata']
   const rows = entries.value.map(e => [
-    e.timestamp, e.operation, e.resource_type || '', e.resource_id || '',
-    e.tenant_id || '', e.key_id || '', String(e.status), e.error_code || '',
-    e.request_id || '', e.source_ip || '', e.user_agent || '',
-    e.metadata ? JSON.stringify(e.metadata) : '',
+    e.timestamp, e.operation, e.resource_type, e.resource_id,
+    e.tenant_id, e.key_id, e.status, e.error_code,
+    e.request_id, e.source_ip, e.user_agent,
+    e.metadata ? safeJsonStringify(e.metadata, 0) : '',
   ])
-  const csv = [headers.join(','), ...rows.map(r => r.map(v => `"${v.replace(/"/g, '""')}"`).join(','))].join('\n')
+  // csvEscape neutralizes Excel/Sheets formula injection (CWE-1236) by
+  // prefixing cells starting with =, +, -, @, TAB, or CR with a single
+  // quote. Server-controlled fields like operation/source_ip would
+  // otherwise be a vector when an admin opens the export in a spreadsheet.
+  const csv = [
+    headers.map(csvEscape).join(','),
+    ...rows.map(r => r.map(csvEscape).join(',')),
+  ].join('\n')
   const blob = new Blob([csv], { type: 'text/csv' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -45,7 +53,7 @@ function doExportCsv() {
 }
 
 function doExportJson() {
-  const blob = new Blob([JSON.stringify(entries.value, null, 2)], { type: 'application/json' })
+  const blob = new Blob([safeJsonStringify(entries.value, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -229,7 +237,7 @@ onMounted(() => { query() })
                 </div>
                 <div v-if="e.metadata && Object.keys(e.metadata).length > 0" class="bg-white border border-gray-200 rounded p-3 text-xs font-mono overflow-auto max-h-48">
                   <div class="text-gray-400 mb-1 font-sans text-xs">Metadata</div>
-                  <pre class="whitespace-pre-wrap">{{ JSON.stringify(e.metadata, null, 2) }}</pre>
+                  <pre class="whitespace-pre-wrap">{{ safeJsonStringify(e.metadata) }}</pre>
                 </div>
               </td>
             </tr>

@@ -11,6 +11,7 @@ import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
 import { formatDateTime } from '../utils/format'
 import { toMessage } from '../utils/errors'
+import { safeJsonStringify } from '../utils/safe'
 
 const route = useRoute()
 const router = useRouter()
@@ -168,7 +169,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
                   <div v-if="e.actor"><span class="text-gray-400">Actor:</span> {{ e.actor.type }}<span v-if="e.actor.key_id" class="font-mono"> {{ e.actor.key_id }}</span></div>
                 </div>
                 <div v-if="e.data" class="bg-white border border-gray-200 rounded p-3 text-xs font-mono overflow-auto max-h-40">
-                  <pre class="whitespace-pre-wrap">{{ JSON.stringify(e.data, null, 2) }}</pre>
+                  <pre class="whitespace-pre-wrap">{{ safeJsonStringify(e.data) }}</pre>
                 </div>
               </td>
             </tr>
