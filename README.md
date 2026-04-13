@@ -8,6 +8,11 @@
 
 Operational admin dashboard for the [Cycles Budget Governance System](https://github.com/runcycles/cycles-server-admin), aligned with [governance spec v0.1.25.10](https://github.com/runcycles/cycles-server-admin/blob/main/complete-budget-governance-v0.1.25.yaml).
 
+<p align="center">
+  <img src="docs/runcycles-demo.gif" alt="Dashboard walkthrough — tenants, budgets, reservations, webhooks" width="800"/><br/>
+  <em>End-to-end walkthrough of the main operator flows</em>
+</p>
+
 ## Overview
 
 Operations-first dashboard for monitoring and managing the Cycles budget enforcement platform. Designed around operator workflows, not CRUD entity lists.
