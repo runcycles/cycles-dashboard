@@ -173,15 +173,23 @@ const preview = computed(() => serialize())
         <span class="font-mono text-sm flex-1">{{ props.tenantId }}</span>
         <span class="text-xs text-gray-400">locked</span>
       </div>
-      <!-- User-added deeper segments. Each row: kind label, id radio +
-           text input, remove button. -->
+      <!-- User-added deeper segments. Each row: kind label, id input,
+           optional "any (*)" radio for policy patterns, remove button.
+           No "id:" label because the text field visually IS the id,
+           and the kind label on the left already identifies the level.
+           For budgets (allowWildcards=false) we don't render any radio
+           at all — there's no alternative to literal id, so a choice
+           widget would be pointless. -->
       <div v-for="(seg, i) in extra" :key="i" class="px-3 py-2 text-sm">
         <div class="flex items-center gap-2">
           <span class="inline-block w-24 text-xs font-medium text-gray-500">{{ seg.kind }}</span>
           <div class="flex-1 flex items-center gap-3 flex-wrap">
-            <label class="inline-flex items-center gap-1 text-xs cursor-pointer">
+            <!-- Policy wildcard mode: two radios giving equal weight to
+                 "literal" and "any". The radio next to the input sets
+                 the semantic that picking the input text selects the
+                 literal form. -->
+            <label v-if="props.allowWildcards" class="inline-flex items-center gap-1 text-xs cursor-pointer">
               <input type="radio" :name="`seg-${i}-idmode`" :checked="!seg.anyId" @change="setAnyId(i, false)" />
-              <span>id:</span>
             </label>
             <input
               :id="`scope-seg-${i}-id`"
@@ -189,7 +197,7 @@ const preview = computed(() => serialize())
               :disabled="seg.anyId"
               :required="!seg.anyId"
               class="border border-gray-300 rounded px-2 py-1 text-sm font-mono flex-1 min-w-40 disabled:bg-gray-100 disabled:text-gray-400"
-              placeholder="e.g. prod, reviewer, v2.1"
+              :placeholder="`${seg.kind} id (e.g. prod, reviewer, v2.1)`"
             />
             <label v-if="props.allowWildcards" class="inline-flex items-center gap-1 text-xs cursor-pointer">
               <input type="radio" :name="`seg-${i}-idmode`" :checked="seg.anyId" @change="setAnyId(i, true)" />
