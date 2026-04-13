@@ -7,22 +7,37 @@
 // ────────────────────────────────────────────────────────────────────
 // safeJsonStringify — never throws.
 //
-// JSON.stringify throws TypeError on circular references, BigInt, etc.
-// EventsView renders payloads inside <pre>{{ ... }}</pre>; an uncaught
-// throw inside a render expression would blank the entire details panel.
-// We swap a sentinel string for cycles via a WeakSet replacer.
+// JSON.stringify throws TypeError on circular references and on BigInt.
+// EventsView and AuditView render payloads inside <pre>{{ ... }}</pre>; an
+// uncaught throw inside a render expression blanks the entire details panel.
+//
+// Cycle detection uses a per-call ancestor STACK (not a WeakSet) so that a
+// non-circular shared reference — `{a: X, b: X}` where X is the same object
+// — is serialized twice, just like vanilla JSON.stringify does. A naive
+// WeakSet "has-ever-seen" check would over-flag the second occurrence as
+// `[Circular]` and corrupt the output. The stack is trimmed each call by
+// matching the replacer's `this` (the holder object), which gives us the
+// current ancestor chain because JSON.stringify recurses depth-first.
 // ────────────────────────────────────────────────────────────────────
 export function safeJsonStringify(value: unknown, indent = 2): string {
-  const seen = new WeakSet<object>()
-  try {
-    return JSON.stringify(value, (_k, v) => {
-      if (typeof v === 'bigint') return `${v.toString()}n`
-      if (v && typeof v === 'object') {
-        if (seen.has(v)) return '[Circular]'
-        seen.add(v)
+  const ancestors: object[] = []
+  function replacer(this: unknown, _key: string, val: unknown): unknown {
+    if (typeof val === 'bigint') return `${val.toString()}n`
+    if (val && typeof val === 'object') {
+      // Pop until the top of the stack is the current parent — JSON.stringify
+      // walks depth-first, so anything past `this` is a sibling that already
+      // returned. Without trimming, sibling subtrees would inherit each
+      // other's ancestors and produce false-positive "[Circular]" markers.
+      while (ancestors.length > 0 && ancestors[ancestors.length - 1] !== this) {
+        ancestors.pop()
       }
-      return v
-    }, indent) ?? ''
+      if (ancestors.includes(val as object)) return '[Circular]'
+      ancestors.push(val as object)
+    }
+    return val
+  }
+  try {
+    return JSON.stringify(value, replacer, indent) ?? ''
   } catch (e) {
     return `[Unserializable: ${e instanceof Error ? e.message : String(e)}]`
   }

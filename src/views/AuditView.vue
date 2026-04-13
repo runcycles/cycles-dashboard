@@ -237,7 +237,7 @@ onMounted(() => { query() })
                 </div>
                 <div v-if="e.metadata && Object.keys(e.metadata).length > 0" class="bg-white border border-gray-200 rounded p-3 text-xs font-mono overflow-auto max-h-48">
                   <div class="text-gray-400 mb-1 font-sans text-xs">Metadata</div>
-                  <pre class="whitespace-pre-wrap">{{ JSON.stringify(e.metadata, null, 2) }}</pre>
+                  <pre class="whitespace-pre-wrap">{{ safeJsonStringify(e.metadata) }}</pre>
                 </div>
               </td>
             </tr>

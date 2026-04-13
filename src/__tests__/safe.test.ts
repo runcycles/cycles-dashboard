@@ -34,6 +34,47 @@ describe('safeJsonStringify', () => {
   it('returns null literal for null input', () => {
     expect(safeJsonStringify(null)).toBe('null')
   })
+
+  // Regression: a previous WeakSet implementation flagged shared sibling
+  // references as "[Circular]". Vanilla JSON.stringify serializes them
+  // twice, and so should we — only true cycles must be marked.
+  it('does NOT mark shared sibling references as circular', () => {
+    const shared = { id: 'x', n: 1 }
+    const out = safeJsonStringify({ a: shared, b: shared, c: shared })
+    expect(out).toBe(JSON.stringify({ a: shared, b: shared, c: shared }, null, 2))
+    expect(out).not.toContain('[Circular]')
+    // sanity: the shared object's fields appear three times
+    expect(out.match(/"id": "x"/g)?.length).toBe(3)
+  })
+
+  it('handles deeply nested shared refs in arrays without false circular', () => {
+    const leaf = { v: 42 }
+    const out = safeJsonStringify({ items: [{ leaf }, { leaf }, { leaf }] })
+    expect(out).not.toContain('[Circular]')
+    expect(out.match(/"v": 42/g)?.length).toBe(3)
+  })
+
+  it('still marks self-referential cycles as [Circular]', () => {
+    const a: Record<string, unknown> = {}
+    a.self = a
+    const out = safeJsonStringify(a)
+    expect(out).toContain('"[Circular]"')
+  })
+
+  it('still marks deep mutual cycles', () => {
+    const a: Record<string, unknown> = { name: 'a' }
+    const b: Record<string, unknown> = { name: 'b', child: { grand: a } }
+    a.b = b // a → b → child → grand → a
+    const out = safeJsonStringify(a)
+    expect(out).toContain('"[Circular]"')
+  })
+
+  it('serializes the same shared array twice without truncation', () => {
+    const list = [1, 2, 3]
+    const out = safeJsonStringify({ x: list, y: list })
+    expect(out).not.toContain('[Circular]')
+    expect((out.match(/\[\s*1,\s*2,\s*3\s*\]/g) || []).length).toBe(2)
+  })
 })
 
 describe('csvEscape', () => {
