@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { safeJsonStringify, csvEscape, tenantFromScope } from '../utils/safe'
+import { safeJsonStringify, csvEscape, tenantFromScope, parsePositiveAmount } from '../utils/safe'
 
 describe('safeJsonStringify', () => {
   it('matches JSON.stringify for plain objects', () => {
@@ -165,5 +165,71 @@ describe('tenantFromScope', () => {
 
   it('does not match tenant: prefix in the middle of a string', () => {
     expect(tenantFromScope('foo/tenant:acme')).toBe('')
+  })
+})
+
+// Regression: v0.1.25.18 inlined `fundForm.value.amount.trim()` assuming
+// Vue v-model preserved the empty-string initial value as a string. In
+// practice Vue 3 v-model on `<input type="number">` coerces user input
+// to a number, so .trim() threw `TypeError: trim is not a function` and
+// killed the submit handler — user saw "Execute does nothing" with no
+// toast or error banner. parsePositiveAmount must therefore accept BOTH
+// runtime types the input can produce: the initial empty string, AND
+// numbers after Vue's coercion kicks in.
+describe('parsePositiveAmount', () => {
+  it('accepts a positive number (post-coercion runtime type)', () => {
+    expect(parsePositiveAmount(100)).toBe(100)
+    expect(parsePositiveAmount(0.5)).toBe(0.5)
+    expect(parsePositiveAmount(1e6)).toBe(1e6)
+  })
+
+  it('accepts a positive numeric string', () => {
+    expect(parsePositiveAmount('100')).toBe(100)
+    expect(parsePositiveAmount('0.5')).toBe(0.5)
+  })
+
+  it('returns null for empty string (initial form state)', () => {
+    expect(parsePositiveAmount('')).toBeNull()
+  })
+
+  it('returns null for null / undefined', () => {
+    expect(parsePositiveAmount(null)).toBeNull()
+    expect(parsePositiveAmount(undefined)).toBeNull()
+  })
+
+  it('returns null for zero (must be strictly positive)', () => {
+    expect(parsePositiveAmount(0)).toBeNull()
+    expect(parsePositiveAmount('0')).toBeNull()
+  })
+
+  it('returns null for negative numbers / strings', () => {
+    expect(parsePositiveAmount(-5)).toBeNull()
+    expect(parsePositiveAmount('-5')).toBeNull()
+  })
+
+  it('returns null for NaN / Infinity / -Infinity', () => {
+    expect(parsePositiveAmount(NaN)).toBeNull()
+    expect(parsePositiveAmount(Infinity)).toBeNull()
+    expect(parsePositiveAmount(-Infinity)).toBeNull()
+  })
+
+  it('returns null for non-numeric strings', () => {
+    expect(parsePositiveAmount('abc')).toBeNull()
+    expect(parsePositiveAmount('100abc')).toBeNull()
+  })
+
+  it('returns null for non-primitive types (objects, arrays)', () => {
+    expect(parsePositiveAmount({})).toBeNull()
+    expect(parsePositiveAmount([])).toBeNull() // Number([]) is 0
+    expect(parsePositiveAmount([1, 2])).toBeNull() // Number([1,2]) is NaN
+  })
+
+  it('does NOT throw on inputs that lack .trim() (the original v0.1.25.18 bug)', () => {
+    // Direct regression: any of these values would have crashed
+    // submitFund with `TypeError: trim is not a function` in v0.1.25.18.
+    // Whatever they evaluate to, parsePositiveAmount must return cleanly.
+    expect(() => parsePositiveAmount(100)).not.toThrow()
+    expect(() => parsePositiveAmount(0)).not.toThrow()
+    expect(() => parsePositiveAmount(null)).not.toThrow()
   })
 })

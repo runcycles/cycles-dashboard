@@ -5,7 +5,7 @@ import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
 import { listBudgets, lookupBudget, listTenants, listEvents, fundBudget, freezeBudget, unfreezeBudget, updateBudgetConfig } from '../api/client'
 import { COMMIT_OVERAGE_POLICIES } from '../types'
-import { tenantFromScope } from '../utils/safe'
+import { tenantFromScope, parsePositiveAmount } from '../utils/safe'
 import { useAuthStore } from '../stores/auth'
 import type { BudgetLedger, Tenant, Event } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -184,7 +184,15 @@ async function executeBudgetAction() {
 
 // Budget fund operations
 const showFund = ref(false)
-const fundForm = ref({ operation: 'CREDIT', amount: '', reason: '' })
+// `amount` is typed as `number | string` because Vue 3 v-model on
+// `<input type="number">` writes back a number after user input, but we
+// initialize with an empty string so the field starts blank rather than
+// pre-filled with 0. Any consumer must coerce via Number() and validate.
+const fundForm = ref<{ operation: string; amount: number | string; reason: string }>({
+  operation: 'CREDIT',
+  amount: '',
+  reason: '',
+})
 const fundLoading = ref(false)
 const fundError = ref('')
 
@@ -205,14 +213,15 @@ async function submitFund() {
   if (!detail.value) return
   // Reset error up-front so a stale "Invalid amount" doesn't flash on retry.
   fundError.value = ''
-  // Empty input previously fell through `!fundForm.value.amount` as a silent
-  // return. We now treat it as a validation error and surface it.
-  const raw = fundForm.value.amount.trim()
-  if (!raw) { fundError.value = 'Amount is required'; return }
-  const amount = Number(raw)
-  // amount === 0 also matters: prior code allowed it to pass through and the
-  // server happily accepted a no-op fund, leaving an audit-log artifact.
-  if (isNaN(amount) || amount <= 0) { fundError.value = 'Amount must be a positive number'; return }
+  // parsePositiveAmount handles the string-or-number ambiguity caused by
+  // Vue 3 v-model on type="number" inputs. Returns null for empty / 0 /
+  // negative / NaN / non-numeric. See utils/safe.ts for why this isn't
+  // inlined.
+  const amount = parsePositiveAmount(fundForm.value.amount)
+  if (amount === null) {
+    fundError.value = 'Amount must be a positive number'
+    return
+  }
   // Prefer the dropdown selection; otherwise derive from the ledger scope.
   // Previously this silently returned when selectedTenant was '' — users
   // arriving at a budget via drill-down saw the Execute button do nothing.
