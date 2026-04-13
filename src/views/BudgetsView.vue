@@ -193,15 +193,33 @@ function openFund() {
   showFund.value = true
 }
 
+// Extract tenant from canonical scope (e.g. "tenant:acme" or
+// "tenant:acme/workspace:prod"). The detail page is commonly reached via
+// deep link / overview drill-down where the tenant dropdown hasn't been
+// touched, so we can't rely on `selectedTenant`. Returns '' if the scope
+// doesn't start with tenant:.
+function tenantFromScope(scope: string): string {
+  const m = /^tenant:([^/]+)/.exec(scope)
+  return m ? m[1] : ''
+}
+
 async function submitFund() {
-  if (!detail.value || !fundForm.value.amount || !selectedTenant.value) return
+  if (!detail.value || !fundForm.value.amount) return
   const amount = Number(fundForm.value.amount)
   if (isNaN(amount) || amount < 0) { fundError.value = 'Invalid amount'; return }
+  // Prefer the dropdown selection; otherwise derive from the ledger scope.
+  // Previously this silently returned when selectedTenant was '' — users
+  // arriving at a budget via drill-down saw the Execute button do nothing.
+  const tenantId = selectedTenant.value || tenantFromScope(detail.value.scope)
+  if (!tenantId) {
+    fundError.value = `Cannot determine tenant for scope "${detail.value.scope}". Expected a "tenant:<id>" prefix.`
+    return
+  }
   fundLoading.value = true
   fundError.value = ''
   try {
     const idempotencyKey = `dashboard-${fundForm.value.operation.toLowerCase()}-${detail.value.scope}-${Date.now()}`
-    await fundBudget(selectedTenant.value, detail.value.scope, detail.value.unit, fundForm.value.operation, amount, idempotencyKey, fundForm.value.reason || `${fundForm.value.operation} via admin dashboard`)
+    await fundBudget(tenantId, detail.value.scope, detail.value.unit, fundForm.value.operation, amount, idempotencyKey, fundForm.value.reason || `${fundForm.value.operation} via admin dashboard`)
     await loadDetail()
     showFund.value = false
     const labels: Record<string, string> = { CREDIT: 'Budget credited', DEBIT: 'Budget debited', RESET: 'Budget allocation reset', REPAY_DEBT: 'Debt repaid' }

@@ -95,7 +95,12 @@ async function request<T>(method: string, path: string, params?: Record<string, 
     method,
     headers: { 'X-Admin-API-Key': auth.apiKey, 'Content-Type': 'application/json' },
   })
-  if (res.status === 401 || res.status === 403) {
+  // 401 = key missing/invalid → end session.
+  // 403 = authenticated but not permitted for THIS op → keep session,
+  // surface an ApiError so the view shows the error (logging out on 403
+  // destroyed the session on e.g. webhook-security PUT attempts where
+  // the key lacked admin:webhooks:write but the rest of the app worked).
+  if (res.status === 401) {
     handleUnauthorized()
     throw new Error('Unauthorized')
   }
@@ -107,10 +112,12 @@ async function request<T>(method: string, path: string, params?: Record<string, 
   }
 }
 
-// Centralized 401/403 handling. Logs out and redirects to /login — but only
+// Centralized 401 handling. Logs out and redirects to /login — but only
 // if we're not already there. This avoids a race where an in-flight fetch
 // from an unmounting protected view resolves *after* logout has already
 // navigated to /login, producing `/login?redirect=/login`.
+// NOTE: 403 is intentionally NOT handled here — "forbidden for this op"
+// must not end the whole session.
 export function handleUnauthorized() {
   const auth = useAuthStore()
   auth.logout()
@@ -136,7 +143,12 @@ async function mutate<T>(method: string, path: string, body?: Record<string, unk
     headers: { 'X-Admin-API-Key': auth.apiKey, 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
   })
-  if (res.status === 401 || res.status === 403) {
+  // 401 = key missing/invalid → end session.
+  // 403 = authenticated but not permitted for THIS op → keep session,
+  // surface an ApiError so the view shows the error (logging out on 403
+  // destroyed the session on e.g. webhook-security PUT attempts where
+  // the key lacked admin:webhooks:write but the rest of the app worked).
+  if (res.status === 401) {
     handleUnauthorized()
     throw new Error('Unauthorized')
   }
@@ -257,12 +269,22 @@ export function fundBudget(tenantId: string, scope: string, unit: string, operat
   return post<import('../types').BudgetLedger>(`${BASE}/admin/budgets/fund`, body, { tenant_id: tenantId, scope, unit })
 }
 
-// Webhook — rotate signing secret (generate cryptographically strong secret)
-export function rotateWebhookSecret(id: string): Promise<import('../types').WebhookSubscription & { signing_secret?: string }> {
+// Webhook — rotate signing secret (generate cryptographically strong secret).
+// The secret is generated client-side and PATCHed to the server; the server
+// response typically does NOT echo the secret back (secrets are write-only
+// by design). We return the locally-generated value alongside the updated
+// subscription so the caller can display it once — callers that rely on
+// `res.signing_secret` from the server response would see `undefined` and
+// silently render nothing.
+export async function rotateWebhookSecret(id: string): Promise<{
+  subscription: import('../types').WebhookSubscription
+  signing_secret: string
+}> {
   const bytes = new Uint8Array(32)
   crypto.getRandomValues(bytes)
   const secret = 'whsec_' + Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')
-  return patch<import('../types').WebhookSubscription & { signing_secret?: string }>(`${BASE}/admin/webhooks/${id}`, { signing_secret: secret })
+  const subscription = await patch<import('../types').WebhookSubscription>(`${BASE}/admin/webhooks/${id}`, { signing_secret: secret })
+  return { subscription, signing_secret: secret }
 }
 
 // Webhook security config

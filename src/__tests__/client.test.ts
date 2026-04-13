@@ -312,13 +312,58 @@ describe('endpoint wrappers — smoke', () => {
     expect(body.reason).toBe('monthly')
   })
 
-  it('rotateWebhookSecret → generates a whsec_-prefixed secret and PATCHes it', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({})))
-    await api.rotateWebhookSecret('sub_1')
+  it('rotateWebhookSecret → generates whsec_ secret, PATCHes it, and returns it alongside subscription', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ subscription_id: 'sub_1', name: 'hook' })))
+    const result = await api.rotateWebhookSecret('sub_1')
     const init = lastCall()[1]
     expect(init.method).toBe('PATCH')
     const body = JSON.parse(init.body)
     expect(body.signing_secret).toMatch(/^whsec_[a-f0-9]{64}$/)
+    // Caller must receive the locally-generated secret even if the server
+    // response does not echo signing_secret (common for write-only secrets).
+    expect(result.signing_secret).toBe(body.signing_secret)
+    expect(result.subscription).toMatchObject({ subscription_id: 'sub_1' })
+  })
+
+  it('rotateWebhookSecret → still returns the secret when server omits signing_secret from response', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ subscription_id: 'sub_1' })))
+    const result = await api.rotateWebhookSecret('sub_1')
+    expect(result.signing_secret).toMatch(/^whsec_[a-f0-9]{64}$/)
+  })
+
+  it('403 does NOT logout — throws ApiError instead (session preserved for per-op permission failures)', async () => {
+    const logoutSpy = vi.spyOn(useAuthStore(), 'logout')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: () => Promise.resolve({
+        error: 'FORBIDDEN',
+        message: 'Key lacks admin:webhooks:write',
+        request_id: 'req_x',
+      }),
+    } as unknown as Response))
+    try {
+      await api.getOverview()
+      throw new Error('expected to throw')
+    } catch (e) {
+      expect(e).toBeInstanceOf(ApiError)
+      expect((e as ApiError).status).toBe(403)
+      expect((e as ApiError).errorCode).toBe('FORBIDDEN')
+    }
+    expect(logoutSpy).not.toHaveBeenCalled()
+    expect(routerPush).not.toHaveBeenCalled()
+  })
+
+  it('401 still logs out (session ended)', async () => {
+    const logoutSpy = vi.spyOn(useAuthStore(), 'logout')
+    currentRoute.value = { name: 'overview', fullPath: '/' }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: () => Promise.resolve({}),
+    } as unknown as Response))
+    await expect(api.getOverview()).rejects.toThrow(/Unauthorized/)
+    expect(logoutSpy).toHaveBeenCalled()
   })
 
   it('propagates non-2xx as thrown ApiError with fallback message when body is not JSON', async () => {
