@@ -316,6 +316,78 @@ describe('endpoint wrappers — smoke', () => {
   // v0.1.25.13). Each wrapper must inject tenant_id into the body so the
   // server can route the create to the correct tenant; updatePolicy needs
   // none because policy_id pins it.
+  // v0.1.25.22 (cycles-server v0.1.25.8, cycles-protocol revision
+  // 2026-04-13): reservations are on the runtime plane, not /admin/.
+  // The wrappers send tenant as a query param (required for admin
+  // auth per spec); force-release generates an idempotency_key and
+  // optionally passes reason.
+  describe('reservation wrappers (runtime plane, admin dual-auth)', () => {
+    it('listReservations → GET /v1/reservations with tenant + status filter', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ reservations: [] })))
+      await api.listReservations('acme', { status: 'ACTIVE', limit: 50 })
+      const url = new URL(String(lastCall()[0]))
+      expect(url.pathname).toBe('/v1/reservations')
+      expect(url.searchParams.get('tenant')).toBe('acme')
+      expect(url.searchParams.get('status')).toBe('ACTIVE')
+      expect(url.searchParams.get('limit')).toBe('50')
+    })
+
+    it('listReservations → omits undefined filters cleanly', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ reservations: [] })))
+      await api.listReservations('acme')
+      const url = new URL(String(lastCall()[0]))
+      expect(url.searchParams.get('tenant')).toBe('acme')
+      expect(url.searchParams.get('status')).toBeNull()
+      expect(url.searchParams.get('limit')).toBeNull()
+    })
+
+    it('getReservation → GET /v1/reservations/{id}', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ reservation_id: 'res-1' })))
+      await api.getReservation('res-1')
+      const [url, init] = lastCall()
+      expect(String(url)).toContain('/v1/reservations/res-1')
+      expect(init.method).toBe('GET')
+    })
+
+    it('releaseReservation → POST /v1/reservations/{id}/release with idempotency_key + reason', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ status: 'RELEASED' })))
+      await api.releaseReservation('res-1', 'idem-k-123', '[INCIDENT_FORCE_RELEASE] hung')
+      const [url, init] = lastCall()
+      expect(String(url)).toContain('/v1/reservations/res-1/release')
+      expect(init.method).toBe('POST')
+      const body = JSON.parse(init.body)
+      expect(body.idempotency_key).toBe('idem-k-123')
+      expect(body.reason).toBe('[INCIDENT_FORCE_RELEASE] hung')
+    })
+
+    it('releaseReservation without reason → body omits reason field (not null)', async () => {
+      // Server treats missing reason as "no audit metadata" and empty
+      // string as "provided but empty" — we want the former.
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ status: 'RELEASED' })))
+      await api.releaseReservation('res-1', 'idem-k-123')
+      const body = JSON.parse(lastCall()[1].body)
+      expect(body.idempotency_key).toBe('idem-k-123')
+      expect(body).not.toHaveProperty('reason')
+    })
+
+    it('listReservations propagates 400 INVALID_REQUEST as ApiError', async () => {
+      // Server returns 400 if tenant is missing from the query under
+      // admin auth. The client wrapper always sends tenant, but this
+      // verifies the error pass-through for defense in depth.
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: () => Promise.resolve({
+          error: 'INVALID_REQUEST',
+          message: 'tenant query parameter is required when using admin key authentication',
+          request_id: 'r_1',
+        }),
+      } as unknown as Response))
+      await expect(api.listReservations(''))
+        .rejects.toMatchObject({ status: 400, errorCode: 'INVALID_REQUEST' })
+    })
+  })
+
   describe('admin-on-behalf-of write wrappers', () => {
     it('createBudget → POST /v1/admin/budgets with tenant_id stitched into body', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ ledger_id: 'led-1' })))

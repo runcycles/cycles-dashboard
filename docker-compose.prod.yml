@@ -19,6 +19,32 @@ services:
     depends_on:
       cycles-admin:
         condition: service_healthy
+      cycles-server:
+        condition: service_healthy
+    networks:
+      - cycles
+
+  cycles-server:
+    # Runtime-plane server. Release cadence is independent of dashboard +
+    # cycles-server-admin — this tag intentionally lags the others. Only
+    # bump when a new runtime-plane feature requires it.
+    image: ghcr.io/runcycles/cycles-server:0.1.25.8
+    restart: unless-stopped
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:?ADMIN_API_KEY must be set}
+      DASHBOARD_CORS_ORIGIN: ${DASHBOARD_ORIGIN:-https://admin.example.com}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7878/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
     networks:
       - cycles
 

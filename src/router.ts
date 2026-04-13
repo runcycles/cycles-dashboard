@@ -12,6 +12,7 @@ const routes = [
   { path: '/audit', name: 'audit', component: () => import('./views/AuditView.vue') },
   { path: '/tenants', name: 'tenants', component: () => import('./views/TenantsView.vue') },
   { path: '/tenants/:id', name: 'tenant-detail', component: () => import('./views/TenantDetailView.vue') },
+  { path: '/reservations', name: 'reservations', component: () => import('./views/ReservationsView.vue') },
 ]
 
 const router = createRouter({

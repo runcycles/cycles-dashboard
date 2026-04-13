@@ -1,8 +1,55 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-13 (v0.1.25.21)
-**Spec:** `cycles-governance-admin-v0.1.25.yaml` (OpenAPI 3.1.0, **v0.1.25.13** — adds dual-auth on createBudget / createPolicy / updatePolicy + optional `tenant_id` in BudgetCreateRequest / PolicyCreateRequest)
-**Stack:** Vue 3 + TypeScript + Vite + Pinia + Tailwind CSS v4
+**Date:** 2026-04-13 (v0.1.25.22)
+**Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.15+ continues to satisfy the governance plane.
+
+### 2026-04-13 — v0.1.25.22: Stage 2.3 — Reservations management (closes ops Blocker #1)
+
+Closes the biggest remaining ops gap surfaced in the post-v0.1.25.20 review: operators couldn't find or force-release hung reservations in the UI — had to shell out to curl against the runtime plane's API key. Third piece of a 3-PR rollout (spec + server + dashboard):
+
+1. [cycles-protocol#37](https://github.com/runcycles/cycles-protocol/pull/37) revision 2026-04-13 — dual-auth on list/get/release reservations
+2. [cycles-protocol#39](https://github.com/runcycles/cycles-protocol/pull/39) — NORMATIVE clause: admin audit entries MUST be discoverable via the governance audit-query surface
+3. [cycles-server#91](https://github.com/runcycles/cycles-server/pull/91) v0.1.25.8 — filter allowlist, controller branching, audit-log writes to the shared store so dashboard's existing Audit view picks them up
+4. **This PR** — UI surface for the runtime-plane dual-auth endpoints
+
+**Dashboard changes:**
+
+| File | Change |
+|---|---|
+| `src/types.ts` | `RESERVATION_STATUSES` const + `ReservationStatus` / `ReservationSummary` / `ReservationListResponse` types. Shape intentionally minimal — only what the UI renders, so spec additions don't require matching dashboard changes. |
+| `src/api/client.ts` | `listReservations(tenantId, params?)`, `getReservation(id)`, `releaseReservation(id, idempotencyKey, reason?)`. Route through `/v1/*` (runtime plane), not `/v1/admin/*`. Client-enforces `tenant` query param on list (server returns 400 otherwise per spec). |
+| `src/views/ReservationsView.vue` | New view. Tenant-required filter (first tenant auto-selected), status filter (defaults to `ACTIVE` — operationally-interesting set). Sortable table with **age** (relative-time) and **expiry** columns; overdue indicator (⚠) when status=ACTIVE and past expiry_at_ms. Force-release via `FormDialog` with pre-filled `[INCIDENT_FORCE_RELEASE]` reason tag per spec's SHOULD guidance. |
+| `src/router.ts` | `/reservations` route. |
+| `src/components/Sidebar.vue` | Sidebar entry (clock icon). Capability-gated via `view_reservations` (defaults to allow when introspect doesn't surface the flag — older admin servers pre-v0.1.25.15 just work). |
+
+**Ops workflow closed**: paged → open Reservations tab → pick tenant → sort by Created asc → overdue (⚠) row at top → click Force release → structured reason → confirm → audit entry lands in dashboard's existing Audit view with `actor_type=admin_on_behalf_of`. End-to-end in the UI, no curl.
+
+**Tests** (+6 in `src/__tests__/client.test.ts` `reservation wrappers` suite):
+- `listReservations` query-param shape + filter passthrough
+- `listReservations` omits undefined filters cleanly
+- `getReservation` GET path
+- `releaseReservation` POST body with idempotency_key + reason
+- `releaseReservation` without reason → body omits field (not null/empty)
+- `listReservations` 400 INVALID_REQUEST pass-through as ApiError
+
+**Spec compliance.** Aligned with cycles-protocol@main (post-#37 + #39). Client-side `tenant` requirement matches the server's NORMATIVE behavior. Force-release audit entries surface via the governance audit endpoint (guaranteed by the shared-store implementation in server PR #91 + the #39 NORMATIVE).
+
+**Deployment topology change (dual backend).** The dashboard now fronts **two** backends — governance plane (cycles-admin:7979) for everything historical, and runtime plane (cycles-server:7878) for reservations. Routing is split at the reverse proxy, not in client code:
+
+| File | Split rule |
+|---|---|
+| `nginx.conf` | `~ ^/v1/reservations(/\|$)` → `cycles-server:7878`; catch-all `/v1/` → `cycles-admin:7979` (unchanged). Specific block precedes catch-all. |
+| `vite.config.ts` | `/v1/reservations` → `localhost:7878`; `/v1` → `localhost:7979`. Vite matches longer prefix first. |
+| `docker-compose.prod.yml` | New `cycles-server` service (image `ghcr.io/runcycles/cycles-server:0.1.25.8`, shared `ADMIN_API_KEY` + Redis, `/actuator/health` probe). Dashboard `depends_on` both. |
+| `docker-compose.yml` | Same addition for local dev, port 7878 exposed, CORS origin `http://localhost:8080`. |
+
+Shared `ADMIN_API_KEY`: both backends accept the same admin key for their respective dual-auth endpoints — `cycles-server` only needs it to satisfy `X-Admin-API-Key` on `/v1/reservations*`, no separate rotation surface.
+
+**Gates.** typecheck clean; **273/273 tests pass** (was 267; +6); build clean.
+
+**Stage 3 ahead** — tenant-scoped webhooks (same dual-auth pattern applied to 6 more endpoints).
+
+---
 
 ### 2026-04-13 — v0.1.25.21: Stage 1 ops QoL (8 dashboard-only gaps closed)
 
