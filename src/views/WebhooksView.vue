@@ -102,7 +102,13 @@ const securityLoading = ref(false)
 const securityError = ref('')
 
 async function openSecurityConfig() {
+  // Reset synchronously BEFORE the dialog appears. Otherwise the dialog
+  // briefly shows the previous session's values during the GET round-trip,
+  // and on a slow network the user might edit those stale values before
+  // the real config arrives and clobbers them.
   securityError.value = ''
+  securityConfig.value = null
+  securityForm.value = { blocked_cidr: '', allowed_patterns: '', allow_http: false }
   securityLoading.value = true
   showSecurityConfig.value = true
   try {

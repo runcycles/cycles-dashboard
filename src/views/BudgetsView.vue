@@ -5,6 +5,7 @@ import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
 import { listBudgets, lookupBudget, listTenants, listEvents, fundBudget, freezeBudget, unfreezeBudget, updateBudgetConfig } from '../api/client'
 import { COMMIT_OVERAGE_POLICIES } from '../types'
+import { tenantFromScope } from '../utils/safe'
 import { useAuthStore } from '../stores/auth'
 import type { BudgetLedger, Tenant, Event } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -86,6 +87,13 @@ async function loadAllTenantBudgets(filterFn?: (b: BudgetLedger) => boolean) {
 }
 
 async function loadList() {
+  // Reset pagination state up-front. Without this, a filter change that
+  // refetches page-1 still leaves the OLD nextCursor live; if the user
+  // clicks "Load more" between the watcher firing and the fetch returning,
+  // we'd send a cursor scoped to the previous filter — server may return
+  // misaligned results or a stale-cursor error.
+  nextCursor.value = ''
+  hasMore.value = false
   try {
     if (isCrossTenantFilter.value) {
       if (activeFilter.value === 'over_limit') {
@@ -193,20 +201,18 @@ function openFund() {
   showFund.value = true
 }
 
-// Extract tenant from canonical scope (e.g. "tenant:acme" or
-// "tenant:acme/workspace:prod"). The detail page is commonly reached via
-// deep link / overview drill-down where the tenant dropdown hasn't been
-// touched, so we can't rely on `selectedTenant`. Returns '' if the scope
-// doesn't start with tenant:.
-function tenantFromScope(scope: string): string {
-  const m = /^tenant:([^/]+)/.exec(scope)
-  return m ? m[1] : ''
-}
-
 async function submitFund() {
-  if (!detail.value || !fundForm.value.amount) return
-  const amount = Number(fundForm.value.amount)
-  if (isNaN(amount) || amount < 0) { fundError.value = 'Invalid amount'; return }
+  if (!detail.value) return
+  // Reset error up-front so a stale "Invalid amount" doesn't flash on retry.
+  fundError.value = ''
+  // Empty input previously fell through `!fundForm.value.amount` as a silent
+  // return. We now treat it as a validation error and surface it.
+  const raw = fundForm.value.amount.trim()
+  if (!raw) { fundError.value = 'Amount is required'; return }
+  const amount = Number(raw)
+  // amount === 0 also matters: prior code allowed it to pass through and the
+  // server happily accepted a no-op fund, leaving an audit-log artifact.
+  if (isNaN(amount) || amount <= 0) { fundError.value = 'Amount must be a positive number'; return }
   // Prefer the dropdown selection; otherwise derive from the ledger scope.
   // Previously this silently returned when selectedTenant was '' — users
   // arriving at a budget via drill-down saw the Execute button do nothing.
@@ -215,10 +221,16 @@ async function submitFund() {
     fundError.value = `Cannot determine tenant for scope "${detail.value.scope}". Expected a "tenant:<id>" prefix.`
     return
   }
+  if (fundLoading.value) return // double-submit guard (defense in depth alongside :disabled)
   fundLoading.value = true
-  fundError.value = ''
   try {
-    const idempotencyKey = `dashboard-${fundForm.value.operation.toLowerCase()}-${detail.value.scope}-${Date.now()}`
+    // Date.now() alone collides if the user double-clicks within the same
+    // millisecond. Mix in 64 bits of crypto randomness so each Execute is
+    // a distinct idempotency key and the server treats them as separate
+    // operations (or rejects the second as a true duplicate when intended).
+    const rand = crypto.getRandomValues(new Uint8Array(8))
+    const suffix = Array.from(rand, b => b.toString(16).padStart(2, '0')).join('')
+    const idempotencyKey = `dashboard-${fundForm.value.operation.toLowerCase()}-${detail.value.scope}-${Date.now()}-${suffix}`
     await fundBudget(tenantId, detail.value.scope, detail.value.unit, fundForm.value.operation, amount, idempotencyKey, fundForm.value.reason || `${fundForm.value.operation} via admin dashboard`)
     await loadDetail()
     showFund.value = false
