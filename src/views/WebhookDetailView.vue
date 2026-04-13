@@ -133,7 +133,7 @@ function openEdit() {
     url: webhook.value.url,
     event_types: [...(webhook.value.event_types || [])],
     scope_filter: webhook.value.scope_filter || '',
-    disable_after_failures: String((webhook.value as any).disable_after_failures ?? '10'),
+    disable_after_failures: String(webhook.value.disable_after_failures ?? '10'),
   }
   editError.value = ''
   showEdit.value = true
@@ -257,6 +257,19 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           <div v-if="webhook.scope_filter" class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Scope Filter</span><span class="font-mono text-xs">{{ webhook.scope_filter }}</span></div>
           <div v-if="webhook.last_success_at" class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Last Success</span>{{ formatDateTime(webhook.last_success_at) }}</div>
           <div v-if="webhook.last_failure_at" class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Last Failure</span>{{ formatDateTime(webhook.last_failure_at) }}</div>
+          <!-- v0.1.25.21 (#10): expose disable_after_failures so ops can
+               see the auto-disable threshold at a glance without
+               opening the edit form. Color the consecutive_failures
+               cell red as it approaches the threshold so a "trending
+               toward auto-disable" subscription is visually obvious. -->
+          <div class="bg-gray-50 rounded p-3">
+            <span class="text-gray-500 block text-xs mb-1">Failure threshold</span>
+            <span class="tabular-nums">
+              <span :class="(webhook.consecutive_failures ?? 0) >= (webhook.disable_after_failures ?? 10) - 2 ? 'text-red-600 font-medium' : 'text-gray-700'">{{ webhook.consecutive_failures ?? 0 }}</span>
+              <span class="text-gray-400"> / {{ webhook.disable_after_failures ?? 10 }} consecutive</span>
+            </span>
+            <p class="text-xs text-gray-400 mt-0.5">Server auto-disables the subscription when threshold is reached.</p>
+          </div>
         </div>
       </div>
 

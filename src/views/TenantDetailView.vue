@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
-import { getTenant, listBudgets, listApiKeys, listPolicies, updateTenantStatus, updateTenant, revokeApiKey, createApiKey, createBudget, createPolicy, updatePolicy } from '../api/client'
+import { getTenant, listTenants, listBudgets, listApiKeys, listPolicies, updateTenantStatus, updateTenant, revokeApiKey, createApiKey, createBudget, createPolicy, updatePolicy, freezeBudget } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { Tenant, BudgetLedger, ApiKey, Policy, ApiKeyCreateResponse, BudgetCreateRequest, PolicyCreateRequest, PolicyUpdateRequest } from '../types'
 import { PERMISSIONS, COMMIT_OVERAGE_POLICIES } from '../types'
@@ -33,11 +33,39 @@ const canManageBudgets = computed(() => auth.capabilities?.manage_budgets !== fa
 const canManagePolicies = computed(() => auth.capabilities?.manage_policies !== false)
 
 const tenant = ref<Tenant | null>(null)
+// v0.1.25.21 (#2): sibling tenants keyed off this tenant's id — used
+// for the "Children" list on the header card.
+const allTenants = ref<Tenant[]>([])
 const budgets = ref<BudgetLedger[]>([])
 const apiKeys = ref<ApiKey[]>([])
 const policies = ref<Policy[]>([])
 const error = ref('')
 const tab = ref<'budgets' | 'keys' | 'policies'>('budgets')
+
+// v0.1.25.21 (#6): spend rollup — aggregate allocated / remaining /
+// spent / debt across the tenant's budgets, grouped by unit. Budgets in
+// different units are summed separately because adding TOKENS to
+// USD_MICROCENTS would be meaningless. ACTIVE-only because FROZEN /
+// CLOSED budgets shouldn't skew the "current capacity" view.
+const rollupByUnit = computed(() => {
+  const out: Record<string, { allocated: number; remaining: number; spent: number; debt: number; count: number }> = {}
+  for (const b of budgets.value) {
+    if (b.status !== 'ACTIVE') continue
+    const u = b.unit
+    if (!out[u]) out[u] = { allocated: 0, remaining: 0, spent: 0, debt: 0, count: 0 }
+    out[u].allocated += b.allocated.amount
+    out[u].remaining += b.remaining.amount
+    out[u].spent += (b.spent?.amount ?? 0)
+    out[u].debt += (b.debt?.amount ?? 0)
+    out[u].count++
+  }
+  return out
+})
+const rollupUnits = computed(() => Object.keys(rollupByUnit.value).sort())
+
+const childTenants = computed<Tenant[]>(() =>
+  allTenants.value.filter(t => t.parent_tenant_id === id),
+)
 
 // Tenant status action
 const pendingTenantAction = ref<'SUSPENDED' | 'ACTIVE' | 'CLOSED' | null>(null)
@@ -342,17 +370,64 @@ async function submitEditPolicy() {
   finally { editPolicyLoading.value = false }
 }
 
+// v0.1.25.21 (#7): Emergency freeze — loops freezeBudget over every
+// ACTIVE budget in this tenant. Single click replaces a 3+ minute
+// click-through-each-budget ritual during incident response. We pre-
+// filter to ACTIVE because freezing FROZEN budgets would either no-op
+// or 409 depending on server state; either way it's noise.
+const pendingEmergencyFreeze = ref(false)
+const emergencyFreezeRunning = ref(false)
+const emergencyFreezeProgress = ref({ done: 0, total: 0, failed: 0 })
+const emergencyFreezeCancelRequested = ref(false)
+const activeBudgets = computed(() => budgets.value.filter(b => b.status === 'ACTIVE'))
+
+function openEmergencyFreeze() { pendingEmergencyFreeze.value = true }
+async function executeEmergencyFreeze() {
+  if (emergencyFreezeRunning.value) return
+  const targets = activeBudgets.value.slice()
+  emergencyFreezeProgress.value = { done: 0, total: targets.length, failed: 0 }
+  emergencyFreezeRunning.value = true
+  emergencyFreezeCancelRequested.value = false
+  for (const b of targets) {
+    if (emergencyFreezeCancelRequested.value) break
+    try { await freezeBudget(b.scope, b.unit, 'Emergency freeze — tenant lockdown via admin dashboard') }
+    catch (e) {
+      emergencyFreezeProgress.value.failed++
+      console.warn(`emergency freeze failed on ${b.scope}:${b.unit}:`, toMessage(e))
+    }
+    emergencyFreezeProgress.value.done++
+  }
+  emergencyFreezeRunning.value = false
+  const p = emergencyFreezeProgress.value
+  const summary = `${p.done - p.failed}/${p.total} budgets frozen`
+  if (p.failed > 0) toast.error(`${summary}, ${p.failed} failed — check console`)
+  else if (emergencyFreezeCancelRequested.value) toast.success(`${summary} (cancelled by user)`)
+  else toast.success(summary)
+  pendingEmergencyFreeze.value = false
+  await refresh()
+}
+function cancelEmergencyFreeze() {
+  if (emergencyFreezeRunning.value) emergencyFreezeCancelRequested.value = true
+  else pendingEmergencyFreeze.value = false
+}
+
 const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
     tenant.value = await getTenant(id)
-    const [bRes, kRes, pRes] = await Promise.all([
+    const [bRes, kRes, pRes, tRes] = await Promise.all([
       listBudgets({ tenant_id: id }),
       listApiKeys({ tenant_id: id }),
       listPolicies({ tenant_id: id }),
+      // v0.1.25.21 (#2): fetch full tenant list once per poll to
+      // resolve children for the hierarchy card. Cheap — the list is
+      // already cached on the TenantsView poll and listTenants is a
+      // single request.
+      listTenants(),
     ])
     budgets.value = bRes.ledgers
     apiKeys.value = kRes.keys
     policies.value = pRes.policies
+    allTenants.value = tRes.tenants
     error.value = ''
   } catch (e) { error.value = toMessage(e) }
 }, 60000)
@@ -377,15 +452,57 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           <h2 class="text-lg font-medium text-gray-900">{{ tenant.name }}</h2>
           <StatusBadge :status="tenant.status" />
           <span class="flex-1" />
-          <div v-if="canManageTenants" class="flex gap-2">
+          <div v-if="canManageTenants" class="flex gap-2 flex-wrap">
             <button @click="openEditTenant" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Edit</button>
+            <!-- #7 Emergency Freeze: only shown if there are ACTIVE budgets
+                 to freeze. Otherwise the button would just confirm a no-op. -->
+            <button v-if="canManageBudgets && activeBudgets.length > 0" @click="openEmergencyFreeze" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Emergency Freeze ({{ activeBudgets.length }})</button>
             <button v-if="tenant.status === 'ACTIVE'" @click="pendingTenantAction = 'SUSPENDED'" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Suspend</button>
             <button v-if="tenant.status === 'SUSPENDED'" @click="pendingTenantAction = 'ACTIVE'" class="text-xs text-green-700 hover:text-green-900 border border-green-200 rounded px-2.5 py-1 hover:bg-green-50 cursor-pointer transition-colors">Reactivate</button>
             <button v-if="tenant.status !== 'CLOSED'" @click="pendingTenantAction = 'CLOSED'" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Close</button>
           </div>
         </div>
         <p class="text-sm text-gray-500 font-mono">{{ tenant.tenant_id }}</p>
-        <p v-if="tenant.parent_tenant_id" class="text-sm text-gray-400 mt-1">Parent: <router-link :to="{ name: 'tenant-detail', params: { id: tenant.parent_tenant_id } }" class="text-blue-600 hover:underline">{{ tenant.parent_tenant_id }}</router-link></p>
+        <!-- Hierarchy: parent link + child list (#2). Children show only
+             the first 6 inline; if there are more, a "View all" link
+             drops into TenantsView filtered by this tenant as parent. -->
+        <p v-if="tenant.parent_tenant_id" class="text-sm text-gray-400 mt-1">
+          Parent: <router-link :to="{ name: 'tenant-detail', params: { id: tenant.parent_tenant_id } }" class="text-blue-600 hover:underline">{{ tenant.parent_tenant_id }}</router-link>
+        </p>
+        <div v-if="childTenants.length > 0" class="text-sm text-gray-500 mt-2 flex items-center gap-1 flex-wrap">
+          <span class="text-gray-400">Children ({{ childTenants.length }}):</span>
+          <router-link
+            v-for="c in childTenants.slice(0, 6)"
+            :key="c.tenant_id"
+            :to="{ name: 'tenant-detail', params: { id: c.tenant_id } }"
+            class="text-blue-600 hover:underline text-xs font-mono"
+          >{{ c.tenant_id }}</router-link>
+          <router-link v-if="childTenants.length > 6" :to="{ name: 'tenants', query: { parent: tenant.tenant_id } }" class="text-xs text-gray-500 hover:text-gray-700 hover:underline">… +{{ childTenants.length - 6 }} more</router-link>
+        </div>
+      </div>
+
+      <!-- Spend rollup (#6). Grouped by unit because adding TOKENS to
+           USD_MICROCENTS would be meaningless. Utilization % is
+           calculated from the sum, not averaged across budgets — the
+           more-informative view for "how close is this tenant to its
+           allocated capacity overall." -->
+      <div v-if="rollupUnits.length > 0" class="bg-white rounded-lg shadow p-4 mb-4">
+        <h3 class="text-sm font-medium text-gray-700 mb-3">Spend rollup (ACTIVE budgets)</h3>
+        <div class="space-y-3">
+          <div v-for="u in rollupUnits" :key="u" class="grid grid-cols-5 gap-3 text-sm items-baseline">
+            <div class="col-span-1">
+              <div class="text-xs text-gray-400">{{ u }}</div>
+              <div class="text-xs text-gray-400">{{ rollupByUnit[u].count }} ledger{{ rollupByUnit[u].count === 1 ? '' : 's' }}</div>
+            </div>
+            <div><div class="text-xs text-gray-400">Allocated</div><div class="font-semibold tabular-nums">{{ rollupByUnit[u].allocated.toLocaleString() }}</div></div>
+            <div><div class="text-xs text-gray-400">Remaining</div><div class="font-semibold tabular-nums">{{ rollupByUnit[u].remaining.toLocaleString() }}</div></div>
+            <div><div class="text-xs text-gray-400">Spent</div><div class="font-semibold tabular-nums">{{ rollupByUnit[u].spent.toLocaleString() }}</div></div>
+            <div>
+              <div class="text-xs text-gray-400">Debt</div>
+              <div class="font-semibold tabular-nums" :class="rollupByUnit[u].debt > 0 ? 'text-red-600' : 'text-gray-400'">{{ rollupByUnit[u].debt.toLocaleString() }}</div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Tabs -->
@@ -436,7 +553,11 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
               <td class="px-4 py-3"><StatusBadge :status="k.status" /></td>
               <td class="px-4 py-3 text-xs text-gray-500">{{ k.permissions.join(', ') }}</td>
               <td v-if="canManageKeys" class="px-4 py-3">
-                <button v-if="k.status === 'ACTIVE'" @click="pendingKeyRevoke = k" class="text-xs text-red-600 hover:text-red-800 cursor-pointer hover:underline">Revoke</button>
+                <div class="flex gap-2">
+                  <!-- #8: same drill-down as ApiKeysView.vue. -->
+                  <router-link :to="{ name: 'audit', query: { key_id: k.key_id } }" class="text-xs text-gray-600 hover:text-gray-800 cursor-pointer hover:underline">Activity</router-link>
+                  <button v-if="k.status === 'ACTIVE'" @click="pendingKeyRevoke = k" class="text-xs text-red-600 hover:text-red-800 cursor-pointer hover:underline">Revoke</button>
+                </div>
               </td>
             </tr>
             <tr v-if="apiKeys.length === 0"><td :colspan="canManageKeys ? 5 : 4"><EmptyState message="No API keys" hint="API keys will appear here once created" /></td></tr>
@@ -558,6 +679,24 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     </FormDialog>
 
     <SecretReveal v-if="createdKeySecret" title="API Key Created" :secret="createdKeySecret.key_secret" label="API Key Secret" @close="createdKeySecret = null; refresh()" />
+
+    <!-- v0.1.25.21 (#7): Emergency Freeze confirm. Intentionally spells
+         out the blast radius (N budgets, list of scopes if small) so ops
+         sees exactly what they're about to hit. Uses bulk-loader pattern
+         from TenantsView — sequential calls, progress in message slot,
+         cancel between requests. -->
+    <ConfirmAction
+      v-if="pendingEmergencyFreeze"
+      title="Emergency Freeze all budgets?"
+      :message="emergencyFreezeRunning
+        ? `Working… ${emergencyFreezeProgress.done}/${emergencyFreezeProgress.total} processed${emergencyFreezeProgress.failed ? ` (${emergencyFreezeProgress.failed} failed)` : ''}.`
+        : `Freezes ALL ${activeBudgets.length} ACTIVE budgets for tenant '${tenant?.name || id}'. Pending reservations against these scopes will be rejected until unfrozen. FROZEN / CLOSED budgets are skipped. Audit log records 'Emergency freeze — tenant lockdown' as the reason on each.`"
+      :confirm-label="emergencyFreezeRunning ? 'Working…' : `Freeze ${activeBudgets.length} budgets`"
+      :danger="true"
+      :loading="emergencyFreezeRunning"
+      @confirm="executeEmergencyFreeze"
+      @cancel="cancelEmergencyFreeze"
+    />
 
     <!-- v0.1.25.20: Create Budget (admin-on-behalf-of) -->
     <FormDialog v-if="showCreateBudget" title="Create Budget" submit-label="Create" :loading="createBudgetLoading" :error="createBudgetError" @submit="submitCreateBudget" @cancel="showCreateBudget = false">

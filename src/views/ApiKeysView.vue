@@ -222,6 +222,11 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             </td>
             <td v-if="canManage" class="px-4 py-3">
               <div class="flex gap-2">
+                <!-- v0.1.25.21 (#8): one-click drill into audit log
+                     pre-filtered by this key. Available regardless of
+                     status — investigating revoked keys is the most
+                     common reason to want their history. -->
+                <router-link :to="{ name: 'audit', query: { key_id: k.key_id } }" class="text-xs text-gray-600 hover:text-gray-800 cursor-pointer hover:underline">Activity</router-link>
                 <button v-if="k.status === 'ACTIVE'" @click="openEdit(k)" class="text-xs text-blue-600 hover:text-blue-800 cursor-pointer hover:underline">Edit</button>
                 <button v-if="k.status === 'ACTIVE'" @click="pendingRevoke = k" class="text-xs text-red-600 hover:text-red-800 cursor-pointer hover:underline">Revoke</button>
               </div>

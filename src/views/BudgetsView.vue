@@ -47,6 +47,12 @@ const detailEvents = ref<Event[]>([])
 const filterStatus = ref((route.query.status as string) || '')
 const filterUnit = ref('')
 const filterScope = ref('')
+// v0.1.25.21 (#9): utilization range filter. Captures the common ops
+// query "show me budgets at >X%" without the user having to eyeball
+// the utilization bars row by row. Stored as strings so empty values
+// stay empty (Number('') === 0 would otherwise default to 0%).
+const filterUtilMin = ref<string>('')
+const filterUtilMax = ref<string>('')
 
 const pageTitle = computed(() => {
   if (isDetail.value) return 'Budget Detail'
@@ -66,11 +72,35 @@ async function loadTenants() {
   }
 }
 
+function utilizationPercent(b: BudgetLedger): number {
+  // Utilization = (allocated - remaining) / allocated * 100. Matches
+  // what UtilizationBar renders. allocated <= 0 is treated as 0%
+  // (no capacity to be utilized).
+  if (b.allocated.amount <= 0) return 0
+  return Math.round(((b.allocated.amount - b.remaining.amount) / b.allocated.amount) * 100)
+}
+
 function applyClientFilters(items: BudgetLedger[], extra?: (b: BudgetLedger) => boolean): BudgetLedger[] {
   let result = items
   if (filterStatus.value) result = result.filter(b => b.status === filterStatus.value)
   if (filterUnit.value) result = result.filter(b => b.unit === filterUnit.value)
   if (filterScope.value) result = result.filter(b => b.scope.startsWith(filterScope.value))
+  // Utilization range. Empty string means "no bound" — only apply when
+  // the input parses to a finite number. Min defaults to 0, max to 100,
+  // but only when the OTHER bound is set (otherwise an unbounded
+  // filter would still be a no-op).
+  const minRaw = filterUtilMin.value.trim()
+  const maxRaw = filterUtilMax.value.trim()
+  if (minRaw !== '' || maxRaw !== '') {
+    const min = minRaw === '' ? 0 : Number(minRaw)
+    const max = maxRaw === '' ? Number.POSITIVE_INFINITY : Number(maxRaw)
+    if (Number.isFinite(min) && Number.isFinite(max) || maxRaw === '') {
+      result = result.filter(b => {
+        const u = utilizationPercent(b)
+        return u >= min && u <= max
+      })
+    }
+  }
   if (extra) result = result.filter(extra)
   return result
 }
@@ -380,6 +410,16 @@ watch(() => route.query, () => {
           <div>
             <label for="budget-scope" class="block text-xs text-gray-500 mb-1">Scope prefix</label>
             <input id="budget-scope" v-model="filterScope" @change="loadList" @keyup.enter="loadList" placeholder="tenant:acme" class="border border-gray-300 rounded px-2 py-1.5 text-sm" />
+          </div>
+          <!-- v0.1.25.21 (#9): utilization range. Pure client-side
+               filter on the loaded result set; doesn't refetch. -->
+          <div>
+            <label for="budget-util-min" class="block text-xs text-gray-500 mb-1">Utilization %</label>
+            <div class="flex items-center gap-1">
+              <input id="budget-util-min" v-model="filterUtilMin" @change="loadList" @keyup.enter="loadList" type="number" min="0" max="100" placeholder="min" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-16" aria-label="Minimum utilization percent" />
+              <span class="text-xs text-gray-400">to</span>
+              <input id="budget-util-max" v-model="filterUtilMax" @change="loadList" @keyup.enter="loadList" type="number" min="0" max="100" placeholder="max" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-16" aria-label="Maximum utilization percent" />
+            </div>
           </div>
           <div v-if="isLoading" class="flex items-center">
             <svg class="w-4 h-4 text-gray-400 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>

@@ -145,6 +145,10 @@ export interface WebhookSubscription {
   created_at: string
   last_success_at?: string
   last_failure_at?: string
+  // v0.1.25.21: server-controlled auto-disable threshold. Surfaced on
+  // the WebhookDetail summary so operators can see how close a failing
+  // subscription is to being auto-disabled.
+  disable_after_failures?: number
 }
 
 export interface WebhookListResponse {

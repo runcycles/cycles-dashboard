@@ -26,7 +26,90 @@ const canManage = computed(() => auth.capabilities?.manage_webhooks !== false)
 const webhooks = ref<WebhookSubscription[]>([])
 const tenants = ref<Tenant[]>([])
 const error = ref('')
-const { sortKey, sortDir, toggle, sorted: sortedWebhooks } = useSort(webhooks)
+
+// v0.1.25.21 (#5): filter by tenant + bulk pause/enable. The existing
+// view was system-wide with no way to scope to "webhooks for tenant X"
+// — an ops pain when you need to pause a noisy tenant's subscriptions.
+const tenantFilter = ref('')
+const filteredWebhooks = computed(() =>
+  tenantFilter.value
+    ? webhooks.value.filter(w => w.tenant_id === tenantFilter.value)
+    : webhooks.value,
+)
+const { sortKey, sortDir, toggle, sorted: sortedWebhooks } = useSort(filteredWebhooks)
+
+const selected = ref<Set<string>>(new Set())
+function toggleSelect(id: string) {
+  const next = new Set(selected.value)
+  next.has(id) ? next.delete(id) : next.add(id)
+  selected.value = next
+}
+const selectedVisibleAll = computed(() =>
+  filteredWebhooks.value.length > 0 &&
+  filteredWebhooks.value.every(w => selected.value.has(w.subscription_id)),
+)
+const selectedVisibleCount = computed(() =>
+  filteredWebhooks.value.filter(w => selected.value.has(w.subscription_id)).length,
+)
+function toggleSelectAll() {
+  if (selectedVisibleAll.value) {
+    selected.value = new Set()
+  } else {
+    selected.value = new Set(filteredWebhooks.value.map(w => w.subscription_id))
+  }
+}
+
+// Bulk pause/enable with the same sequential + cancel + summary pattern
+// as TenantsView bulk. See executeBulk there for the design rationale
+// (sequential to keep progress honest and avoid rate-limit bursts).
+const bulkAction = ref<'PAUSED' | 'ACTIVE' | null>(null)
+const bulkProgress = ref({ done: 0, total: 0, failed: 0 })
+const bulkRunning = ref(false)
+const bulkCancelRequested = ref(false)
+
+function openBulk(action: 'PAUSED' | 'ACTIVE') { bulkAction.value = action }
+async function executeBulk() {
+  if (!bulkAction.value || bulkRunning.value) return
+  const action = bulkAction.value
+  // Skip webhooks that are already in target state OR that are DISABLED
+  // (DISABLED is set by the server after too many failures — reactivating
+  // should be an explicit single-row action, not a bulk sweep, because
+  // those endpoints are likely still broken).
+  const targets = webhooks.value.filter(w =>
+    selected.value.has(w.subscription_id) &&
+    w.status !== action &&
+    w.status !== 'DISABLED'
+  )
+  bulkProgress.value = { done: 0, total: targets.length, failed: 0 }
+  bulkRunning.value = true
+  bulkCancelRequested.value = false
+  for (const w of targets) {
+    if (bulkCancelRequested.value) break
+    try { await updateWebhook(w.subscription_id, { status: action }) }
+    catch (e) {
+      bulkProgress.value.failed++
+      console.warn(`bulk ${action} failed on ${w.subscription_id}:`, toMessage(e))
+    }
+    bulkProgress.value.done++
+  }
+  bulkRunning.value = false
+  const verb = action === 'PAUSED' ? 'paused' : 'enabled'
+  const summary = `${bulkProgress.value.done - bulkProgress.value.failed}/${bulkProgress.value.total} webhooks ${verb}`
+  if (bulkProgress.value.failed > 0) {
+    toast.error(`${summary}, ${bulkProgress.value.failed} failed — check console for details`)
+  } else if (bulkCancelRequested.value) {
+    toast.success(`${summary} (cancelled by user)`)
+  } else {
+    toast.success(summary)
+  }
+  bulkAction.value = null
+  selected.value = new Set()
+  await refresh()
+}
+function cancelBulk() {
+  if (bulkRunning.value) bulkCancelRequested.value = true
+  else bulkAction.value = null
+}
 
 function healthColor(w: WebhookSubscription): string {
   if (w.status === 'DISABLED') return 'bg-red-500'
@@ -158,10 +241,34 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       </template>
     </PageHeader>
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
+
+    <!-- Tenant filter (#5). Options sourced from the tenants the webhooks
+         actually belong to rather than the full tenant list, so the
+         dropdown doesn't show tenants with no subscriptions. -->
+    <div class="mb-4">
+      <select v-model="tenantFilter" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+        <option value="">All tenants</option>
+        <option v-for="t in tenants.filter(t => webhooks.some(w => w.tenant_id === t.tenant_id))" :key="t.tenant_id" :value="t.tenant_id">
+          {{ t.name || t.tenant_id }}
+        </option>
+      </select>
+    </div>
+
+    <!-- Bulk bar, visible only on selection. Same design as TenantsView. -->
+    <div v-if="canManage && selectedVisibleCount > 0" class="mb-3 bg-blue-50 border border-blue-200 rounded px-4 py-2 flex items-center gap-3 flex-wrap">
+      <span class="text-sm text-blue-900">{{ selectedVisibleCount }} selected</span>
+      <button @click="openBulk('PAUSED')" class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer">Pause selected</button>
+      <button @click="openBulk('ACTIVE')" class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer">Enable selected</button>
+      <button @click="selected = new Set()" class="text-xs text-gray-500 hover:text-gray-700 ml-auto cursor-pointer">Clear</button>
+    </div>
+
     <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
-      <table class="w-full text-sm min-w-[600px]">
+      <table class="w-full text-sm min-w-[680px]">
         <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
           <tr>
+            <th v-if="canManage" class="px-4 py-3 w-10">
+              <input type="checkbox" :checked="selectedVisibleAll" @change="toggleSelectAll" aria-label="Select all visible webhooks" />
+            </th>
             <th class="px-4 py-3 text-left w-10">Health</th>
             <SortHeader label="URL" column="url" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
@@ -172,6 +279,9 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         </thead>
         <tbody class="divide-y divide-gray-100">
           <tr v-for="w in sortedWebhooks" :key="w.subscription_id" class="hover:bg-gray-50 transition-colors">
+            <td v-if="canManage" class="px-4 py-3">
+              <input type="checkbox" :checked="selected.has(w.subscription_id)" @change="toggleSelect(w.subscription_id)" :aria-label="`Select webhook ${w.name || w.url}`" />
+            </td>
             <td class="px-4 py-3"><span :class="healthColor(w)" class="inline-block w-2.5 h-2.5 rounded-full" :title="healthLabel(w)" /></td>
             <td class="px-4 py-3">
               <router-link :to="{ name: 'webhook-detail', params: { id: w.subscription_id } }" class="text-blue-600 hover:underline truncate block max-w-[300px]">{{ w.url }}</router-link>
@@ -185,8 +295,8 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
               <button v-if="w.status === 'PAUSED' || w.status === 'DISABLED'" @click="pendingStatusAction = { id: w.subscription_id, url: w.url, action: 'ACTIVE' }" class="text-xs text-green-700 hover:text-green-900 cursor-pointer hover:underline">Enable</button>
             </td>
           </tr>
-          <tr v-if="webhooks.length === 0">
-            <td :colspan="canManage ? 6 : 5"><EmptyState message="No webhook subscriptions" hint="Webhook subscriptions will appear here once configured" /></td>
+          <tr v-if="filteredWebhooks.length === 0">
+            <td :colspan="canManage ? 7 : 5"><EmptyState :message="tenantFilter ? 'No webhooks for this tenant' : 'No webhook subscriptions'" hint="Webhook subscriptions will appear here once configured" /></td>
           </tr>
         </tbody>
       </table>
@@ -202,6 +312,24 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       :danger="pendingStatusAction.action === 'PAUSED'"
       @confirm="executeStatusAction"
       @cancel="pendingStatusAction = null"
+    />
+
+    <!-- Bulk confirm (#5). DISABLED webhooks are excluded server-side from
+         the loop because reactivating them should be an explicit per-row
+         decision (the URL is likely still broken). -->
+    <ConfirmAction
+      v-if="bulkAction"
+      :title="bulkAction === 'PAUSED' ? `Pause ${selectedVisibleCount} webhooks?` : `Enable ${selectedVisibleCount} webhooks?`"
+      :message="bulkRunning
+        ? `Working… ${bulkProgress.done}/${bulkProgress.total} processed${bulkProgress.failed ? ` (${bulkProgress.failed} failed)` : ''}.`
+        : bulkAction === 'PAUSED'
+          ? `Pauses each selected subscription. Events to paused endpoints are dropped. Webhooks already PAUSED or DISABLED are skipped.`
+          : `Re-enables each selected subscription. Webhooks already ACTIVE are skipped. DISABLED webhooks (auto-disabled after failures) must be re-enabled individually so you can verify the endpoint is healthy first.`"
+      :confirm-label="bulkRunning ? 'Working…' : bulkAction === 'PAUSED' ? 'Pause all' : 'Enable all'"
+      :danger="bulkAction === 'PAUSED'"
+      :loading="bulkRunning"
+      @confirm="executeBulk"
+      @cancel="cancelBulk"
     />
 
     <FormDialog v-if="showCreate" title="Create Webhook" submit-label="Create Webhook" :loading="createLoading" :error="createError" @submit="submitCreate" @cancel="showCreate = false" :wide="true">

@@ -1,8 +1,39 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-13 (v0.1.25.20)
+**Date:** 2026-04-13 (v0.1.25.21)
 **Spec:** `cycles-governance-admin-v0.1.25.yaml` (OpenAPI 3.1.0, **v0.1.25.13** — adds dual-auth on createBudget / createPolicy / updatePolicy + optional `tenant_id` in BudgetCreateRequest / PolicyCreateRequest)
 **Stack:** Vue 3 + TypeScript + Vite + Pinia + Tailwind CSS v4
+
+### 2026-04-13 — v0.1.25.21: Stage 1 ops QoL (8 dashboard-only gaps closed)
+
+First of three planned stages addressing day-2 ops workflow gaps surfaced in the post-v0.1.25.20 ops review. This stage covers everything achievable against the current admin server (v0.1.25.15) without spec/server changes — the cross-repo work for **#1 Reservations management** and **#3 Tenant webhooks** is deferred to Stages 2 and 3.
+
+| # | Gap | Where | What changed |
+|---|-----|-------|--------------|
+| **#2** | No tenant hierarchy visibility | `TenantsView` + `TenantDetailView` | New "Parent" + "Children" columns on the list (count is clickable to filter to that subtree). Detail page header card now shows parent link and an inline list of up to 6 children with a "View all" link to the filtered list. Parent filter dropdown lists only tenants that actually have children. |
+| **#4** | Cannot bulk-suspend tenants | `TenantsView` | Per-row checkboxes + "select all visible" header checkbox. Bulk action bar appears on selection with **Suspend selected** / **Reactivate selected** buttons. Sequential per-tenant calls (avoids rate-limit bursts) with live progress in the confirm dialog and a cancel-between-requests path. Skips tenants already in the target state and CLOSED tenants (terminal). Summary toast reports done/failed. |
+| **#5** | No way to bulk-pause webhooks by tenant | `WebhooksView` | Tenant filter dropdown (lists only tenants that have subscriptions). Per-row checkboxes + bulk **Pause selected** / **Enable selected** with the same sequential-with-cancel pattern as #4. **DISABLED** subscriptions are skipped from bulk Enable — auto-disabled webhooks should be re-enabled per-row after operator verifies the endpoint. |
+| **#6** | Tenant spend rollup missing | `TenantDetailView` | New "Spend rollup (ACTIVE budgets)" card aggregates allocated / remaining / spent / debt across the tenant's budgets, **grouped by unit** (USD_MICROCENTS, TOKENS, etc — adding across units would be meaningless). Debt cell turns red when nonzero. |
+| **#7** | No emergency freeze | `TenantDetailView` | "Emergency Freeze (N)" button on the tenant header (only shown when N>0 ACTIVE budgets exist). Confirm dialog spells out blast radius before commit; sequential per-budget calls record `Emergency freeze — tenant lockdown via admin dashboard` as the audit reason. Same loader / cancel pattern as bulk ops. |
+| **#8** | Audit drill-down from key row | `ApiKeysView` + `TenantDetailView` keys tab + `AuditView` | Per-key **Activity** link that routes to `/audit?key_id=…`. AuditView reads `key_id`, `tenant_id`, `operation`, `resource_type`, `resource_id` from the URL on mount, pre-fills the form, and auto-runs the query — saves the copy-paste-and-click ritual. Available regardless of key status (investigating revoked keys is the most common reason). |
+| **#9** | No utilization range filter | `BudgetsView` | New min/max % inputs in the filter row. Pure client-side — `utilizationPercent()` matches the formula UtilizationBar uses. Empty-string inputs mean "no bound" (so `min=80, max=` filters ≥80%). Triggers re-load via existing filter pipeline so cross-tenant queries also respect the range. |
+| **#10** | Webhook auto-disable threshold not visible | `WebhookDetailView` + `types.ts` | Added `disable_after_failures?: number` to `WebhookSubscription` type. Detail summary now shows "Failure threshold: N/M consecutive" with the failure count colored red as it approaches the threshold (within 2 of M). Lets ops see "this webhook is one bad delivery away from auto-disable" at a glance. |
+
+**Architectural notes for the bulk-action pattern.** All three new bulk flows (tenant suspend/reactivate, webhook pause/enable, emergency freeze) share the same shape: sequential per-item calls (not parallel — keeps progress honest, avoids rate-limit bursts), live progress in the confirm dialog's message slot, cancel-between-requests via a flag the loop checks, summary toast at the end (success / "N failed" / "cancelled by user"). Failures are `console.warn`'d per-item rather than toasted to keep the UI quiet — one summary toast is less noisy than 20.
+
+**Defensive choices**:
+- Bulk actions skip items already in target state (avoids noisy 409s).
+- DISABLED webhooks are excluded from bulk Enable — re-enabling those should be a per-row decision.
+- Emergency Freeze button only renders when there are ACTIVE budgets to freeze.
+- Bulk ops respect filtered visibility — the count in the bar reflects only what the user can see, so a hidden-by-filter row never gets unexpectedly affected.
+
+**Spec compliance.** Unchanged. Stage 1 uses only existing endpoints.
+
+**Gates.** typecheck clean; **267/267 tests pass** (no test changes — all features are integrative, none of them touch testable utility code). Build clean.
+
+**Coming next**: Stage 2 (3-repo) — admin-path support for Reservations (list + force-expire). Stage 3 (3-repo) — dual-auth on tenant-webhook endpoints + UI.
+
+---
 
 ### 2026-04-13 — v0.1.25.20: Create Budget + Create/Edit Policy (admin-on-behalf-of) + client-side scope validation
 
