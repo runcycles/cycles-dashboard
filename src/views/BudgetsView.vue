@@ -47,6 +47,18 @@ const detailEvents = ref<Event[]>([])
 const filterStatus = ref((route.query.status as string) || '')
 const filterUnit = ref('')
 const filterScope = ref('')
+// v0.1.25.21 (#9): utilization range filter. Captures the common ops
+// query "show me budgets at >X%" without the user having to eyeball
+// the utilization bars row by row.
+//
+// Type is `number | string` because Vue 3's v-model on
+// `<input type="number">` auto-coerces user input to a number once
+// they type — even when initialized as ''. Initial empty string ('')
+// stays a string until they touch the input. Per the v0.1.25.19
+// `Fund Budget Execute` regression: never call string methods on a
+// v-model'd number-input value. We treat both at consumption.
+const filterUtilMin = ref<number | string>('')
+const filterUtilMax = ref<number | string>('')
 
 const pageTitle = computed(() => {
   if (isDetail.value) return 'Budget Detail'
@@ -66,11 +78,39 @@ async function loadTenants() {
   }
 }
 
+function utilizationPercent(b: BudgetLedger): number {
+  // Utilization = (allocated - remaining) / allocated * 100. Matches
+  // what UtilizationBar renders. allocated <= 0 is treated as 0%
+  // (no capacity to be utilized).
+  if (b.allocated.amount <= 0) return 0
+  return Math.round(((b.allocated.amount - b.remaining.amount) / b.allocated.amount) * 100)
+}
+
 function applyClientFilters(items: BudgetLedger[], extra?: (b: BudgetLedger) => boolean): BudgetLedger[] {
   let result = items
   if (filterStatus.value) result = result.filter(b => b.status === filterStatus.value)
   if (filterUnit.value) result = result.filter(b => b.unit === filterUnit.value)
   if (filterScope.value) result = result.filter(b => b.scope.startsWith(filterScope.value))
+  // Utilization range. Empty string (initial / cleared) means
+  // "no bound on this side." Vue v-model on type=number coerces to
+  // number once the user types, so the value is `number | string` at
+  // runtime. Coerce defensively at consumption (Number(undefined)→NaN,
+  // Number('')→0, Number(null)→0; we only apply the filter when at
+  // least one side has a finite parsed value).
+  const rawMin = filterUtilMin.value
+  const rawMax = filterUtilMax.value
+  const minSet = rawMin !== '' && rawMin !== null && rawMin !== undefined
+  const maxSet = rawMax !== '' && rawMax !== null && rawMax !== undefined
+  if (minSet || maxSet) {
+    const min = minSet ? Number(rawMin) : 0
+    const max = maxSet ? Number(rawMax) : Number.POSITIVE_INFINITY
+    if (Number.isFinite(min) && (Number.isFinite(max) || max === Number.POSITIVE_INFINITY)) {
+      result = result.filter(b => {
+        const u = utilizationPercent(b)
+        return u >= min && u <= max
+      })
+    }
+  }
   if (extra) result = result.filter(extra)
   return result
 }
@@ -137,7 +177,12 @@ async function loadMore() {
     if (filterUnit.value) params.unit = filterUnit.value
     if (filterScope.value) params.scope_prefix = filterScope.value
     const res = await listBudgets(params)
-    budgets.value = [...budgets.value, ...res.ledgers]
+    // v0.1.25.21: apply client-side filters (utilization range #9) to
+    // the newly-appended page too. Without this, "Load more" would
+    // bypass the in-memory filter and dump unfiltered rows into the
+    // visible list — the user would see budgets outside their
+    // utilization range mysteriously appearing on page 2+.
+    budgets.value = [...budgets.value, ...applyClientFilters(res.ledgers)]
     hasMore.value = res.has_more
     nextCursor.value = res.next_cursor ?? ''
   } catch (e) { error.value = toMessage(e) }
@@ -380,6 +425,16 @@ watch(() => route.query, () => {
           <div>
             <label for="budget-scope" class="block text-xs text-gray-500 mb-1">Scope prefix</label>
             <input id="budget-scope" v-model="filterScope" @change="loadList" @keyup.enter="loadList" placeholder="tenant:acme" class="border border-gray-300 rounded px-2 py-1.5 text-sm" />
+          </div>
+          <!-- v0.1.25.21 (#9): utilization range. Pure client-side
+               filter on the loaded result set; doesn't refetch. -->
+          <div>
+            <label for="budget-util-min" class="block text-xs text-gray-500 mb-1">Utilization %</label>
+            <div class="flex items-center gap-1">
+              <input id="budget-util-min" v-model="filterUtilMin" @change="loadList" @keyup.enter="loadList" type="number" min="0" max="100" placeholder="min" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-16" aria-label="Minimum utilization percent" />
+              <span class="text-xs text-gray-400">to</span>
+              <input id="budget-util-max" v-model="filterUtilMax" @change="loadList" @keyup.enter="loadList" type="number" min="0" max="100" placeholder="max" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-16" aria-label="Maximum utilization percent" />
+            </div>
           </div>
           <div v-if="isLoading" class="flex items-center">
             <svg class="w-4 h-4 text-gray-400 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>

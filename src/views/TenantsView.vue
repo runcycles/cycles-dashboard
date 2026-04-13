@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
@@ -25,14 +25,132 @@ const canManage = computed(() => auth.capabilities?.manage_tenants !== false)
 const tenants = ref<Tenant[]>([])
 const error = ref('')
 const search = ref('')
+const parentFilter = ref('')
+
+// v0.1.25.21 (#2): show hierarchy. Derive child counts once per poll so
+// the column render doesn't re-filter tenants.value for every row.
+const childCountMap = computed<Record<string, number>>(() => {
+  const counts: Record<string, number> = {}
+  for (const t of tenants.value) {
+    if (t.parent_tenant_id) counts[t.parent_tenant_id] = (counts[t.parent_tenant_id] ?? 0) + 1
+  }
+  return counts
+})
+
 const filteredTenants = computed(() => {
-  if (!search.value) return tenants.value
-  const q = search.value.toLowerCase()
-  return tenants.value.filter(t => t.tenant_id.toLowerCase().includes(q) || t.name.toLowerCase().includes(q))
+  let out = tenants.value
+  if (parentFilter.value) {
+    if (parentFilter.value === '__root__') {
+      // "(root-level only)" pseudo-option — tenants with no parent.
+      out = out.filter(t => !t.parent_tenant_id)
+    } else {
+      out = out.filter(t => t.parent_tenant_id === parentFilter.value)
+    }
+  }
+  if (search.value) {
+    const q = search.value.toLowerCase()
+    out = out.filter(t => t.tenant_id.toLowerCase().includes(q) || t.name.toLowerCase().includes(q))
+  }
+  return out
 })
 const { sortKey, sortDir, toggle, sorted: sortedTenants } = useSort(filteredTenants)
 
-// Create tenant
+// Parents available in the filter dropdown — union of tenants that have
+// at least one child, so the filter doesn't list tenants with no kids
+// (those would always produce an empty table).
+const parentOptions = computed<Tenant[]>(() => {
+  const withChildren = new Set(Object.keys(childCountMap.value))
+  return tenants.value.filter(t => withChildren.has(t.tenant_id))
+})
+
+// ─── #4 bulk suspend / reactivate ─────────────────────────────────────
+// Selected tenant_ids. Resets on filter/search changes so users don't
+// accidentally bulk-act on rows they can't see. Held as a Set for O(1)
+// toggle in the checkbox handler.
+const selected = ref<Set<string>>(new Set())
+// Clear selection when filters change so a hidden-by-filter row never
+// gets unexpectedly bulk-acted on. Same reasoning as WebhooksView.
+watch([search, parentFilter], () => { selected.value = new Set() })
+function toggleSelect(id: string) {
+  const next = new Set(selected.value)
+  next.has(id) ? next.delete(id) : next.add(id)
+  selected.value = next
+}
+function toggleSelectAll() {
+  if (selectedVisibleAll.value) {
+    selected.value = new Set()
+  } else {
+    selected.value = new Set(filteredTenants.value.map(t => t.tenant_id))
+  }
+}
+const selectedVisibleAll = computed(() =>
+  filteredTenants.value.length > 0 &&
+  filteredTenants.value.every(t => selected.value.has(t.tenant_id)),
+)
+const selectedVisibleCount = computed(() =>
+  filteredTenants.value.filter(t => selected.value.has(t.tenant_id)).length,
+)
+
+// Bulk action state machine. We sequence the per-tenant calls rather
+// than parallelizing because (a) it's simpler to report progress and
+// (b) a burst of admin writes could trip rate limits. Users can cancel
+// between calls — progress resumes only on a fresh click.
+const bulkAction = ref<'SUSPENDED' | 'ACTIVE' | null>(null)
+const bulkProgress = ref({ done: 0, total: 0, failed: 0 })
+const bulkRunning = ref(false)
+const bulkCancelRequested = ref(false)
+
+function openBulk(action: 'SUSPENDED' | 'ACTIVE') {
+  bulkAction.value = action
+}
+async function executeBulk() {
+  if (!bulkAction.value || bulkRunning.value) return
+  const action = bulkAction.value
+  // Filter the selection to only tenants whose current status would
+  // actually change. Avoids noisy "already suspended" 409s from the
+  // server and keeps the progress count honest.
+  const targets = tenants.value.filter(t =>
+    selected.value.has(t.tenant_id) &&
+    t.status !== action &&
+    // CLOSED is terminal — never reactivate or re-suspend.
+    t.status !== 'CLOSED'
+  )
+  bulkProgress.value = { done: 0, total: targets.length, failed: 0 }
+  bulkRunning.value = true
+  bulkCancelRequested.value = false
+  for (const t of targets) {
+    if (bulkCancelRequested.value) break
+    try {
+      await updateTenantStatus(t.tenant_id, action)
+    } catch (e) {
+      bulkProgress.value.failed++
+      // Don't toast per failure — one summary at the end is less noisy.
+      console.warn(`bulk ${action} failed on ${t.tenant_id}:`, toMessage(e))
+    }
+    bulkProgress.value.done++
+  }
+  bulkRunning.value = false
+  const summary = `${bulkProgress.value.done - bulkProgress.value.failed}/${bulkProgress.value.total} tenants ${action === 'SUSPENDED' ? 'suspended' : 'reactivated'}`
+  if (bulkProgress.value.failed > 0) {
+    toast.error(`${summary}, ${bulkProgress.value.failed} failed — check console for details`)
+  } else if (bulkCancelRequested.value) {
+    toast.success(`${summary} (cancelled by user)`)
+  } else {
+    toast.success(summary)
+  }
+  bulkAction.value = null
+  selected.value = new Set()
+  await refresh()
+}
+function cancelBulk() {
+  if (bulkRunning.value) {
+    bulkCancelRequested.value = true
+  } else {
+    bulkAction.value = null
+  }
+}
+
+// ─── Create tenant (existing) ─────────────────────────────────────────
 const showCreate = ref(false)
 const createLoading = ref(false)
 const createError = ref('')
@@ -62,7 +180,7 @@ async function submitCreate() {
   finally { createLoading.value = false }
 }
 
-// Suspend/reactivate
+// ─── Single-row suspend / reactivate (retained) ──────────────────────
 const pendingStatusAction = ref<{ tenantId: string; name: string; action: 'SUSPENDED' | 'ACTIVE' } | null>(null)
 
 async function executeStatusAction() {
@@ -87,6 +205,12 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     error.value = ''
   } catch (e) { error.value = toMessage(e) }
 }, 60000)
+
+function parentName(id: string | undefined): string {
+  if (!id) return ''
+  const p = tenants.value.find(t => t.tenant_id === id)
+  return p?.name || id
+}
 </script>
 
 <template>
@@ -97,15 +221,38 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       </template>
     </PageHeader>
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
-    <div class="mb-4">
-      <input v-model="search" placeholder="Search tenants by ID or name..." class="border border-gray-300 rounded px-3 py-1.5 text-sm w-full max-w-xs" />
+
+    <!-- Search + parent filter -->
+    <div class="mb-4 flex gap-3 flex-wrap items-center">
+      <input v-model="search" placeholder="Search by ID or name..." class="border border-gray-300 rounded px-3 py-1.5 text-sm max-w-xs flex-1 min-w-[14rem]" />
+      <select v-model="parentFilter" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+        <option value="">All tenants</option>
+        <option value="__root__">(root-level only)</option>
+        <option v-for="p in parentOptions" :key="p.tenant_id" :value="p.tenant_id">Children of: {{ p.name || p.tenant_id }}</option>
+      </select>
     </div>
+
+    <!-- Bulk action bar — appears only when rows are selected and the
+         user has write capability. Shows a summary + action buttons +
+         per-action confirmation dialog. -->
+    <div v-if="canManage && selectedVisibleCount > 0" class="mb-3 bg-blue-50 border border-blue-200 rounded px-4 py-2 flex items-center gap-3 flex-wrap">
+      <span class="text-sm text-blue-900">{{ selectedVisibleCount }} selected</span>
+      <button @click="openBulk('SUSPENDED')" class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer">Suspend selected</button>
+      <button @click="openBulk('ACTIVE')" class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer">Reactivate selected</button>
+      <button @click="selected = new Set()" class="text-xs text-gray-500 hover:text-gray-700 ml-auto cursor-pointer">Clear</button>
+    </div>
+
     <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
-      <table class="w-full text-sm min-w-[480px]">
+      <table class="w-full text-sm min-w-[640px]">
         <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
           <tr>
+            <th v-if="canManage" class="px-4 py-3 w-10">
+              <input type="checkbox" :checked="selectedVisibleAll" @change="toggleSelectAll" aria-label="Select all visible tenants" />
+            </th>
             <SortHeader label="Tenant ID" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Name" column="name" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+            <th class="px-4 py-3 text-left text-xs uppercase tracking-wider">Parent</th>
+            <th class="px-4 py-3 text-left text-xs uppercase tracking-wider">Children</th>
             <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Created" column="created_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <th v-if="canManage" class="px-4 py-3 w-24"></th>
@@ -113,10 +260,28 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         </thead>
         <tbody class="divide-y divide-gray-100">
           <tr v-for="t in sortedTenants" :key="t.tenant_id" class="hover:bg-gray-50 transition-colors">
+            <td v-if="canManage" class="px-4 py-3">
+              <input type="checkbox" :checked="selected.has(t.tenant_id)" @change="toggleSelect(t.tenant_id)" :aria-label="`Select ${t.name || t.tenant_id}`" />
+            </td>
             <td class="px-4 py-3">
               <router-link :to="{ name: 'tenant-detail', params: { id: t.tenant_id } }" class="text-blue-600 hover:underline font-mono text-xs">{{ t.tenant_id }}</router-link>
             </td>
             <td class="px-4 py-3 text-gray-700">{{ t.name }}</td>
+            <td class="px-4 py-3 text-xs">
+              <router-link v-if="t.parent_tenant_id" :to="{ name: 'tenant-detail', params: { id: t.parent_tenant_id } }" class="text-blue-600 hover:underline font-mono">
+                {{ parentName(t.parent_tenant_id) }}
+              </router-link>
+              <span v-else class="text-gray-300">—</span>
+            </td>
+            <td class="px-4 py-3 text-xs">
+              <button
+                v-if="childCountMap[t.tenant_id]"
+                @click="parentFilter = t.tenant_id"
+                class="text-blue-600 hover:underline cursor-pointer"
+                :aria-label="`Filter list to ${childCountMap[t.tenant_id]} children of ${t.name}`"
+              >{{ childCountMap[t.tenant_id] }} child{{ childCountMap[t.tenant_id] === 1 ? '' : 'ren' }}</button>
+              <span v-else class="text-gray-300">—</span>
+            </td>
             <td class="px-4 py-3"><StatusBadge :status="t.status" /></td>
             <td class="px-4 py-3 text-gray-400 text-xs">{{ formatDate(t.created_at) }}</td>
             <td v-if="canManage" class="px-4 py-3">
@@ -125,12 +290,13 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             </td>
           </tr>
           <tr v-if="filteredTenants.length === 0">
-            <td :colspan="canManage ? 5 : 4"><EmptyState :message="search ? 'No tenants match your search' : 'No tenants found'" :hint="search ? undefined : 'Tenants will appear here once created'" /></td>
+            <td :colspan="canManage ? 8 : 6"><EmptyState :message="search || parentFilter ? 'No tenants match your filters' : 'No tenants found'" :hint="search || parentFilter ? undefined : 'Tenants will appear here once created'" /></td>
           </tr>
         </tbody>
       </table>
     </div>
 
+    <!-- Single-row confirm (retained) -->
     <ConfirmAction
       v-if="pendingStatusAction"
       :title="pendingStatusAction.action === 'SUSPENDED' ? 'Suspend this tenant?' : 'Reactivate this tenant?'"
@@ -141,6 +307,27 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       :danger="pendingStatusAction.action === 'SUSPENDED'"
       @confirm="executeStatusAction"
       @cancel="pendingStatusAction = null"
+    />
+
+    <!-- Bulk confirm. During execution shows a live progress message in
+         the error slot (not literally an error — reusing the visible
+         text region under the title). On cancel mid-run, stops after
+         the current request completes. -->
+    <ConfirmAction
+      v-if="bulkAction"
+      :title="bulkAction === 'SUSPENDED'
+        ? `Suspend ${bulkRunning ? bulkProgress.total : selectedVisibleCount} tenants?`
+        : `Reactivate ${bulkRunning ? bulkProgress.total : selectedVisibleCount} tenants?`"
+      :message="bulkRunning
+        ? `Working… ${bulkProgress.done}/${bulkProgress.total} processed${bulkProgress.failed ? ` (${bulkProgress.failed} failed)` : ''}.`
+        : bulkAction === 'SUSPENDED'
+          ? `This will block API access for each selected tenant and all their keys. Tenants already SUSPENDED or CLOSED will be skipped.`
+          : `This will restore API access for each selected tenant. Tenants already ACTIVE or CLOSED will be skipped.`"
+      :confirm-label="bulkRunning ? 'Working…' : bulkAction === 'SUSPENDED' ? 'Suspend all' : 'Reactivate all'"
+      :danger="bulkAction === 'SUSPENDED'"
+      :loading="bulkRunning"
+      @confirm="executeBulk"
+      @cancel="cancelBulk"
     />
 
     <FormDialog v-if="showCreate" title="Create Tenant" submit-label="Create Tenant" :loading="createLoading" :error="createError" @submit="submitCreate" @cancel="showCreate = false">
