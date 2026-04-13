@@ -265,7 +265,11 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           <div class="bg-gray-50 rounded p-3">
             <span class="text-gray-500 block text-xs mb-1">Failure threshold</span>
             <span class="tabular-nums">
-              <span :class="(webhook.consecutive_failures ?? 0) >= (webhook.disable_after_failures ?? 10) - 2 ? 'text-red-600 font-medium' : 'text-gray-700'">{{ webhook.consecutive_failures ?? 0 }}</span>
+              <!-- Danger zone = within 2 of the auto-disable threshold,
+                   floored at 1 so a low threshold (e.g. 1 or 2) doesn't
+                   make 0 failures show as red (false alarm on a
+                   perfectly healthy webhook). -->
+              <span :class="(webhook.consecutive_failures ?? 0) >= Math.max((webhook.disable_after_failures ?? 10) - 2, 1) ? 'text-red-600 font-medium' : 'text-gray-700'">{{ webhook.consecutive_failures ?? 0 }}</span>
               <span class="text-gray-400"> / {{ webhook.disable_after_failures ?? 10 }} consecutive</span>
             </span>
             <p class="text-xs text-gray-400 mt-0.5">Server auto-disables the subscription when threshold is reached.</p>

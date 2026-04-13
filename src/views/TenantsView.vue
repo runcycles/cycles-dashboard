@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
@@ -68,6 +68,9 @@ const parentOptions = computed<Tenant[]>(() => {
 // accidentally bulk-act on rows they can't see. Held as a Set for O(1)
 // toggle in the checkbox handler.
 const selected = ref<Set<string>>(new Set())
+// Clear selection when filters change so a hidden-by-filter row never
+// gets unexpectedly bulk-acted on. Same reasoning as WebhooksView.
+watch([search, parentFilter], () => { selected.value = new Set() })
 function toggleSelect(id: string) {
   const next = new Set(selected.value)
   next.has(id) ? next.delete(id) : next.add(id)
@@ -312,7 +315,9 @@ function parentName(id: string | undefined): string {
          the current request completes. -->
     <ConfirmAction
       v-if="bulkAction"
-      :title="bulkAction === 'SUSPENDED' ? `Suspend ${selectedVisibleCount} tenants?` : `Reactivate ${selectedVisibleCount} tenants?`"
+      :title="bulkAction === 'SUSPENDED'
+        ? `Suspend ${bulkRunning ? bulkProgress.total : selectedVisibleCount} tenants?`
+        : `Reactivate ${bulkRunning ? bulkProgress.total : selectedVisibleCount} tenants?`"
       :message="bulkRunning
         ? `Working… ${bulkProgress.done}/${bulkProgress.total} processed${bulkProgress.failed ? ` (${bulkProgress.failed} failed)` : ''}.`
         : bulkAction === 'SUSPENDED'

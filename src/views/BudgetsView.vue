@@ -49,10 +49,16 @@ const filterUnit = ref('')
 const filterScope = ref('')
 // v0.1.25.21 (#9): utilization range filter. Captures the common ops
 // query "show me budgets at >X%" without the user having to eyeball
-// the utilization bars row by row. Stored as strings so empty values
-// stay empty (Number('') === 0 would otherwise default to 0%).
-const filterUtilMin = ref<string>('')
-const filterUtilMax = ref<string>('')
+// the utilization bars row by row.
+//
+// Type is `number | string` because Vue 3's v-model on
+// `<input type="number">` auto-coerces user input to a number once
+// they type — even when initialized as ''. Initial empty string ('')
+// stays a string until they touch the input. Per the v0.1.25.19
+// `Fund Budget Execute` regression: never call string methods on a
+// v-model'd number-input value. We treat both at consumption.
+const filterUtilMin = ref<number | string>('')
+const filterUtilMax = ref<number | string>('')
 
 const pageTitle = computed(() => {
   if (isDetail.value) return 'Budget Detail'
@@ -85,16 +91,20 @@ function applyClientFilters(items: BudgetLedger[], extra?: (b: BudgetLedger) => 
   if (filterStatus.value) result = result.filter(b => b.status === filterStatus.value)
   if (filterUnit.value) result = result.filter(b => b.unit === filterUnit.value)
   if (filterScope.value) result = result.filter(b => b.scope.startsWith(filterScope.value))
-  // Utilization range. Empty string means "no bound" — only apply when
-  // the input parses to a finite number. Min defaults to 0, max to 100,
-  // but only when the OTHER bound is set (otherwise an unbounded
-  // filter would still be a no-op).
-  const minRaw = filterUtilMin.value.trim()
-  const maxRaw = filterUtilMax.value.trim()
-  if (minRaw !== '' || maxRaw !== '') {
-    const min = minRaw === '' ? 0 : Number(minRaw)
-    const max = maxRaw === '' ? Number.POSITIVE_INFINITY : Number(maxRaw)
-    if (Number.isFinite(min) && Number.isFinite(max) || maxRaw === '') {
+  // Utilization range. Empty string (initial / cleared) means
+  // "no bound on this side." Vue v-model on type=number coerces to
+  // number once the user types, so the value is `number | string` at
+  // runtime. Coerce defensively at consumption (Number(undefined)→NaN,
+  // Number('')→0, Number(null)→0; we only apply the filter when at
+  // least one side has a finite parsed value).
+  const rawMin = filterUtilMin.value
+  const rawMax = filterUtilMax.value
+  const minSet = rawMin !== '' && rawMin !== null && rawMin !== undefined
+  const maxSet = rawMax !== '' && rawMax !== null && rawMax !== undefined
+  if (minSet || maxSet) {
+    const min = minSet ? Number(rawMin) : 0
+    const max = maxSet ? Number(rawMax) : Number.POSITIVE_INFINITY
+    if (Number.isFinite(min) && (Number.isFinite(max) || max === Number.POSITIVE_INFINITY)) {
       result = result.filter(b => {
         const u = utilizationPercent(b)
         return u >= min && u <= max
@@ -167,7 +177,12 @@ async function loadMore() {
     if (filterUnit.value) params.unit = filterUnit.value
     if (filterScope.value) params.scope_prefix = filterScope.value
     const res = await listBudgets(params)
-    budgets.value = [...budgets.value, ...res.ledgers]
+    // v0.1.25.21: apply client-side filters (utilization range #9) to
+    // the newly-appended page too. Without this, "Load more" would
+    // bypass the in-memory filter and dump unfiltered rows into the
+    // visible list — the user would see budgets outside their
+    // utilization range mysteriously appearing on page 2+.
+    budgets.value = [...budgets.value, ...applyClientFilters(res.ledgers)]
     hasMore.value = res.has_more
     nextCursor.value = res.next_cursor ?? ''
   } catch (e) { error.value = toMessage(e) }

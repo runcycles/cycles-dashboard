@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { listAuditLogs } from '../api/client'
 import { useSort } from '../composables/useSort'
@@ -110,12 +110,24 @@ function hasDetail(e: AuditLogEntry): boolean {
 // filters and auto-run the query, so ops doesn't have to copy-paste
 // the key_id / tenant_id into the form.
 const route = useRoute()
-onMounted(() => {
+function applyQueryParams() {
   if (route.query.tenant_id) tenantId.value = String(route.query.tenant_id)
   if (route.query.key_id) keyId.value = String(route.query.key_id)
   if (route.query.operation) operation.value = String(route.query.operation)
   if (route.query.resource_type) resourceType.value = String(route.query.resource_type)
   if (route.query.resource_id) resourceId.value = String(route.query.resource_id)
+}
+onMounted(() => {
+  applyQueryParams()
+  query()
+})
+// Watch in-place query changes too — same-route navigation (e.g. clicking
+// an Activity link from a sidebar that's already on AuditView) won't
+// remount the component, so the onMounted hook wouldn't fire. Without
+// this watch, the URL would update but the form would stay on the
+// previous filter values.
+watch(() => route.query, () => {
+  applyQueryParams()
   query()
 })
 </script>

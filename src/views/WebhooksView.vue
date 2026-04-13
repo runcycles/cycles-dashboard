@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
@@ -36,6 +36,13 @@ const filteredWebhooks = computed(() =>
     ? webhooks.value.filter(w => w.tenant_id === tenantFilter.value)
     : webhooks.value,
 )
+// Clear the selection when the tenant filter changes. Otherwise a user
+// who selects 5 webhooks for tenant A then switches the filter to
+// tenant B would see "0 selected" in the bulk bar (selectedVisibleCount
+// reads filtered state) but `selected.value` still holds the 5 hidden
+// ids — clicking "Pause selected" would silently affect tenant A's
+// webhooks even though tenant B is what's on screen.
+watch(tenantFilter, () => { selected.value = new Set() })
 const { sortKey, sortDir, toggle, sorted: sortedWebhooks } = useSort(filteredWebhooks)
 
 const selected = ref<Set<string>>(new Set())
@@ -319,7 +326,9 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
          decision (the URL is likely still broken). -->
     <ConfirmAction
       v-if="bulkAction"
-      :title="bulkAction === 'PAUSED' ? `Pause ${selectedVisibleCount} webhooks?` : `Enable ${selectedVisibleCount} webhooks?`"
+      :title="bulkAction === 'PAUSED'
+        ? `Pause ${bulkRunning ? bulkProgress.total : selectedVisibleCount} webhooks?`
+        : `Enable ${bulkRunning ? bulkProgress.total : selectedVisibleCount} webhooks?`"
       :message="bulkRunning
         ? `Working… ${bulkProgress.done}/${bulkProgress.total} processed${bulkProgress.failed ? ` (${bulkProgress.failed} failed)` : ''}.`
         : bulkAction === 'PAUSED'

@@ -390,7 +390,11 @@ async function executeEmergencyFreeze() {
   emergencyFreezeCancelRequested.value = false
   for (const b of targets) {
     if (emergencyFreezeCancelRequested.value) break
-    try { await freezeBudget(b.scope, b.unit, 'Emergency freeze — tenant lockdown via admin dashboard') }
+    // Audit-log reason is structured for grep-ability: the
+    // [EMERGENCY_FREEZE] tag lets ops surface every emergency-freeze
+    // action with a single regex against the audit log. Free-text
+    // suffix preserves human-readable context.
+    try { await freezeBudget(b.scope, b.unit, '[EMERGENCY_FREEZE] Tenant lockdown via admin dashboard') }
     catch (e) {
       emergencyFreezeProgress.value.failed++
       console.warn(`emergency freeze failed on ${b.scope}:${b.unit}:`, toMessage(e))
