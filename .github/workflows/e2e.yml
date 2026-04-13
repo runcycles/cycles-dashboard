@@ -1,0 +1,116 @@
+name: Nightly E2E
+
+# Exercises the full published stack (dashboard image + cycles-server +
+# cycles-server-admin + redis) through the dashboard's built-in nginx.
+# Catches plumbing-layer defects that unit tests and Vite-based dev work
+# don't see — specifically the class of bugs that produced v0.1.25.22's
+# nginx proxy_pass path-stripping regression.
+
+on:
+  schedule:
+    # Daily at 06:00 UTC — off-hours for most contributors and avoids
+    # the GitHub Actions queue rush at the top of the hour.
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+  # Also run on PRs that touch the highest-risk plumbing files, so
+  # regressions are caught at review time. Scoped narrowly on purpose —
+  # we don't want to add 3+ minutes of compose stack spin-up to every PR.
+  pull_request:
+    paths:
+      - 'nginx.conf'
+      - 'Dockerfile'
+      - 'docker-compose*.yml'
+      - 'src/api/client.ts'
+      - '.github/workflows/e2e.yml'
+      - 'scripts/e2e-probes.sh'
+
+jobs:
+  e2e:
+    name: Compose stack + HTTP probes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Needed for ghcr.io image pulls (cycles-server, cycles-server-admin).
+      packages: read
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # Authenticate to ghcr so we can pull the backend images. The
+      # dashboard image is built locally from this checkout so we test
+      # the current source, not a previously-published build.
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # Build the dashboard image from current source. docker-compose.yml
+      # uses `build: .` for the dashboard service, so `compose up --build`
+      # will pick this up; explicit build step keeps build output in the
+      # logs for easier diagnosis on failure.
+      - name: Build dashboard image
+        run: docker compose -f docker-compose.yml build dashboard
+
+      - name: Start compose stack
+        env:
+          ADMIN_API_KEY: admin-bootstrap-key
+        run: docker compose -f docker-compose.yml up -d
+
+      # Wait for all services to report healthy. `docker compose ps`
+      # doesn't have a wait-for-all-healthy flag, so poll with a timeout.
+      # Each service's healthcheck has start_period: 30s and interval: 10s,
+      # so ~90s is a safe ceiling for a cold start on a CI runner.
+      - name: Wait for healthchecks
+        run: |
+          set -e
+          for i in $(seq 1 18); do
+            unhealthy=$(docker compose -f docker-compose.yml ps \
+              --format '{{.Name}} {{.Health}}' \
+              | grep -v 'healthy$' | grep -v '^$' || true)
+            if [ -z "$unhealthy" ]; then
+              echo "All services healthy after $((i*5))s."
+              docker compose -f docker-compose.yml ps
+              exit 0
+            fi
+            echo "Waiting for healthchecks (attempt $i/18)..."
+            echo "$unhealthy"
+            sleep 5
+          done
+          echo "ERROR: services did not become healthy in time."
+          docker compose -f docker-compose.yml ps
+          exit 1
+
+      - name: Run E2E probes
+        env:
+          ADMIN_API_KEY: admin-bootstrap-key
+          DASHBOARD_URL: http://localhost:8080
+        run: bash scripts/e2e-probes.sh
+
+      # On failure, surface each container's logs as a workflow artifact
+      # so the person triaging doesn't need to reproduce locally.
+      - name: Capture compose logs on failure
+        if: failure()
+        run: |
+          mkdir -p e2e-logs
+          for svc in dashboard cycles-admin cycles-server redis; do
+            docker compose -f docker-compose.yml logs "$svc" > "e2e-logs/$svc.log" 2>&1 || true
+          done
+          docker compose -f docker-compose.yml ps > e2e-logs/compose-ps.txt 2>&1 || true
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: e2e-compose-logs
+          path: e2e-logs/
+          retention-days: 14
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.yml down -v
