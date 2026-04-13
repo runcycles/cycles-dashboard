@@ -185,18 +185,25 @@ const preview = computed(() => serialize())
           <span class="inline-block w-24 text-xs font-medium text-gray-500">{{ seg.kind }}</span>
           <div class="flex-1 flex items-center gap-3 flex-wrap">
             <!-- Policy wildcard mode: two radios giving equal weight to
-                 "literal" and "any". The radio next to the input sets
-                 the semantic that picking the input text selects the
-                 literal form. -->
+                 "literal" and "any". The "literal" radio carries an
+                 aria-label so non-sighted users hear what it controls;
+                 sighted users read the adjacent text input as the
+                 visual cue. -->
             <label v-if="props.allowWildcards" class="inline-flex items-center gap-1 text-xs cursor-pointer">
-              <input type="radio" :name="`seg-${i}-idmode`" :checked="!seg.anyId" @change="setAnyId(i, false)" />
+              <input
+                type="radio"
+                :name="`seg-${i}-idmode`"
+                :checked="!seg.anyId"
+                @change="setAnyId(i, false)"
+                :aria-label="`Use specific ${seg.kind} id`"
+              />
             </label>
             <input
               :id="`scope-seg-${i}-id`"
               v-model="seg.id"
               :disabled="seg.anyId"
               :required="!seg.anyId"
-              class="border border-gray-300 rounded px-2 py-1 text-sm font-mono flex-1 min-w-40 disabled:bg-gray-100 disabled:text-gray-400"
+              class="border border-gray-300 rounded px-2 py-1 text-sm font-mono flex-1 min-w-[10rem] disabled:bg-gray-100 disabled:text-gray-400"
               :placeholder="`${seg.kind} id (e.g. prod, reviewer, v2.1)`"
             />
             <label v-if="props.allowWildcards" class="inline-flex items-center gap-1 text-xs cursor-pointer">
