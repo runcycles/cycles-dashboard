@@ -23,6 +23,7 @@ Follow-up to v0.1.25.17. Systematic audit of every write operation across detail
 
 - `safeJsonStringify` was using a `WeakSet` to mark visited objects — this incorrectly flagged **shared sibling references** (`{a: X, b: X}` where X is the same object) as `[Circular]` even though there's no cycle, corrupting AuditView CSV exports of any payload with shared refs. Replaced with a per-call ancestor **stack** trimmed by matching the replacer's `this` against the top — preserves true-cycle detection while matching vanilla `JSON.stringify` behavior on shared refs. +5 regression tests assert: shared refs serialized N times, deeply nested shared refs, self-cycle, deep mutual cycle, shared arrays.
 - `AuditView` UI metadata panel (`<pre>{{ JSON.stringify(e.metadata, null, 2) }}</pre>`) still used bare `JSON.stringify` — same crash risk as the EventsView fix. Now uses `safeJsonStringify`.
+- **Rotate Secret confirm dialog closed before the PATCH ran.** `executeRotate()` set `pendingRotate = false` at line 1, then awaited the network call. On 403 / timeout, the user clicked Confirm, watched the dialog vanish, then a disconnected toast appeared seconds later with no UI tying it to the action. **Upgraded `ConfirmAction` with optional `loading` and `error` props** (backwards compatible — both default to undefined, so the other ~12 call sites are unaffected). The Rotate flow now keeps the dialog mounted with a spinner during the PATCH, closes only on success, and surfaces failures inline so the user can retry or cancel from the same context. +10 component-level tests cover loading-disables-buttons, loading-blocks-backdrop, loading-spinner-renders, error-block-renders, retry-after-error.
 
 **Tests.** +29 new cases in `src/__tests__/safe.test.ts`:
 
@@ -30,7 +31,7 @@ Follow-up to v0.1.25.17. Systematic audit of every write operation across detail
 - `csvEscape` — RFC 4180 quoting, embedded quotes, commas/newlines, null/undefined, number/boolean coercion, all 6 formula-injection prefixes (`=` / `+` / `-` / `@` / TAB / CR), no-prefix when `=` is mid-string (10 cases).
 - `tenantFromScope` — bare scope, compound scope, dashes/dots/underscores in id, non-tenant scopes, null/undefined/empty, no false positive when `tenant:` is mid-string (8 cases).
 
-**Gates.** typecheck clean; **182/182 tests pass** (was 153); build clean.
+**Gates.** typecheck clean; **192/192 tests pass** (was 153); build clean.
 
 **Spec compliance.** Unchanged. No endpoint, schema, or wire-format changes.
 

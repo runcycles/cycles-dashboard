@@ -65,12 +65,27 @@ async function executeDelete() {
   }
 }
 
-// Rotate signing secret
+// Rotate signing secret. Keep the confirm dialog mounted (with a loading
+// spinner) until the request settles. Previously we closed the dialog
+// before awaiting the PATCH — on a 403 the user saw nothing happen, then
+// a toast appeared seconds later with no UI context tying it to the
+// click. The dialog now closes only on success; on error it stays open
+// with an inline error so the user can read it next to the action they
+// confirmed, and retry or cancel.
 const pendingRotate = ref(false)
+const rotateLoading = ref(false)
+const rotateError = ref('')
 const rotatedSecret = ref<string | null>(null)
 
+function openRotate() {
+  rotateError.value = ''
+  pendingRotate.value = true
+}
+
 async function executeRotate() {
-  pendingRotate.value = false
+  if (rotateLoading.value) return // double-click guard
+  rotateError.value = ''
+  rotateLoading.value = true
   try {
     const { signing_secret, subscription } = await rotateWebhookSecret(id)
     // The secret is always returned by the client wrapper (generated
@@ -78,11 +93,14 @@ async function executeRotate() {
     // it back on subsequent reads.
     rotatedSecret.value = signing_secret
     webhook.value = subscription
+    pendingRotate.value = false
     toast.success('Signing secret rotated — copy it now, it will not be shown again')
   } catch (e) {
     const msg = toMessage(e)
-    error.value = msg
+    rotateError.value = msg
     toast.error(`Rotate secret failed: ${msg}`)
+  } finally {
+    rotateLoading.value = false
   }
 }
 
@@ -208,7 +226,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           <div v-if="canManage" class="flex gap-2 flex-wrap">
             <button @click="openEdit"class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Edit</button>
             <button @click="runTest" :disabled="testLoading" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors disabled:opacity-50">{{ testLoading ? 'Testing...' : 'Send Test' }}</button>
-            <button @click="pendingRotate = true" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Rotate Secret</button>
+            <button @click="openRotate" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Rotate Secret</button>
             <button @click="showReplay = true" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Replay</button>
             <button v-if="(webhook.consecutive_failures ?? 0) > 0 && webhook.status !== 'ACTIVE'" @click="pendingAction = 'reset'" class="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-2.5 py-1 hover:bg-blue-50 cursor-pointer transition-colors">Reset &amp; Re-enable</button>
             <button v-if="webhook.status === 'ACTIVE'" @click="pendingAction = 'PAUSED'" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Pause</button>
@@ -343,6 +361,8 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       :message="`This will generate a new signing secret for '${webhook?.name || webhook?.url}'. The old secret will be immediately invalidated. Any consumers verifying webhook signatures will need to update their secret.`"
       confirm-label="Rotate Secret"
       :danger="true"
+      :loading="rotateLoading"
+      :error="rotateError"
       @confirm="executeRotate"
       @cancel="pendingRotate = false"
     />
