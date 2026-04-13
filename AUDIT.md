@@ -1,8 +1,43 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-13 (v0.1.25.19)
-**Spec:** `cycles-governance-admin-v0.1.25.yaml` (OpenAPI 3.1.0, **v0.1.25.12** — additive error-response docs only since v0.1.25.10; no schema or endpoint changes)
+**Date:** 2026-04-13 (v0.1.25.20)
+**Spec:** `cycles-governance-admin-v0.1.25.yaml` (OpenAPI 3.1.0, **v0.1.25.13** — adds dual-auth on createBudget / createPolicy / updatePolicy + optional `tenant_id` in BudgetCreateRequest / PolicyCreateRequest)
 **Stack:** Vue 3 + TypeScript + Vite + Pinia + Tailwind CSS v4
+
+### 2026-04-13 — v0.1.25.20: Create Budget + Create/Edit Policy (admin-on-behalf-of)
+
+Closes the long-standing budget management gap reported by the user — admin operators could manage tenants end-to-end (create / update / suspend / reactivate) but could only **list / freeze / fund / update** budgets, never **create** them. Same for policies (list-only). The blocker was spec-side: createBudget / createPolicy / updatePolicy were `ApiKeyAuth`-only, and the dashboard authenticates exclusively with `X-Admin-API-Key`.
+
+Three-PR rollout:
+1. **Spec** — [cycles-protocol#36](https://github.com/runcycles/cycles-protocol/pull/36) v0.1.25.13: dual-auth + optional `tenant_id` in request bodies.
+2. **Server** — [cycles-server-admin#91](https://github.com/runcycles/cycles-server-admin/pull/91) v0.1.25.14: `ADMIN_ALLOWED_ENDPOINTS` updated, controllers branch on auth context, audit log + event tag `actor_type=admin_on_behalf_of`. Defense-in-depth path-traversal guard in `AuthInterceptor`.
+3. **Dashboard** — this release.
+
+**Dashboard changes:**
+
+| File | Change |
+|------|--------|
+| `src/api/client.ts` | New `createBudget(tenantId, body)`, `createPolicy(tenantId, body)`, `updatePolicy(policyId, body)`. The first two stitch `tenant_id` into the body so call sites stay tenant-agnostic; the third doesn't because policy_id pins the owning tenant server-side. |
+| `src/types.ts` | Added `BudgetCreateRequest`, `PolicyCreateRequest`, `PolicyUpdateRequest`. `Capabilities` gained optional `manage_policies?: boolean` (defaults to "allow" when undefined so older admin servers keep working). |
+| `src/views/TenantDetailView.vue` | "Create Budget" button on Budgets tab, "Create Policy" + per-row "Edit" buttons on Policies tab. Three new FormDialogs with field-level validation. Capability-gated via `canManageBudgets` / `canManagePolicies`. Forms pre-fill `scope`/`scope_pattern` with `tenant:<id>` to satisfy the server's tenant-prefix requirement out of the box. |
+
+**UI placement decisions:**
+- Budget creation lives under the tenant detail's Budgets tab (not on the global `BudgetsView`) because every budget is tenant-scoped — opening it from the tenant context means the tenant is unambiguous and we don't have to disambiguate which tenant the new budget belongs to.
+- Edit Policy uses PATCH semantics — only fields the user changed are sent; no-op submits surface "No changes to save" inline.
+- Form types use `number | string` on numeric inputs (allocated, overdraft_limit, priority) per the v0.1.25.19 hard-won lesson about Vue 3 `v-model` on `<input type="number">` auto-coercing to number after user input. All consumption sites use `Number()` + `Number.isFinite()` defensively.
+
+**Tests** (+5 in `src/__tests__/client.test.ts` `admin-on-behalf-of write wrappers` suite):
+- `createBudget` injects `tenant_id` into the POST body
+- `createPolicy` injects `tenant_id` into the POST body
+- `updatePolicy` does NOT inject `tenant_id` (path pins owner)
+- 409 DUPLICATE_RESOURCE on createBudget surfaces as `ApiError` with code intact
+- 400 INVALID_REQUEST on createPolicy surfaces cleanly
+
+**Spec compliance.** Aligned with cycles-governance-admin v0.1.25.13. Purely additive — view-file changes don't touch existing flows.
+
+**Gates.** typecheck clean; **216/216 tests pass** (was 211; +5); build clean.
+
+---
 
 ### 2026-04-13 — v0.1.25.19: Fund Budget Execute regression — Vue v-model number coercion
 

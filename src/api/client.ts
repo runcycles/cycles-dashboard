@@ -215,6 +215,25 @@ export const listApiKeys = (params?: Record<string, string>) =>
 export const listPolicies = (params: Record<string, string>) =>
   get<import('../types').PolicyListResponse>(`${BASE}/admin/policies`, params)
 
+// v0.1.25.20: createPolicy — admin-on-behalf-of (spec v0.1.25.13). Same
+// shape as createBudget — tenant_id required in body, server uses it to
+// scope the new policy to the target tenant.
+export function createPolicy(
+  tenantId: string,
+  body: import('../types').PolicyCreateRequest,
+): Promise<import('../types').Policy> {
+  return post<import('../types').Policy>(
+    `${BASE}/admin/policies`,
+    { ...(body as unknown as Record<string, unknown>), tenant_id: tenantId },
+  )
+}
+
+// v0.1.25.20: updatePolicy — admin-on-behalf-of. Unlike create, no
+// tenant_id is needed in the body — policy_id pins the owning tenant
+// in the persistence layer, server resolves it server-side.
+export const updatePolicy = (policyId: string, body: import('../types').PolicyUpdateRequest) =>
+  patch<import('../types').Policy>(`${BASE}/admin/policies/${policyId}`, body as unknown as Record<string, unknown>)
+
 // ── Write operations ────────────────────────────────────────────────
 
 // Tenants
@@ -254,6 +273,21 @@ export const replayWebhookEvents = (id: string, body: import('../types').ReplayE
   post<import('../types').ReplayEventsResponse>(`${BASE}/admin/webhooks/${id}/replay`, body as unknown as Record<string, unknown>)
 
 // Budgets
+
+// v0.1.25.20: createBudget — admin-on-behalf-of (spec v0.1.25.13, server
+// v0.1.25.14). Dashboard authenticates with admin key, so tenant_id MUST
+// be in the body — the server uses it to route the create to the correct
+// tenant. The wrapper stitches the field in to keep the call sites tidy.
+export function createBudget(
+  tenantId: string,
+  body: import('../types').BudgetCreateRequest,
+): Promise<import('../types').BudgetLedger> {
+  return post<import('../types').BudgetLedger>(
+    `${BASE}/admin/budgets`,
+    { ...(body as unknown as Record<string, unknown>), tenant_id: tenantId },
+  )
+}
+
 export const updateBudgetConfig = (scope: string, unit: string, body: Record<string, unknown>) =>
   mutate<import('../types').BudgetLedger>('PATCH', `${BASE}/admin/budgets`, body, { scope, unit })
 

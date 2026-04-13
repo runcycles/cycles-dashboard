@@ -2,10 +2,10 @@
 import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
-import { getTenant, listBudgets, listApiKeys, listPolicies, updateTenantStatus, updateTenant, revokeApiKey, createApiKey } from '../api/client'
+import { getTenant, listBudgets, listApiKeys, listPolicies, updateTenantStatus, updateTenant, revokeApiKey, createApiKey, createBudget, createPolicy, updatePolicy } from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import type { Tenant, BudgetLedger, ApiKey, Policy, ApiKeyCreateResponse } from '../types'
-import { PERMISSIONS } from '../types'
+import type { Tenant, BudgetLedger, ApiKey, Policy, ApiKeyCreateResponse, BudgetCreateRequest, PolicyCreateRequest, PolicyUpdateRequest } from '../types'
+import { PERMISSIONS, COMMIT_OVERAGE_POLICIES } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import MaskedValue from '../components/MaskedValue.vue'
@@ -24,6 +24,11 @@ const auth = useAuthStore()
 const id = route.params.id as string
 const canManageTenants = computed(() => auth.capabilities?.manage_tenants !== false)
 const canManageKeys = computed(() => auth.capabilities?.manage_api_keys !== false)
+// v0.1.25.20: Create Budget + Create/Edit Policy buttons gated on the
+// matching capability flags. Both default to "allow" when undefined so
+// older admin servers (pre-v0.1.25.14) keep working.
+const canManageBudgets = computed(() => auth.capabilities?.manage_budgets !== false)
+const canManagePolicies = computed(() => auth.capabilities?.manage_policies !== false)
 
 const tenant = ref<Tenant | null>(null)
 const budgets = ref<BudgetLedger[]>([])
@@ -131,6 +136,195 @@ async function submitCreateKey() {
   finally { createKeyLoading.value = false }
 }
 
+// v0.1.25.20: Create Budget — admin-on-behalf-of (server v0.1.25.14, spec
+// v0.1.25.13). Tenant_id is supplied by the API client wrapper from the
+// route param; the form is tenant-agnostic. Allocation is bound as a
+// number (Vue v-model on type=number coerces — see feedback memory on
+// that), so we coerce defensively at submit.
+const showCreateBudget = ref(false)
+const createBudgetLoading = ref(false)
+const createBudgetError = ref('')
+const createBudgetForm = ref<{
+  scope: string
+  unit: string
+  allocated: number | string
+  overdraft_limit: number | string
+  commit_overage_policy: string
+}>({
+  scope: '',
+  unit: 'USD_MICROCENTS',
+  allocated: '',
+  overdraft_limit: '',
+  commit_overage_policy: '',
+})
+
+function openCreateBudget() {
+  // Pre-fill scope with `tenant:<id>` so the user only fills the suffix
+  // (workspace, agent, etc) — the most common shape and the one that
+  // satisfies the server's `tenant:*` requirement out of the box.
+  createBudgetForm.value = {
+    scope: `tenant:${id}`,
+    unit: 'USD_MICROCENTS',
+    allocated: '',
+    overdraft_limit: '',
+    commit_overage_policy: '',
+  }
+  createBudgetError.value = ''
+  showCreateBudget.value = true
+}
+
+async function submitCreateBudget() {
+  if (createBudgetLoading.value) return
+  createBudgetError.value = ''
+  const allocated = Number(createBudgetForm.value.allocated)
+  if (!Number.isFinite(allocated) || allocated <= 0) {
+    createBudgetError.value = 'Allocated amount must be a positive number'
+    return
+  }
+  if (!createBudgetForm.value.scope.trim()) {
+    createBudgetError.value = 'Scope is required'
+    return
+  }
+  const body: BudgetCreateRequest = {
+    scope: createBudgetForm.value.scope.trim(),
+    unit: createBudgetForm.value.unit,
+    allocated: { unit: createBudgetForm.value.unit, amount: allocated },
+  }
+  // overdraft is optional — only include when > 0 to avoid the server
+  // recording an explicit zero where "unset" was intended.
+  const od = Number(createBudgetForm.value.overdraft_limit)
+  if (Number.isFinite(od) && od > 0) {
+    body.overdraft_limit = { unit: createBudgetForm.value.unit, amount: od }
+  }
+  if (createBudgetForm.value.commit_overage_policy) {
+    body.commit_overage_policy = createBudgetForm.value.commit_overage_policy
+  }
+  createBudgetLoading.value = true
+  try {
+    await createBudget(id, body)
+    showCreateBudget.value = false
+    toast.success('Budget created')
+    refresh()
+  } catch (e) { createBudgetError.value = toMessage(e) }
+  finally { createBudgetLoading.value = false }
+}
+
+// v0.1.25.20: Create Policy — admin-on-behalf-of. Same shape as Create
+// Budget — tenant_id supplied by wrapper. UI exposes the most-used
+// fields; advanced fields (caps, rate_limits, action_quotas) can be
+// added in a follow-up once the basic flow is exercised.
+const showCreatePolicy = ref(false)
+const createPolicyLoading = ref(false)
+const createPolicyError = ref('')
+const createPolicyForm = ref<{
+  name: string
+  scope_pattern: string
+  description: string
+  priority: number | string
+  commit_overage_policy: string
+}>({
+  name: '',
+  scope_pattern: `tenant:${id}/*`,
+  description: '',
+  priority: '',
+  commit_overage_policy: '',
+})
+
+function openCreatePolicy() {
+  createPolicyForm.value = {
+    name: '',
+    scope_pattern: `tenant:${id}/*`,
+    description: '',
+    priority: '',
+    commit_overage_policy: '',
+  }
+  createPolicyError.value = ''
+  showCreatePolicy.value = true
+}
+
+async function submitCreatePolicy() {
+  if (createPolicyLoading.value) return
+  createPolicyError.value = ''
+  if (!createPolicyForm.value.name.trim()) {
+    createPolicyError.value = 'Name is required'
+    return
+  }
+  if (!createPolicyForm.value.scope_pattern.trim()) {
+    createPolicyError.value = 'Scope pattern is required'
+    return
+  }
+  const body: PolicyCreateRequest = {
+    name: createPolicyForm.value.name.trim(),
+    scope_pattern: createPolicyForm.value.scope_pattern.trim(),
+  }
+  if (createPolicyForm.value.description.trim()) body.description = createPolicyForm.value.description.trim()
+  const prio = Number(createPolicyForm.value.priority)
+  if (createPolicyForm.value.priority !== '' && Number.isFinite(prio)) body.priority = prio
+  if (createPolicyForm.value.commit_overage_policy) body.commit_overage_policy = createPolicyForm.value.commit_overage_policy
+  createPolicyLoading.value = true
+  try {
+    await createPolicy(id, body)
+    showCreatePolicy.value = false
+    toast.success('Policy created')
+    refresh()
+  } catch (e) { createPolicyError.value = toMessage(e) }
+  finally { createPolicyLoading.value = false }
+}
+
+// v0.1.25.20: Edit Policy — uses PATCH /v1/admin/policies/{id}. policy_id
+// pins the owning tenant on the server; no tenant_id needed in body.
+const showEditPolicy = ref(false)
+const editPolicyLoading = ref(false)
+const editPolicyError = ref('')
+const editPolicyTarget = ref<Policy | null>(null)
+const editPolicyForm = ref<{
+  name: string
+  description: string
+  priority: number | string
+  commit_overage_policy: string
+}>({ name: '', description: '', priority: '', commit_overage_policy: '' })
+
+function openEditPolicy(p: Policy) {
+  editPolicyTarget.value = p
+  editPolicyForm.value = {
+    name: p.name,
+    description: '',
+    priority: p.priority ?? '',
+    commit_overage_policy: '',
+  }
+  editPolicyError.value = ''
+  showEditPolicy.value = true
+}
+
+async function submitEditPolicy() {
+  if (!editPolicyTarget.value || editPolicyLoading.value) return
+  editPolicyError.value = ''
+  const body: PolicyUpdateRequest = {}
+  // PATCH semantics: only send fields the user actually changed/filled.
+  // Avoid no-op payloads that would dirty the audit log.
+  if (editPolicyForm.value.name.trim() && editPolicyForm.value.name.trim() !== editPolicyTarget.value.name) {
+    body.name = editPolicyForm.value.name.trim()
+  }
+  if (editPolicyForm.value.description.trim()) body.description = editPolicyForm.value.description.trim()
+  const prio = Number(editPolicyForm.value.priority)
+  if (editPolicyForm.value.priority !== '' && Number.isFinite(prio) && prio !== editPolicyTarget.value.priority) {
+    body.priority = prio
+  }
+  if (editPolicyForm.value.commit_overage_policy) body.commit_overage_policy = editPolicyForm.value.commit_overage_policy
+  if (Object.keys(body).length === 0) {
+    editPolicyError.value = 'No changes to save'
+    return
+  }
+  editPolicyLoading.value = true
+  try {
+    await updatePolicy(editPolicyTarget.value.policy_id, body)
+    showEditPolicy.value = false
+    toast.success('Policy updated')
+    refresh()
+  } catch (e) { editPolicyError.value = toMessage(e) }
+  finally { editPolicyLoading.value = false }
+}
+
 const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
     tenant.value = await getTenant(id)
@@ -189,6 +383,9 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       </div>
 
       <!-- Budgets tab -->
+      <div v-if="tab === 'budgets' && canManageBudgets" class="flex justify-end mb-2">
+        <button @click="openCreateBudget" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Budget</button>
+      </div>
       <div v-if="tab === 'budgets'" class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
         <table class="w-full text-sm min-w-[520px]">
           <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
@@ -231,10 +428,13 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       </div>
 
       <!-- Policies tab -->
+      <div v-if="tab === 'policies' && canManagePolicies" class="flex justify-end mb-2">
+        <button @click="openCreatePolicy" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Policy</button>
+      </div>
       <div v-if="tab === 'policies'" class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
         <table class="w-full text-sm min-w-[520px]">
           <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
-            <tr><th class="px-4 py-3 text-left">Policy ID</th><th class="px-4 py-3 text-left">Name</th><th class="px-4 py-3 text-left">Scope</th><th class="px-4 py-3 text-left">Status</th></tr>
+            <tr><th class="px-4 py-3 text-left">Policy ID</th><th class="px-4 py-3 text-left">Name</th><th class="px-4 py-3 text-left">Scope</th><th class="px-4 py-3 text-left">Status</th><th v-if="canManagePolicies" class="px-4 py-3 w-20"></th></tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
             <tr v-for="p in policies" :key="p.policy_id" class="hover:bg-gray-50 transition-colors">
@@ -242,8 +442,11 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
               <td class="px-4 py-3 text-gray-700">{{ p.name }}</td>
               <td class="px-4 py-3 text-gray-500 font-mono text-xs">{{ p.scope_pattern }}</td>
               <td class="px-4 py-3"><StatusBadge :status="p.status" /></td>
+              <td v-if="canManagePolicies" class="px-4 py-3">
+                <button @click="openEditPolicy(p)" class="text-xs text-gray-600 hover:text-gray-800 cursor-pointer hover:underline">Edit</button>
+              </td>
             </tr>
-            <tr v-if="policies.length === 0"><td colspan="4"><EmptyState message="No policies" hint="Policies will appear here once configured" /></td></tr>
+            <tr v-if="policies.length === 0"><td :colspan="canManagePolicies ? 5 : 4"><EmptyState message="No policies" hint="Policies will appear here once configured" /></td></tr>
           </tbody>
         </table>
       </div>
@@ -338,5 +541,89 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     </FormDialog>
 
     <SecretReveal v-if="createdKeySecret" title="API Key Created" :secret="createdKeySecret.key_secret" label="API Key Secret" @close="createdKeySecret = null; refresh()" />
+
+    <!-- v0.1.25.20: Create Budget (admin-on-behalf-of) -->
+    <FormDialog v-if="showCreateBudget" title="Create Budget" submit-label="Create" :loading="createBudgetLoading" :error="createBudgetError" @submit="submitCreateBudget" @cancel="showCreateBudget = false">
+      <div>
+        <label for="cb-scope" class="block text-xs text-gray-500 mb-1">Scope</label>
+        <input id="cb-scope" v-model="createBudgetForm.scope" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="tenant:acme/workspace:prod" />
+        <p class="text-xs text-gray-400 mt-0.5">Canonical scope identifier. Must start with <code>tenant:</code> and the tenant must be ACTIVE.</p>
+      </div>
+      <div>
+        <label for="cb-unit" class="block text-xs text-gray-500 mb-1">Unit</label>
+        <select id="cb-unit" v-model="createBudgetForm.unit" required class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
+          <option value="USD_MICROCENTS">USD_MICROCENTS</option>
+          <option value="TOKENS">TOKENS</option>
+          <option value="CREDITS">CREDITS</option>
+          <option value="RISK_POINTS">RISK_POINTS</option>
+        </select>
+      </div>
+      <div>
+        <label for="cb-allocated" class="block text-xs text-gray-500 mb-1">Initial allocation</label>
+        <input id="cb-allocated" v-model="createBudgetForm.allocated" type="number" min="0" step="1" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
+      </div>
+      <div>
+        <label for="cb-overdraft" class="block text-xs text-gray-500 mb-1">Overdraft limit (optional)</label>
+        <input id="cb-overdraft" v-model="createBudgetForm.overdraft_limit" type="number" min="0" step="1" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
+      </div>
+      <div>
+        <label for="cb-cop" class="block text-xs text-gray-500 mb-1">Commit overage policy (optional)</label>
+        <select id="cb-cop" v-model="createBudgetForm.commit_overage_policy" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
+          <option value="">— Inherit from tenant —</option>
+          <option v-for="p in COMMIT_OVERAGE_POLICIES" :key="p" :value="p">{{ p }}</option>
+        </select>
+      </div>
+    </FormDialog>
+
+    <!-- v0.1.25.20: Create Policy (admin-on-behalf-of) -->
+    <FormDialog v-if="showCreatePolicy" title="Create Policy" submit-label="Create" :loading="createPolicyLoading" :error="createPolicyError" @submit="submitCreatePolicy" @cancel="showCreatePolicy = false">
+      <div>
+        <label for="cp-name" class="block text-xs text-gray-500 mb-1">Name</label>
+        <input id="cp-name" v-model="createPolicyForm.name" required maxlength="256" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
+      </div>
+      <div>
+        <label for="cp-scope" class="block text-xs text-gray-500 mb-1">Scope pattern</label>
+        <input id="cp-scope" v-model="createPolicyForm.scope_pattern" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="tenant:acme/*" />
+        <p class="text-xs text-gray-400 mt-0.5">Glob pattern. <code>*</code> matches one path segment.</p>
+      </div>
+      <div>
+        <label for="cp-desc" class="block text-xs text-gray-500 mb-1">Description (optional)</label>
+        <input id="cp-desc" v-model="createPolicyForm.description" maxlength="1024" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
+      </div>
+      <div>
+        <label for="cp-priority" class="block text-xs text-gray-500 mb-1">Priority (higher wins on overlap)</label>
+        <input id="cp-priority" v-model="createPolicyForm.priority" type="number" step="1" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="0" />
+      </div>
+      <div>
+        <label for="cp-cop" class="block text-xs text-gray-500 mb-1">Commit overage policy (optional)</label>
+        <select id="cp-cop" v-model="createPolicyForm.commit_overage_policy" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
+          <option value="">— Default —</option>
+          <option v-for="p in COMMIT_OVERAGE_POLICIES" :key="p" :value="p">{{ p }}</option>
+        </select>
+      </div>
+    </FormDialog>
+
+    <!-- v0.1.25.20: Edit Policy -->
+    <FormDialog v-if="showEditPolicy" title="Edit Policy" submit-label="Save Changes" :loading="editPolicyLoading" :error="editPolicyError" @submit="submitEditPolicy" @cancel="showEditPolicy = false">
+      <div>
+        <label for="ep-name" class="block text-xs text-gray-500 mb-1">Name</label>
+        <input id="ep-name" v-model="editPolicyForm.name" maxlength="256" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
+      </div>
+      <div>
+        <label for="ep-desc" class="block text-xs text-gray-500 mb-1">Description (optional)</label>
+        <input id="ep-desc" v-model="editPolicyForm.description" maxlength="1024" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
+      </div>
+      <div>
+        <label for="ep-priority" class="block text-xs text-gray-500 mb-1">Priority</label>
+        <input id="ep-priority" v-model="editPolicyForm.priority" type="number" step="1" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
+      </div>
+      <div>
+        <label for="ep-cop" class="block text-xs text-gray-500 mb-1">Commit overage policy (optional)</label>
+        <select id="ep-cop" v-model="editPolicyForm.commit_overage_policy" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
+          <option value="">— Unchanged —</option>
+          <option v-for="p in COMMIT_OVERAGE_POLICIES" :key="p" :value="p">{{ p }}</option>
+        </select>
+      </div>
+    </FormDialog>
   </div>
 </template>
