@@ -149,6 +149,17 @@ const replayResult = ref<string | null>(null)
 
 async function submitReplay() {
   replayError.value = ''
+  // Client-side range sanity check. Server will also reject, but a
+  // pre-flight avoids a wasted round-trip and surfaces the problem
+  // next to the offending inputs.
+  if (replayForm.value.from && replayForm.value.to) {
+    const fromMs = new Date(replayForm.value.from).getTime()
+    const toMs = new Date(replayForm.value.to).getTime()
+    if (!isNaN(fromMs) && !isNaN(toMs) && fromMs > toMs) {
+      replayError.value = '"From" must be before "To"'
+      return
+    }
+  }
   replayLoading.value = true
   try {
     const body: Record<string, unknown> = {}
@@ -156,9 +167,10 @@ async function submitReplay() {
     if (replayForm.value.to) body.to = new Date(replayForm.value.to).toISOString()
     if (replayForm.value.max_events) body.max_events = Number(replayForm.value.max_events)
     const res = await replayWebhookEvents(id, body as any)
+    // Leave banner visible until the user dismisses it — previous 5s
+    // auto-clear was easy to miss when scrolled into deliveries list.
     replayResult.value = `${res.events_queued} events queued for replay`
     showReplay.value = false
-    setTimeout(() => { replayResult.value = null }, 5000)
   } catch (e) { replayError.value = toMessage(e) }
   finally { replayLoading.value = false }
 }
@@ -234,7 +246,10 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       </div>
 
       <!-- Replay result -->
-      <div v-if="replayResult" class="mb-4 px-4 py-3 rounded-lg text-sm bg-blue-50 border border-blue-200 text-blue-700">{{ replayResult }}</div>
+      <div v-if="replayResult" class="mb-4 px-4 py-3 rounded-lg text-sm bg-blue-50 border border-blue-200 text-blue-700 flex items-start justify-between gap-3" role="status">
+        <span>{{ replayResult }}</span>
+        <button type="button" @click="replayResult = null" aria-label="Dismiss replay notification" class="text-blue-500 hover:text-blue-800 cursor-pointer shrink-0">✕</button>
+      </div>
 
       <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
         <div class="px-4 py-3 border-b border-gray-100 flex justify-between items-center">

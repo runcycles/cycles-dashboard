@@ -54,12 +54,14 @@ const pageTitle = computed(() => {
   return 'Budgets'
 })
 
+const tenantsError = ref('')
 async function loadTenants() {
   try {
     const res = await listTenants()
     tenants.value = res.tenants
+    tenantsError.value = ''
   } catch (e) {
-    console.error('Failed to load tenants for budget filter', e)
+    tenantsError.value = `Could not load tenant list: ${toMessage(e)}`
   }
 }
 
@@ -320,6 +322,7 @@ watch(() => route.query, () => {
               <option value="">All tenants</option>
               <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
             </select>
+            <p v-if="tenantsError" class="text-xs text-red-600 mt-1" role="alert">{{ tenantsError }}</p>
           </div>
           <div>
             <label for="budget-status" class="block text-xs text-gray-500 mb-1">Status</label>
