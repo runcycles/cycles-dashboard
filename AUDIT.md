@@ -1,8 +1,31 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-13 (v0.1.25.18)
+**Date:** 2026-04-13 (v0.1.25.19)
 **Spec:** `cycles-governance-admin-v0.1.25.yaml` (OpenAPI 3.1.0, **v0.1.25.12** — additive error-response docs only since v0.1.25.10; no schema or endpoint changes)
 **Stack:** Vue 3 + TypeScript + Vite + Pinia + Tailwind CSS v4
+
+### 2026-04-13 — v0.1.25.19: Fund Budget Execute regression — Vue v-model number coercion
+
+Hotfix. v0.1.25.18 added empty-amount validation to `submitFund` via `fundForm.value.amount.trim()`, assuming the form-bound value stayed a string. **Vue 3's v-model on `<input type="number">` auto-coerces user input to a `number`** (via `looseToNumber`), so once the user typed an amount, `.trim()` threw `TypeError: trim is not a function` inside the form-submit emit handler. Vue logged the error to console but the user just saw the dialog stay open with no toast / no error banner / no network request — **"Execute does nothing"**.
+
+Reported by user immediately after release. Browser console showed:
+```
+BudgetsView.vue:210 Uncaught (in promise) TypeError: fundForm.value.amount.trim is not a function
+```
+
+**Fix.**
+- New `parsePositiveAmount(input: unknown): number | null` in `utils/safe.ts` — accepts both runtime types Vue can produce (string before user input, number after), returns the validated positive value or `null`. Documented edge cases: empty, zero, negative, NaN, ±Infinity, non-numeric strings, objects/arrays.
+- `submitFund` calls `parsePositiveAmount(fundForm.value.amount)` and surfaces "Amount must be a positive number" on null. No more `.trim()`.
+- Form ref is now typed as `{ amount: number | string; ... }` so the next person who touches this can't make the same string-only assumption without a TS error.
+- +10 regression tests in `safe.test.ts` cover positive number, positive string, empty string, null/undefined, zero, negative, NaN/Infinity, non-numeric, non-primitive — and an explicit "does NOT throw" test on the inputs that crashed v0.1.25.18.
+
+**Self-critique recorded.** The audit subagent flagged the binding type concern in v0.1.25.18 review (#4 in the report) and I dismissed it as "verified safe". It wasn't. The dismissal happened because I tested mentally with `Number(raw)` not `raw.trim()` and didn't trace which code path the new `.trim()` call would actually hit.
+
+**Gates.** typecheck clean; **211/211 tests pass** (was 201); build clean.
+
+**Spec compliance.** Unchanged.
+
+---
 
 ### 2026-04-13 — v0.1.25.18: Round-3 audit fixes (write-op hardening + CSV injection + circular JSON + pagination)
 

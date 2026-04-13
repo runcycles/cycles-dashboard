@@ -64,6 +64,36 @@ export function csvEscape(value: unknown): string {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// parsePositiveAmount — coerce a form-bound amount field to a positive
+// finite number, or return null if invalid.
+//
+// Vue 3's v-model on `<input type="number">` auto-coerces user input to
+// a number (via looseToNumber), but the initial value we bind is often
+// an empty string — so the field can be either type at runtime. A
+// previous version of submitFund called .trim() on this field, which
+// threw `TypeError: trim is not a function` once the user typed and Vue
+// coerced. Form-handler exceptions kill the submit silently from the
+// user's POV ("Execute does nothing"). This helper has one job: turn
+// whatever the input gave us into a validated number, or null.
+//
+//   parsePositiveAmount("100")  → 100
+//   parsePositiveAmount(100)    → 100
+//   parsePositiveAmount("")     → null  (empty)
+//   parsePositiveAmount(0)      → null  (must be > 0)
+//   parsePositiveAmount(-5)     → null
+//   parsePositiveAmount("abc")  → null
+//   parsePositiveAmount(NaN)    → null
+//   parsePositiveAmount(null)   → null
+//   parsePositiveAmount(undef)  → null
+// ────────────────────────────────────────────────────────────────────
+export function parsePositiveAmount(input: unknown): number | null {
+  if (input === null || input === undefined || input === '') return null
+  const n = Number(input)
+  if (!Number.isFinite(n) || n <= 0) return null
+  return n
+}
+
+// ────────────────────────────────────────────────────────────────────
 // tenantFromScope — extract canonical tenant id from a scope path.
 //
 // Cycles scopes are slash-joined identifiers like "tenant:acme",
