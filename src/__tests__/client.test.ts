@@ -312,6 +312,96 @@ describe('endpoint wrappers — smoke', () => {
     expect(body.reason).toBe('monthly')
   })
 
+  // v0.1.25.20: admin-on-behalf-of write wrappers (server v0.1.25.14, spec
+  // v0.1.25.13). Each wrapper must inject tenant_id into the body so the
+  // server can route the create to the correct tenant; updatePolicy needs
+  // none because policy_id pins it.
+  describe('admin-on-behalf-of write wrappers', () => {
+    it('createBudget → POST /v1/admin/budgets with tenant_id stitched into body', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ ledger_id: 'led-1' })))
+      await api.createBudget('tenant-acme', {
+        scope: 'tenant:acme/workspace:prod',
+        unit: 'USD_MICROCENTS',
+        allocated: { unit: 'USD_MICROCENTS', amount: 5000000 },
+      })
+      const [url, init] = lastCall()
+      expect(String(url)).toContain('/v1/admin/budgets')
+      expect(init.method).toBe('POST')
+      const body = JSON.parse(init.body)
+      expect(body.tenant_id).toBe('tenant-acme')
+      expect(body.scope).toBe('tenant:acme/workspace:prod')
+      expect(body.allocated.amount).toBe(5000000)
+    })
+
+    it('createPolicy → POST /v1/admin/policies with tenant_id stitched into body', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ policy_id: 'pol_1' })))
+      await api.createPolicy('tenant-acme', {
+        name: 'Engineering policy',
+        scope_pattern: 'tenant:acme/workspace:eng/*',
+        priority: 10,
+      })
+      const [url, init] = lastCall()
+      expect(String(url)).toContain('/v1/admin/policies')
+      expect(init.method).toBe('POST')
+      const body = JSON.parse(init.body)
+      expect(body.tenant_id).toBe('tenant-acme')
+      expect(body.name).toBe('Engineering policy')
+      expect(body.priority).toBe(10)
+    })
+
+    it('updatePolicy → PATCH /v1/admin/policies/{id} WITHOUT tenant_id (policy_id pins owner server-side)', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ policy_id: 'pol_xyz' })))
+      await api.updatePolicy('pol_xyz', { name: 'Renamed', priority: 20 })
+      const [url, init] = lastCall()
+      expect(String(url)).toContain('/v1/admin/policies/pol_xyz')
+      expect(init.method).toBe('PATCH')
+      const body = JSON.parse(init.body)
+      expect(body.name).toBe('Renamed')
+      expect(body.priority).toBe(20)
+      // Crucial: NO tenant_id should appear — server resolves owner from
+      // the path. Sending one would be ignored at best, rejected at worst.
+      expect(body.tenant_id).toBeUndefined()
+    })
+
+    it('createBudget propagates 409 DUPLICATE_RESOURCE as ApiError', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: false,
+        status: 409,
+        json: () => Promise.resolve({
+          error: 'DUPLICATE_RESOURCE',
+          message: 'Budget already exists for this (scope, unit)',
+          request_id: 'req_1',
+        }),
+      } as unknown as Response))
+      try {
+        await api.createBudget('tenant-acme', {
+          scope: 'tenant:acme', unit: 'USD_MICROCENTS',
+          allocated: { unit: 'USD_MICROCENTS', amount: 100 },
+        })
+        throw new Error('expected to throw')
+      } catch (e) {
+        expect(e).toBeInstanceOf(ApiError)
+        expect((e as ApiError).status).toBe(409)
+        expect((e as ApiError).errorCode).toBe('DUPLICATE_RESOURCE')
+      }
+    })
+
+    it('createPolicy surfaces 400 INVALID_REQUEST cleanly', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: () => Promise.resolve({
+          error: 'INVALID_REQUEST',
+          message: 'tenant_id is required',
+          request_id: 'req_2',
+        }),
+      } as unknown as Response))
+      await expect(
+        api.createPolicy('', { name: 'x', scope_pattern: 'tenant:x/*' }),
+      ).rejects.toMatchObject({ status: 400, errorCode: 'INVALID_REQUEST' })
+    })
+  })
+
   it('rotateWebhookSecret → generates whsec_ secret, PATCHes it, and returns it alongside subscription', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ subscription_id: 'sub_1', name: 'hook' })))
     const result = await api.rotateWebhookSecret('sub_1')

@@ -13,6 +13,12 @@ export interface Capabilities {
   manage_tenants?: boolean
   manage_api_keys?: boolean
   manage_webhooks?: boolean
+  // v0.1.25.20: introspect surfaces a manage_policies flag so the dashboard
+  // can hide Create/Edit Policy buttons for keys that lack policies:write.
+  // Older servers don't return this flag — undefined defaults to "allow"
+  // so existing deployments keep working; a stricter setup can return
+  // explicit false to gate the UI.
+  manage_policies?: boolean
 }
 
 export interface AuthIntrospectResponse {
@@ -327,6 +333,35 @@ export const EVENT_TYPES = [
 export const EVENT_CATEGORIES = ['budget', 'tenant', 'api_key', 'policy', 'reservation', 'system'] as const
 
 export const COMMIT_OVERAGE_POLICIES = ['REJECT', 'ALLOW_IF_AVAILABLE', 'ALLOW_WITH_OVERDRAFT'] as const
+
+// v0.1.25.20: write-op request types for create-budget / create-policy /
+// update-policy admin-on-behalf-of flows (server v0.1.25.14, spec
+// v0.1.25.13). tenant_id is set by the API client wrapper, not by the
+// caller — keeps the form types tenant-agnostic.
+export interface BudgetCreateRequest {
+  scope: string
+  unit: string
+  allocated: { unit: string; amount: number }
+  overdraft_limit?: { unit: string; amount: number }
+  commit_overage_policy?: string
+  rollover_policy?: string
+}
+
+export interface PolicyCreateRequest {
+  name: string
+  description?: string
+  scope_pattern: string
+  priority?: number
+  commit_overage_policy?: string
+}
+
+export interface PolicyUpdateRequest {
+  name?: string
+  description?: string
+  priority?: number
+  commit_overage_policy?: string
+  status?: string
+}
 
 export interface WebhookSecurityConfig {
   blocked_cidr_ranges?: string[]
