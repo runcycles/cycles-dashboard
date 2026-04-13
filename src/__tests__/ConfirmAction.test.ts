@@ -64,6 +64,62 @@ describe('ConfirmAction', () => {
     })
   })
 
+  // Accessibility: when loading=true both buttons become disabled, leaving
+  // useFocusTrap with no enabled focusables. Without an explicit fallback
+  // target, Tab would escape the modal into background content. We move
+  // focus to a visually-hidden sentinel and announce the wait via
+  // aria-live; aria-busy on the dialog itself signals the loading state
+  // to assistive tech.
+  describe('loading accessibility', () => {
+    it('marks dialog aria-busy="true" when loading', () => {
+      const w = mount(ConfirmAction, { props: { ...baseProps, loading: true } })
+      expect(w.find('[role="dialog"]').attributes('aria-busy')).toBe('true')
+    })
+
+    it('omits aria-busy when not loading (no false-positive busy state)', () => {
+      const w = mount(ConfirmAction, { props: baseProps })
+      expect(w.find('[role="dialog"]').attributes('aria-busy')).toBeUndefined()
+    })
+
+    it('renders a polite live region announcing the in-progress confirmLabel', () => {
+      const w = mount(ConfirmAction, { props: { ...baseProps, loading: true } })
+      const sink = w.find('[aria-live="polite"]')
+      expect(sink.exists()).toBe(true)
+      expect(sink.text()).toContain('Rotate Secret in progress')
+    })
+
+    it('the live region is empty when not loading (nothing to announce)', () => {
+      const w = mount(ConfirmAction, { props: baseProps })
+      expect(w.find('[aria-live="polite"]').text()).toBe('')
+    })
+
+    it('focus sink is programmatically focusable but skipped in Tab order', () => {
+      const w = mount(ConfirmAction, { props: { ...baseProps, loading: true } })
+      const sink = w.find('[aria-live="polite"]')
+      // tabindex="-1" → focus() works, but Tab key skips it
+      expect(sink.attributes('tabindex')).toBe('-1')
+    })
+
+    it('moves focus to the sink when loading flips true', async () => {
+      const w = mount(ConfirmAction, { props: baseProps, attachTo: document.body })
+      await w.setProps({ loading: true })
+      // Wait for the watcher's nextTick
+      await new Promise(r => setTimeout(r, 0))
+      const sink = w.find('[aria-live="polite"]').element as HTMLElement
+      expect(document.activeElement).toBe(sink)
+      w.unmount()
+    })
+
+    it('returns focus to the confirm button when loading flips back to false', async () => {
+      const w = mount(ConfirmAction, { props: { ...baseProps, loading: true }, attachTo: document.body })
+      await w.setProps({ loading: false })
+      await new Promise(r => setTimeout(r, 0))
+      const buttons = w.findAll('button')
+      expect(document.activeElement).toBe(buttons[1].element)
+      w.unmount()
+    })
+  })
+
   describe('error prop', () => {
     it('renders an inline error block when error is set', () => {
       const w = mount(ConfirmAction, { props: { ...baseProps, error: 'Permission denied (FORBIDDEN)' } })
