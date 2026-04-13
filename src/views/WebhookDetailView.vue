@@ -72,12 +72,13 @@ const rotatedSecret = ref<string | null>(null)
 async function executeRotate() {
   pendingRotate.value = false
   try {
-    const res = await rotateWebhookSecret(id)
-    if (res.signing_secret) {
-      rotatedSecret.value = res.signing_secret
-    }
-    toast.success('Signing secret rotated')
-    webhook.value = await getWebhook(id)
+    const { signing_secret, subscription } = await rotateWebhookSecret(id)
+    // The secret is always returned by the client wrapper (generated
+    // locally before PATCH). Display it once — the server will not echo
+    // it back on subsequent reads.
+    rotatedSecret.value = signing_secret
+    webhook.value = subscription
+    toast.success('Signing secret rotated — copy it now, it will not be shown again')
   } catch (e) {
     const msg = toMessage(e)
     error.value = msg

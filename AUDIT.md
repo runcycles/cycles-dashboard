@@ -1,8 +1,24 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-13 (v0.1.25.16)
+**Date:** 2026-04-13 (v0.1.25.17)
 **Spec:** `cycles-governance-admin-v0.1.25.yaml` (OpenAPI 3.1.0, **v0.1.25.12** — additive error-response docs only since v0.1.25.10; no schema or endpoint changes)
 **Stack:** Vue 3 + TypeScript + Vite + Pinia + Tailwind CSS v4
+
+### 2026-04-13 — v0.1.25.17: Three reported write-op bugs
+
+Reported by user: Fund Budget Execute does nothing; Rotate Secret doesn't display the new secret; Save Config on Webhook Security logs the user out.
+
+| Bug | Root cause | Fix |
+|-----|-----------|-----|
+| **Fund Budget Execute button is a no-op (no logs, no change)** | `submitFund()` in `BudgetsView.vue` silently `return`'d when `selectedTenant.value` was empty. The detail page is typically reached via deep link / drill-down where the tenant dropdown is never touched, so `selectedTenant` was always `''`. | Derive tenant from the canonical scope (`tenant:<id>[/...]`) when the dropdown hasn't been used. Surface an explicit error ("Cannot determine tenant for scope …") instead of silently dropping the click. |
+| **Rotate Secret generates a secret but never displays it** | The secret is generated client-side in `rotateWebhookSecret()` and PATCHed; the previous implementation read `res.signing_secret` from the server response, but admin servers typically don't echo write-only secrets on PATCH. The UI then silently displayed nothing and the secret was effectively unrecoverable. | Changed the wrapper to return `{ subscription, signing_secret }` — the secret is always returned, sourced from the locally-generated value. Toast also warns "copy it now, it will not be shown again". |
+| **Save Config on Webhook Security logs user out** | `api/client.ts` treated both **401** and **403** as a session end via `handleUnauthorized()`. A 403 on PUT `/v1/admin/config/webhook-security` (key present but lacks `admin:webhooks:write`) was killing the entire session instead of surfacing a permission error on that one operation. | Removed 403 from the logout path. 401 still ends the session; 403 now flows through `toApiError()` and surfaces as an `ApiError` with `errorCode: "FORBIDDEN"` in the form's error slot — rest of the UI keeps working. |
+
+**Tests.** +4 cases in `client.test.ts`: rotate secret returns secret even when server response omits it, rotate secret returns `{ subscription, signing_secret }` shape, 403 does NOT logout / does throw `ApiError`, 401 still logs out.
+
+**Spec compliance.** Unchanged. No endpoint, schema, or wire-format changes — these were all client bugs.
+
+---
 
 ### 2026-04-13 — v0.1.25.16: UI bug fixes + polish
 
