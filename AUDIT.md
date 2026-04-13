@@ -1,8 +1,23 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-10 (v0.1.25.14)
-**Spec:** `complete-budget-governance-v0.1.25.yaml` (OpenAPI 3.1.0, v0.1.25.10 — spec unchanged since v0.1.25.10, dashboard-only minors thereafter)
+**Date:** 2026-04-13 (v0.1.25.15)
+**Spec:** `cycles-governance-admin-v0.1.25.yaml` (OpenAPI 3.1.0, **v0.1.25.12** — additive error-response docs only since v0.1.25.10; no schema or endpoint changes)
 **Stack:** Vue 3 + TypeScript + Vite + Pinia + Tailwind CSS v4
+
+### 2026-04-13 — v0.1.25.15: Structured ErrorResponse parsing + spec refresh
+
+**Spec tracking.** Admin spec advanced v0.1.25.10 → v0.1.25.11 → v0.1.25.12 since our last review. Both bumps are **purely additive error-response documentation** — no schema changes, no new endpoints, no behavior change:
+
+- **v0.1.25.11** — documented `400 Bad Request` on all 28 admin operations that previously lacked it (all 43 ops now document 400).
+- **v0.1.25.12** — documented targeted `404` on `PATCH /v1/admin/tenants/{id}`; `409` on `POST /v1/admin/policies` (DUPLICATE_RESOURCE); `409` on `DELETE /v1/admin/api-keys/{id}` (ALREADY_REVOKED).
+
+No dashboard surface changes required. Previously-valid responses remain valid.
+
+**Dashboard change — `ApiError` class** (`src/api/client.ts`). `request()` / `mutate()` now parse non-2xx `ErrorResponse` bodies (`{ error, message, request_id, details? }`) and throw a typed `ApiError` with `status`, `errorCode`, `requestId`, `details`. The friendly `.message` combines server message + code (e.g. `"Policy already exists for this tenant (DUPLICATE_RESOURCE)"`), so existing `err.message` consumers in write-op views get better toasts for free without code changes. Falls back to `"API error: <status>"` when the body is missing, empty, or non-JSON.
+
+**Tests.** 4 new cases covering: structured parse → ApiError with errorCode+requestId, `details` passthrough, empty-object fallback, non-JSON fallback. Existing non-2xx propagation test retained with JSON-rejection mock.
+
+---
 
 ### 2026-04-08 — v0.1.25.5: Initial release
 

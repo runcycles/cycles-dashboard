@@ -19,7 +19,7 @@ vi.mock('../router', () => ({
 
 // Import after mocks are registered.
 import * as api from '../api/client'
-import { fetchWithTimeout, handleUnauthorized } from '../api/client'
+import { fetchWithTimeout, handleUnauthorized, ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 
 function mockFetchOnce(response: Partial<Response> & { json?: () => Promise<unknown> }) {
@@ -321,9 +321,65 @@ describe('endpoint wrappers — smoke', () => {
     expect(body.signing_secret).toMatch(/^whsec_[a-f0-9]{64}$/)
   })
 
-  it('propagates non-2xx as thrown Error', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500 } as Response))
+  it('propagates non-2xx as thrown ApiError with fallback message when body is not JSON', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: () => Promise.reject(new SyntaxError('not json')),
+    } as unknown as Response))
     await expect(api.getOverview()).rejects.toThrow(/API error: 500/)
+  })
+
+  it('parses ErrorResponse body into ApiError with errorCode + friendly message', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: () => Promise.resolve({
+        error: 'DUPLICATE_RESOURCE',
+        message: 'Policy already exists for this tenant',
+        request_id: 'req_abc',
+      }),
+    } as unknown as Response))
+    try {
+      await api.listPolicies({ tenant_id: 'acme' })
+      throw new Error('expected to throw')
+    } catch (e) {
+      expect(e).toBeInstanceOf(ApiError)
+      const err = e as ApiError
+      expect(err.status).toBe(409)
+      expect(err.errorCode).toBe('DUPLICATE_RESOURCE')
+      expect(err.requestId).toBe('req_abc')
+      expect(err.message).toBe('Policy already exists for this tenant (DUPLICATE_RESOURCE)')
+    }
+  })
+
+  it('ApiError carries details when the server returns them', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: () => Promise.resolve({
+        error: 'INVALID_REQUEST',
+        message: 'Field validation failed',
+        request_id: 'req_1',
+        details: { field: 'tenant_id', reason: 'required' },
+      }),
+    } as unknown as Response))
+    try {
+      await api.getOverview()
+      throw new Error('expected to throw')
+    } catch (e) {
+      const err = e as ApiError
+      expect(err.details).toEqual({ field: 'tenant_id', reason: 'required' })
+    }
+  })
+
+  it('falls back to "API error: <status>" when body is an empty object', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: () => Promise.resolve({}),
+    } as unknown as Response))
+    await expect(api.getOverview()).rejects.toThrow(/API error: 503/)
   })
 
   it('204 no-content returns undefined (mutate path)', async () => {

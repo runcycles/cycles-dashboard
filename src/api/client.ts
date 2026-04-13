@@ -4,6 +4,62 @@ import router from '../router'
 const BASE = '/v1'
 const DEFAULT_TIMEOUT_MS = 30_000
 
+// Structured error matching the admin spec's ErrorResponse schema
+// ({ error, message, request_id, details? }). When the server returns a
+// 4xx/5xx with a conformant JSON body, callers can `instanceof ApiError`
+// to surface the specific `errorCode` (e.g. DUPLICATE_RESOURCE,
+// ALREADY_REVOKED, BUDGET_EXCEEDED) in UI toasts instead of a generic
+// "API error: 409". `message` is set to a human-friendly combination of
+// the server's message + code so existing `err.message` consumers get a
+// better string for free.
+export class ApiError extends Error {
+  readonly status: number
+  readonly errorCode?: string
+  readonly requestId?: string
+  readonly details?: Record<string, unknown>
+
+  constructor(
+    status: number,
+    message: string,
+    errorCode?: string,
+    requestId?: string,
+    details?: Record<string, unknown>,
+  ) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.errorCode = errorCode
+    this.requestId = requestId
+    this.details = details
+  }
+}
+
+// Parses a non-2xx response into an ApiError. Tries to read the
+// ErrorResponse JSON body; falls back to a generic "API error: <status>"
+// when the body is missing, empty, or not JSON (e.g. an upstream proxy
+// returned an HTML error page).
+async function toApiError(res: Response): Promise<ApiError> {
+  let body: unknown
+  try {
+    body = await res.json()
+  } catch {
+    return new ApiError(res.status, `API error: ${res.status}`)
+  }
+  if (body && typeof body === 'object') {
+    const b = body as Record<string, unknown>
+    const code = typeof b.error === 'string' ? b.error : undefined
+    const msg = typeof b.message === 'string' ? b.message : undefined
+    const reqId = typeof b.request_id === 'string' ? b.request_id : undefined
+    const details = b.details && typeof b.details === 'object'
+      ? (b.details as Record<string, unknown>)
+      : undefined
+    const friendly = msg && code ? `${msg} (${code})`
+      : msg ?? code ?? `API error: ${res.status}`
+    return new ApiError(res.status, friendly, code, reqId, details)
+  }
+  return new ApiError(res.status, `API error: ${res.status}`)
+}
+
 // Wraps `fetch` with an AbortController-backed timeout. A hung backend should
 // fail after `timeoutMs` rather than spin the UI forever. Translates the
 // AbortError into a clear error message so callers don't need to pattern-match
@@ -43,7 +99,7 @@ async function request<T>(method: string, path: string, params?: Record<string, 
     handleUnauthorized()
     throw new Error('Unauthorized')
   }
-  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  if (!res.ok) throw await toApiError(res)
   try {
     return await res.json()
   } catch {
@@ -84,7 +140,7 @@ async function mutate<T>(method: string, path: string, body?: Record<string, unk
     handleUnauthorized()
     throw new Error('Unauthorized')
   }
-  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  if (!res.ok) throw await toApiError(res)
   if (res.status === 204) return undefined as T
   try { return await res.json() } catch { throw new Error('Invalid response from server') }
 }
