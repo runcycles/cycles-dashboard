@@ -50,18 +50,34 @@ async function executeAction() {
   finally { pendingAction.value = null }
 }
 
-// Delete webhook
+// Delete webhook. Same close-on-success / stay-open-on-error / loading-
+// spinner pattern as Rotate Secret. Without the loading state the user
+// could cancel mid-DELETE (the network call still completes) or click
+// the destructive button repeatedly while the first request is pending.
 const pendingDelete = ref(false)
+const deleteLoading = ref(false)
+const deleteError = ref('')
+
+function openDelete() {
+  deleteError.value = ''
+  pendingDelete.value = true
+}
+
 async function executeDelete() {
+  if (deleteLoading.value) return // double-click guard
+  deleteError.value = ''
+  deleteLoading.value = true
   try {
     await deleteWebhook(id)
+    pendingDelete.value = false
     toast.success('Webhook deleted')
     router.push('/webhooks')
   } catch (e) {
     const msg = toMessage(e)
-    error.value = msg
+    deleteError.value = msg
     toast.error(`Delete failed: ${msg}`)
-    pendingDelete.value = false
+  } finally {
+    deleteLoading.value = false
   }
 }
 
@@ -231,7 +247,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             <button v-if="(webhook.consecutive_failures ?? 0) > 0 && webhook.status !== 'ACTIVE'" @click="pendingAction = 'reset'" class="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-2.5 py-1 hover:bg-blue-50 cursor-pointer transition-colors">Reset &amp; Re-enable</button>
             <button v-if="webhook.status === 'ACTIVE'" @click="pendingAction = 'PAUSED'" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Pause</button>
             <button v-if="webhook.status === 'DISABLED' || webhook.status === 'PAUSED'" @click="pendingAction = 'ACTIVE'" class="text-xs text-green-700 hover:text-green-900 border border-green-200 rounded px-2.5 py-1 hover:bg-green-50 cursor-pointer transition-colors">Enable</button>
-            <button @click="pendingDelete = true" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Delete</button>
+            <button @click="openDelete" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Delete</button>
           </div>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
@@ -335,6 +351,8 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       :message="`Permanently delete webhook '${webhook?.name || webhook?.url}'. Pending deliveries will be cancelled. This cannot be undone.`"
       confirm-label="Delete Webhook"
       :danger="true"
+      :loading="deleteLoading"
+      :error="deleteError"
       @confirm="executeDelete"
       @cancel="pendingDelete = false"
     />

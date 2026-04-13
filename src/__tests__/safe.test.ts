@@ -75,6 +75,25 @@ describe('safeJsonStringify', () => {
     expect(out).not.toContain('[Circular]')
     expect((out.match(/\[\s*1,\s*2,\s*3\s*\]/g) || []).length).toBe(2)
   })
+
+  // Top-level array — exercises the synthetic { '': value } wrapper that
+  // JSON.stringify uses internally. The ancestor-stack must not get
+  // confused by the wrapper not being in `ancestors[]`.
+  it('handles top-level array with shared element refs', () => {
+    const x = { n: 1 }
+    const out = safeJsonStringify([x, x, x])
+    expect(out).not.toContain('[Circular]')
+    expect((out.match(/"n": 1/g) || []).length).toBe(3)
+  })
+
+  // Nested-but-not-cyclic: same leaf appears as child of A AND grandchild
+  // of A. Must not be marked Circular in the second slot.
+  it('handles same leaf at different depths without false circular', () => {
+    const leaf = { id: 'leaf' }
+    const out = safeJsonStringify({ a: leaf, b: { nested: leaf } })
+    expect(out).not.toContain('[Circular]')
+    expect((out.match(/"id": "leaf"/g) || []).length).toBe(2)
+  })
 })
 
 describe('csvEscape', () => {
