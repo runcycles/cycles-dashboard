@@ -328,3 +328,49 @@ export const getWebhookSecurityConfig = () =>
 export const updateWebhookSecurityConfig = (body: import('../types').WebhookSecurityConfig) =>
   mutate<import('../types').WebhookSecurityConfig>('PUT', `${BASE}/admin/config/webhook-security`, body as unknown as Record<string, unknown>)
 
+// v0.1.25.22: reservations (runtime plane — cycles-server v0.1.25.8+,
+// cycles-protocol revision 2026-04-13). Three dual-auth endpoints the
+// admin dashboard uses to surface and force-release hung reservations.
+// Routed through the same `/v1/*` proxy as admin calls (dashboard
+// nginx forwards `/v1/*` to the runtime server; admin-key auth is
+// accepted on this allowlisted subset).
+//
+// listReservations under admin auth requires `tenant` as a filter
+// (server returns 400 INVALID_REQUEST otherwise). The wrapper
+// enforces this client-side so a missing tenantId never reaches the
+// server — callers pass it as a separate positional arg rather than
+// stuffing it into the params record, matching the explicit-scoping
+// feel of fundBudget / createBudget.
+
+// Reservations use /v1/reservations (runtime plane), NOT /v1/admin/*.
+// Server interceptor accepts X-Admin-API-Key on this allowlisted subset.
+export function listReservations(
+  tenantId: string,
+  params?: { status?: string; limit?: number; cursor?: string },
+): Promise<import('../types').ReservationListResponse> {
+  const q: Record<string, string> = { tenant: tenantId }
+  if (params?.status) q.status = params.status
+  if (params?.limit !== undefined) q.limit = String(params.limit)
+  if (params?.cursor) q.cursor = params.cursor
+  return get<import('../types').ReservationListResponse>(`/v1/reservations`, q)
+}
+
+export const getReservation = (reservationId: string) =>
+  get<import('../types').ReservationSummary>(`/v1/reservations/${reservationId}`)
+
+// Force-release a reservation. Optional `reason` is passed through to
+// the server (surfaced in the audit-log entry's metadata); the
+// dashboard nudges callers toward a structured prefix per the spec's
+// SHOULD guidance ("[INCIDENT_FORCE_RELEASE] ..."). idempotencyKey is
+// generated client-side — the runtime plane requires it on every
+// release, even when admin-driven.
+export function releaseReservation(
+  reservationId: string,
+  idempotencyKey: string,
+  reason?: string,
+): Promise<unknown> {
+  const body: Record<string, unknown> = { idempotency_key: idempotencyKey }
+  if (reason) body.reason = reason
+  return post<unknown>(`/v1/reservations/${reservationId}/release`, body)
+}
+

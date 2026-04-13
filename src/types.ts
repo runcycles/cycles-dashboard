@@ -395,3 +395,32 @@ export interface AuditLogListResponse {
   has_more: boolean
   next_cursor?: string
 }
+
+// v0.1.25.22 (runtime spec cycles-protocol@main, server v0.1.25.8+):
+// reservation types for admin-on-behalf-of read/force-release flows.
+// `status` is the runtime plane's ReservationStatus — ACTIVE is the
+// operationally-interesting state (active reservations past their
+// grace window are the "stuck" ones that ops force-releases).
+export const RESERVATION_STATUSES = ['ACTIVE', 'COMMITTED', 'RELEASED', 'EXPIRED'] as const
+export type ReservationStatus = typeof RESERVATION_STATUSES[number]
+
+// Minimal shape — the runtime spec's ReservationSummary / ReservationDetail
+// carry more (Subject, Action, balances). Dashboard only renders what ops
+// need to identify and force-release hung reservations; extra fields are
+// kept opaque to stay resilient to spec additions.
+export interface ReservationSummary {
+  reservation_id: string
+  status: ReservationStatus
+  scope_path: string
+  reserved: { unit: string; amount: number }
+  created_at_ms: number
+  expires_at_ms: number
+  idempotency_key?: string
+  affected_scopes?: string[]
+}
+
+export interface ReservationListResponse {
+  reservations: ReservationSummary[]
+  has_more?: boolean
+  next_cursor?: string
+}
