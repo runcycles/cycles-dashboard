@@ -14,6 +14,7 @@ import EmptyState from '../components/EmptyState.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
+import ScopeBuilder from '../components/ScopeBuilder.vue'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 
@@ -561,9 +562,13 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <!-- v0.1.25.20: Create Budget (admin-on-behalf-of) -->
     <FormDialog v-if="showCreateBudget" title="Create Budget" submit-label="Create" :loading="createBudgetLoading" :error="createBudgetError" @submit="submitCreateBudget" @cancel="showCreateBudget = false">
       <div>
-        <label for="cb-scope" class="block text-xs text-gray-500 mb-1">Scope</label>
-        <input id="cb-scope" v-model="createBudgetForm.scope" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="tenant:acme/workspace:prod" />
-        <p class="text-xs text-gray-400 mt-0.5">Canonical scope identifier. Must start with <code>tenant:</code> and the tenant must be ACTIVE.</p>
+        <label class="block text-xs text-gray-500 mb-1">Scope</label>
+        <!-- v0.1.25.20: structured builder replaces the free-text input.
+             Tenant row is locked to the current detail's tenant, so the
+             admin-on-behalf-of cross-field check passes by construction.
+             Deeper levels chosen from an "+ Add level" dropdown that only
+             offers canonical kinds in canonical order. -->
+        <ScopeBuilder v-model="createBudgetForm.scope" :tenant-id="id" />
       </div>
       <div>
         <label for="cb-unit" class="block text-xs text-gray-500 mb-1">Unit</label>
@@ -598,9 +603,11 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         <input id="cp-name" v-model="createPolicyForm.name" required maxlength="256" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
       </div>
       <div>
-        <label for="cp-scope" class="block text-xs text-gray-500 mb-1">Scope pattern</label>
-        <input id="cp-scope" v-model="createPolicyForm.scope_pattern" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="tenant:acme/*" />
-        <p class="text-xs text-gray-400 mt-0.5">Glob pattern. <code>*</code> matches one path segment.</p>
+        <label class="block text-xs text-gray-500 mb-1">Scope pattern</label>
+        <!-- Policy patterns enable wildcards: per-row "any <kind> (*)"
+             radio for id-wildcards, and a trailing /* checkbox for
+             "match everything deeper." -->
+        <ScopeBuilder v-model="createPolicyForm.scope_pattern" :tenant-id="id" allow-wildcards />
       </div>
       <div>
         <label for="cp-desc" class="block text-xs text-gray-500 mb-1">Description (optional)</label>

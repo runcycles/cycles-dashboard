@@ -45,7 +45,18 @@ Three-PR rollout:
 
 **Spec compliance.** Aligned with cycles-governance-admin v0.1.25.13. Purely additive — view-file changes don't touch existing flows.
 
-**Gates.** typecheck clean; **249/249 tests pass** (was 211; +38); build clean.
+**Structured scope builder** — replaces the raw text input on both dialogs with a row-per-segment UI (`src/components/ScopeBuilder.vue`). Previously users had to know the canonical kind set (tenant/workspace/app/workflow/agent/toolset), remember the order, and hand-type `tenant:acme/agent:reviewer`-style strings. Now:
+
+- **First row locked** to `tenant:<tenantId from route>` — enforces the admin-on-behalf-of cross-field tenant match by construction; user can't submit a scope for a different tenant.
+- **"+ Add level" dropdown** only offers canonical kinds that haven't been used yet AND come after the last-used kind in canonical order. Preserves the server's invariant without the user having to know it.
+- **Per-row id chooser** — radio choice between *literal id* text input OR *any &lt;kind&gt; (\*)* for id-wildcards in policy patterns. Picking "any" drops any deeper rows and disables further additions (id-wildcards must be terminal per spec).
+- **Trailing `/*` checkbox** — separate from the per-row wildcard because it's semantically not a segment, it's a "match everything deeper" suffix. Only rendered when `allowWildcards` (policies).
+- **Live preview** (`Will create as: tenant:acme/agent:reviewer`) in monospace beneath the rows — sanity check for users who already know the format and want to see exactly what goes on the wire.
+- **Parses existing values** on mount for edit-in-place flows; if parsing fails (legacy non-canonical scopes, tenant mismatch), surfaces a `role="alert"` warning and falls back to the tenant-locked root rather than silently corrupting.
+
+**Tests** (+18 in `src/__tests__/ScopeBuilder.test.ts`): initial render emits locked tenant-only scope, deep scope round-trips, policy pattern round-trips (`tenant:acme/*`, `tenant:acme/agent:*`), tenant mismatch parse error + fallback, unknown-kind parse error (legacy `agentic`), add/remove rows, dropdown filtering (no duplicates, canonical-order gate), per-row wildcard radio serialization, trailing /* checkbox serialization, "any id" disables trailing checkbox (redundant), wildcard controls hidden when `allowWildcards=false`, dropdown hidden when terminal state reached.
+
+**Gates.** typecheck clean; **267/267 tests pass** (was 211; +56); build clean.
 
 ---
 
