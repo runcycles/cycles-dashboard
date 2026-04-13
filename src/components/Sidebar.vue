@@ -22,7 +22,7 @@ const navItems = [
   // view_reservations flag → undefined !== false → renders. Older
   // admin servers that pre-date v0.1.25.8 will 401 on the list call,
   // which the dashboard handles via the existing ApiError logout path.
-  { name: 'Reservations', route: '/reservations', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z', cap: (caps as { view_reservations?: boolean } | undefined)?.view_reservations },
+  { name: 'Reservations', route: '/reservations', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z', cap: caps?.view_reservations },
   { name: 'Audit', route: '/audit', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', cap: caps?.view_audit },
 ]
 

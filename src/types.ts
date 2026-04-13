@@ -19,6 +19,11 @@ export interface Capabilities {
   // so existing deployments keep working; a stricter setup can return
   // explicit false to gate the UI.
   manage_policies?: boolean
+  // v0.1.25.22: reservations (runtime plane). Older servers (pre-0.1.25.8)
+  // don't surface these flags — undefined defaults to "allow" in Sidebar
+  // + ReservationsView so existing deployments keep working.
+  view_reservations?: boolean
+  manage_reservations?: boolean
 }
 
 export interface AuthIntrospectResponse {

@@ -13,6 +13,12 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      // Runtime-plane endpoints go to cycles-server (7878).
+      // Order matters: more-specific pattern first.
+      '/v1/reservations': {
+        target: 'http://localhost:7878',
+        changeOrigin: true,
+      },
       '/v1': {
         target: 'http://localhost:7979',
         changeOrigin: true,

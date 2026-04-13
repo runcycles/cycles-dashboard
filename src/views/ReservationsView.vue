@@ -34,9 +34,7 @@ const auth = useAuthStore()
 // response — default to allow. Older admin servers surface 401/403 at
 // call time if the key lacks access; that path is already handled by
 // the ApiError flow.
-const canManage = computed(() =>
-  (auth.capabilities as { manage_reservations?: boolean } | undefined)?.manage_reservations !== false,
-)
+const canManage = computed(() => auth.capabilities?.manage_reservations !== false)
 
 // Scoping. Server rejects listReservations under admin auth without
 // a tenant; we mirror that at the form level so the user can't submit
@@ -52,20 +50,28 @@ const loadingList = ref(false)
 // Sort local, not server — the runtime spec doesn't guarantee
 // stable ordering of returned reservations, and ops typically want
 // to sort by age (created_at asc) to find the oldest-stuck one first.
+// `reserved` needs an accessor because the raw field is an object
+// ({unit, amount}) — without it useSort stringifies to "[object Object]"
+// and every row compares equal (silent no-op on header click).
 const { sortKey, sortDir, toggle, sorted: sortedReservations } = useSort(
   reservations,
   'created_at_ms',
   'asc',
+  { reserved: (r) => r.reserved.amount },
 )
 
 async function loadTenants() {
   try {
     const res = await listTenants()
     tenants.value = res.tenants
-    // Default the tenant filter to the first tenant so the view has
-    // something to show on first render. The user can switch or clear.
+    // Default the tenant filter to the first ACTIVE tenant so the view
+    // has something to show on first render. Suspended/closed tenants
+    // typically have no live reservations — picking one by accident
+    // renders an empty table that looks broken. Fall back to the
+    // first tenant of any status if none are ACTIVE.
     if (!tenantFilter.value && tenants.value.length > 0) {
-      tenantFilter.value = tenants.value[0].tenant_id
+      const firstActive = tenants.value.find((t) => t.status === 'ACTIVE')
+      tenantFilter.value = (firstActive ?? tenants.value[0]).tenant_id
     }
   } catch (e) { error.value = toMessage(e) }
 }
@@ -196,7 +202,7 @@ function isExpired(r: ReservationSummary): boolean {
             <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Reserved" column="reserved" :active-column="sortKey" :direction="sortDir" @sort="toggle" align="right" />
             <SortHeader label="Created" column="created_at_ms" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <th class="px-4 py-3 text-left">Expires</th>
+            <SortHeader label="Expires" column="expires_at_ms" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <th v-if="canManage" class="px-4 py-3 w-24"></th>
           </tr>
         </thead>

@@ -69,14 +69,20 @@ src/
 
 ### Development (with Vite proxy)
 
-Requires the admin server running at `localhost:7979`.
+Requires **both** backends running locally:
+- **cycles-server-admin** at `localhost:7979` — governance plane (tenants, budgets, policies, webhooks, audit, introspect).
+- **cycles-server** at `localhost:7878` — runtime plane (reservations; force-release uses admin-on-behalf-of dual-auth).
 
 ```bash
 npm install
 npm run dev
 ```
 
-Dashboard starts at `http://localhost:5173`. The Vite dev server proxies `/v1/*` to the admin server.
+Dashboard starts at `http://localhost:5173`. The Vite dev server splits the proxy:
+- `/v1/reservations*` → `localhost:7878` (cycles-server)
+- `/v1/*` (all others) → `localhost:7979` (cycles-server-admin)
+
+The same routing split is mirrored in `nginx.conf` for the production container.
 
 ### Development (full stack via Docker)
 
