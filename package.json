@@ -1,7 +1,7 @@
 {
   "name": "cycles-dashboard",
   "private": true,
-  "version": "0.1.25.22",
+  "version": "0.1.25.23",
   "type": "module",
   "engines": {
     "node": ">=20.19.0"

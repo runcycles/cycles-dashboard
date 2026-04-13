@@ -1,7 +1,33 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-13 (v0.1.25.22)
+**Date:** 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
 **Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.15+ continues to satisfy the governance plane.
+
+### 2026-04-13 — v0.1.25.23: hotfix — nginx proxy_pass dropped path for non-reservations /v1/*
+
+Discovered while running the full compose stack end-to-end against the v0.1.25.22 release images. Every `/v1/admin/*` call through the published dashboard container's built-in nginx returned `500` with admin-side error `No static resource v1.` — nginx was sending just `/v1/` upstream and stripping the rest of the path. Only `/v1/reservations*` worked.
+
+**Root cause.** When `proxy_pass` mixes a variable (`$upstream`) with a URI suffix (`/v1/`), nginx does **not** perform automatic URI substitution — the literal suffix replaces the entire path. Documented nginx behavior but subtle. The `/v1/reservations` block added in v0.1.25.22 accidentally used the correct pattern (`proxy_pass $upstream$request_uri`), which is how the admin block's long-standing bug hid behind the new routing split.
+
+**Fix.** Switch the catch-all `/v1/` block to `proxy_pass $upstream$request_uri;`, matching the reservations block.
+
+**Why this wasn't caught before:**
+- Vite dev proxy uses a different implementation and handles this correctly — `npm run dev` always worked.
+- Production deployments have historically been fronted by Caddy or a cloud LB doing their own path rewriting, masking the issue.
+- The compose stack's nginx path wasn't being exercised as a full end-to-end test until today's release validation.
+
+**Severity: high.** Anyone pulling the published `ghcr.io/runcycles/cycles-dashboard:0.1.25.22` image and terminating at the container's built-in nginx (no upstream rewriting proxy) has a broken dashboard — only Reservations works, every other tab 500s. The v0.1.25.22 release image should be treated as unsafe; v0.1.25.23 is the fixed replacement.
+
+**Verified.** Full compose stack (redis + cycles-server 0.1.25.8 + cycles-server-admin 0.1.25.16 + dashboard) — all four probes now return valid JSON:
+
+| Probe | Before | After |
+|---|---|---|
+| `GET /v1/admin/tenants` | 500 | `{"tenants":[],"has_more":false}` |
+| `GET /v1/admin/audit/logs?limit=3` | 500 | `{"logs":[],"has_more":false}` |
+| `GET /v1/reservations?tenant=...&status=ACTIVE` | ✅ already worked | ✅ |
+| `GET /v1/webhooks?tenant=...` (admin key, Stage 3 dual-auth) | 500 | `{"subscriptions":[],"has_more":false}` |
+
+---
 
 ### 2026-04-13 — v0.1.25.22: Stage 2.3 — Reservations management (closes ops Blocker #1)
 
