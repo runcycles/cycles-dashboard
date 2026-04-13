@@ -9,9 +9,32 @@ describe('format utilities', () => {
       expect(out.length).toBeGreaterThan(0)
     })
 
-    it('returns "Invalid Date" for garbage input', () => {
-      const out = formatDateTime('not a date')
-      expect(out).toBe('Invalid Date')
+    it('returns em-dash for garbage input', () => {
+      expect(formatDateTime('not a date')).toBe('—')
+    })
+
+    it('returns em-dash for null / undefined / empty', () => {
+      expect(formatDateTime(null)).toBe('—')
+      expect(formatDateTime(undefined)).toBe('—')
+      expect(formatDateTime('')).toBe('—')
+    })
+  })
+
+  describe('null guards across formatters', () => {
+    it('formatDate returns em-dash for null-ish', () => {
+      expect(formatDate(null)).toBe('—')
+      expect(formatDate(undefined)).toBe('—')
+      expect(formatDate('')).toBe('—')
+      expect(formatDate('garbage')).toBe('—')
+    })
+    it('formatTime returns em-dash for null-ish', () => {
+      expect(formatTime(null)).toBe('—')
+      expect(formatTime('garbage')).toBe('—')
+    })
+    it('formatRelative returns em-dash for null-ish', () => {
+      expect(formatRelative(null)).toBe('—')
+      expect(formatRelative(undefined)).toBe('—')
+      expect(formatRelative('')).toBe('—')
     })
   })
 
