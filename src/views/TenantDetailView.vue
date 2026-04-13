@@ -6,6 +6,7 @@ import { getTenant, listBudgets, listApiKeys, listPolicies, updateTenantStatus, 
 import { useAuthStore } from '../stores/auth'
 import type { Tenant, BudgetLedger, ApiKey, Policy, ApiKeyCreateResponse, BudgetCreateRequest, PolicyCreateRequest, PolicyUpdateRequest } from '../types'
 import { PERMISSIONS, COMMIT_OVERAGE_POLICIES } from '../types'
+import { validateScope } from '../utils/safe'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import MaskedValue from '../components/MaskedValue.vue'
@@ -185,6 +186,13 @@ async function submitCreateBudget() {
     createBudgetError.value = 'Scope is required'
     return
   }
+  // Client-side scope grammar check — mirrors server's ScopeValidator
+  // (cycles-server-admin v0.1.25.15). Catches typos like "agentic" for
+  // "agent" before the round-trip, and steers toward the canonical
+  // kind set without the user having to remember it. The server remains
+  // the source of truth and will re-validate.
+  const scopeError = validateScope(createBudgetForm.value.scope.trim(), { fieldName: 'Scope' })
+  if (scopeError) { createBudgetError.value = scopeError; return }
   const body: BudgetCreateRequest = {
     scope: createBudgetForm.value.scope.trim(),
     unit: createBudgetForm.value.unit,
@@ -253,6 +261,14 @@ async function submitCreatePolicy() {
     createPolicyError.value = 'Scope pattern is required'
     return
   }
+  // Client-side grammar check for the pattern. `allowWildcards: true`
+  // because policy patterns can use `tenant:acme/*` (all descendants)
+  // and `tenant:acme/agent:*` (id-wildcard) per spec examples. Budget
+  // scopes stay concrete (no wildcards).
+  const scopeError = validateScope(createPolicyForm.value.scope_pattern.trim(), {
+    fieldName: 'Scope pattern', allowWildcards: true,
+  })
+  if (scopeError) { createPolicyError.value = scopeError; return }
   const body: PolicyCreateRequest = {
     name: createPolicyForm.value.name.trim(),
     scope_pattern: createPolicyForm.value.scope_pattern.trim(),

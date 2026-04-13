@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { safeJsonStringify, csvEscape, tenantFromScope, parsePositiveAmount } from '../utils/safe'
+import { safeJsonStringify, csvEscape, tenantFromScope, parsePositiveAmount, validateScope } from '../utils/safe'
 
 describe('safeJsonStringify', () => {
   it('matches JSON.stringify for plain objects', () => {
@@ -231,5 +231,86 @@ describe('parsePositiveAmount', () => {
     expect(() => parsePositiveAmount(100)).not.toThrow()
     expect(() => parsePositiveAmount(0)).not.toThrow()
     expect(() => parsePositiveAmount(null)).not.toThrow()
+  })
+})
+
+// Mirror of cycles-server-admin v0.1.25.15 ScopeValidator. Client-side
+// grammar check so users see form-level errors instantly instead of a
+// 400 round-trip. Must stay in lockstep with the server — any scope the
+// client accepts must pass server validation too.
+describe('validateScope', () => {
+  describe('budget scope (no wildcards)', () => {
+    it.each([
+      'tenant:acme',
+      'tenant:acme/workspace:prod',
+      'tenant:acme/workspace:prod/app:checkout/workflow:order/agent:reviewer/toolset:llm',
+      'tenant:acme/agent:reviewer', // skipped levels allowed
+      'tenant:acme-corp.v2/workspace:prod_01/agent:rev-bot.v3',
+      'tenant:a', // single-char id accepted
+    ])('accepts canonical scope %s', (scope) => {
+      expect(validateScope(scope)).toBeNull()
+    })
+
+    // Exact user bug that motivated v0.1.25.15.
+    it('rejects the agentic:codex typo', () => {
+      const err = validateScope('tenant:acme/agentic:codex')
+      expect(err).toContain("non-canonical kind 'agentic'")
+    })
+
+    it.each([
+      ['workspace:eng', "must start with 'tenant:<id>'"],
+      ['tenant:acme/florb:blerp', "non-canonical kind 'florb'"],
+      ['tenant:acme/agent:a/workspace:w', 'out of canonical order'],
+      ['tenant:acme/agent:a/agent:b', 'out of canonical order'],
+      ['tenant:acme/workspace:a/workspace:b', 'out of canonical order'],
+      ['tenant:acme/agent:', "'<kind>:<id>'"],
+      ['tenant:acme/agent_reviewer', "'<kind>:<id>'"],
+      ['tenant:acme//agent:a', 'empty segment'],
+      ['tenant:acme/', 'empty segment'],
+      ['tenant:acme/agent:bad id', 'disallowed characters'],
+      ['tenant:.acme', 'disallowed characters'],
+      ['tenant:acme.', 'disallowed characters'],
+      ['tenant:-acme', 'disallowed characters'],
+      ['tenant:acme/*', 'wildcards are not allowed'],
+    ])('rejects %s with message containing %s', (scope, expectedMsg) => {
+      expect(validateScope(scope)).toContain(expectedMsg)
+    })
+
+    it.each([null, undefined, '', '   '])('rejects null-ish input: %j', (scope) => {
+      expect(validateScope(scope)).toContain('must not be blank')
+    })
+  })
+
+  describe('policy scope_pattern (wildcards allowed)', () => {
+    it.each([
+      'tenant:acme',
+      'tenant:acme/*',
+      'tenant:acme/agent:*',
+      'tenant:acme/workspace:prod/*',
+    ])('accepts pattern %s', (pattern) => {
+      expect(validateScope(pattern, { allowWildcards: true })).toBeNull()
+    })
+
+    it('rejects mid-chain wildcard', () => {
+      const err = validateScope('tenant:acme/*/agent:a', { allowWildcards: true })
+      expect(err).toContain('must be the final segment')
+    })
+
+    it('rejects id-wildcard that is not terminal', () => {
+      const err = validateScope('tenant:acme/agent:*/toolset:x', { allowWildcards: true })
+      expect(err).toContain("must be the final segment's id")
+    })
+
+    // Regression lock matching the server: tenant:*/agent:foo would
+    // also fail at the "terminal-id-wildcard" rule, not the cross-check.
+    it('rejects tenant:*/agent:foo at the grammar layer', () => {
+      const err = validateScope('tenant:*/agent:foo', { allowWildcards: true })
+      expect(err).toContain('must be the final segment')
+    })
+  })
+
+  it('custom fieldName surfaces in error messages', () => {
+    const err = validateScope('workspace:eng', { fieldName: 'Scope' })
+    expect(err).toMatch(/^Scope /)
   })
 })

@@ -4,7 +4,7 @@
 **Spec:** `cycles-governance-admin-v0.1.25.yaml` (OpenAPI 3.1.0, **v0.1.25.13** — adds dual-auth on createBudget / createPolicy / updatePolicy + optional `tenant_id` in BudgetCreateRequest / PolicyCreateRequest)
 **Stack:** Vue 3 + TypeScript + Vite + Pinia + Tailwind CSS v4
 
-### 2026-04-13 — v0.1.25.20: Create Budget + Create/Edit Policy (admin-on-behalf-of)
+### 2026-04-13 — v0.1.25.20: Create Budget + Create/Edit Policy (admin-on-behalf-of) + client-side scope validation
 
 Closes the long-standing budget management gap reported by the user — admin operators could manage tenants end-to-end (create / update / suspend / reactivate) but could only **list / freeze / fund / update** budgets, never **create** them. Same for policies (list-only). The blocker was spec-side: createBudget / createPolicy / updatePolicy were `ApiKeyAuth`-only, and the dashboard authenticates exclusively with `X-Admin-API-Key`.
 
@@ -33,9 +33,19 @@ Three-PR rollout:
 - 409 DUPLICATE_RESOURCE on createBudget surfaces as `ApiError` with code intact
 - 400 INVALID_REQUEST on createPolicy surfaces cleanly
 
+**Client-side scope validation** (folded into this PR, paired with cycles-server-admin v0.1.25.15). End-to-end testing revealed the server was silently accepting non-canonical scopes like `tenant:acme/agentic:codex` (typo for "agent") — server now enforces canonical grammar, and the dashboard mirrors the check in `validateScope()` (`src/utils/safe.ts`) so users see form-level errors instantly instead of a 400 round-trip.
+
+- **`validateScope(scope, { allowWildcards })`** returns null on valid, or a human-readable error pointing at the offending segment. Same rules as the server:
+  - First segment `tenant:<id>`
+  - Canonical kinds in order: `tenant → workspace → app → workflow → agent → toolset`
+  - Ids alphanumeric-bookended (rejects `.foo`, `foo-`)
+  - Policy patterns allow terminal `*` and id-wildcard; budget scopes are concrete
+- Wired into the `submitCreateBudget` and `submitCreatePolicy` handlers in `TenantDetailView.vue`. Server remains the source of truth — anything the client accepts must still pass server validation.
+- +33 `validateScope` tests in `safe.test.ts` including the exact `agentic:codex` regression lock, every rejection path (non-canonical kind, missing tenant prefix, reversed order, duplicate kinds, empty id, disallowed chars, leading/trailing punctuation), wildcard rules (terminal-only, budget rejects all wildcards), `tenant:*/agent:foo` regression lock matching the server.
+
 **Spec compliance.** Aligned with cycles-governance-admin v0.1.25.13. Purely additive — view-file changes don't touch existing flows.
 
-**Gates.** typecheck clean; **216/216 tests pass** (was 211; +5); build clean.
+**Gates.** typecheck clean; **249/249 tests pass** (was 211; +38); build clean.
 
 ---
 
