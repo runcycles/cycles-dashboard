@@ -16,6 +16,12 @@ services:
   dashboard:
     image: ghcr.io/runcycles/cycles-dashboard:0.1.25.23
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     depends_on:
       cycles-admin:
         condition: service_healthy
