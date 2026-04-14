@@ -1,7 +1,16 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
-**Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.15+ continues to satisfy the governance plane.
+**Date:** 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
+**Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.17+ continues to satisfy the governance plane.
+
+### 2026-04-14 — v0.1.25.24 API-key edit: only PATCH changed fields
+
+Fixes runcycles/cycles-dashboard#43 from the client side. `ApiKeysView.submitEdit` was always including the full stored permissions list in every PATCH body, even when the operator only changed the name. If any stored permission string differed from the admin server's current closed enum (legacy records, schema drift), the server rejected the whole request with an opaque 400 — the operator had no way to rename a key whose stored permissions included a legacy value.
+
+Companion to the server-side fix in cycles-server-admin v0.1.25.17 (widens `ApiKeyUpdateRequest.permissions` to `List<String>` and returns an actionable 400 naming the bad permission). Even with the server fix, the right default here is to not send fields the user didn't touch.
+
+**Changes:**
+- `src/views/ApiKeysView.vue` — `submitEdit()` now diffs each form field against `editingKey.value` and only includes fields that actually changed. Permissions and scope_filter use a set-equality helper (`sameStringSet`) so reordering alone doesn't count as a change. If nothing changed, the dialog closes without issuing a request. Out of scope: the form still allows clearing permissions to an empty list or clearing scope_filter — both are legitimate edits and are correctly distinguished from "unchanged."
 
 ### 2026-04-14 — Playwright E2E layer
 
