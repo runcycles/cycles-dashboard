@@ -1,7 +1,27 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
+**Date:** 2026-04-14 (error-surfacing + SecretReveal + 3 incident-response Playwright flows), 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
 **Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.17+ continues to satisfy the governance plane.
+
+### 2026-04-14 — Error-surfacing + SecretReveal + 3 incident-response Playwright flows
+
+Closes three gaps from the v0.1.25.26 test-quality review: silent toast-error regressions, uncovered compliance-audit surface (SecretReveal), and the remaining incident-response end-to-end flows.
+
+**1. Error-surfacing (`src/__tests__/error-surfacing.test.ts`, 4 tests).** 26+ view catch blocks call `toast.error(toMessage(e))`. Nothing asserted the toast actually rendered with readable text — a silent-no-op refactor of `useToast.error` or a `toMessage` regression that returned "[object Object]" would have let destructive operations silently "fail-open" in prod. Tests mount `ApiKeysView`, stub `revokeApiKey` to reject with a conformant `ApiError`, drive the UI into the catch path via real click handlers, then assert the `toasts` ref received an error toast containing the server message. Covers both `ApiError` and generic `Error` catch paths.
+
+**2. SecretReveal component (`src/__tests__/SecretReveal.test.ts`, 10 tests).** Compliance buyers audit this surface — it's the one-shot modal operators see after rotating or creating a secret. Tests lock in: secret renders inline and is selectable, "will not be shown again" warning is prominent, Close is gated on "I copied this" acknowledgement, Escape key respects the same gate, Copy invokes `navigator.clipboard.writeText` with the secret, the 2-second "Copied!" flip reverts, the 60-second clipboard wipe fires IFF the clipboard still holds the secret (preserves user's own clipboard content if they copied something else), `role="dialog"` + `aria-modal="true"` + `aria-label` wired correctly.
+
+**3. Three incident-response Playwright flows** templated from `reservations-force-release.spec.ts`:
+
+| Spec | Flow | Regression class caught |
+|---|---|---|
+| `suspend-tenant.spec.ts` | TenantDetailView → Suspend → confirm → reactivate round-trip | single-tenant compromise response (distinct from existing bulk-suspend spec) |
+| `revoke-key.spec.ts` | ApiKeysView → row Revoke → confirm → list shows REVOKED | leaked-key remediation; catches dialog-lingers, toast-silent, list-doesn't-refresh regressions |
+| `replay-event.spec.ts` | WebhookDetailView → Replay → form submit → events_queued banner | outage-remediation flow; locks `max_events` sent as number (not string) |
+
+Each spec is self-contained — creates its own tenant/key/webhook in `beforeAll` so it doesn't mutate seed fixtures other specs depend on. Request-body assertions (status transition on PATCH, `max_events` type on replay) guard against silent semantic drift that a naive UI-only assertion would miss.
+
+**Gates:** 300/300 Vitest pass (286 prior + 14 new: 4 error-surfacing + 10 SecretReveal). 3 new Playwright specs parse + list. Typecheck clean. Build clean. No runtime change, no version bump.
 
 ### 2026-04-14 — Capability-gated UI visibility test layer
 
