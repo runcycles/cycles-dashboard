@@ -83,9 +83,28 @@ const editError = ref('')
 const editForm = ref({ name: '', permissions: [] as string[], scope_filter: '' })
 
 function openEdit(k: KeyWithTenant) {
-  editForm.value = { name: k.name || '', permissions: [...k.permissions], scope_filter: k.scope_filter?.join(', ') || '' }
+  // Filter out any stored permission that isn't in the canonical PERMISSIONS
+  // set. Unknown values (legacy records like `decide`, typos from direct
+  // Redis writes, values that predate the current spec) have no checkbox in
+  // the UI and, if left in the form's `permissions` array, would ride along
+  // in every PATCH body — the admin server then rejects the whole request
+  // with 400 "Unrecognized permission: <value>". Filtering here means the
+  // operator can edit the key; saving the form implicitly drops the bad
+  // value. Warn them so the drop isn't silent.
+  const allowed = new Set<string>(PERMISSIONS as readonly string[])
+  const stored = k.permissions || []
+  const dropped = stored.filter(p => !allowed.has(p))
+  const kept = stored.filter(p => allowed.has(p))
+  editForm.value = {
+    name: k.name || '',
+    permissions: kept,
+    scope_filter: k.scope_filter?.join(', ') || '',
+  }
   editError.value = ''
   editingKey.value = k
+  if (dropped.length) {
+    toast.error(`Unrecognized permissions will be removed on save: ${dropped.join(', ')}`)
+  }
 }
 
 // Deep-compare two string arrays as sets — order-insensitive equality for
