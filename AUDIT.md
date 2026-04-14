@@ -1,7 +1,58 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
+**Date:** 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
 **Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.17+ continues to satisfy the governance plane.
+
+### 2026-04-14 — v0.1.25.25 grouped PermissionPicker
+
+Picking from a flat 27-item permission list was painful for operators. Replaced the inline `<label v-for>` blocks in `ApiKeysView` (create + edit) and `TenantDetailView` (create) with a new `PermissionPicker.vue` component that groups by plane + resource and supports bulk select:
+
+- **Tenant** plane — Reservations, Balances, Budgets, Policies, Webhooks, Events
+- **Admin (wildcard)** — `admin:read`, `admin:write` at the plane level (no sub-group)
+- **Admin (per-resource)** — Tenants, Budgets, Policies, API Keys, Webhooks, Events, Audit
+
+Each plane and each sub-section shows a tristate checkbox (click fills if any unchecked, clears when all checked) plus `X/Y` count. Individual checkboxes render the last colon-suffix (`create`, `read`, `write`) since the section header provides context. Spec compliance is preserved — the picker's source of truth is `PERMISSION_GROUPS` in `src/types.ts`, which a new `PermissionGroups.test.ts` asserts is the exact set-cover of `PERMISSIONS` (no drift, no duplicates).
+
+**Changes:**
+- `src/types.ts` — added `PERMISSION_GROUPS` as a typed grouped view of `PERMISSIONS`.
+- `src/components/PermissionPicker.vue` — new component. ~100 LOC. `v-model` over `string[]`.
+- `src/views/ApiKeysView.vue` — replaced two inline permission lists with `<PermissionPicker>`.
+- `src/views/TenantDetailView.vue` — replaced inline permission list; removed now-unused `PERMISSIONS` import.
+- `src/__tests__/PermissionGroups.test.ts` — drift guard (2 tests).
+
+**Picker layout refinement (same release):**
+- Edit dialog shows a pending-changes summary beneath the picker: green `+perm` chips for adds, red `−perm` chips for removes. Renders only when there's actually a diff. Makes the Save-button intent visible at a glance and also surfaces the `openEdit`-time legacy-perm filter (e.g. `decide` appears as an explicit pending removal alongside the toast). `aria-live="polite"` so screen readers pick it up as checkboxes toggle.
+- *Tried and reverted:* 3-col side-by-side layout for the three planes. Looked clean in the mockup but the actual edit-dialog width (~600–700px) couldn't fit three columns of nested content — section headers wrapped, the internal `grid-cols-2` of checkboxes compressed, and `X/Y` counts fell to the next line. Stacked single-column is the honest fit for this dialog size. Revisit if the dialog is widened materially.
+
+**Not in this PR:** filter/search box in the picker, preset buttons ("read-only", "full tenant"), collapsible sections, and the fuller matrix layout proposed as "option A." Kept scope tight; revisit if operators ask.
+
+### 2026-04-14 — v0.1.25.25 default sort: newest-first on reservations / api-keys / budgets / tenants
+
+Also shipping in v0.1.25.25: all four list views now default to newest-first ordering by `created_at`. Previously they defaulted to either unsorted (api-keys, tenants), created_at asc (reservations), or unsorted (budgets) — all wrong for the typical "what changed recently" operator workflow.
+
+**Changes:**
+- `ApiKeysView.vue` / `TenantsView.vue` — `useSort(items, 'created_at', 'desc')`.
+- `BudgetsView.vue` — defaults to **highest-utilization first** (`('utilization', 'desc')`) rather than `created_at`. Operators triaging budgets care about "which scopes are closest to running dry" more than provisioning order — the near-exhausted rows are the actionable ones, so floating them to the top is the right default.
+- `ReservationsView.vue` — `useSort(reservations, 'created_at_ms', 'desc')` (was `'asc'`). Empty-state hint rewritten: default is newest-first; click Created once to flip to asc to find oldest-stuck "hung" reservations.
+
+**Why `created_at` desc is safe for these types:** all four carry `created_at` as an ISO-8601 string (or `created_at_ms` as a number on ReservationSummary). ISO-8601 sorts lexicographically in chronological order, so `desc` means newest first without any custom accessor.
+
+The existing `reservations-sort-reserved.spec.ts` e2e test toggles the Reserved column explicitly, so it's independent of the default sort direction. No test breakage.
+
+### 2026-04-14 — v0.1.25.25 complete PERMISSIONS enum + unknown-value filter on API-key edit
+
+Follow-up to v0.1.25.24 after the dev still hit `Unrecognized permission: decide (INVALID_REQUEST)` on edit. Root cause: the dashboard's `PERMISSIONS` constant in `src/types.ts` was incomplete — only the 13 tenant-runtime permissions, missing all 14 admin-prefix permissions that the spec (cycles-governance-admin-v0.1.25.yaml, `schemas.Permission`, lines 1337-1384) and admin server enum have. Operators editing any key whose stored `permissions` included a value not rendered as a checkbox (admin permissions, or legacy orphans like `decide` from pre-enum direct Redis writes) would inadvertently round-trip that value — the stored string sits in `editForm.permissions` but has no corresponding checkbox in the UI, so `v-model` can't toggle it off. The v0.1.25.24 diff-before-PATCH fix only helped when the operator never touched the permissions UI; a single checkbox click mutated the array length and re-triggered the send.
+
+**Changes:**
+- `src/types.ts` — `PERMISSIONS` now lists all 27 spec permissions (13 tenant + `admin:read`/`admin:write` wildcard + 12 granular admin). Comment ties the constant to the spec and the admin server enum so future drift is obvious.
+- `src/views/ApiKeysView.vue` — `openEdit()` filters any stored permission not in `PERMISSIONS` out of `editForm.permissions` at load time and toasts a visible error naming the dropped values. Saving the form then cleans up the stored record (the PATCH sends only recognized values). Cancel leaves the stored record untouched.
+
+**Behavioral consequences:**
+- Operator with a key that has `decide` (or any other non-spec value) stored: opens Edit → sees the warning toast → Save writes the cleaned list → key now conforms to spec.
+- Operator with a key that has only-valid stored permissions: no warning, no filtering — identical to v0.1.25.24 behavior.
+- Operator wanting to keep a non-spec permission on a key: no UI path anymore. By design — these are invalid per spec and the admin server rejects them on write.
+
+**Not in this release:** an admin-side "sweep" to proactively clean up legacy stored permissions. Still per-key via the edit flow.
 
 ### 2026-04-14 — v0.1.25.24 API-key edit: only PATCH changed fields
 

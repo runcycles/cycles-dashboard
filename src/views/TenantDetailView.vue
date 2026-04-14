@@ -5,7 +5,8 @@ import { usePolling } from '../composables/usePolling'
 import { getTenant, listTenants, listBudgets, listApiKeys, listPolicies, updateTenantStatus, updateTenant, revokeApiKey, createApiKey, createBudget, createPolicy, updatePolicy, freezeBudget } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { Tenant, BudgetLedger, ApiKey, Policy, ApiKeyCreateResponse, BudgetCreateRequest, PolicyCreateRequest, PolicyUpdateRequest } from '../types'
-import { PERMISSIONS, COMMIT_OVERAGE_POLICIES } from '../types'
+import { COMMIT_OVERAGE_POLICIES } from '../types'
+import PermissionPicker from '../components/PermissionPicker.vue'
 import { validateScope } from '../utils/safe'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -665,12 +666,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       </div>
       <div>
         <label class="block text-xs text-gray-500 mb-1">Permissions</label>
-        <div class="grid grid-cols-2 gap-1 max-h-40 overflow-y-auto border border-gray-200 rounded p-2">
-          <label v-for="p in PERMISSIONS" :key="p" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
-            <input type="checkbox" :value="p" v-model="createKeyForm.permissions" class="rounded" />
-            {{ p }}
-          </label>
-        </div>
+        <PermissionPicker v-model="createKeyForm.permissions" />
       </div>
       <div>
         <label for="ck2-scope" class="block text-xs text-gray-500 mb-1">Scope filter (comma-separated, optional)</label>

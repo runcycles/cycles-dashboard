@@ -3,7 +3,12 @@ import { ref, computed, type Ref } from 'vue'
 export type SortDir = 'asc' | 'desc'
 export type ValueAccessor<T> = (item: T) => string | number | null | undefined
 
-export function useSort<T>(items: Ref<T[]>, defaultKey?: keyof T & string, defaultDir: SortDir = 'asc', accessors?: Record<string, ValueAccessor<T>>) {
+// `defaultKey` intentionally allows any string, not just `keyof T & string`:
+// callers commonly seed the default with a synthetic key backed by an
+// accessor (e.g. BudgetsView uses `'utilization'`, which isn't a field on
+// BudgetLedger but is provided by `accessors.utilization`). Constraining to
+// `keyof T` would force an `as any` at every such call site.
+export function useSort<T>(items: Ref<T[]>, defaultKey?: string, defaultDir: SortDir = 'asc', accessors?: Record<string, ValueAccessor<T>>) {
   const sortKey = ref<string>(defaultKey ?? '')
   const sortDir = ref<SortDir>(defaultDir)
 

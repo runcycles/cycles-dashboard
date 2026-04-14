@@ -47,16 +47,18 @@ const reservations = ref<ReservationSummary[]>([])
 const error = ref('')
 const loadingList = ref(false)
 
-// Sort local, not server — the runtime spec doesn't guarantee
-// stable ordering of returned reservations, and ops typically want
-// to sort by age (created_at asc) to find the oldest-stuck one first.
+// Sort local, not server — the runtime spec doesn't guarantee stable
+// ordering of returned reservations. Default to created_at desc (newest
+// first): the common workflow is "what did my agents do most recently",
+// not "which reservation has been stuck longest". Click the Created
+// header once to flip back to ascending for the oldest-stuck-first view.
 // `reserved` needs an accessor because the raw field is an object
 // ({unit, amount}) — without it useSort stringifies to "[object Object]"
 // and every row compares equal (silent no-op on header click).
 const { sortKey, sortDir, toggle, sorted: sortedReservations } = useSort(
   reservations,
   'created_at_ms',
-  'asc',
+  'desc',
   { reserved: (r) => r.reserved.amount },
 )
 
@@ -188,8 +190,9 @@ function isExpired(r: ReservationSummary): boolean {
         </select>
       </div>
       <p class="text-xs text-gray-400 flex-1 min-w-[16rem]">
-        Reservations past their grace window but still ACTIVE are the "hung" ones —
-        sort by Created (asc, default) to find the oldest first.
+        Default sort is Created (newest first). Click the Created header to flip
+        to ascending — reservations past their grace window but still ACTIVE rise
+        to the top, which is the fast way to find "hung" ones.
       </p>
     </div>
 

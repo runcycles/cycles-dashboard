@@ -318,10 +318,64 @@ export interface ReplayEventsResponse {
 
 // Well-known enums
 
+// Full permission enum per cycles-governance-admin-v0.1.25 spec
+// (schemas.Permission, lines 1337-1384). MUST match the admin server's
+// Permission.java — if a stored key carries a permission not listed here,
+// the edit form will filter it out on openEdit and warn the operator
+// (see ApiKeysView.openEdit / TenantDetailView edit paths). Adding an
+// admin-plane permission that's in the spec but missing here means the
+// checkbox for it never renders and operators can't toggle it.
 export const PERMISSIONS = [
+  // Tenant runtime permissions
   'reservations:create', 'reservations:commit', 'reservations:release', 'reservations:extend', 'reservations:list',
   'balances:read', 'budgets:read', 'budgets:write', 'policies:read', 'policies:write',
   'webhooks:read', 'webhooks:write', 'events:read',
+  // Admin wildcard (backward compatible)
+  'admin:read', 'admin:write',
+  // Granular admin permissions
+  'admin:tenants:read', 'admin:tenants:write',
+  'admin:budgets:read', 'admin:budgets:write',
+  'admin:policies:read', 'admin:policies:write',
+  'admin:apikeys:read', 'admin:apikeys:write',
+  'admin:webhooks:read', 'admin:webhooks:write',
+  'admin:events:read', 'admin:audit:read',
+] as const
+
+// Grouped view of PERMISSIONS for the edit/create picker. Purely a UI
+// concern — the canonical flat list is PERMISSIONS above. A unit test
+// guards against drift between the two. Structure: plane -> sections ->
+// items. A section with label=null renders items at the plane level
+// without a sub-header (used by the wildcard plane).
+export const PERMISSION_GROUPS = [
+  {
+    plane: 'Tenant',
+    sections: [
+      { label: 'Reservations', items: ['reservations:create', 'reservations:commit', 'reservations:release', 'reservations:extend', 'reservations:list'] },
+      { label: 'Balances', items: ['balances:read'] },
+      { label: 'Budgets', items: ['budgets:read', 'budgets:write'] },
+      { label: 'Policies', items: ['policies:read', 'policies:write'] },
+      { label: 'Webhooks', items: ['webhooks:read', 'webhooks:write'] },
+      { label: 'Events', items: ['events:read'] },
+    ],
+  },
+  {
+    plane: 'Admin (wildcard)',
+    sections: [
+      { label: null, items: ['admin:read', 'admin:write'] },
+    ],
+  },
+  {
+    plane: 'Admin (per-resource)',
+    sections: [
+      { label: 'Tenants', items: ['admin:tenants:read', 'admin:tenants:write'] },
+      { label: 'Budgets', items: ['admin:budgets:read', 'admin:budgets:write'] },
+      { label: 'Policies', items: ['admin:policies:read', 'admin:policies:write'] },
+      { label: 'API Keys', items: ['admin:apikeys:read', 'admin:apikeys:write'] },
+      { label: 'Webhooks', items: ['admin:webhooks:read', 'admin:webhooks:write'] },
+      { label: 'Events', items: ['admin:events:read'] },
+      { label: 'Audit', items: ['admin:audit:read'] },
+    ],
+  },
 ] as const
 
 export const EVENT_TYPES = [

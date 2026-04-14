@@ -37,7 +37,11 @@ const hasMore = ref(false)
 const nextCursor = ref('')
 const loadingMore = ref(false)
 const error = ref('')
-const { sortKey, sortDir, toggle, sorted: sortedBudgets } = useSort(budgets, undefined, 'asc', {
+// Default sort: highest utilization first. Operators triaging budgets
+// care about "which scopes are closest to running dry", not when a
+// ledger was provisioned — the near-exhausted rows are the actionable
+// ones. Clicking any header switches to that column's natural order.
+const { sortKey, sortDir, toggle, sorted: sortedBudgets } = useSort(budgets, 'utilization', 'desc', {
   utilization: (b: BudgetLedger) => b.allocated.amount > 0 ? (b.allocated.amount - b.remaining.amount) / b.allocated.amount : 0,
   debt: (b: BudgetLedger) => b.debt?.amount ?? 0,
 })

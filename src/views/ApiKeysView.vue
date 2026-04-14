@@ -6,6 +6,7 @@ import { listTenants, listApiKeys, revokeApiKey, createApiKey, updateApiKey } fr
 import { useAuthStore } from '../stores/auth'
 import type { Tenant, ApiKey, ApiKeyCreateResponse } from '../types'
 import { PERMISSIONS } from '../types'
+import PermissionPicker from '../components/PermissionPicker.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import MaskedValue from '../components/MaskedValue.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -83,9 +84,28 @@ const editError = ref('')
 const editForm = ref({ name: '', permissions: [] as string[], scope_filter: '' })
 
 function openEdit(k: KeyWithTenant) {
-  editForm.value = { name: k.name || '', permissions: [...k.permissions], scope_filter: k.scope_filter?.join(', ') || '' }
+  // Filter out any stored permission that isn't in the canonical PERMISSIONS
+  // set. Unknown values (legacy records like `decide`, typos from direct
+  // Redis writes, values that predate the current spec) have no checkbox in
+  // the UI and, if left in the form's `permissions` array, would ride along
+  // in every PATCH body — the admin server then rejects the whole request
+  // with 400 "Unrecognized permission: <value>". Filtering here means the
+  // operator can edit the key; saving the form implicitly drops the bad
+  // value. Warn them so the drop isn't silent.
+  const allowed = new Set<string>(PERMISSIONS as readonly string[])
+  const stored = k.permissions || []
+  const dropped = stored.filter(p => !allowed.has(p))
+  const kept = stored.filter(p => allowed.has(p))
+  editForm.value = {
+    name: k.name || '',
+    permissions: kept,
+    scope_filter: k.scope_filter?.join(', ') || '',
+  }
   editError.value = ''
   editingKey.value = k
+  if (dropped.length) {
+    toast.error(`Unrecognized permissions will be removed on save: ${dropped.join(', ')}`)
+  }
 }
 
 // Deep-compare two string arrays as sets — order-insensitive equality for
@@ -99,6 +119,23 @@ function sameStringSet(a: string[] | undefined, b: string[] | undefined): boolea
   for (const v of bb) if (!sa.has(v)) return false
   return true
 }
+
+// Pending-changes summary for the edit dialog. Shows what the operator
+// will add / remove on Save, so the picker's state-change intent is
+// visible at a glance before the PATCH goes out. Also catches the
+// openEdit-time legacy-perm filter (e.g. `decide` shows up as a
+// pending removal alongside the toast) which makes the cleanup
+// behavior explicit rather than implicit.
+const pendingPermAdds = computed<string[]>(() => {
+  if (!editingKey.value) return []
+  const orig = new Set(editingKey.value.permissions || [])
+  return editForm.value.permissions.filter(p => !orig.has(p))
+})
+const pendingPermRemoves = computed<string[]>(() => {
+  if (!editingKey.value) return []
+  const curr = new Set(editForm.value.permissions)
+  return (editingKey.value.permissions || []).filter(p => !curr.has(p))
+})
 
 async function submitEdit() {
   if (!editingKey.value) return
@@ -144,7 +181,9 @@ const filteredKeys = computed(() => {
   if (filterTenant.value) result = result.filter(k => k.tenant_id === filterTenant.value)
   return result
 })
-const { sortKey, sortDir, toggle, sorted: sortedKeys } = useSort(filteredKeys)
+// Default sort: newest keys first. created_at is an ISO-8601 string, which
+// sorts lexicographically in chronological order, so 'desc' == newest first.
+const { sortKey, sortDir, toggle, sorted: sortedKeys } = useSort(filteredKeys, 'created_at', 'desc')
 
 const statusCounts = computed(() => {
   const counts: Record<string, number> = {}
@@ -288,12 +327,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       </div>
       <div>
         <label class="block text-xs text-gray-500 mb-1">Permissions</label>
-        <div class="grid grid-cols-2 gap-1 max-h-40 overflow-y-auto border border-gray-200 rounded p-2">
-          <label v-for="p in PERMISSIONS" :key="p" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
-            <input type="checkbox" :value="p" v-model="createForm.permissions" class="rounded" />
-            {{ p }}
-          </label>
-        </div>
+        <PermissionPicker v-model="createForm.permissions" />
       </div>
       <div>
         <label for="ck-scope" class="block text-xs text-gray-500 mb-1">Scope filter (comma-separated, optional)</label>
@@ -316,11 +350,35 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       </div>
       <div>
         <label class="block text-xs text-gray-500 mb-1">Permissions</label>
-        <div class="grid grid-cols-2 gap-1 max-h-40 overflow-y-auto border border-gray-200 rounded p-2">
-          <label v-for="p in PERMISSIONS" :key="p" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
-            <input type="checkbox" :value="p" v-model="editForm.permissions" class="rounded" />
-            {{ p }}
-          </label>
+        <PermissionPicker v-model="editForm.permissions" />
+        <!--
+          Pending-changes summary. Rendered only when there's actually a
+          diff — avoids visual noise on rename-only edits. Adds in green,
+          removes in red; flex-wrap keeps the chip list tidy on narrow
+          dialogs. aria-live so screen readers catch a newly-meaningful
+          change as checkboxes toggle.
+        -->
+        <div
+          v-if="pendingPermAdds.length || pendingPermRemoves.length"
+          class="mt-2 text-xs flex flex-wrap gap-1 items-center"
+          aria-live="polite"
+        >
+          <template v-if="pendingPermAdds.length">
+            <span class="text-green-700 font-medium">Adding:</span>
+            <span
+              v-for="p in pendingPermAdds"
+              :key="'add:' + p"
+              class="bg-green-50 text-green-700 border border-green-200 rounded px-1.5 py-0.5 font-mono"
+            >+{{ p }}</span>
+          </template>
+          <template v-if="pendingPermRemoves.length">
+            <span class="text-red-700 font-medium" :class="pendingPermAdds.length ? 'ml-3' : ''">Removing:</span>
+            <span
+              v-for="p in pendingPermRemoves"
+              :key="'rem:' + p"
+              class="bg-red-50 text-red-700 border border-red-200 rounded px-1.5 py-0.5 font-mono"
+            >−{{ p }}</span>
+          </template>
         </div>
       </div>
       <div>
