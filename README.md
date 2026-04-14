@@ -1,12 +1,12 @@
 [![CI](https://github.com/runcycles/cycles-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/runcycles/cycles-dashboard/actions)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Spec](https://img.shields.io/badge/spec-v0.1.25.10-blue)](https://github.com/runcycles/cycles-server-admin/blob/main/complete-budget-governance-v0.1.25.yaml)
+[![Spec](https://img.shields.io/badge/spec-v0.1.25.14-blue)](https://github.com/runcycles/cycles-protocol/blob/main/cycles-governance-admin-v0.1.25.yaml)
 [![Vue](https://img.shields.io/badge/vue-3-brightgreen)](https://vuejs.org)
 [![TypeScript](https://img.shields.io/badge/typescript-strict-blue)](https://www.typescriptlang.org)
 
 # Runcycles Admin Dashboard
 
-Operational admin dashboard for the [Cycles Budget Governance System](https://github.com/runcycles/cycles-server-admin), aligned with [governance spec v0.1.25.10](https://github.com/runcycles/cycles-server-admin/blob/main/complete-budget-governance-v0.1.25.yaml).
+Operational admin dashboard for the [Cycles Budget Governance System](https://github.com/runcycles/cycles-server-admin), aligned with [governance spec v0.1.25.14](https://github.com/runcycles/cycles-protocol/blob/main/cycles-governance-admin-v0.1.25.yaml).
 
 <p align="center">
   <img src="docs/runcycles-demo.gif" alt="Dashboard walkthrough — tenants, budgets, reservations, webhooks" width="800"/><br/>
@@ -23,8 +23,9 @@ Operations-first dashboard for monitoring and managing the Cycles budget enforce
 | **Tenants** | Tenant list + detail with budgets, API keys, and policies tabs |
 | **Budgets** | Tenant-scoped budget list with utilization/debt bars + exact scope detail |
 | **Events** | Correlation-first investigation tool with expandable detail rows |
-| **Webhooks** | Subscription health (green/yellow/red) + delivery history |
 | **API Keys** | Cross-tenant key list with masked IDs, permissions, status filters |
+| **Webhooks** | Subscription health (green/yellow/red) + delivery history |
+| **Reservations** | Hung-reservation force-release during incident response (runtime-plane admin-on-behalf-of) |
 | **Audit** | Compliance query tool with CSV/JSON export (manual-only, no auto-refresh) |
 
 ### Operational Actions
@@ -35,21 +36,28 @@ Tier 1 incident-response actions available directly from the dashboard (capabili
 |--------|-------|--------|
 | **Freeze budget** | Budget detail | Blocks all reservations, commits, and fund operations |
 | **Unfreeze budget** | Budget detail | Re-enables normal operations |
+| **Create budget** | Budgets list, Tenant detail | Admin-on-behalf-of (dual-auth) — modal with ScopeBuilder + tenant selector |
+| **Adjust budget allocation** | Budget detail | Inline form — uses fund endpoint with RESET operation |
+| **Emergency Freeze (tenant-wide)** | Tenant detail | Sequential freeze across all ACTIVE budgets — one-click lockdown with confirm + blast-radius summary |
+| **Create policy** | Policies tab (Tenant detail) | Admin-on-behalf-of — modal form, tenant-scoped |
+| **Edit policy** | Policies tab | Admin-on-behalf-of — patch policy_id, server resolves owning tenant |
 | **Suspend tenant** | Tenant detail | Blocks all API access for the tenant |
 | **Reactivate tenant** | Tenant detail | Restores API access |
+| **Bulk suspend / reactivate tenants** | Tenants list | Multi-select + bulk action bar with sequential per-tenant calls, live progress, cancel-between-requests |
+| **Create tenant** | Tenants list | Modal form, navigates to new tenant on success |
+| **Edit tenant** | Tenant detail | Edit display name |
 | **Revoke API key** | API Keys list, Tenant detail | Immediately invalidates the key (irreversible) |
+| **Create API key** | API Keys list, Tenant detail | Modal form with permissions, shows secret once |
+| **Edit API key** | API Keys list | Edit name, permissions, scope filter |
 | **Pause webhook** | Webhook detail | Stops event deliveries; events silently dropped |
 | **Enable webhook** | Webhook detail | Resumes deliveries (resets failure counter) |
 | **Reset & re-enable webhook** | Webhook detail | Re-enables disabled/failing webhook, clears failures |
-| **Adjust budget allocation** | Budget detail | Inline form — uses fund endpoint with RESET operation |
-| **Create tenant** | Tenants list | Modal form, navigates to new tenant on success |
-| **Edit tenant** | Tenant detail | Edit display name |
-| **Create API key** | API Keys list, Tenant detail | Modal form with permissions, shows secret once |
-| **Edit API key** | API Keys list | Edit name, permissions, scope filter |
+| **Bulk pause / enable webhooks** | Webhooks list | Multi-select + tenant filter; sequential per-sub with cancel. Auto-disabled webhooks excluded from bulk Enable (per-row verification required) |
 | **Create webhook** | Webhooks list | Modal form, shows signing secret once |
 | **Delete webhook** | Webhook detail | Permanent deletion with confirmation |
 | **Test webhook** | Webhook detail | Sends synthetic test event, shows result inline |
 | **Replay events** | Webhook detail | Re-deliver events for a time range |
+| **Force release reservation** | Reservations | Runtime-plane admin-on-behalf-of — pre-filled `[INCIDENT_FORCE_RELEASE]` reason for audit grep-ability |
 
 ## Architecture
 
