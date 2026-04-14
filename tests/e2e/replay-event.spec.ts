@@ -30,8 +30,11 @@ test.beforeAll(async () => {
     data: {
       tenant_id: fx.tenantId,
       url: `https://example.invalid/e2e-replay-${Date.now()}`,
-      // Broad subscription so no event-type mismatch blocks replay-eligibility.
-      event_types: [],
+      // Server requires at least one event type. `budget.created` is the
+      // same event used by webhooks-bulk-pause's setup; no tenant events
+      // are actually needed for the replay flow (the endpoint returns
+      // 2xx with events_queued=0 when the time window is empty).
+      event_types: ['budget.created'],
     },
   })
   if (!res.ok()) {

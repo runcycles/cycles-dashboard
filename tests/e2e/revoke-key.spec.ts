@@ -48,18 +48,18 @@ test('operator revokes a leaked API key and the row reflects REVOKED status', as
   await loginAsAdmin(page)
   await page.goto('/api-keys')
 
-  // Wait for the API keys list to load. The view lists keys grouped
-  // by tenant; scope to our seeded tenant via the filter so the
-  // target row is guaranteed visible without scroll.
+  // ApiKeysView calls listTenants then issues a listApiKeys per tenant
+  // — wait on the tenants fetch first so the filter dropdown is
+  // populated before we try to select our target.
   await page.waitForResponse(
-    (r) => r.url().includes('/v1/admin/api-keys') && r.request().method() === 'GET',
+    (r) => r.url().includes('/v1/admin/tenants') && r.request().method() === 'GET',
     { timeout: 10_000 },
   )
-  // Filter by tenant so the target row is visible regardless of how
-  // many other tenants exist in the stack.
-  await page.selectOption('select[aria-label*="tenant" i]', fx.tenantId).catch(() => {
-    // Filter selector may be absent if only one tenant is loaded; fall through.
-  })
+
+  // Filter to the seeded tenant so the target row is easy to locate
+  // regardless of other tenants/keys in the shared table. Matches the
+  // pattern used in api-keys-edit.spec.ts.
+  await page.locator('#keys-tenant').selectOption(fx.tenantId)
 
   // Row filtering by key name — unique within tenant scope.
   const targetRow = page.getByRole('row').filter({ hasText: revokeKeyName })
