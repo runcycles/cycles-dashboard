@@ -57,11 +57,15 @@ function groupState(items: readonly string[]): 'none' | 'some' | 'all' {
 
 <template>
   <!--
-    Layout: stack vertically on narrow screens (mobile, small dialogs),
-    go side-by-side at md+ so each plane gets its own column. max-h cap
-    is a safety net for pathological content sizes; typical contents fit.
+    Layout note: tried side-by-side columns for the three planes in a
+    prior revision, but the edit dialog width (~600-700px in practice)
+    isn't enough to fit three columns of nested content — section
+    headers wrap awkwardly, the internal grid-cols-2 of checkboxes
+    compresses, and counts ("3/5") fall to the next line. Stacked
+    single-column is the honest fit for this dialog size. If someone
+    later widens the dialog materially, revisit.
   -->
-  <div class="border border-gray-200 rounded p-2 space-y-3 md:space-y-0 md:grid md:grid-cols-3 md:gap-4 max-h-[32rem] overflow-y-auto">
+  <div class="border border-gray-200 rounded p-2 space-y-3 max-h-[28rem] overflow-y-auto">
     <div v-for="plane in PERMISSION_GROUPS" :key="plane.plane" class="space-y-1.5">
       <!-- Plane header: aggregate bulk-select across all sections in the plane -->
       <label class="flex items-center gap-2 text-xs font-medium text-gray-700 bg-gray-50 px-2 py-1 rounded cursor-pointer">

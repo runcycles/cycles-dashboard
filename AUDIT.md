@@ -20,9 +20,9 @@ Each plane and each sub-section shows a tristate checkbox (click fills if any un
 - `src/views/TenantDetailView.vue` — replaced inline permission list; removed now-unused `PERMISSIONS` import.
 - `src/__tests__/PermissionGroups.test.ts` — drift guard (2 tests).
 
-**Picker layout refinements (same release):**
-- Planes now sit side-by-side as 3 columns on md+ (≥768px) screens; stack on narrow. Cuts scroll distance in half on typical desktop dialogs.
+**Picker layout refinement (same release):**
 - Edit dialog shows a pending-changes summary beneath the picker: green `+perm` chips for adds, red `−perm` chips for removes. Renders only when there's actually a diff. Makes the Save-button intent visible at a glance and also surfaces the `openEdit`-time legacy-perm filter (e.g. `decide` appears as an explicit pending removal alongside the toast). `aria-live="polite"` so screen readers pick it up as checkboxes toggle.
+- *Tried and reverted:* 3-col side-by-side layout for the three planes. Looked clean in the mockup but the actual edit-dialog width (~600–700px) couldn't fit three columns of nested content — section headers wrapped, the internal `grid-cols-2` of checkboxes compressed, and `X/Y` counts fell to the next line. Stacked single-column is the honest fit for this dialog size. Revisit if the dialog is widened materially.
 
 **Not in this PR:** filter/search box in the picker, preset buttons ("read-only", "full tenant"), collapsible sections, and the fuller matrix layout proposed as "option A." Kept scope tight; revisit if operators ask.
 
