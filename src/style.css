@@ -2,6 +2,90 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ── Reusable component classes ───────────────────────────────────────
+   Consolidates the utility-class strings that repeated 4+ times across
+   views. Not a design-system abstraction — just deduplication.
+
+   Why @apply in style.css and not Vue components? The patterns below
+   are pure styling with no interactive state; they don't benefit from
+   props / slots / types. Heavier components (FormDialog, ConfirmAction,
+   StatusBadge, ActionButton-with-loading) stay as .vue files.
+
+   Sidebar.vue is exempt from this consolidation — it sits on a dark
+   background permanently, so the muted/form-* classes defined for
+   white-bg context would break its contrast. Keep inline Tailwind
+   there.
+
+   Dark-mode note: @apply-generated CSS is flat declarations, not
+   class utilities, so the .dark .text-gray-X cascade rules further
+   down in this file don't apply to these component classes. Each
+   component that has distinct light/dark colors gets its own
+   explicit `.dark .<class>` override here.
+   ──────────────────────────────────────────────────────────────────── */
+
+@layer components {
+  /* ── Form controls ──────────────────────────────────────────────── */
+
+  .form-label       { @apply block text-xs mb-1; color: var(--color-gray-600); }
+  .dark .form-label { color: var(--color-gray-400); }
+
+  .form-input       { @apply border border-gray-300 rounded px-2 py-1.5 text-sm w-full; }
+  /* Inline the form-input utilities (can't @apply a sibling
+     component class in Tailwind v4). */
+  .form-input-mono  { @apply border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono; }
+
+  /* .form-select matches .form-input plus an explicit bg-white so the
+     select popup styling is consistent across browsers. In dark mode,
+     the generic `.dark select` rule further down takes over. */
+  .form-select      { @apply border border-gray-300 rounded px-2 py-1.5 text-sm bg-white; }
+
+  /* Optional width: most selects are auto-width, some (create-form
+     dialogs) want w-full. Compose: `class="form-select w-full"`. */
+
+  /* ── Surfaces ──────────────────────────────────────────────────── */
+
+  .card             { @apply bg-white rounded-lg shadow p-4; }
+  .card-table       { @apply bg-white rounded-lg shadow overflow-hidden overflow-x-auto; }
+
+  /* ── Table atoms ──────────────────────────────────────────────── */
+
+  .table-cell       { @apply px-4 py-3; }
+  .table-header     { @apply bg-gray-50 text-xs uppercase tracking-wider; color: var(--color-gray-600); }
+  .dark .table-header { color: var(--color-gray-400); }
+  .table-row-hover  { @apply hover:bg-gray-50 transition-colors; }
+
+  /* ── Muted text (secondary copy) ──────────────────────────────── */
+
+  .muted            { color: var(--color-gray-600); }
+  .dark .muted      { color: var(--color-gray-400); }
+  /* Inline rather than composing via @apply (v4 doesn't allow
+     @apply on sibling component classes). */
+  .muted-sm         { @apply text-xs; color: var(--color-gray-600); }
+  .dark .muted-sm   { color: var(--color-gray-400); }
+
+  /* ── Banners ──────────────────────────────────────────────────── */
+
+  .banner-error     { @apply bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4; }
+  .banner-warning   { @apply bg-yellow-50 border border-yellow-200 text-yellow-700 text-sm rounded-lg px-4 py-3 mb-4; }
+
+  /* ── Info panel (nested gray block inside a dialog) ──────────── */
+
+  .info-panel       { @apply bg-gray-50 rounded p-3; }
+
+  /* ── Action buttons ───────────────────────────────────────────
+     Row-style: inline link-like buttons that live inside table rows.
+     Pill-style: outlined rectangular buttons for header or toolbar
+     actions. Both have danger/success/primary variants. */
+
+  .btn-row-danger   { @apply text-xs text-red-600 hover:text-red-800 cursor-pointer hover:underline; }
+  .btn-row-success  { @apply text-xs text-green-700 hover:text-green-900 cursor-pointer hover:underline; }
+  .btn-row-primary  { @apply text-xs text-blue-600 hover:text-blue-800 cursor-pointer hover:underline; }
+
+  .btn-pill-danger  { @apply text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors; }
+  .btn-pill-success { @apply text-xs text-green-700 hover:text-green-900 border border-green-200 rounded px-2.5 py-1 hover:bg-green-50 cursor-pointer transition-colors; }
+  .btn-pill-primary { @apply text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-2.5 py-1 hover:bg-blue-50 cursor-pointer transition-colors; }
+}
+
 /* ── Dark mode overrides ──────────────────────────────────────────────
    Cards render on gray-900, table headers on gray-800.
    Every override is chosen for ≥4.5:1 contrast on those surfaces.

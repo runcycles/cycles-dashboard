@@ -171,7 +171,7 @@ const preview = computed(() => serialize())
       <div class="flex items-center gap-2 px-3 py-2 text-sm bg-gray-50">
         <span class="inline-block w-24 text-xs font-medium text-gray-600 dark:text-gray-500">tenant</span>
         <span class="font-mono text-sm flex-1">{{ props.tenantId }}</span>
-        <span class="text-xs text-gray-600 dark:text-gray-400">locked</span>
+        <span class="muted-sm">locked</span>
       </div>
       <!-- User-added deeper segments. Each row: kind label, id input,
            optional "any (*)" radio for policy patterns, remove button.
@@ -215,7 +215,7 @@ const preview = computed(() => serialize())
             type="button"
             @click="removeRow(i)"
             :aria-label="`Remove ${seg.kind} level`"
-            class="text-gray-600 dark:text-gray-400 hover:text-red-600 cursor-pointer text-sm"
+            class="muted hover:text-red-600 cursor-pointer text-sm"
           >✕</button>
         </div>
       </div>
@@ -231,7 +231,7 @@ const preview = computed(() => serialize())
         <option value="">+ Add level</option>
         <option v-for="k in availableKinds" :key="k" :value="k">{{ k }}</option>
       </select>
-      <span v-else class="text-xs text-gray-600 dark:text-gray-400">No more levels available.</span>
+      <span v-else class="muted-sm">No more levels available.</span>
     </div>
     <!-- Policy-only: trailing /* for "match everything deeper than the
          last concrete segment." Deliberately below the row list —

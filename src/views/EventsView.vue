@@ -94,29 +94,29 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
   <div>
     <PageHeader title="Events" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh" />
 
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
+    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
     <!-- Filters -->
-    <form @submit.prevent="applyFilters" class="bg-white rounded-lg shadow p-4 mb-4">
+    <form @submit.prevent="applyFilters" class="card p-4 mb-4">
       <div class="flex gap-3 flex-wrap items-end">
         <div>
-          <label for="ev-category" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Category</label>
-          <select id="ev-category" v-model="category" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+          <label for="ev-category" class="form-label">Category</label>
+          <select id="ev-category" v-model="category" class="form-select">
             <option value="">All</option>
             <option>budget</option><option>reservation</option><option>tenant</option>
             <option>api_key</option><option>policy</option><option>system</option>
           </select>
         </div>
         <div>
-          <label for="ev-tenant" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Tenant ID</label>
+          <label for="ev-tenant" class="form-label">Tenant ID</label>
           <input id="ev-tenant" v-model="tenantId" placeholder="tenant id" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-32" />
         </div>
         <div>
-          <label for="ev-scope" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Scope</label>
+          <label for="ev-scope" class="form-label">Scope</label>
           <input id="ev-scope" v-model="scope" placeholder="scope prefix" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-40" />
         </div>
         <div>
-          <label for="ev-correlation" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Correlation ID</label>
+          <label for="ev-correlation" class="form-label">Correlation ID</label>
           <input id="ev-correlation" v-model="correlationId" placeholder="correlation_id" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-40" />
         </div>
         <button type="submit" class="bg-gray-900 text-white px-3 py-1.5 rounded text-sm hover:bg-gray-800 cursor-pointer">Filter</button>
@@ -125,12 +125,12 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
     </form>
 
     <!-- Results count -->
-    <p v-if="events.length > 0" class="text-xs text-gray-600 dark:text-gray-400 mb-2">{{ events.length }} events</p>
+    <p v-if="events.length > 0" class="muted-sm mb-2">{{ events.length }} events</p>
 
     <!-- Event table -->
-    <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
+    <div class="card-table">
       <table class="w-full text-sm min-w-[640px]">
-        <thead class="bg-gray-50 text-gray-600 dark:text-gray-500 text-xs uppercase tracking-wider">
+        <thead class="table-header">
           <tr>
             <th class="w-8"></th>
             <SortHeader label="Type" column="event_type" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
@@ -149,7 +149,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
                  TenantLink/action buttons inside another interactive
                  element (axe rule: nested-interactive, WCAG 4.1.2). -->
             <tr class="hover:bg-gray-50 cursor-pointer transition-colors" @click="expanded = expanded === e.event_id ? null : e.event_id">
-              <td class="pl-3 py-3 text-gray-600 dark:text-gray-400">
+              <td class="pl-3 py-3 muted">
                 <button
                   type="button"
                   :aria-expanded="expanded === e.event_id"
@@ -162,25 +162,25 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
                   </svg>
                 </button>
               </td>
-              <td class="px-4 py-3 font-mono text-xs">{{ e.event_type }}</td>
-              <td class="px-4 py-3"><span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs">{{ e.category }}</span></td>
-              <td class="px-4 py-3 text-gray-700 truncate max-w-[200px] font-mono text-xs">{{ e.scope || '-' }}</td>
-              <td class="px-4 py-3">
+              <td class="table-cell font-mono text-xs">{{ e.event_type }}</td>
+              <td class="table-cell"><span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs">{{ e.category }}</span></td>
+              <td class="table-cell text-gray-700 truncate max-w-[200px] font-mono text-xs">{{ e.scope || '-' }}</td>
+              <td class="table-cell">
                 <TenantLink v-if="e.tenant_id" :tenant-id="e.tenant_id" @click.stop />
               </td>
-              <td class="px-4 py-3 text-gray-600 dark:text-gray-400 whitespace-nowrap text-xs" :title="new Date(e.timestamp).toISOString()">{{ formatDateTime(e.timestamp) }}</td>
+              <td class="table-cell muted whitespace-nowrap text-xs" :title="new Date(e.timestamp).toISOString()">{{ formatDateTime(e.timestamp) }}</td>
             </tr>
             <tr v-if="expanded === e.event_id" class="bg-gray-50/70">
-              <td colspan="6" class="px-4 py-3 pl-11">
+              <td colspan="6" class="table-cell pl-11">
                 <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3">
-                  <div><span class="text-gray-600 dark:text-gray-400">Event ID:</span> <span class="font-mono">{{ e.event_id }}</span></div>
-                  <div><span class="text-gray-600 dark:text-gray-400">Source:</span> {{ e.source }}</div>
-                  <div v-if="e.request_id"><span class="text-gray-600 dark:text-gray-400">Request ID:</span> <span class="font-mono">{{ e.request_id }}</span></div>
+                  <div><span class="muted">Event ID:</span> <span class="font-mono">{{ e.event_id }}</span></div>
+                  <div><span class="muted">Source:</span> {{ e.source }}</div>
+                  <div v-if="e.request_id"><span class="muted">Request ID:</span> <span class="font-mono">{{ e.request_id }}</span></div>
                   <div v-if="e.correlation_id">
-                    <span class="text-gray-600 dark:text-gray-400">Correlation ID:</span>
+                    <span class="muted">Correlation ID:</span>
                     <button @click.stop="viewCorrelated(e.correlation_id!)" class="text-blue-600 hover:underline ml-1 font-mono cursor-pointer">{{ e.correlation_id }}</button>
                   </div>
-                  <div v-if="e.actor"><span class="text-gray-600 dark:text-gray-400">Actor:</span> {{ e.actor.type }}<span v-if="e.actor.key_id" class="font-mono"> {{ e.actor.key_id }}</span></div>
+                  <div v-if="e.actor"><span class="muted">Actor:</span> {{ e.actor.type }}<span v-if="e.actor.key_id" class="font-mono"> {{ e.actor.key_id }}</span></div>
                 </div>
                 <div v-if="e.data" class="bg-white border border-gray-200 rounded p-3 text-xs font-mono overflow-auto max-h-40">
                   <pre class="whitespace-pre-wrap">{{ safeJsonStringify(e.data) }}</pre>
@@ -197,7 +197,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
           </tr>
         </tbody>
       </table>
-      <div v-if="hasMore" class="px-4 py-3 border-t border-gray-100 text-center">
+      <div v-if="hasMore" class="table-cell border-t border-gray-100 text-center">
         <button @click="loadMore" :disabled="loadingMore" class="text-xs text-blue-600 hover:text-blue-800 cursor-pointer disabled:opacity-50">
           {{ loadingMore ? 'Loading...' : 'Load more events' }}
         </button>

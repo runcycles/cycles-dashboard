@@ -221,7 +221,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       </template>
     </PageHeader>
 
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
+    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
     <!-- Summary -->
     <div v-if="keys.length > 0" class="flex gap-3 mb-4">
@@ -232,18 +232,18 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     </div>
 
     <!-- Filters -->
-    <div class="bg-white rounded-lg shadow p-4 mb-4">
+    <div class="card p-4 mb-4">
       <div class="flex gap-3 flex-wrap items-end">
         <div>
-          <label for="keys-tenant" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Tenant</label>
-          <select id="keys-tenant" v-model="filterTenant" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+          <label for="keys-tenant" class="form-label">Tenant</label>
+          <select id="keys-tenant" v-model="filterTenant" class="form-select">
             <option value="">All tenants</option>
             <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
           </select>
         </div>
         <div>
-          <label for="keys-status" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Status</label>
-          <select id="keys-status" v-model="filterStatus" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+          <label for="keys-status" class="form-label">Status</label>
+          <select id="keys-status" v-model="filterStatus" class="form-select">
             <option value="">All</option>
             <option>ACTIVE</option>
             <option>REVOKED</option>
@@ -252,55 +252,55 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         </div>
         <button v-if="hasActiveFilters" @click="clearFilters" class="text-xs text-gray-600 dark:text-gray-500 hover:text-gray-700 cursor-pointer">Clear</button>
         <div v-if="isLoading" class="flex items-center">
-          <svg class="w-4 h-4 text-gray-600 dark:text-gray-400 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+          <svg class="w-4 h-4 muted animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
         </div>
       </div>
     </div>
 
-    <p v-if="filteredKeys.length > 0" class="text-xs text-gray-600 dark:text-gray-400 mb-2">{{ filteredKeys.length }} key{{ filteredKeys.length !== 1 ? 's' : '' }}</p>
+    <p v-if="filteredKeys.length > 0" class="muted-sm mb-2">{{ filteredKeys.length }} key{{ filteredKeys.length !== 1 ? 's' : '' }}</p>
 
-    <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
+    <div class="card-table">
       <table class="w-full text-sm min-w-[900px]">
-        <thead class="bg-gray-50 text-gray-600 dark:text-gray-500 text-xs uppercase tracking-wider">
+        <thead class="table-header">
           <tr>
-            <th class="px-4 py-3 text-left">Key ID</th>
+            <th class="table-cell text-left">Key ID</th>
             <SortHeader label="Name" column="name" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Tenant" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <th class="px-4 py-3 text-left">Permissions</th>
-            <th class="px-4 py-3 text-left">Scope Filter</th>
+            <th class="table-cell text-left">Permissions</th>
+            <th class="table-cell text-left">Scope Filter</th>
             <SortHeader label="Created" column="created_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Expires" column="expires_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <th v-if="canManage" class="px-4 py-3 w-20"></th>
+            <th v-if="canManage" class="table-cell w-20"></th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
-          <tr v-for="k in sortedKeys" :key="k.key_id" class="hover:bg-gray-50 transition-colors">
-            <td class="px-4 py-3"><MaskedValue :value="k.key_id" /></td>
-            <td class="px-4 py-3 text-gray-700">{{ k.name || '-' }}</td>
-            <td class="px-4 py-3">
+          <tr v-for="k in sortedKeys" :key="k.key_id" class="table-row-hover">
+            <td class="table-cell"><MaskedValue :value="k.key_id" /></td>
+            <td class="table-cell text-gray-700">{{ k.name || '-' }}</td>
+            <td class="table-cell">
               <TenantLink :tenant-id="k.tenant_id" />
             </td>
-            <td class="px-4 py-3"><StatusBadge :status="k.status" /></td>
-            <td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-500">
+            <td class="table-cell"><StatusBadge :status="k.status" /></td>
+            <td class="table-cell text-xs text-gray-600 dark:text-gray-500">
               <div class="flex flex-wrap gap-1">
                 <span v-for="p in k.permissions" :key="p" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{{ p }}</span>
               </div>
             </td>
-            <td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-500 font-mono">{{ k.scope_filter?.join(', ') || '-' }}</td>
-            <td class="px-4 py-3 text-gray-600 dark:text-gray-400 text-xs whitespace-nowrap">{{ formatDateTime(k.created_at) }}</td>
-            <td class="px-4 py-3 text-xs whitespace-nowrap" :class="k.expires_at ? 'text-gray-600 dark:text-gray-500' : 'text-gray-600 dark:text-gray-400'">
+            <td class="table-cell text-xs text-gray-600 dark:text-gray-500 font-mono">{{ k.scope_filter?.join(', ') || '-' }}</td>
+            <td class="table-cell muted-sm whitespace-nowrap">{{ formatDateTime(k.created_at) }}</td>
+            <td class="table-cell text-xs whitespace-nowrap" :class="k.expires_at ? 'text-gray-600 dark:text-gray-500' : 'muted'">
               {{ k.expires_at ? formatDateTime(k.expires_at) : 'Never' }}
             </td>
-            <td v-if="canManage" class="px-4 py-3">
+            <td v-if="canManage" class="table-cell">
               <div class="flex gap-2">
                 <!-- v0.1.25.21 (#8): one-click drill into audit log
                      pre-filtered by this key. Available regardless of
                      status — investigating revoked keys is the most
                      common reason to want their history. -->
                 <router-link :to="{ name: 'audit', query: { key_id: k.key_id } }" class="text-xs text-gray-600 hover:text-gray-800 cursor-pointer hover:underline">Activity</router-link>
-                <button v-if="k.status === 'ACTIVE'" @click="openEdit(k)" class="text-xs text-blue-600 hover:text-blue-800 cursor-pointer hover:underline">Edit</button>
-                <button v-if="k.status === 'ACTIVE'" @click="pendingRevoke = k" class="text-xs text-red-600 hover:text-red-800 cursor-pointer hover:underline">Revoke</button>
+                <button v-if="k.status === 'ACTIVE'" @click="openEdit(k)" class="btn-row-primary">Edit</button>
+                <button v-if="k.status === 'ACTIVE'" @click="pendingRevoke = k" class="btn-row-danger">Revoke</button>
               </div>
             </td>
           </tr>
@@ -316,25 +316,25 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <!-- Create API Key dialog -->
     <FormDialog v-if="showCreate" title="Create API Key" submit-label="Create Key" :loading="createLoading" :error="createError" @submit="submitCreate" @cancel="showCreate = false">
       <div>
-        <label for="ck-tenant" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Tenant</label>
-        <select id="ck-tenant" v-model="createForm.tenant_id" required class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
+        <label for="ck-tenant" class="form-label">Tenant</label>
+        <select id="ck-tenant" v-model="createForm.tenant_id" required class="form-select w-full">
           <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
         </select>
       </div>
       <div>
-        <label for="ck-name" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Name</label>
-        <input id="ck-name" v-model="createForm.name" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" placeholder="my-service-key" />
+        <label for="ck-name" class="form-label">Name</label>
+        <input id="ck-name" v-model="createForm.name" required class="form-input" placeholder="my-service-key" />
       </div>
       <div>
-        <label class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Permissions</label>
+        <label class="form-label">Permissions</label>
         <PermissionPicker v-model="createForm.permissions" />
       </div>
       <div>
-        <label for="ck-scope" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Scope filter (comma-separated, optional)</label>
-        <input id="ck-scope" v-model="createForm.scope_filter" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="tenant:acme, tenant:acme/*" />
+        <label for="ck-scope" class="form-label">Scope filter (comma-separated, optional)</label>
+        <input id="ck-scope" v-model="createForm.scope_filter" class="form-input-mono" placeholder="tenant:acme, tenant:acme/*" />
       </div>
       <div>
-        <label for="ck-expires" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Expires at (optional)</label>
+        <label for="ck-expires" class="form-label">Expires at (optional)</label>
         <input id="ck-expires" v-model="createForm.expires_at" type="datetime-local" class="border border-gray-300 rounded px-2 py-1.5 text-sm" />
       </div>
     </FormDialog>
@@ -345,11 +345,11 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <!-- Edit API Key dialog -->
     <FormDialog v-if="editingKey" title="Edit API Key" submit-label="Save Changes" :loading="editLoading" :error="editError" @submit="submitEdit" @cancel="editingKey = null">
       <div>
-        <label for="ek-name" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Name</label>
-        <input id="ek-name" v-model="editForm.name" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
+        <label for="ek-name" class="form-label">Name</label>
+        <input id="ek-name" v-model="editForm.name" required class="form-input" />
       </div>
       <div>
-        <label class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Permissions</label>
+        <label class="form-label">Permissions</label>
         <PermissionPicker v-model="editForm.permissions" />
         <!--
           Pending-changes summary. Rendered only when there's actually a
@@ -382,8 +382,8 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         </div>
       </div>
       <div>
-        <label for="ek-scope" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Scope filter (comma-separated)</label>
-        <input id="ek-scope" v-model="editForm.scope_filter" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
+        <label for="ek-scope" class="form-label">Scope filter (comma-separated)</label>
+        <input id="ek-scope" v-model="editForm.scope_filter" class="form-input-mono" />
       </div>
     </FormDialog>
 

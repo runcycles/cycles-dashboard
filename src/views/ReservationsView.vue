@@ -169,73 +169,73 @@ function isExpired(r: ReservationSummary): boolean {
       :last-updated="lastUpdated"
       @refresh="refresh"
     />
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
+    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
     <!-- Filters. Tenant is required; the server rejects admin list
          without it, so we enforce client-side too. Status defaults to
          ACTIVE because that's the operationally-interesting set. -->
     <div class="mb-4 flex gap-3 flex-wrap items-end">
       <div>
-        <label for="res-tenant" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Tenant *</label>
-        <select id="res-tenant" v-model="tenantFilter" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+        <label for="res-tenant" class="form-label">Tenant *</label>
+        <select id="res-tenant" v-model="tenantFilter" class="form-select">
           <option value="" disabled>— pick a tenant —</option>
           <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
         </select>
       </div>
       <div>
-        <label for="res-status" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Status</label>
-        <select id="res-status" v-model="statusFilter" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+        <label for="res-status" class="form-label">Status</label>
+        <select id="res-status" v-model="statusFilter" class="form-select">
           <option value="">All</option>
           <option v-for="s in RESERVATION_STATUSES" :key="s" :value="s">{{ s }}</option>
         </select>
       </div>
-      <p class="text-xs text-gray-600 dark:text-gray-400 flex-1 min-w-[16rem]">
+      <p class="muted-sm flex-1 min-w-[16rem]">
         Default sort is Created (newest first). Click the Created header to flip
         to ascending — reservations past their grace window but still ACTIVE rise
         to the top, which is the fast way to find "hung" ones.
       </p>
     </div>
 
-    <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
+    <div class="card-table">
       <table class="w-full text-sm min-w-[720px]">
-        <thead class="bg-gray-50 text-gray-600 dark:text-gray-500 text-xs uppercase tracking-wider">
+        <thead class="table-header">
           <tr>
             <SortHeader label="Reservation ID" column="reservation_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <th class="px-4 py-3 text-left">Scope</th>
+            <th class="table-cell text-left">Scope</th>
             <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Reserved" column="reserved" :active-column="sortKey" :direction="sortDir" @sort="toggle" align="right" />
             <SortHeader label="Created" column="created_at_ms" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Expires" column="expires_at_ms" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <th v-if="canManage" class="px-4 py-3 w-24"></th>
+            <th v-if="canManage" class="table-cell w-24"></th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
-          <tr v-for="r in sortedReservations" :key="r.reservation_id" class="hover:bg-gray-50 transition-colors">
-            <td class="px-4 py-3 font-mono text-xs break-all">{{ r.reservation_id }}</td>
-            <td class="px-4 py-3 font-mono text-xs text-gray-600 break-all">{{ r.scope_path }}</td>
-            <td class="px-4 py-3"><StatusBadge :status="r.status" /></td>
-            <td class="px-4 py-3 text-right tabular-nums">
+          <tr v-for="r in sortedReservations" :key="r.reservation_id" class="table-row-hover">
+            <td class="table-cell font-mono text-xs break-all">{{ r.reservation_id }}</td>
+            <td class="table-cell font-mono text-xs text-gray-600 break-all">{{ r.scope_path }}</td>
+            <td class="table-cell"><StatusBadge :status="r.status" /></td>
+            <td class="table-cell text-right tabular-nums">
               {{ r.reserved.amount.toLocaleString() }}
-              <span class="text-xs text-gray-600 dark:text-gray-400">{{ r.reserved.unit }}</span>
+              <span class="muted-sm">{{ r.reserved.unit }}</span>
             </td>
-            <td class="px-4 py-3 text-gray-600 dark:text-gray-500 text-xs" :title="formatDateTime(new Date(r.created_at_ms).toISOString())">
+            <td class="table-cell text-gray-600 dark:text-gray-500 text-xs" :title="formatDateTime(new Date(r.created_at_ms).toISOString())">
               {{ ageLabel(r) }}
             </td>
-            <td class="px-4 py-3 text-xs" :class="isExpired(r) && r.status === 'ACTIVE' ? 'text-red-600 font-medium' : 'text-gray-600 dark:text-gray-500'">
+            <td class="table-cell text-xs" :class="isExpired(r) && r.status === 'ACTIVE' ? 'text-red-600 font-medium' : 'text-gray-600 dark:text-gray-500'">
               <!-- Overdue indicator: ACTIVE + past expiry is the
                    definitional "hung" state. Tooltip shows the exact
                    expiry time for drill-down. -->
               {{ formatRelative(new Date(r.expires_at_ms).toISOString()) }}
               <span v-if="isExpired(r) && r.status === 'ACTIVE'" class="ml-1" title="Past expiry — this reservation is overdue for cleanup">⚠</span>
             </td>
-            <td v-if="canManage" class="px-4 py-3">
+            <td v-if="canManage" class="table-cell">
               <!-- Only ACTIVE reservations can be released. COMMITTED /
                    RELEASED / EXPIRED are terminal states — no release
                    action makes sense. -->
               <button
                 v-if="r.status === 'ACTIVE'"
                 @click="openRelease(r)"
-                class="text-xs text-red-600 hover:text-red-800 cursor-pointer hover:underline"
+                class="btn-row-danger"
               >Force release</button>
             </td>
           </tr>
@@ -278,7 +278,7 @@ function isExpired(r: ReservationSummary): boolean {
         via the Audit tab.
       </p>
       <div>
-        <label for="release-reason" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Reason (for audit log)</label>
+        <label for="release-reason" class="form-label">Reason (for audit log)</label>
         <input
           id="release-reason"
           v-model="releaseReason"
@@ -286,7 +286,7 @@ function isExpired(r: ReservationSummary): boolean {
           class="border border-gray-300 rounded px-2 py-1 text-sm w-full"
           placeholder="[INCIDENT_FORCE_RELEASE] hung after redis restart"
         />
-        <p class="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
+        <p class="muted-sm mt-0.5">
           Stored on the audit-log entry. Structured prefix like
           <code class="font-mono">[INCIDENT_FORCE_RELEASE]</code> makes later grep easier.
         </p>
