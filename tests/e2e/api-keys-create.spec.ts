@@ -53,8 +53,15 @@ test('creating an API key reveals the secret with a gated confirmation + close',
   // Check two permissions — the form requires at least one in body
   // only if .length > 0; the server validates. Pick minimally
   // non-empty so the test exercises the multi-select wiring.
-  await createDialog.getByLabel('budgets:read').check()
-  await createDialog.getByLabel('balances:read').check()
+  //
+  // Target checkboxes by input[value=...] rather than label text: the
+  // PermissionPicker displays only the short tail ("read") under each
+  // section header ("Budgets"), so getByLabel("budgets:read") matches
+  // nothing. The value attribute still carries the full permission
+  // string, making it a stable selector that survives the visual
+  // grouping structure.
+  await createDialog.locator('input[type="checkbox"][value="budgets:read"]').check()
+  await createDialog.locator('input[type="checkbox"][value="balances:read"]').check()
 
   // Submit. Capture the response body so we can assert the server
   // issued a key_secret we can later verify is actually rendered.
