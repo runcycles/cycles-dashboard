@@ -223,7 +223,7 @@ function parentName(id: string | undefined): string {
         <button v-if="canManage" @click="openCreate" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Tenant</button>
       </template>
     </PageHeader>
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
+    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
     <!-- Search + parent filter -->
     <div class="mb-4 flex gap-3 flex-wrap items-center">
@@ -245,38 +245,38 @@ function parentName(id: string | undefined): string {
       <button @click="selected = new Set()" class="text-xs text-gray-600 dark:text-gray-500 hover:text-gray-700 ml-auto cursor-pointer">Clear</button>
     </div>
 
-    <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
+    <div class="card-table">
       <table class="w-full text-sm min-w-[640px]">
-        <thead class="bg-gray-50 text-gray-600 dark:text-gray-500 text-xs uppercase tracking-wider">
+        <thead class="table-header">
           <tr>
-            <th v-if="canManage" class="px-4 py-3 w-10">
+            <th v-if="canManage" class="table-cell w-10">
               <input type="checkbox" :checked="selectedVisibleAll" @change="toggleSelectAll" aria-label="Select all visible tenants" />
             </th>
             <SortHeader label="Tenant ID" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Name" column="name" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <th class="px-4 py-3 text-left text-xs uppercase tracking-wider">Parent</th>
-            <th class="px-4 py-3 text-left text-xs uppercase tracking-wider">Children</th>
+            <th class="table-cell text-left text-xs uppercase tracking-wider">Parent</th>
+            <th class="table-cell text-left text-xs uppercase tracking-wider">Children</th>
             <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Created" column="created_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <th v-if="canManage" class="px-4 py-3 w-24"></th>
+            <th v-if="canManage" class="table-cell w-24"></th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
-          <tr v-for="t in sortedTenants" :key="t.tenant_id" class="hover:bg-gray-50 transition-colors">
-            <td v-if="canManage" class="px-4 py-3">
+          <tr v-for="t in sortedTenants" :key="t.tenant_id" class="table-row-hover">
+            <td v-if="canManage" class="table-cell">
               <input type="checkbox" :checked="selected.has(t.tenant_id)" @change="toggleSelect(t.tenant_id)" :aria-label="`Select ${t.name || t.tenant_id}`" />
             </td>
-            <td class="px-4 py-3">
+            <td class="table-cell">
               <router-link :to="{ name: 'tenant-detail', params: { id: t.tenant_id } }" class="text-blue-600 hover:underline font-mono text-xs">{{ t.tenant_id }}</router-link>
             </td>
-            <td class="px-4 py-3 text-gray-700">{{ t.name }}</td>
-            <td class="px-4 py-3 text-xs">
+            <td class="table-cell text-gray-700">{{ t.name }}</td>
+            <td class="table-cell text-xs">
               <router-link v-if="t.parent_tenant_id" :to="{ name: 'tenant-detail', params: { id: t.parent_tenant_id } }" class="text-blue-600 hover:underline font-mono">
                 {{ parentName(t.parent_tenant_id) }}
               </router-link>
               <span v-else class="text-gray-500" aria-hidden="true">—</span>
             </td>
-            <td class="px-4 py-3 text-xs">
+            <td class="table-cell text-xs">
               <button
                 v-if="childCountMap[t.tenant_id]"
                 @click="parentFilter = t.tenant_id"
@@ -285,9 +285,9 @@ function parentName(id: string | undefined): string {
               >{{ childCountMap[t.tenant_id] }} child{{ childCountMap[t.tenant_id] === 1 ? '' : 'ren' }}</button>
               <span v-else class="text-gray-500" aria-hidden="true">—</span>
             </td>
-            <td class="px-4 py-3"><StatusBadge :status="t.status" /></td>
-            <td class="px-4 py-3 text-gray-600 dark:text-gray-400 text-xs">{{ formatDate(t.created_at) }}</td>
-            <td v-if="canManage" class="px-4 py-3">
+            <td class="table-cell"><StatusBadge :status="t.status" /></td>
+            <td class="table-cell text-gray-600 dark:text-gray-400 text-xs">{{ formatDate(t.created_at) }}</td>
+            <td v-if="canManage" class="table-cell">
               <button v-if="t.status === 'ACTIVE'" @click="pendingStatusAction = { tenantId: t.tenant_id, name: t.name, action: 'SUSPENDED' }" class="text-xs text-red-600 hover:text-red-800 cursor-pointer hover:underline">Suspend</button>
               <button v-if="t.status === 'SUSPENDED'" @click="pendingStatusAction = { tenantId: t.tenant_id, name: t.name, action: 'ACTIVE' }" class="text-xs text-green-700 hover:text-green-900 cursor-pointer hover:underline">Reactivate</button>
             </td>

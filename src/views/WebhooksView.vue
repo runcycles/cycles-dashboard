@@ -247,7 +247,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         <button v-if="canManage" @click="openCreate" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Webhook</button>
       </template>
     </PageHeader>
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
+    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
     <!-- Tenant filter (#5). Options sourced from the tenants the webhooks
          actually belong to rather than the full tenant list, so the
@@ -269,35 +269,35 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       <button @click="selected = new Set()" class="text-xs text-gray-600 dark:text-gray-500 hover:text-gray-700 ml-auto cursor-pointer">Clear</button>
     </div>
 
-    <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
+    <div class="card-table">
       <table class="w-full text-sm min-w-[680px]">
-        <thead class="bg-gray-50 text-gray-600 dark:text-gray-500 text-xs uppercase tracking-wider">
+        <thead class="table-header">
           <tr>
-            <th v-if="canManage" class="px-4 py-3 w-10">
+            <th v-if="canManage" class="table-cell w-10">
               <input type="checkbox" :checked="selectedVisibleAll" @change="toggleSelectAll" aria-label="Select all visible webhooks" />
             </th>
-            <th class="px-4 py-3 text-left w-10">Health</th>
+            <th class="table-cell text-left w-10">Health</th>
             <SortHeader label="URL" column="url" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Failures" column="consecutive_failures" :active-column="sortKey" :direction="sortDir" @sort="toggle" align="right" />
-            <th class="px-4 py-3 text-left">Events</th>
-            <th v-if="canManage" class="px-4 py-3 w-20"></th>
+            <th class="table-cell text-left">Events</th>
+            <th v-if="canManage" class="table-cell w-20"></th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
-          <tr v-for="w in sortedWebhooks" :key="w.subscription_id" class="hover:bg-gray-50 transition-colors">
-            <td v-if="canManage" class="px-4 py-3">
+          <tr v-for="w in sortedWebhooks" :key="w.subscription_id" class="table-row-hover">
+            <td v-if="canManage" class="table-cell">
               <input type="checkbox" :checked="selected.has(w.subscription_id)" @change="toggleSelect(w.subscription_id)" :aria-label="`Select webhook ${w.name || w.url}`" />
             </td>
-            <td class="px-4 py-3"><span :class="healthColor(w)" class="inline-block w-2.5 h-2.5 rounded-full" :title="healthLabel(w)" /></td>
-            <td class="px-4 py-3">
+            <td class="table-cell"><span :class="healthColor(w)" class="inline-block w-2.5 h-2.5 rounded-full" :title="healthLabel(w)" /></td>
+            <td class="table-cell">
               <router-link :to="{ name: 'webhook-detail', params: { id: w.subscription_id } }" class="text-blue-600 hover:underline truncate block max-w-[300px]">{{ w.url }}</router-link>
               <span v-if="w.name" class="text-xs text-gray-600 dark:text-gray-400">{{ w.name }}</span>
             </td>
-            <td class="px-4 py-3"><StatusBadge :status="w.status" /></td>
-            <td class="px-4 py-3 text-right tabular-nums" :class="(w.consecutive_failures ?? 0) > 0 ? 'text-red-600 font-medium' : 'text-gray-600 dark:text-gray-400'">{{ w.consecutive_failures ?? 0 }}</td>
-            <td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-500">{{ w.event_types?.join(', ') || w.event_categories?.join(', ') || 'all' }}</td>
-            <td v-if="canManage" class="px-4 py-3">
+            <td class="table-cell"><StatusBadge :status="w.status" /></td>
+            <td class="table-cell text-right tabular-nums" :class="(w.consecutive_failures ?? 0) > 0 ? 'text-red-600 font-medium' : 'text-gray-600 dark:text-gray-400'">{{ w.consecutive_failures ?? 0 }}</td>
+            <td class="table-cell text-xs text-gray-600 dark:text-gray-500">{{ w.event_types?.join(', ') || w.event_categories?.join(', ') || 'all' }}</td>
+            <td v-if="canManage" class="table-cell">
               <button v-if="w.status === 'ACTIVE'" @click="pendingStatusAction = { id: w.subscription_id, url: w.url, action: 'PAUSED' }" class="text-xs text-red-600 hover:text-red-800 cursor-pointer hover:underline">Pause</button>
               <button v-if="w.status === 'PAUSED' || w.status === 'DISABLED'" @click="pendingStatusAction = { id: w.subscription_id, url: w.url, action: 'ACTIVE' }" class="text-xs text-green-700 hover:text-green-900 cursor-pointer hover:underline">Enable</button>
             </td>

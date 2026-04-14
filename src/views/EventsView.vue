@@ -94,10 +94,10 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
   <div>
     <PageHeader title="Events" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh" />
 
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
+    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
     <!-- Filters -->
-    <form @submit.prevent="applyFilters" class="bg-white rounded-lg shadow p-4 mb-4">
+    <form @submit.prevent="applyFilters" class="card p-4 mb-4">
       <div class="flex gap-3 flex-wrap items-end">
         <div>
           <label for="ev-category" class="form-label">Category</label>
@@ -128,9 +128,9 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
     <p v-if="events.length > 0" class="text-xs text-gray-600 dark:text-gray-400 mb-2">{{ events.length }} events</p>
 
     <!-- Event table -->
-    <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
+    <div class="card-table">
       <table class="w-full text-sm min-w-[640px]">
-        <thead class="bg-gray-50 text-gray-600 dark:text-gray-500 text-xs uppercase tracking-wider">
+        <thead class="table-header">
           <tr>
             <th class="w-8"></th>
             <SortHeader label="Type" column="event_type" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
@@ -162,16 +162,16 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
                   </svg>
                 </button>
               </td>
-              <td class="px-4 py-3 font-mono text-xs">{{ e.event_type }}</td>
-              <td class="px-4 py-3"><span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs">{{ e.category }}</span></td>
-              <td class="px-4 py-3 text-gray-700 truncate max-w-[200px] font-mono text-xs">{{ e.scope || '-' }}</td>
-              <td class="px-4 py-3">
+              <td class="table-cell font-mono text-xs">{{ e.event_type }}</td>
+              <td class="table-cell"><span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs">{{ e.category }}</span></td>
+              <td class="table-cell text-gray-700 truncate max-w-[200px] font-mono text-xs">{{ e.scope || '-' }}</td>
+              <td class="table-cell">
                 <TenantLink v-if="e.tenant_id" :tenant-id="e.tenant_id" @click.stop />
               </td>
-              <td class="px-4 py-3 text-gray-600 dark:text-gray-400 whitespace-nowrap text-xs" :title="new Date(e.timestamp).toISOString()">{{ formatDateTime(e.timestamp) }}</td>
+              <td class="table-cell text-gray-600 dark:text-gray-400 whitespace-nowrap text-xs" :title="new Date(e.timestamp).toISOString()">{{ formatDateTime(e.timestamp) }}</td>
             </tr>
             <tr v-if="expanded === e.event_id" class="bg-gray-50/70">
-              <td colspan="6" class="px-4 py-3 pl-11">
+              <td colspan="6" class="table-cell pl-11">
                 <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3">
                   <div><span class="text-gray-600 dark:text-gray-400">Event ID:</span> <span class="font-mono">{{ e.event_id }}</span></div>
                   <div><span class="text-gray-600 dark:text-gray-400">Source:</span> {{ e.source }}</div>
@@ -197,7 +197,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
           </tr>
         </tbody>
       </table>
-      <div v-if="hasMore" class="px-4 py-3 border-t border-gray-100 text-center">
+      <div v-if="hasMore" class="table-cell border-t border-gray-100 text-center">
         <button @click="loadMore" :disabled="loadingMore" class="text-xs text-blue-600 hover:text-blue-800 cursor-pointer disabled:opacity-50">
           {{ loadingMore ? 'Loading...' : 'Load more events' }}
         </button>

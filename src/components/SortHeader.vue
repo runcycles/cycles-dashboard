@@ -18,7 +18,7 @@ const ariaSortValue = computed(() => {
 
 <template>
   <th
-    :class="['px-4 py-3 cursor-pointer select-none hover:text-gray-700 transition-colors', align === 'right' ? 'text-right' : 'text-left']"
+    :class="['table-cell cursor-pointer select-none hover:text-gray-700 transition-colors', align === 'right' ? 'text-right' : 'text-left']"
     :aria-sort="ariaSortValue"
     :aria-label="`Sort by ${label}`"
     role="columnheader"

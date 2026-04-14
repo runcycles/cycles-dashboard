@@ -231,7 +231,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         </button>
       </template>
     </PageHeader>
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
+    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
     <template v-if="webhook">
       <div class="bg-white rounded-lg shadow p-6 mb-4">
         <div class="flex items-center gap-3 mb-4 flex-wrap">
@@ -251,18 +251,18 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           </div>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-          <div class="bg-gray-50 rounded p-3"><span class="form-label">URL</span><span class="font-mono text-xs break-all">{{ webhook.url }}</span></div>
-          <div class="bg-gray-50 rounded p-3"><span class="form-label">Tenant</span><TenantLink :tenant-id="webhook.tenant_id" /></div>
-          <div class="bg-gray-50 rounded p-3"><span class="form-label">Subscribed Event Types</span><div class="flex flex-wrap gap-1 mt-1"><span v-for="et in (webhook.event_types || [])" :key="et" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs font-mono">{{ et }}</span><span v-if="!webhook.event_types?.length" class="text-xs text-gray-600 dark:text-gray-400">all events</span></div></div>
-          <div v-if="webhook.scope_filter" class="bg-gray-50 rounded p-3"><span class="form-label">Scope Filter</span><span class="font-mono text-xs">{{ webhook.scope_filter }}</span></div>
-          <div v-if="webhook.last_success_at" class="bg-gray-50 rounded p-3"><span class="form-label">Last Success</span>{{ formatDateTime(webhook.last_success_at) }}</div>
-          <div v-if="webhook.last_failure_at" class="bg-gray-50 rounded p-3"><span class="form-label">Last Failure</span>{{ formatDateTime(webhook.last_failure_at) }}</div>
+          <div class="info-panel"><span class="form-label">URL</span><span class="font-mono text-xs break-all">{{ webhook.url }}</span></div>
+          <div class="info-panel"><span class="form-label">Tenant</span><TenantLink :tenant-id="webhook.tenant_id" /></div>
+          <div class="info-panel"><span class="form-label">Subscribed Event Types</span><div class="flex flex-wrap gap-1 mt-1"><span v-for="et in (webhook.event_types || [])" :key="et" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs font-mono">{{ et }}</span><span v-if="!webhook.event_types?.length" class="text-xs text-gray-600 dark:text-gray-400">all events</span></div></div>
+          <div v-if="webhook.scope_filter" class="info-panel"><span class="form-label">Scope Filter</span><span class="font-mono text-xs">{{ webhook.scope_filter }}</span></div>
+          <div v-if="webhook.last_success_at" class="info-panel"><span class="form-label">Last Success</span>{{ formatDateTime(webhook.last_success_at) }}</div>
+          <div v-if="webhook.last_failure_at" class="info-panel"><span class="form-label">Last Failure</span>{{ formatDateTime(webhook.last_failure_at) }}</div>
           <!-- v0.1.25.21 (#10): expose disable_after_failures so ops can
                see the auto-disable threshold at a glance without
                opening the edit form. Color the consecutive_failures
                cell red as it approaches the threshold so a "trending
                toward auto-disable" subscription is visually obvious. -->
-          <div class="bg-gray-50 rounded p-3">
+          <div class="info-panel">
             <span class="form-label">Failure threshold</span>
             <span class="tabular-nums">
               <!-- Danger zone = within 2 of the auto-disable threshold,
@@ -278,7 +278,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       </div>
 
       <!-- Test result -->
-      <div v-if="testResult" class="mb-4 px-4 py-3 rounded-lg text-sm" :class="testResult.success ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-red-50 border border-red-200 text-red-700'">
+      <div v-if="testResult" class="mb-4 table-cell rounded-lg text-sm" :class="testResult.success ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-red-50 border border-red-200 text-red-700'">
         <div class="flex items-center gap-2">
           <span class="font-medium">{{ testResult.success ? 'Test passed' : 'Test failed' }}</span>
           <span v-if="testResult.response_status" class="font-mono">HTTP {{ testResult.response_status }}</span>
@@ -298,33 +298,33 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       </div>
 
       <!-- Replay result -->
-      <div v-if="replayResult" class="mb-4 px-4 py-3 rounded-lg text-sm bg-blue-50 border border-blue-200 text-blue-700 flex items-start justify-between gap-3" role="status">
+      <div v-if="replayResult" class="mb-4 table-cell rounded-lg text-sm bg-blue-50 border border-blue-200 text-blue-700 flex items-start justify-between gap-3" role="status">
         <span>{{ replayResult }}</span>
         <button type="button" @click="replayResult = null" aria-label="Dismiss replay notification" class="text-blue-500 hover:text-blue-800 cursor-pointer shrink-0">✕</button>
       </div>
 
-      <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
-        <div class="px-4 py-3 border-b border-gray-100 flex justify-between items-center">
+      <div class="card-table">
+        <div class="table-cell border-b border-gray-100 flex justify-between items-center">
           <h3 class="text-sm font-medium text-gray-700">Delivery History</h3>
           <span class="text-xs text-gray-600 dark:text-gray-400">{{ deliveries.length }} deliveries</span>
         </div>
         <table class="w-full text-sm min-w-[600px]">
-          <thead class="bg-gray-50 text-gray-600 dark:text-gray-500 text-xs uppercase tracking-wider">
+          <thead class="table-header">
             <tr>
-              <th class="px-4 py-3 text-left">Status</th>
-              <th class="px-4 py-3 text-left">HTTP Code</th>
-              <th class="px-4 py-3 text-right">Attempts</th>
-              <th class="px-4 py-3 text-left">Event ID</th>
-              <th class="px-4 py-3 text-left">Time</th>
+              <th class="table-cell text-left">Status</th>
+              <th class="table-cell text-left">HTTP Code</th>
+              <th class="table-cell text-right">Attempts</th>
+              <th class="table-cell text-left">Event ID</th>
+              <th class="table-cell text-left">Time</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
-            <tr v-for="d in deliveries" :key="d.delivery_id" class="hover:bg-gray-50 transition-colors">
-              <td class="px-4 py-3"><StatusBadge :status="d.status" /></td>
-              <td class="px-4 py-3 font-mono text-xs" :class="d.http_status && d.http_status >= 400 ? 'text-red-600' : 'text-gray-600 dark:text-gray-500'">{{ d.http_status || '-' }}</td>
-              <td class="px-4 py-3 text-right text-gray-600 dark:text-gray-500 tabular-nums">{{ d.attempts }}</td>
-              <td class="px-4 py-3 font-mono text-xs text-gray-600 dark:text-gray-400">{{ d.event_id }}</td>
-              <td class="px-4 py-3 text-gray-600 dark:text-gray-400 text-xs">{{ d.attempted_at ? formatDateTime(d.attempted_at) : d.created_at ? formatDateTime(d.created_at) : '-' }}</td>
+            <tr v-for="d in deliveries" :key="d.delivery_id" class="table-row-hover">
+              <td class="table-cell"><StatusBadge :status="d.status" /></td>
+              <td class="table-cell font-mono text-xs" :class="d.http_status && d.http_status >= 400 ? 'text-red-600' : 'text-gray-600 dark:text-gray-500'">{{ d.http_status || '-' }}</td>
+              <td class="table-cell text-right text-gray-600 dark:text-gray-500 tabular-nums">{{ d.attempts }}</td>
+              <td class="table-cell font-mono text-xs text-gray-600 dark:text-gray-400">{{ d.event_id }}</td>
+              <td class="table-cell text-gray-600 dark:text-gray-400 text-xs">{{ d.attempted_at ? formatDateTime(d.attempted_at) : d.created_at ? formatDateTime(d.created_at) : '-' }}</td>
             </tr>
             <tr v-if="deliveries.length === 0">
               <td colspan="5"><EmptyState message="No deliveries yet" hint="Deliveries will appear here once events are dispatched" /></td>

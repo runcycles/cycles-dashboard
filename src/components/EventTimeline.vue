@@ -18,7 +18,7 @@ function toggle(id: string) {
   <div v-else class="divide-y divide-gray-100">
     <div v-for="e in events" :key="e.event_id">
       <div
-        class="flex items-center gap-3 py-2 cursor-pointer hover:bg-gray-50 transition-colors -mx-1 px-1 rounded"
+        class="flex items-center gap-3 py-2 cursor-pointer table-row-hover -mx-1 px-1 rounded"
         role="button" tabindex="0"
         @click="toggle(e.event_id)"
         @keydown.enter.prevent="toggle(e.event_id)"

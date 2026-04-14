@@ -136,9 +136,9 @@ watch(() => route.query, () => {
   <div>
     <PageHeader title="Audit Logs" />
 
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
+    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
-    <form @submit.prevent="query" class="bg-white rounded-lg shadow p-4 mb-4">
+    <form @submit.prevent="query" class="card p-4 mb-4">
       <div class="flex gap-3 flex-wrap items-end">
         <div>
           <label for="audit-tenant" class="form-label">Tenant ID</label>
@@ -199,16 +199,16 @@ watch(() => route.query, () => {
       </div>
     </div>
 
-    <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
+    <div class="card-table">
       <table class="w-full text-sm min-w-[900px]">
-        <thead class="bg-gray-50 text-gray-600 dark:text-gray-500 text-xs uppercase tracking-wider">
+        <thead class="table-header">
           <tr>
             <th class="w-8"></th>
             <SortHeader label="Time" column="timestamp" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Operation" column="operation" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Resource" column="resource_type" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Tenant" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <th class="px-4 py-3 text-left">Key ID</th>
+            <th class="table-cell text-left">Key ID</th>
             <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           </tr>
         </thead>
@@ -221,7 +221,7 @@ watch(() => route.query, () => {
                  another interactive element (axe: nested-interactive,
                  WCAG 4.1.2). -->
             <tr
-              class="hover:bg-gray-50 transition-colors"
+              class="table-row-hover"
               :class="hasDetail(e) ? 'cursor-pointer' : ''"
               @click="hasDetail(e) ? (expanded = expanded === e.log_id ? null : e.log_id) : null"
             >
@@ -239,29 +239,29 @@ watch(() => route.query, () => {
                   </svg>
                 </button>
               </td>
-              <td class="px-4 py-3 text-gray-600 dark:text-gray-400 whitespace-nowrap text-xs" :title="new Date(e.timestamp).toISOString()">{{ formatDateTime(e.timestamp) }}</td>
-              <td class="px-4 py-3 font-mono text-xs">{{ e.operation }}</td>
-              <td class="px-4 py-3 text-xs">
+              <td class="table-cell text-gray-600 dark:text-gray-400 whitespace-nowrap text-xs" :title="new Date(e.timestamp).toISOString()">{{ formatDateTime(e.timestamp) }}</td>
+              <td class="table-cell font-mono text-xs">{{ e.operation }}</td>
+              <td class="table-cell text-xs">
                 <span v-if="e.resource_type" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{{ e.resource_type }}</span>
                 <span v-if="e.resource_id" class="ml-1 font-mono text-gray-600 dark:text-gray-400">{{ e.resource_id }}</span>
                 <span v-if="!e.resource_type && !e.resource_id" class="text-gray-600 dark:text-gray-400">-</span>
               </td>
-              <td class="px-4 py-3 text-gray-600 dark:text-gray-500 text-xs">
+              <td class="table-cell text-gray-600 dark:text-gray-500 text-xs">
                 <TenantLink v-if="e.tenant_id" :tenant-id="e.tenant_id" />
                 <span v-else class="text-gray-600 dark:text-gray-400 text-xs">-</span>
               </td>
-              <td class="px-4 py-3">
+              <td class="table-cell">
                 <MaskedValue v-if="e.key_id" :value="e.key_id" />
                 <span v-else class="text-gray-600 dark:text-gray-400 text-xs">-</span>
               </td>
-              <td class="px-4 py-3">
+              <td class="table-cell">
                 <span class="px-1.5 py-0.5 rounded text-xs font-medium" :class="e.status >= 400 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'">{{ e.status }}</span>
                 <span v-if="e.error_code" class="ml-1 text-xs text-red-500 font-mono">{{ e.error_code }}</span>
               </td>
             </tr>
             <!-- Expanded detail row -->
             <tr v-if="expanded === e.log_id" class="bg-gray-50/70">
-              <td :colspan="7" class="px-4 py-3 pl-11">
+              <td :colspan="7" class="table-cell pl-11">
                 <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3">
                   <div v-if="e.request_id"><span class="text-gray-600 dark:text-gray-400">Request ID:</span> <span class="font-mono">{{ e.request_id }}</span></div>
                   <div v-if="e.source_ip"><span class="text-gray-600 dark:text-gray-400">Source IP:</span> <span class="font-mono">{{ e.source_ip }}</span></div>

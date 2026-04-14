@@ -350,7 +350,7 @@ watch(() => route.query, () => {
       </template>
     </PageHeader>
 
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
+    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
     <!-- Detail mode -->
     <template v-if="isDetail && detail">
@@ -366,13 +366,13 @@ watch(() => route.query, () => {
           <button v-if="canManage && detail.status === 'FROZEN'" @click="requestFreeze(detail.scope, detail.unit, 'unfreeze')" class="text-xs text-green-700 hover:text-green-900 border border-green-200 rounded px-2.5 py-1 hover:bg-green-50 cursor-pointer transition-colors">Unfreeze</button>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
-          <div class="bg-gray-50 rounded p-3"><span class="form-label">Allocated</span><span class="font-semibold">{{ detail.allocated.amount.toLocaleString() }}</span></div>
-          <div class="bg-gray-50 rounded p-3"><span class="form-label">Remaining</span><span class="font-semibold">{{ detail.remaining.amount.toLocaleString() }}</span></div>
-          <div class="bg-gray-50 rounded p-3"><span class="form-label">Reserved</span><span class="font-semibold">{{ detail.reserved?.amount.toLocaleString() || '0' }}</span></div>
-          <div class="bg-gray-50 rounded p-3"><span class="form-label">Spent</span><span class="font-semibold">{{ detail.spent?.amount.toLocaleString() || '0' }}</span></div>
-          <div class="bg-gray-50 rounded p-3"><span class="form-label">Debt</span><span class="font-semibold" :class="detail.debt && detail.debt.amount > 0 ? 'text-red-600' : ''">{{ detail.debt?.amount.toLocaleString() || '0' }}</span></div>
-          <div class="bg-gray-50 rounded p-3"><span class="form-label">Overdraft Limit</span><span class="font-semibold">{{ detail.overdraft_limit?.amount.toLocaleString() || '0' }}</span></div>
-          <div class="bg-gray-50 rounded p-3"><span class="form-label">Overage Policy</span><span class="font-semibold text-xs">{{ detail.commit_overage_policy || 'Inherit' }}</span></div>
+          <div class="info-panel"><span class="form-label">Allocated</span><span class="font-semibold">{{ detail.allocated.amount.toLocaleString() }}</span></div>
+          <div class="info-panel"><span class="form-label">Remaining</span><span class="font-semibold">{{ detail.remaining.amount.toLocaleString() }}</span></div>
+          <div class="info-panel"><span class="form-label">Reserved</span><span class="font-semibold">{{ detail.reserved?.amount.toLocaleString() || '0' }}</span></div>
+          <div class="info-panel"><span class="form-label">Spent</span><span class="font-semibold">{{ detail.spent?.amount.toLocaleString() || '0' }}</span></div>
+          <div class="info-panel"><span class="form-label">Debt</span><span class="font-semibold" :class="detail.debt && detail.debt.amount > 0 ? 'text-red-600' : ''">{{ detail.debt?.amount.toLocaleString() || '0' }}</span></div>
+          <div class="info-panel"><span class="form-label">Overdraft Limit</span><span class="font-semibold">{{ detail.overdraft_limit?.amount.toLocaleString() || '0' }}</span></div>
+          <div class="info-panel"><span class="form-label">Overage Policy</span><span class="font-semibold text-xs">{{ detail.commit_overage_policy || 'Inherit' }}</span></div>
         </div>
         <div class="mt-4">
           <UtilizationBar :remaining="detail.remaining.amount" :allocated="detail.allocated.amount" />
@@ -388,7 +388,7 @@ watch(() => route.query, () => {
         </div>
       </div>
 
-      <div class="bg-white rounded-lg shadow p-4">
+      <div class="card p-4">
         <h3 class="text-sm font-medium text-gray-700 mb-3">Event Timeline</h3>
         <EventTimeline :events="detailEvents" />
       </div>
@@ -402,7 +402,7 @@ watch(() => route.query, () => {
         <button @click="clearFilter" class="ml-auto text-xs text-blue-600 hover:underline cursor-pointer">Clear filter</button>
       </div>
 
-      <div v-if="!isCrossTenantFilter" class="bg-white rounded-lg shadow p-4 mb-4">
+      <div v-if="!isCrossTenantFilter" class="card p-4 mb-4">
         <div class="flex gap-3 flex-wrap items-end">
           <div>
             <label for="budget-tenant" class="form-label">Tenant</label>
@@ -446,31 +446,31 @@ watch(() => route.query, () => {
         </div>
       </div>
 
-      <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
+      <div class="card-table">
         <table class="w-full text-sm min-w-[600px]">
-          <thead class="bg-gray-50 text-gray-600 dark:text-gray-500 text-xs uppercase tracking-wider">
+          <thead class="table-header">
             <tr>
               <SortHeader label="Scope" column="scope" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
               <SortHeader label="Unit" column="unit" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
               <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
               <SortHeader label="Utilization" column="utilization" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
               <SortHeader label="Debt" column="debt" :active-column="sortKey" :direction="sortDir" @sort="toggle" align="right" />
-              <th v-if="canManage" class="px-4 py-3 w-20"></th>
+              <th v-if="canManage" class="table-cell w-20"></th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
-            <tr v-for="b in sortedBudgets" :key="b.ledger_id" class="hover:bg-gray-50 transition-colors">
-              <td class="px-4 py-3">
+            <tr v-for="b in sortedBudgets" :key="b.ledger_id" class="table-row-hover">
+              <td class="table-cell">
                 <router-link :to="{ name: 'budgets', query: { scope: b.scope, unit: b.unit } }" class="text-blue-600 hover:underline font-mono text-xs">{{ b.scope }}</router-link>
                 <span v-if="b.is_over_limit" class="ml-1.5 bg-red-100 text-red-700 px-1 py-0.5 rounded text-xs font-medium">OVER</span>
               </td>
-              <td class="px-4 py-3 text-gray-600 dark:text-gray-500">{{ b.unit }}</td>
-              <td class="px-4 py-3"><StatusBadge :status="b.status" /></td>
-              <td class="px-4 py-3">
+              <td class="table-cell text-gray-600 dark:text-gray-500">{{ b.unit }}</td>
+              <td class="table-cell"><StatusBadge :status="b.status" /></td>
+              <td class="table-cell">
                 <UtilizationBar :remaining="b.remaining.amount" :allocated="b.allocated.amount" />
               </td>
-              <td class="px-4 py-3 text-right tabular-nums" :class="(b.debt?.amount ?? 0) > 0 ? 'text-red-600 font-medium' : 'text-gray-600 dark:text-gray-400'">{{ (b.debt?.amount ?? 0).toLocaleString() }}</td>
-              <td v-if="canManage" class="px-4 py-3">
+              <td class="table-cell text-right tabular-nums" :class="(b.debt?.amount ?? 0) > 0 ? 'text-red-600 font-medium' : 'text-gray-600 dark:text-gray-400'">{{ (b.debt?.amount ?? 0).toLocaleString() }}</td>
+              <td v-if="canManage" class="table-cell">
                 <button v-if="b.status === 'ACTIVE'" @click.prevent="requestFreeze(b.scope, b.unit, 'freeze')" class="text-xs text-red-600 hover:text-red-800 cursor-pointer hover:underline">Freeze</button>
                 <button v-if="b.status === 'FROZEN'" @click.prevent="requestFreeze(b.scope, b.unit, 'unfreeze')" class="text-xs text-green-700 hover:text-green-900 cursor-pointer hover:underline">Unfreeze</button>
               </td>
@@ -482,7 +482,7 @@ watch(() => route.query, () => {
             </tr>
           </tbody>
         </table>
-        <div v-if="hasMore" class="px-4 py-3 border-t border-gray-100 text-center">
+        <div v-if="hasMore" class="table-cell border-t border-gray-100 text-center">
           <button @click="loadMore" :disabled="loadingMore" class="text-xs text-blue-600 hover:text-blue-800 cursor-pointer disabled:opacity-50">
             {{ loadingMore ? 'Loading...' : 'Load more results' }}
           </button>
@@ -503,7 +503,7 @@ watch(() => route.query, () => {
     />
 
     <FormDialog v-if="showFund" title="Fund Budget" submit-label="Execute" :loading="fundLoading" :error="fundError" @submit="submitFund" @cancel="showFund = false">
-      <div class="bg-gray-50 rounded p-3 text-xs grid grid-cols-3 gap-2 mb-1">
+      <div class="info-panel text-xs grid grid-cols-3 gap-2 mb-1">
         <div><span class="text-gray-600 dark:text-gray-400 block">Allocated</span><span class="font-semibold">{{ detail?.allocated.amount.toLocaleString() }}</span></div>
         <div><span class="text-gray-600 dark:text-gray-400 block">Remaining</span><span class="font-semibold">{{ detail?.remaining.amount.toLocaleString() }}</span></div>
         <div><span class="text-gray-600 dark:text-gray-400 block">Debt</span><span class="font-semibold" :class="(detail?.debt?.amount ?? 0) > 0 ? 'text-red-600' : ''">{{ (detail?.debt?.amount ?? 0).toLocaleString() }}</span></div>

@@ -169,7 +169,7 @@ function isExpired(r: ReservationSummary): boolean {
       :last-updated="lastUpdated"
       @refresh="refresh"
     />
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
+    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
     <!-- Filters. Tenant is required; the server rejects admin list
          without it, so we enforce client-side too. Status defaults to
@@ -196,39 +196,39 @@ function isExpired(r: ReservationSummary): boolean {
       </p>
     </div>
 
-    <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
+    <div class="card-table">
       <table class="w-full text-sm min-w-[720px]">
-        <thead class="bg-gray-50 text-gray-600 dark:text-gray-500 text-xs uppercase tracking-wider">
+        <thead class="table-header">
           <tr>
             <SortHeader label="Reservation ID" column="reservation_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <th class="px-4 py-3 text-left">Scope</th>
+            <th class="table-cell text-left">Scope</th>
             <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Reserved" column="reserved" :active-column="sortKey" :direction="sortDir" @sort="toggle" align="right" />
             <SortHeader label="Created" column="created_at_ms" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Expires" column="expires_at_ms" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <th v-if="canManage" class="px-4 py-3 w-24"></th>
+            <th v-if="canManage" class="table-cell w-24"></th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
-          <tr v-for="r in sortedReservations" :key="r.reservation_id" class="hover:bg-gray-50 transition-colors">
-            <td class="px-4 py-3 font-mono text-xs break-all">{{ r.reservation_id }}</td>
-            <td class="px-4 py-3 font-mono text-xs text-gray-600 break-all">{{ r.scope_path }}</td>
-            <td class="px-4 py-3"><StatusBadge :status="r.status" /></td>
-            <td class="px-4 py-3 text-right tabular-nums">
+          <tr v-for="r in sortedReservations" :key="r.reservation_id" class="table-row-hover">
+            <td class="table-cell font-mono text-xs break-all">{{ r.reservation_id }}</td>
+            <td class="table-cell font-mono text-xs text-gray-600 break-all">{{ r.scope_path }}</td>
+            <td class="table-cell"><StatusBadge :status="r.status" /></td>
+            <td class="table-cell text-right tabular-nums">
               {{ r.reserved.amount.toLocaleString() }}
               <span class="text-xs text-gray-600 dark:text-gray-400">{{ r.reserved.unit }}</span>
             </td>
-            <td class="px-4 py-3 text-gray-600 dark:text-gray-500 text-xs" :title="formatDateTime(new Date(r.created_at_ms).toISOString())">
+            <td class="table-cell text-gray-600 dark:text-gray-500 text-xs" :title="formatDateTime(new Date(r.created_at_ms).toISOString())">
               {{ ageLabel(r) }}
             </td>
-            <td class="px-4 py-3 text-xs" :class="isExpired(r) && r.status === 'ACTIVE' ? 'text-red-600 font-medium' : 'text-gray-600 dark:text-gray-500'">
+            <td class="table-cell text-xs" :class="isExpired(r) && r.status === 'ACTIVE' ? 'text-red-600 font-medium' : 'text-gray-600 dark:text-gray-500'">
               <!-- Overdue indicator: ACTIVE + past expiry is the
                    definitional "hung" state. Tooltip shows the exact
                    expiry time for drill-down. -->
               {{ formatRelative(new Date(r.expires_at_ms).toISOString()) }}
               <span v-if="isExpired(r) && r.status === 'ACTIVE'" class="ml-1" title="Past expiry — this reservation is overdue for cleanup">⚠</span>
             </td>
-            <td v-if="canManage" class="px-4 py-3">
+            <td v-if="canManage" class="table-cell">
               <!-- Only ACTIVE reservations can be released. COMMITTED /
                    RELEASED / EXPIRED are terminal states — no release
                    action makes sense. -->

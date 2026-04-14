@@ -19,7 +19,7 @@ const sidebarOpen = ref(false)
 
     <div class="flex-1 flex flex-col overflow-hidden">
       <!-- Mobile header bar -->
-      <div class="md:hidden flex items-center gap-3 px-4 py-3 bg-gray-900 text-white shrink-0">
+      <div class="md:hidden flex items-center gap-3 table-cell bg-gray-900 text-white shrink-0">
         <button @click="sidebarOpen = true" aria-label="Open menu" class="cursor-pointer">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />

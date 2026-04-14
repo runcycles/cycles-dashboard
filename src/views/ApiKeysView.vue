@@ -221,7 +221,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       </template>
     </PageHeader>
 
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
+    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
     <!-- Summary -->
     <div v-if="keys.length > 0" class="flex gap-3 mb-4">
@@ -232,7 +232,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     </div>
 
     <!-- Filters -->
-    <div class="bg-white rounded-lg shadow p-4 mb-4">
+    <div class="card p-4 mb-4">
       <div class="flex gap-3 flex-wrap items-end">
         <div>
           <label for="keys-tenant" class="form-label">Tenant</label>
@@ -259,40 +259,40 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
 
     <p v-if="filteredKeys.length > 0" class="text-xs text-gray-600 dark:text-gray-400 mb-2">{{ filteredKeys.length }} key{{ filteredKeys.length !== 1 ? 's' : '' }}</p>
 
-    <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
+    <div class="card-table">
       <table class="w-full text-sm min-w-[900px]">
-        <thead class="bg-gray-50 text-gray-600 dark:text-gray-500 text-xs uppercase tracking-wider">
+        <thead class="table-header">
           <tr>
-            <th class="px-4 py-3 text-left">Key ID</th>
+            <th class="table-cell text-left">Key ID</th>
             <SortHeader label="Name" column="name" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Tenant" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <th class="px-4 py-3 text-left">Permissions</th>
-            <th class="px-4 py-3 text-left">Scope Filter</th>
+            <th class="table-cell text-left">Permissions</th>
+            <th class="table-cell text-left">Scope Filter</th>
             <SortHeader label="Created" column="created_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader label="Expires" column="expires_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <th v-if="canManage" class="px-4 py-3 w-20"></th>
+            <th v-if="canManage" class="table-cell w-20"></th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
-          <tr v-for="k in sortedKeys" :key="k.key_id" class="hover:bg-gray-50 transition-colors">
-            <td class="px-4 py-3"><MaskedValue :value="k.key_id" /></td>
-            <td class="px-4 py-3 text-gray-700">{{ k.name || '-' }}</td>
-            <td class="px-4 py-3">
+          <tr v-for="k in sortedKeys" :key="k.key_id" class="table-row-hover">
+            <td class="table-cell"><MaskedValue :value="k.key_id" /></td>
+            <td class="table-cell text-gray-700">{{ k.name || '-' }}</td>
+            <td class="table-cell">
               <TenantLink :tenant-id="k.tenant_id" />
             </td>
-            <td class="px-4 py-3"><StatusBadge :status="k.status" /></td>
-            <td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-500">
+            <td class="table-cell"><StatusBadge :status="k.status" /></td>
+            <td class="table-cell text-xs text-gray-600 dark:text-gray-500">
               <div class="flex flex-wrap gap-1">
                 <span v-for="p in k.permissions" :key="p" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{{ p }}</span>
               </div>
             </td>
-            <td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-500 font-mono">{{ k.scope_filter?.join(', ') || '-' }}</td>
-            <td class="px-4 py-3 text-gray-600 dark:text-gray-400 text-xs whitespace-nowrap">{{ formatDateTime(k.created_at) }}</td>
-            <td class="px-4 py-3 text-xs whitespace-nowrap" :class="k.expires_at ? 'text-gray-600 dark:text-gray-500' : 'text-gray-600 dark:text-gray-400'">
+            <td class="table-cell text-xs text-gray-600 dark:text-gray-500 font-mono">{{ k.scope_filter?.join(', ') || '-' }}</td>
+            <td class="table-cell text-gray-600 dark:text-gray-400 text-xs whitespace-nowrap">{{ formatDateTime(k.created_at) }}</td>
+            <td class="table-cell text-xs whitespace-nowrap" :class="k.expires_at ? 'text-gray-600 dark:text-gray-500' : 'text-gray-600 dark:text-gray-400'">
               {{ k.expires_at ? formatDateTime(k.expires_at) : 'Never' }}
             </td>
-            <td v-if="canManage" class="px-4 py-3">
+            <td v-if="canManage" class="table-cell">
               <div class="flex gap-2">
                 <!-- v0.1.25.21 (#8): one-click drill into audit log
                      pre-filtered by this key. Available regardless of

@@ -449,7 +449,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         </button>
       </template>
     </PageHeader>
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
+    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
     <template v-if="tenant">
       <div class="bg-white rounded-lg shadow p-6 mb-4">
@@ -491,7 +491,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
            calculated from the sum, not averaged across budgets — the
            more-informative view for "how close is this tenant to its
            allocated capacity overall." -->
-      <div v-if="rollupUnits.length > 0" class="bg-white rounded-lg shadow p-4 mb-4">
+      <div v-if="rollupUnits.length > 0" class="card p-4 mb-4">
         <h3 class="text-sm font-medium text-gray-700 mb-3">Spend rollup (ACTIVE budgets)</h3>
         <div class="space-y-3">
           <div v-for="u in rollupUnits" :key="u" class="grid grid-cols-5 gap-3 text-sm items-baseline">
@@ -525,17 +525,17 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       <div v-if="tab === 'budgets' && canManageBudgets" class="flex justify-end mb-2">
         <button @click="openCreateBudget" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Budget</button>
       </div>
-      <div v-if="tab === 'budgets'" class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
+      <div v-if="tab === 'budgets'" class="card-table">
         <table class="w-full text-sm min-w-[520px]">
-          <thead class="bg-gray-50 text-gray-600 dark:text-gray-500 text-xs uppercase tracking-wider">
-            <tr><th class="px-4 py-3 text-left">Scope</th><th class="px-4 py-3 text-left">Unit</th><th class="px-4 py-3 text-left">Status</th><th class="px-4 py-3 text-right">Allocated</th></tr>
+          <thead class="table-header">
+            <tr><th class="table-cell text-left">Scope</th><th class="table-cell text-left">Unit</th><th class="table-cell text-left">Status</th><th class="table-cell text-right">Allocated</th></tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
-            <tr v-for="b in budgets" :key="b.ledger_id" class="hover:bg-gray-50 transition-colors">
-              <td class="px-4 py-3"><router-link :to="{ name: 'budgets', query: { scope: b.scope, unit: b.unit } }" class="text-blue-600 hover:underline font-mono text-xs">{{ b.scope }}</router-link></td>
-              <td class="px-4 py-3 text-gray-600 dark:text-gray-500">{{ b.unit }}</td>
-              <td class="px-4 py-3"><StatusBadge :status="b.status" /></td>
-              <td class="px-4 py-3 text-right text-gray-600 dark:text-gray-500 tabular-nums">{{ b.allocated.amount.toLocaleString() }}</td>
+            <tr v-for="b in budgets" :key="b.ledger_id" class="table-row-hover">
+              <td class="table-cell"><router-link :to="{ name: 'budgets', query: { scope: b.scope, unit: b.unit } }" class="text-blue-600 hover:underline font-mono text-xs">{{ b.scope }}</router-link></td>
+              <td class="table-cell text-gray-600 dark:text-gray-500">{{ b.unit }}</td>
+              <td class="table-cell"><StatusBadge :status="b.status" /></td>
+              <td class="table-cell text-right text-gray-600 dark:text-gray-500 tabular-nums">{{ b.allocated.amount.toLocaleString() }}</td>
             </tr>
             <tr v-if="budgets.length === 0"><td colspan="4"><EmptyState message="No budgets" hint="Budgets will appear here once allocated" /></td></tr>
           </tbody>
@@ -546,18 +546,18 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       <div v-if="tab === 'keys' && canManageKeys" class="flex justify-end mb-2">
         <button @click="openCreateKey" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create API Key</button>
       </div>
-      <div v-if="tab === 'keys'" class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
+      <div v-if="tab === 'keys'" class="card-table">
         <table class="w-full text-sm min-w-[520px]">
-          <thead class="bg-gray-50 text-gray-600 dark:text-gray-500 text-xs uppercase tracking-wider">
-            <tr><th class="px-4 py-3 text-left">Key ID</th><th class="px-4 py-3 text-left">Name</th><th class="px-4 py-3 text-left">Status</th><th class="px-4 py-3 text-left">Permissions</th><th v-if="canManageKeys" class="px-4 py-3 w-20"></th></tr>
+          <thead class="table-header">
+            <tr><th class="table-cell text-left">Key ID</th><th class="table-cell text-left">Name</th><th class="table-cell text-left">Status</th><th class="table-cell text-left">Permissions</th><th v-if="canManageKeys" class="table-cell w-20"></th></tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
-            <tr v-for="k in apiKeys" :key="k.key_id" class="hover:bg-gray-50 transition-colors">
-              <td class="px-4 py-3"><MaskedValue :value="k.key_id" /></td>
-              <td class="px-4 py-3 text-gray-700">{{ k.name || '-' }}</td>
-              <td class="px-4 py-3"><StatusBadge :status="k.status" /></td>
-              <td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-500">{{ k.permissions.join(', ') }}</td>
-              <td v-if="canManageKeys" class="px-4 py-3">
+            <tr v-for="k in apiKeys" :key="k.key_id" class="table-row-hover">
+              <td class="table-cell"><MaskedValue :value="k.key_id" /></td>
+              <td class="table-cell text-gray-700">{{ k.name || '-' }}</td>
+              <td class="table-cell"><StatusBadge :status="k.status" /></td>
+              <td class="table-cell text-xs text-gray-600 dark:text-gray-500">{{ k.permissions.join(', ') }}</td>
+              <td v-if="canManageKeys" class="table-cell">
                 <div class="flex gap-2">
                   <!-- #8: same drill-down as ApiKeysView.vue. -->
                   <router-link :to="{ name: 'audit', query: { key_id: k.key_id } }" class="text-xs text-gray-600 hover:text-gray-800 cursor-pointer hover:underline">Activity</router-link>
@@ -574,18 +574,18 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       <div v-if="tab === 'policies' && canManagePolicies" class="flex justify-end mb-2">
         <button @click="openCreatePolicy" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Policy</button>
       </div>
-      <div v-if="tab === 'policies'" class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
+      <div v-if="tab === 'policies'" class="card-table">
         <table class="w-full text-sm min-w-[520px]">
-          <thead class="bg-gray-50 text-gray-600 dark:text-gray-500 text-xs uppercase tracking-wider">
-            <tr><th class="px-4 py-3 text-left">Policy ID</th><th class="px-4 py-3 text-left">Name</th><th class="px-4 py-3 text-left">Scope</th><th class="px-4 py-3 text-left">Status</th><th v-if="canManagePolicies" class="px-4 py-3 w-20"></th></tr>
+          <thead class="table-header">
+            <tr><th class="table-cell text-left">Policy ID</th><th class="table-cell text-left">Name</th><th class="table-cell text-left">Scope</th><th class="table-cell text-left">Status</th><th v-if="canManagePolicies" class="table-cell w-20"></th></tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
-            <tr v-for="p in policies" :key="p.policy_id" class="hover:bg-gray-50 transition-colors">
-              <td class="px-4 py-3 font-mono text-xs">{{ p.policy_id }}</td>
-              <td class="px-4 py-3 text-gray-700">{{ p.name }}</td>
-              <td class="px-4 py-3 text-gray-600 dark:text-gray-500 font-mono text-xs">{{ p.scope_pattern }}</td>
-              <td class="px-4 py-3"><StatusBadge :status="p.status" /></td>
-              <td v-if="canManagePolicies" class="px-4 py-3">
+            <tr v-for="p in policies" :key="p.policy_id" class="table-row-hover">
+              <td class="table-cell font-mono text-xs">{{ p.policy_id }}</td>
+              <td class="table-cell text-gray-700">{{ p.name }}</td>
+              <td class="table-cell text-gray-600 dark:text-gray-500 font-mono text-xs">{{ p.scope_pattern }}</td>
+              <td class="table-cell"><StatusBadge :status="p.status" /></td>
+              <td v-if="canManagePolicies" class="table-cell">
                 <button @click="openEditPolicy(p)" class="text-xs text-gray-600 hover:text-gray-800 cursor-pointer hover:underline">Edit</button>
               </td>
             </tr>

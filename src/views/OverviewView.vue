@@ -26,29 +26,29 @@ const { refresh, isLoading } = usePolling(async () => {
       @refresh="refresh"
     />
 
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{{ error }}</p>
+    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
     <LoadingSkeleton v-if="!data" />
 
     <template v-else>
       <!-- Summary counters -->
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <router-link to="/tenants" class="bg-white rounded-lg shadow p-4 hover:shadow-md transition-shadow block group">
+        <router-link to="/tenants" class="card p-4 hover:shadow-md transition-shadow block group">
           <p class="text-sm text-gray-600 dark:text-gray-500 group-hover:text-gray-700">Tenants</p>
           <p class="text-2xl font-semibold text-gray-900">{{ data.tenant_counts.total }}</p>
           <p class="text-xs text-gray-600 dark:text-gray-400">{{ data.tenant_counts.active }} active<span v-if="data.tenant_counts.suspended">, {{ data.tenant_counts.suspended }} suspended</span></p>
         </router-link>
-        <router-link to="/budgets" class="bg-white rounded-lg shadow p-4 hover:shadow-md transition-shadow block group">
+        <router-link to="/budgets" class="card p-4 hover:shadow-md transition-shadow block group">
           <p class="text-sm text-gray-600 dark:text-gray-500 group-hover:text-gray-700">Budgets</p>
           <p class="text-2xl font-semibold text-gray-900">{{ data.budget_counts.total }}</p>
           <p class="text-xs text-gray-600 dark:text-gray-400">{{ data.budget_counts.active }} active<span v-if="data.budget_counts.frozen">, <span class="text-yellow-600">{{ data.budget_counts.frozen }} frozen</span></span></p>
         </router-link>
-        <router-link to="/webhooks" class="bg-white rounded-lg shadow p-4 hover:shadow-md transition-shadow block group">
+        <router-link to="/webhooks" class="card p-4 hover:shadow-md transition-shadow block group">
           <p class="text-sm text-gray-600 dark:text-gray-500 group-hover:text-gray-700">Webhooks</p>
           <p class="text-2xl font-semibold text-gray-900">{{ data.webhook_counts.total }}</p>
           <p class="text-xs text-gray-600 dark:text-gray-400">{{ data.webhook_counts.active }} active<span v-if="data.webhook_counts.with_failures">, <span class="text-red-600">{{ data.webhook_counts.with_failures }} failing</span></span></p>
         </router-link>
-        <router-link to="/events" class="bg-white rounded-lg shadow p-4 hover:shadow-md transition-shadow block group">
+        <router-link to="/events" class="card p-4 hover:shadow-md transition-shadow block group">
           <p class="text-sm text-gray-600 dark:text-gray-500 group-hover:text-gray-700">Events <span class="text-gray-600 dark:text-gray-400 font-normal">({{ Math.round(data.event_window_seconds / 60) }}m)</span></p>
           <p class="text-2xl font-semibold text-gray-900">{{ data.event_counts.total_recent }}</p>
           <p class="text-xs text-gray-600 dark:text-gray-400">
@@ -62,7 +62,7 @@ const { refresh, isLoading } = usePolling(async () => {
 
       <!-- Alerts row -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <div class="bg-white rounded-lg shadow p-4">
+        <div class="card p-4">
           <div class="flex justify-between items-center mb-3">
             <h2 class="text-sm font-medium text-gray-700">
               Over-limit Budgets
@@ -77,7 +77,7 @@ const { refresh, isLoading } = usePolling(async () => {
           </div>
         </div>
 
-        <div class="bg-white rounded-lg shadow p-4">
+        <div class="card p-4">
           <div class="flex justify-between items-center mb-3">
             <h2 class="text-sm font-medium text-gray-700">
               Budgets with Debt
@@ -94,7 +94,7 @@ const { refresh, isLoading } = usePolling(async () => {
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <div class="bg-white rounded-lg shadow p-4">
+        <div class="card p-4">
           <div class="flex justify-between items-center mb-3">
             <h2 class="text-sm font-medium text-gray-700">
               Failing Webhooks
@@ -109,7 +109,7 @@ const { refresh, isLoading } = usePolling(async () => {
           </div>
         </div>
 
-        <div class="bg-white rounded-lg shadow p-4">
+        <div class="card p-4">
           <div class="flex justify-between items-center mb-3">
             <h2 class="text-sm font-medium text-gray-700">
               Frozen Budgets
@@ -126,7 +126,7 @@ const { refresh, isLoading } = usePolling(async () => {
 
       <!-- Recent events -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div class="bg-white rounded-lg shadow p-4">
+        <div class="card p-4">
           <div class="flex justify-between items-center mb-3">
             <h2 class="text-sm font-medium text-gray-700">Recent Denials</h2>
             <router-link :to="{ name: 'events', query: { type: 'reservation.denied' } }" class="text-xs text-blue-600 hover:underline">View all</router-link>
@@ -140,7 +140,7 @@ const { refresh, isLoading } = usePolling(async () => {
             <p class="text-xs text-gray-600 dark:text-gray-500">{{ e.data?.reason_code || 'denied' }}</p>
           </div>
         </div>
-        <div class="bg-white rounded-lg shadow p-4">
+        <div class="card p-4">
           <div class="flex justify-between items-center mb-3">
             <h2 class="text-sm font-medium text-gray-700">Recent Expiries</h2>
             <router-link :to="{ name: 'events', query: { type: 'reservation.expired' } }" class="text-xs text-blue-600 hover:underline">View all</router-link>
