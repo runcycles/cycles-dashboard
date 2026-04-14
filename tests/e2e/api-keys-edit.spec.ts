@@ -74,8 +74,13 @@ test('editing an API key renames it and updates permissions visibly', async ({ p
   await expect(editDialog).toBeVisible()
 
   // Rename + add a permission the key didn't have (budgets:write).
+  //
+  // Target the checkbox by input[value=...]: PermissionPicker renders
+  // only the short tail ("write") under a "Budgets" section header,
+  // so getByLabel("budgets:write") matches nothing. The value
+  // attribute carries the full permission string and is stable.
   await editDialog.locator('#ek-name').fill(editKeyNewName)
-  await editDialog.getByLabel('budgets:write').check()
+  await editDialog.locator('input[type="checkbox"][value="budgets:write"]').check()
 
   // Submit. Assert the PATCH request went out, returned 2xx, and
   // carried both the new name AND the expanded permissions array —
