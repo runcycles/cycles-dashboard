@@ -1,7 +1,19 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
+**Date:** 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
 **Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.17+ continues to satisfy the governance plane.
+
+### 2026-04-14 — v0.1.25.26 — style consolidation via @layer components + dark-mode restore
+
+Consolidates 4+ occurrences of repeated Tailwind utility-class strings into reusable classes defined in `src/style.css` via Tailwind v4's `@layer components` directive. Pure deduplication — not a design-system abstraction. Stateful composites (FormDialog, ConfirmAction, StatusBadge, ActionButton) stay as `.vue` components.
+
+**Classes added** (17 total): `form-label`, `form-input(+mono)`, `form-select`, `card`, `card-table`, `table-cell`, `table-header`, `table-row-hover`, `muted(+sm)`, `banner-error`, `banner-warning`, `info-panel`, `btn-row-{danger,success,primary}`, `btn-pill-{danger,success,primary,secondary}`, `badge-{danger,warning,success}`.
+
+**Sweeps:** 4 PRs, ~50 files touched across `src/views/` and `src/components/`. Sidebar.vue intentionally excluded (dark background permanently — white-bg-tuned classes would break contrast).
+
+**Dark-mode caveat (caught late, fixed in same release):** `@apply` inlines utilities as flat declarations, so cascade rules like `.dark .bg-white { background: gray-900 }` never match elements that use the component classes (they have `.card`, not `.bg-white`). First pass shipped with broken dark mode — every card/table/banner rendered bright. Fixed by adding explicit `.dark .<class>` overrides for every component class that touches bg/border/semantic color. Documented in the style.css dark-overrides section so future additions don't repeat the mistake.
+
+**Why this class of regression wasn't caught by tests:** Vitest is DOM-only and doesn't render CSS. Playwright specs exercise flows but don't assert visual appearance. Axe checks contrast but only on the currently-rendered colors — the dark-mode bug looked fine to axe because the computed colors on light-on-light were actually above contrast ratio for each individual element. Only human eyes on the actual dark-theme render caught it. Trade-off: add a Playwright visual-diff spec later if this class recurs, but for now manual dark-mode verification is the gate.
 
 ### 2026-04-14 — A11y ratchet: all impact levels now enforced (TERMINAL)
 
