@@ -88,16 +88,49 @@ function openEdit(k: KeyWithTenant) {
   editingKey.value = k
 }
 
+// Deep-compare two string arrays as sets — order-insensitive equality for
+// permission / scope_filter diffs. Same length and same member set means
+// no change from the operator's perspective.
+function sameStringSet(a: string[] | undefined, b: string[] | undefined): boolean {
+  const aa = a || []
+  const bb = b || []
+  if (aa.length !== bb.length) return false
+  const sa = new Set(aa)
+  for (const v of bb) if (!sa.has(v)) return false
+  return true
+}
+
 async function submitEdit() {
   if (!editingKey.value) return
   editError.value = ''
   editLoading.value = true
   try {
-    const body: Record<string, unknown> = { name: editForm.value.name }
-    if (editForm.value.permissions.length) body.permissions = editForm.value.permissions
-    const scopes = editForm.value.scope_filter ? editForm.value.scope_filter.split(',').map(s => s.trim()).filter(Boolean) : []
-    if (scopes.length) body.scope_filter = scopes
-    await updateApiKey(editingKey.value.key_id, body as any)
+    // Only send fields the user actually changed. Round-tripping unchanged
+    // permissions was triggering spurious 400s when a stored key carried any
+    // permission value that differs from the current server's closed enum
+    // (legacy records, schema drift). The server-side fix now returns a
+    // descriptive error if validation fails; this change avoids triggering
+    // it at all for the common "rename" case.
+    const body: Record<string, unknown> = {}
+    const original = editingKey.value
+    if (editForm.value.name !== (original.name || '')) {
+      body.name = editForm.value.name
+    }
+    if (!sameStringSet(editForm.value.permissions, original.permissions)) {
+      body.permissions = editForm.value.permissions
+    }
+    const scopes = editForm.value.scope_filter
+      ? editForm.value.scope_filter.split(',').map(s => s.trim()).filter(Boolean)
+      : []
+    if (!sameStringSet(scopes, original.scope_filter)) {
+      body.scope_filter = scopes
+    }
+    if (Object.keys(body).length === 0) {
+      // Nothing to submit — close the dialog quietly.
+      editingKey.value = null
+      return
+    }
+    await updateApiKey(original.key_id, body as any)
     toast.success('API key updated')
     editingKey.value = null
     await refresh()
