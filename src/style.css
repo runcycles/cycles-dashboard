@@ -98,6 +98,99 @@
   .badge-success  { @apply bg-green-100 text-green-700 px-1.5 py-0.5 rounded text-xs; }
 }
 
+/* ── Dark overrides for component classes ────────────────────────────
+   `@apply` inlines utilities as flat declarations, so the `.dark .bg-X`
+   / `.dark .border-X` / `.dark .text-X` cascade rules below do NOT
+   match elements that use the component classes above (they have
+   `.card`, not `.bg-white`). Every component class that sets a
+   bg/border/semantic color from the utility palette needs its own
+   explicit dark override here.
+   ──────────────────────────────────────────────────────────────────── */
+
+/* Surfaces */
+.dark .card,
+.dark .card-table       { background-color: var(--color-gray-900); }
+.dark .table-header     { background-color: var(--color-gray-800); }
+.dark .info-panel       { background-color: var(--color-gray-800); }
+.dark .table-row-hover:hover { background-color: color-mix(in oklab, var(--color-gray-800) 40%, var(--color-gray-900)); }
+
+/* Form controls */
+.dark .form-input,
+.dark .form-input-mono,
+.dark .form-select {
+  background-color: var(--color-gray-800);
+  border-color: var(--color-gray-600);
+  color: var(--color-gray-200);
+}
+
+/* Banners */
+.dark .banner-error {
+  background-color: color-mix(in oklab, var(--color-red-800) 20%, transparent);
+  border-color: var(--color-red-800);
+  color: var(--color-red-500);
+}
+.dark .banner-warning {
+  background-color: color-mix(in oklab, var(--color-yellow-800) 20%, transparent);
+  border-color: var(--color-yellow-800);
+  color: var(--color-yellow-500);
+}
+
+/* Row-style action buttons (text-only) */
+.dark .btn-row-danger   { color: var(--color-red-500); }
+.dark .btn-row-success  { color: var(--color-green-500); }
+.dark .btn-row-primary  { color: oklch(72% 0.17 255); }
+.dark .btn-row-danger:hover   { color: var(--color-red-400); }
+.dark .btn-row-success:hover  { color: var(--color-green-400); }
+.dark .btn-row-primary:hover  { color: oklch(78% 0.17 255); }
+
+/* Pill-style action buttons (text + border + hover-bg) */
+.dark .btn-pill-danger {
+  color: var(--color-red-500);
+  border-color: var(--color-red-800);
+}
+.dark .btn-pill-danger:hover {
+  background-color: color-mix(in oklab, var(--color-red-800) 20%, transparent);
+  color: var(--color-red-400);
+}
+.dark .btn-pill-success {
+  color: var(--color-green-500);
+  border-color: var(--color-green-800);
+}
+.dark .btn-pill-success:hover {
+  background-color: color-mix(in oklab, var(--color-green-800) 20%, transparent);
+  color: var(--color-green-400);
+}
+.dark .btn-pill-primary {
+  color: oklch(72% 0.17 255);
+  border-color: var(--color-blue-800);
+}
+.dark .btn-pill-primary:hover {
+  background-color: color-mix(in oklab, var(--color-blue-800) 20%, transparent);
+  color: oklch(78% 0.17 255);
+}
+.dark .btn-pill-secondary {
+  color: var(--color-gray-300);
+  border-color: var(--color-gray-700);
+}
+.dark .btn-pill-secondary:hover {
+  background-color: var(--color-gray-800);
+  color: var(--color-gray-100);
+}
+
+/* Count / status badges — translucent tints on dark for readability */
+.dark .badge-danger {
+  background-color: color-mix(in oklab, var(--color-red-800) 25%, transparent);
+  color: var(--color-red-500);
+}
+.dark .badge-warning {
+  background-color: color-mix(in oklab, var(--color-yellow-800) 30%, transparent);
+  color: var(--color-yellow-500);
+}
+.dark .badge-success {
+  background-color: color-mix(in oklab, var(--color-green-800) 30%, transparent);
+  color: var(--color-green-500);
+}
+
 /* ── Dark mode overrides ──────────────────────────────────────────────
    Cards render on gray-900, table headers on gray-800.
    Every override is chosen for ≥4.5:1 contrast on those surfaces.
