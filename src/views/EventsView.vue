@@ -125,7 +125,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
     </form>
 
     <!-- Results count -->
-    <p v-if="events.length > 0" class="text-xs text-gray-600 dark:text-gray-400 mb-2">{{ events.length }} events</p>
+    <p v-if="events.length > 0" class="muted-sm mb-2">{{ events.length }} events</p>
 
     <!-- Event table -->
     <div class="card-table">
@@ -149,7 +149,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
                  TenantLink/action buttons inside another interactive
                  element (axe rule: nested-interactive, WCAG 4.1.2). -->
             <tr class="hover:bg-gray-50 cursor-pointer transition-colors" @click="expanded = expanded === e.event_id ? null : e.event_id">
-              <td class="pl-3 py-3 text-gray-600 dark:text-gray-400">
+              <td class="pl-3 py-3 muted">
                 <button
                   type="button"
                   :aria-expanded="expanded === e.event_id"
@@ -168,19 +168,19 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
               <td class="table-cell">
                 <TenantLink v-if="e.tenant_id" :tenant-id="e.tenant_id" @click.stop />
               </td>
-              <td class="table-cell text-gray-600 dark:text-gray-400 whitespace-nowrap text-xs" :title="new Date(e.timestamp).toISOString()">{{ formatDateTime(e.timestamp) }}</td>
+              <td class="table-cell muted whitespace-nowrap text-xs" :title="new Date(e.timestamp).toISOString()">{{ formatDateTime(e.timestamp) }}</td>
             </tr>
             <tr v-if="expanded === e.event_id" class="bg-gray-50/70">
               <td colspan="6" class="table-cell pl-11">
                 <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3">
-                  <div><span class="text-gray-600 dark:text-gray-400">Event ID:</span> <span class="font-mono">{{ e.event_id }}</span></div>
-                  <div><span class="text-gray-600 dark:text-gray-400">Source:</span> {{ e.source }}</div>
-                  <div v-if="e.request_id"><span class="text-gray-600 dark:text-gray-400">Request ID:</span> <span class="font-mono">{{ e.request_id }}</span></div>
+                  <div><span class="muted">Event ID:</span> <span class="font-mono">{{ e.event_id }}</span></div>
+                  <div><span class="muted">Source:</span> {{ e.source }}</div>
+                  <div v-if="e.request_id"><span class="muted">Request ID:</span> <span class="font-mono">{{ e.request_id }}</span></div>
                   <div v-if="e.correlation_id">
-                    <span class="text-gray-600 dark:text-gray-400">Correlation ID:</span>
+                    <span class="muted">Correlation ID:</span>
                     <button @click.stop="viewCorrelated(e.correlation_id!)" class="text-blue-600 hover:underline ml-1 font-mono cursor-pointer">{{ e.correlation_id }}</button>
                   </div>
-                  <div v-if="e.actor"><span class="text-gray-600 dark:text-gray-400">Actor:</span> {{ e.actor.type }}<span v-if="e.actor.key_id" class="font-mono"> {{ e.actor.key_id }}</span></div>
+                  <div v-if="e.actor"><span class="muted">Actor:</span> {{ e.actor.type }}<span v-if="e.actor.key_id" class="font-mono"> {{ e.actor.key_id }}</span></div>
                 </div>
                 <div v-if="e.data" class="bg-white border border-gray-200 rounded p-3 text-xs font-mono overflow-auto max-h-40">
                   <pre class="whitespace-pre-wrap">{{ safeJsonStringify(e.data) }}</pre>

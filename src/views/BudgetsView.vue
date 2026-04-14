@@ -342,7 +342,7 @@ watch(() => route.query, () => {
   <div>
     <PageHeader :title="pageTitle" :subtitle="isDetail && detail ? `${detail.scope} · ${detail.unit}` : undefined" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
       <template #back>
-        <button v-if="isDetail" @click="router.push('/budgets')" aria-label="Back to budgets" class="text-gray-600 dark:text-gray-400 hover:text-gray-700 cursor-pointer">
+        <button v-if="isDetail" @click="router.push('/budgets')" aria-label="Back to budgets" class="muted hover:text-gray-700 cursor-pointer">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
@@ -362,8 +362,8 @@ watch(() => route.query, () => {
           <span v-if="detail.is_over_limit" class="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-medium">OVER LIMIT</span>
           <span class="flex-1" />
           <button v-if="canManage" @click="openEditBudget" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Edit</button>
-          <button v-if="canManage && detail.status === 'ACTIVE'" @click="requestFreeze(detail.scope, detail.unit, 'freeze')" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Freeze</button>
-          <button v-if="canManage && detail.status === 'FROZEN'" @click="requestFreeze(detail.scope, detail.unit, 'unfreeze')" class="text-xs text-green-700 hover:text-green-900 border border-green-200 rounded px-2.5 py-1 hover:bg-green-50 cursor-pointer transition-colors">Unfreeze</button>
+          <button v-if="canManage && detail.status === 'ACTIVE'" @click="requestFreeze(detail.scope, detail.unit, 'freeze')" class="btn-pill-danger">Freeze</button>
+          <button v-if="canManage && detail.status === 'FROZEN'" @click="requestFreeze(detail.scope, detail.unit, 'unfreeze')" class="btn-pill-success">Unfreeze</button>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
           <div class="info-panel"><span class="form-label">Allocated</span><span class="font-semibold">{{ detail.allocated.amount.toLocaleString() }}</span></div>
@@ -384,7 +384,7 @@ watch(() => route.query, () => {
         <!-- Fund budget -->
         <div v-if="canManage && detail.status === 'ACTIVE'" class="mt-4 pt-4 border-t border-gray-200 flex items-center justify-between">
           <span class="text-xs text-gray-600 dark:text-gray-500">Credit, debit, reset allocation, or repay debt</span>
-          <button @click="openFund" class="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-2.5 py-1 hover:bg-blue-50 cursor-pointer transition-colors">Fund Budget</button>
+          <button @click="openFund" class="btn-pill-primary">Fund Budget</button>
         </div>
       </div>
 
@@ -436,12 +436,12 @@ watch(() => route.query, () => {
             <label for="budget-util-min" class="form-label">Utilization %</label>
             <div class="flex items-center gap-1">
               <input id="budget-util-min" v-model="filterUtilMin" @change="loadList" @keyup.enter="loadList" type="number" min="0" max="100" placeholder="min" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-16" aria-label="Minimum utilization percent" />
-              <span class="text-xs text-gray-600 dark:text-gray-400">to</span>
+              <span class="muted-sm">to</span>
               <input id="budget-util-max" v-model="filterUtilMax" @change="loadList" @keyup.enter="loadList" type="number" min="0" max="100" placeholder="max" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-16" aria-label="Maximum utilization percent" />
             </div>
           </div>
           <div v-if="isLoading" class="flex items-center">
-            <svg class="w-4 h-4 text-gray-600 dark:text-gray-400 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+            <svg class="w-4 h-4 muted animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
           </div>
         </div>
       </div>
@@ -469,10 +469,10 @@ watch(() => route.query, () => {
               <td class="table-cell">
                 <UtilizationBar :remaining="b.remaining.amount" :allocated="b.allocated.amount" />
               </td>
-              <td class="table-cell text-right tabular-nums" :class="(b.debt?.amount ?? 0) > 0 ? 'text-red-600 font-medium' : 'text-gray-600 dark:text-gray-400'">{{ (b.debt?.amount ?? 0).toLocaleString() }}</td>
+              <td class="table-cell text-right tabular-nums" :class="(b.debt?.amount ?? 0) > 0 ? 'text-red-600 font-medium' : 'muted'">{{ (b.debt?.amount ?? 0).toLocaleString() }}</td>
               <td v-if="canManage" class="table-cell">
-                <button v-if="b.status === 'ACTIVE'" @click.prevent="requestFreeze(b.scope, b.unit, 'freeze')" class="text-xs text-red-600 hover:text-red-800 cursor-pointer hover:underline">Freeze</button>
-                <button v-if="b.status === 'FROZEN'" @click.prevent="requestFreeze(b.scope, b.unit, 'unfreeze')" class="text-xs text-green-700 hover:text-green-900 cursor-pointer hover:underline">Unfreeze</button>
+                <button v-if="b.status === 'ACTIVE'" @click.prevent="requestFreeze(b.scope, b.unit, 'freeze')" class="btn-row-danger">Freeze</button>
+                <button v-if="b.status === 'FROZEN'" @click.prevent="requestFreeze(b.scope, b.unit, 'unfreeze')" class="btn-row-success">Unfreeze</button>
               </td>
             </tr>
             <tr v-if="budgets.length === 0">
@@ -504,9 +504,9 @@ watch(() => route.query, () => {
 
     <FormDialog v-if="showFund" title="Fund Budget" submit-label="Execute" :loading="fundLoading" :error="fundError" @submit="submitFund" @cancel="showFund = false">
       <div class="info-panel text-xs grid grid-cols-3 gap-2 mb-1">
-        <div><span class="text-gray-600 dark:text-gray-400 block">Allocated</span><span class="font-semibold">{{ detail?.allocated.amount.toLocaleString() }}</span></div>
-        <div><span class="text-gray-600 dark:text-gray-400 block">Remaining</span><span class="font-semibold">{{ detail?.remaining.amount.toLocaleString() }}</span></div>
-        <div><span class="text-gray-600 dark:text-gray-400 block">Debt</span><span class="font-semibold" :class="(detail?.debt?.amount ?? 0) > 0 ? 'text-red-600' : ''">{{ (detail?.debt?.amount ?? 0).toLocaleString() }}</span></div>
+        <div><span class="muted block">Allocated</span><span class="font-semibold">{{ detail?.allocated.amount.toLocaleString() }}</span></div>
+        <div><span class="muted block">Remaining</span><span class="font-semibold">{{ detail?.remaining.amount.toLocaleString() }}</span></div>
+        <div><span class="muted block">Debt</span><span class="font-semibold" :class="(detail?.debt?.amount ?? 0) > 0 ? 'text-red-600' : ''">{{ (detail?.debt?.amount ?? 0).toLocaleString() }}</span></div>
       </div>
       <div>
         <label for="fund-op" class="form-label">Operation</label>
@@ -516,7 +516,7 @@ watch(() => route.query, () => {
           <option value="RESET">Reset — set exact amount</option>
           <option value="REPAY_DEBT">Repay Debt — reduce debt</option>
         </select>
-        <p class="text-xs text-gray-600 dark:text-gray-400 mt-0.5">{{ fundHints[fundForm.operation] }}</p>
+        <p class="muted-sm mt-0.5">{{ fundHints[fundForm.operation] }}</p>
       </div>
       <div>
         <label for="fund-amount" class="form-label">Amount ({{ detail?.unit }})</label>
@@ -533,7 +533,7 @@ watch(() => route.query, () => {
       <div>
         <label for="eb-overdraft" class="form-label">Overdraft Limit ({{ detail?.unit }})</label>
         <input id="eb-overdraft" v-model="editBudgetForm.overdraft_limit" type="number" min="0" step="1" class="form-input-mono" />
-        <p class="text-xs text-gray-600 dark:text-gray-400 mt-0.5">Maximum debt allowed. Set to 0 to disable overdraft.</p>
+        <p class="muted-sm mt-0.5">Maximum debt allowed. Set to 0 to disable overdraft.</p>
       </div>
       <div>
         <label for="eb-overage" class="form-label">Commit Overage Policy</label>

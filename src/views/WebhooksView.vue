@@ -292,14 +292,14 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             <td class="table-cell"><span :class="healthColor(w)" class="inline-block w-2.5 h-2.5 rounded-full" :title="healthLabel(w)" /></td>
             <td class="table-cell">
               <router-link :to="{ name: 'webhook-detail', params: { id: w.subscription_id } }" class="text-blue-600 hover:underline truncate block max-w-[300px]">{{ w.url }}</router-link>
-              <span v-if="w.name" class="text-xs text-gray-600 dark:text-gray-400">{{ w.name }}</span>
+              <span v-if="w.name" class="muted-sm">{{ w.name }}</span>
             </td>
             <td class="table-cell"><StatusBadge :status="w.status" /></td>
-            <td class="table-cell text-right tabular-nums" :class="(w.consecutive_failures ?? 0) > 0 ? 'text-red-600 font-medium' : 'text-gray-600 dark:text-gray-400'">{{ w.consecutive_failures ?? 0 }}</td>
+            <td class="table-cell text-right tabular-nums" :class="(w.consecutive_failures ?? 0) > 0 ? 'text-red-600 font-medium' : 'muted'">{{ w.consecutive_failures ?? 0 }}</td>
             <td class="table-cell text-xs text-gray-600 dark:text-gray-500">{{ w.event_types?.join(', ') || w.event_categories?.join(', ') || 'all' }}</td>
             <td v-if="canManage" class="table-cell">
-              <button v-if="w.status === 'ACTIVE'" @click="pendingStatusAction = { id: w.subscription_id, url: w.url, action: 'PAUSED' }" class="text-xs text-red-600 hover:text-red-800 cursor-pointer hover:underline">Pause</button>
-              <button v-if="w.status === 'PAUSED' || w.status === 'DISABLED'" @click="pendingStatusAction = { id: w.subscription_id, url: w.url, action: 'ACTIVE' }" class="text-xs text-green-700 hover:text-green-900 cursor-pointer hover:underline">Enable</button>
+              <button v-if="w.status === 'ACTIVE'" @click="pendingStatusAction = { id: w.subscription_id, url: w.url, action: 'PAUSED' }" class="btn-row-danger">Pause</button>
+              <button v-if="w.status === 'PAUSED' || w.status === 'DISABLED'" @click="pendingStatusAction = { id: w.subscription_id, url: w.url, action: 'ACTIVE' }" class="btn-row-success">Enable</button>
             </td>
           </tr>
           <tr v-if="filteredWebhooks.length === 0">
@@ -386,12 +386,12 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       <div>
         <label for="sc-cidr" class="form-label">Blocked CIDR ranges (one per line)</label>
         <textarea id="sc-cidr" v-model="securityForm.blocked_cidr" rows="4" class="form-input-mono" placeholder="10.0.0.0/8&#10;172.16.0.0/12&#10;192.168.0.0/16" />
-        <p class="text-xs text-gray-600 dark:text-gray-400 mt-0.5">Webhook URLs resolving to these ranges will be blocked (SSRF protection)</p>
+        <p class="muted-sm mt-0.5">Webhook URLs resolving to these ranges will be blocked (SSRF protection)</p>
       </div>
       <div>
         <label for="sc-patterns" class="form-label">Allowed URL patterns (one per line, glob syntax)</label>
         <textarea id="sc-patterns" v-model="securityForm.allowed_patterns" rows="3" class="form-input-mono" placeholder="https://*.example.com/*" />
-        <p class="text-xs text-gray-600 dark:text-gray-400 mt-0.5">If non-empty, only URLs matching at least one pattern are allowed</p>
+        <p class="muted-sm mt-0.5">If non-empty, only URLs matching at least one pattern are allowed</p>
       </div>
       <label class="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
         <input v-model="securityForm.allow_http" type="checkbox" class="rounded" />

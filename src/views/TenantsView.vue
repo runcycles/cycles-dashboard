@@ -286,10 +286,10 @@ function parentName(id: string | undefined): string {
               <span v-else class="text-gray-500" aria-hidden="true">—</span>
             </td>
             <td class="table-cell"><StatusBadge :status="t.status" /></td>
-            <td class="table-cell text-gray-600 dark:text-gray-400 text-xs">{{ formatDate(t.created_at) }}</td>
+            <td class="table-cell muted-sm">{{ formatDate(t.created_at) }}</td>
             <td v-if="canManage" class="table-cell">
-              <button v-if="t.status === 'ACTIVE'" @click="pendingStatusAction = { tenantId: t.tenant_id, name: t.name, action: 'SUSPENDED' }" class="text-xs text-red-600 hover:text-red-800 cursor-pointer hover:underline">Suspend</button>
-              <button v-if="t.status === 'SUSPENDED'" @click="pendingStatusAction = { tenantId: t.tenant_id, name: t.name, action: 'ACTIVE' }" class="text-xs text-green-700 hover:text-green-900 cursor-pointer hover:underline">Reactivate</button>
+              <button v-if="t.status === 'ACTIVE'" @click="pendingStatusAction = { tenantId: t.tenant_id, name: t.name, action: 'SUSPENDED' }" class="btn-row-danger">Suspend</button>
+              <button v-if="t.status === 'SUSPENDED'" @click="pendingStatusAction = { tenantId: t.tenant_id, name: t.name, action: 'ACTIVE' }" class="btn-row-success">Reactivate</button>
             </td>
           </tr>
           <tr v-if="filteredTenants.length === 0">
@@ -337,7 +337,7 @@ function parentName(id: string | undefined): string {
       <div>
         <label for="ct-id" class="form-label">Tenant ID</label>
         <input id="ct-id" v-model="createForm.tenant_id" required pattern="^[a-z0-9-]+$" minlength="3" maxlength="64" class="form-input-mono" placeholder="acme-corp" />
-        <p class="text-xs text-gray-600 dark:text-gray-400 mt-0.5">Lowercase letters, numbers, and hyphens only</p>
+        <p class="muted-sm mt-0.5">Lowercase letters, numbers, and hyphens only</p>
       </div>
       <div>
         <label for="ct-name" class="form-label">Display Name</label>

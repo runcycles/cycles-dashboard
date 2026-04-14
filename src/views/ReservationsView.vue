@@ -189,7 +189,7 @@ function isExpired(r: ReservationSummary): boolean {
           <option v-for="s in RESERVATION_STATUSES" :key="s" :value="s">{{ s }}</option>
         </select>
       </div>
-      <p class="text-xs text-gray-600 dark:text-gray-400 flex-1 min-w-[16rem]">
+      <p class="muted-sm flex-1 min-w-[16rem]">
         Default sort is Created (newest first). Click the Created header to flip
         to ascending — reservations past their grace window but still ACTIVE rise
         to the top, which is the fast way to find "hung" ones.
@@ -216,7 +216,7 @@ function isExpired(r: ReservationSummary): boolean {
             <td class="table-cell"><StatusBadge :status="r.status" /></td>
             <td class="table-cell text-right tabular-nums">
               {{ r.reserved.amount.toLocaleString() }}
-              <span class="text-xs text-gray-600 dark:text-gray-400">{{ r.reserved.unit }}</span>
+              <span class="muted-sm">{{ r.reserved.unit }}</span>
             </td>
             <td class="table-cell text-gray-600 dark:text-gray-500 text-xs" :title="formatDateTime(new Date(r.created_at_ms).toISOString())">
               {{ ageLabel(r) }}
@@ -235,7 +235,7 @@ function isExpired(r: ReservationSummary): boolean {
               <button
                 v-if="r.status === 'ACTIVE'"
                 @click="openRelease(r)"
-                class="text-xs text-red-600 hover:text-red-800 cursor-pointer hover:underline"
+                class="btn-row-danger"
               >Force release</button>
             </td>
           </tr>
@@ -286,7 +286,7 @@ function isExpired(r: ReservationSummary): boolean {
           class="border border-gray-300 rounded px-2 py-1 text-sm w-full"
           placeholder="[INCIDENT_FORCE_RELEASE] hung after redis restart"
         />
-        <p class="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
+        <p class="muted-sm mt-0.5">
           Stored on the audit-log entry. Structured prefix like
           <code class="font-mono">[INCIDENT_FORCE_RELEASE]</code> makes later grep easier.
         </p>

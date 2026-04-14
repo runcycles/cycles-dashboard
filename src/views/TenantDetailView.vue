@@ -442,7 +442,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   <div>
     <PageHeader title="Tenant Detail" :subtitle="tenant?.tenant_id" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
       <template #back>
-        <button @click="router.push('/tenants')" aria-label="Back to tenants" class="text-gray-600 dark:text-gray-400 hover:text-gray-700 cursor-pointer">
+        <button @click="router.push('/tenants')" aria-label="Back to tenants" class="muted hover:text-gray-700 cursor-pointer">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
@@ -461,21 +461,21 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             <button @click="openEditTenant" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Edit</button>
             <!-- #7 Emergency Freeze: only shown if there are ACTIVE budgets
                  to freeze. Otherwise the button would just confirm a no-op. -->
-            <button v-if="canManageBudgets && activeBudgets.length > 0" @click="openEmergencyFreeze" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Emergency Freeze ({{ activeBudgets.length }})</button>
-            <button v-if="tenant.status === 'ACTIVE'" @click="pendingTenantAction = 'SUSPENDED'" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Suspend</button>
-            <button v-if="tenant.status === 'SUSPENDED'" @click="pendingTenantAction = 'ACTIVE'" class="text-xs text-green-700 hover:text-green-900 border border-green-200 rounded px-2.5 py-1 hover:bg-green-50 cursor-pointer transition-colors">Reactivate</button>
-            <button v-if="tenant.status !== 'CLOSED'" @click="pendingTenantAction = 'CLOSED'" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Close</button>
+            <button v-if="canManageBudgets && activeBudgets.length > 0" @click="openEmergencyFreeze" class="btn-pill-danger">Emergency Freeze ({{ activeBudgets.length }})</button>
+            <button v-if="tenant.status === 'ACTIVE'" @click="pendingTenantAction = 'SUSPENDED'" class="btn-pill-danger">Suspend</button>
+            <button v-if="tenant.status === 'SUSPENDED'" @click="pendingTenantAction = 'ACTIVE'" class="btn-pill-success">Reactivate</button>
+            <button v-if="tenant.status !== 'CLOSED'" @click="pendingTenantAction = 'CLOSED'" class="btn-pill-danger">Close</button>
           </div>
         </div>
         <p class="text-sm text-gray-600 dark:text-gray-500 font-mono">{{ tenant.tenant_id }}</p>
         <!-- Hierarchy: parent link + child list (#2). Children show only
              the first 6 inline; if there are more, a "View all" link
              drops into TenantsView filtered by this tenant as parent. -->
-        <p v-if="tenant.parent_tenant_id" class="text-sm text-gray-600 dark:text-gray-400 mt-1">
+        <p v-if="tenant.parent_tenant_id" class="text-sm muted mt-1">
           Parent: <router-link :to="{ name: 'tenant-detail', params: { id: tenant.parent_tenant_id } }" class="text-blue-600 hover:underline">{{ tenant.parent_tenant_id }}</router-link>
         </p>
         <div v-if="childTenants.length > 0" class="text-sm text-gray-600 dark:text-gray-500 mt-2 flex items-center gap-1 flex-wrap">
-          <span class="text-gray-600 dark:text-gray-400">Children ({{ childTenants.length }}):</span>
+          <span class="muted">Children ({{ childTenants.length }}):</span>
           <router-link
             v-for="c in childTenants.slice(0, 6)"
             :key="c.tenant_id"
@@ -496,15 +496,15 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         <div class="space-y-3">
           <div v-for="u in rollupUnits" :key="u" class="grid grid-cols-5 gap-3 text-sm items-baseline">
             <div class="col-span-1">
-              <div class="text-xs text-gray-600 dark:text-gray-400">{{ u }}</div>
-              <div class="text-xs text-gray-600 dark:text-gray-400">{{ rollupByUnit[u].count }} ledger{{ rollupByUnit[u].count === 1 ? '' : 's' }}</div>
+              <div class="muted-sm">{{ u }}</div>
+              <div class="muted-sm">{{ rollupByUnit[u].count }} ledger{{ rollupByUnit[u].count === 1 ? '' : 's' }}</div>
             </div>
-            <div><div class="text-xs text-gray-600 dark:text-gray-400">Allocated</div><div class="font-semibold tabular-nums">{{ rollupByUnit[u].allocated.toLocaleString() }}</div></div>
-            <div><div class="text-xs text-gray-600 dark:text-gray-400">Remaining</div><div class="font-semibold tabular-nums">{{ rollupByUnit[u].remaining.toLocaleString() }}</div></div>
-            <div><div class="text-xs text-gray-600 dark:text-gray-400">Spent</div><div class="font-semibold tabular-nums">{{ rollupByUnit[u].spent.toLocaleString() }}</div></div>
+            <div><div class="muted-sm">Allocated</div><div class="font-semibold tabular-nums">{{ rollupByUnit[u].allocated.toLocaleString() }}</div></div>
+            <div><div class="muted-sm">Remaining</div><div class="font-semibold tabular-nums">{{ rollupByUnit[u].remaining.toLocaleString() }}</div></div>
+            <div><div class="muted-sm">Spent</div><div class="font-semibold tabular-nums">{{ rollupByUnit[u].spent.toLocaleString() }}</div></div>
             <div>
-              <div class="text-xs text-gray-600 dark:text-gray-400">Debt</div>
-              <div class="font-semibold tabular-nums" :class="rollupByUnit[u].debt > 0 ? 'text-red-600' : 'text-gray-600 dark:text-gray-400'">{{ rollupByUnit[u].debt.toLocaleString() }}</div>
+              <div class="muted-sm">Debt</div>
+              <div class="font-semibold tabular-nums" :class="rollupByUnit[u].debt > 0 ? 'text-red-600' : 'muted'">{{ rollupByUnit[u].debt.toLocaleString() }}</div>
             </div>
           </div>
         </div>
@@ -517,7 +517,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           :class="tab === t ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-600 dark:text-gray-500 hover:text-gray-700'"
           class="px-4 py-2 text-sm font-medium border-b-2 -mb-px cursor-pointer transition-colors">
           {{ t === 'keys' ? 'API Keys' : t.charAt(0).toUpperCase() + t.slice(1) }}
-          <span class="ml-1 text-xs text-gray-600 dark:text-gray-400">({{ t === 'budgets' ? budgets.length : t === 'keys' ? apiKeys.length : policies.length }})</span>
+          <span class="ml-1 muted-sm">({{ t === 'budgets' ? budgets.length : t === 'keys' ? apiKeys.length : policies.length }})</span>
         </button>
       </div>
 
@@ -561,7 +561,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
                 <div class="flex gap-2">
                   <!-- #8: same drill-down as ApiKeysView.vue. -->
                   <router-link :to="{ name: 'audit', query: { key_id: k.key_id } }" class="text-xs text-gray-600 hover:text-gray-800 cursor-pointer hover:underline">Activity</router-link>
-                  <button v-if="k.status === 'ACTIVE'" @click="pendingKeyRevoke = k" class="text-xs text-red-600 hover:text-red-800 cursor-pointer hover:underline">Revoke</button>
+                  <button v-if="k.status === 'ACTIVE'" @click="pendingKeyRevoke = k" class="btn-row-danger">Revoke</button>
                 </div>
               </td>
             </tr>

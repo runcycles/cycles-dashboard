@@ -224,7 +224,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   <div>
     <PageHeader title="Webhook Detail" :subtitle="webhook?.name || webhook?.subscription_id" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
       <template #back>
-        <button @click="router.push('/webhooks')" aria-label="Back to webhooks" class="text-gray-600 dark:text-gray-400 hover:text-gray-700 cursor-pointer">
+        <button @click="router.push('/webhooks')" aria-label="Back to webhooks" class="muted hover:text-gray-700 cursor-pointer">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
@@ -244,16 +244,16 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             <button @click="runTest" :disabled="testLoading" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors disabled:opacity-50">{{ testLoading ? 'Testing...' : 'Send Test' }}</button>
             <button @click="openRotate" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Rotate Secret</button>
             <button @click="showReplay = true" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Replay</button>
-            <button v-if="(webhook.consecutive_failures ?? 0) > 0 && webhook.status !== 'ACTIVE'" @click="pendingAction = 'reset'" class="text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-2.5 py-1 hover:bg-blue-50 cursor-pointer transition-colors">Reset &amp; Re-enable</button>
-            <button v-if="webhook.status === 'ACTIVE'" @click="pendingAction = 'PAUSED'" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Pause</button>
-            <button v-if="webhook.status === 'DISABLED' || webhook.status === 'PAUSED'" @click="pendingAction = 'ACTIVE'" class="text-xs text-green-700 hover:text-green-900 border border-green-200 rounded px-2.5 py-1 hover:bg-green-50 cursor-pointer transition-colors">Enable</button>
-            <button @click="openDelete" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Delete</button>
+            <button v-if="(webhook.consecutive_failures ?? 0) > 0 && webhook.status !== 'ACTIVE'" @click="pendingAction = 'reset'" class="btn-pill-primary">Reset &amp; Re-enable</button>
+            <button v-if="webhook.status === 'ACTIVE'" @click="pendingAction = 'PAUSED'" class="btn-pill-danger">Pause</button>
+            <button v-if="webhook.status === 'DISABLED' || webhook.status === 'PAUSED'" @click="pendingAction = 'ACTIVE'" class="btn-pill-success">Enable</button>
+            <button @click="openDelete" class="btn-pill-danger">Delete</button>
           </div>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
           <div class="info-panel"><span class="form-label">URL</span><span class="font-mono text-xs break-all">{{ webhook.url }}</span></div>
           <div class="info-panel"><span class="form-label">Tenant</span><TenantLink :tenant-id="webhook.tenant_id" /></div>
-          <div class="info-panel"><span class="form-label">Subscribed Event Types</span><div class="flex flex-wrap gap-1 mt-1"><span v-for="et in (webhook.event_types || [])" :key="et" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs font-mono">{{ et }}</span><span v-if="!webhook.event_types?.length" class="text-xs text-gray-600 dark:text-gray-400">all events</span></div></div>
+          <div class="info-panel"><span class="form-label">Subscribed Event Types</span><div class="flex flex-wrap gap-1 mt-1"><span v-for="et in (webhook.event_types || [])" :key="et" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs font-mono">{{ et }}</span><span v-if="!webhook.event_types?.length" class="muted-sm">all events</span></div></div>
           <div v-if="webhook.scope_filter" class="info-panel"><span class="form-label">Scope Filter</span><span class="font-mono text-xs">{{ webhook.scope_filter }}</span></div>
           <div v-if="webhook.last_success_at" class="info-panel"><span class="form-label">Last Success</span>{{ formatDateTime(webhook.last_success_at) }}</div>
           <div v-if="webhook.last_failure_at" class="info-panel"><span class="form-label">Last Failure</span>{{ formatDateTime(webhook.last_failure_at) }}</div>
@@ -270,9 +270,9 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
                    make 0 failures show as red (false alarm on a
                    perfectly healthy webhook). -->
               <span :class="(webhook.consecutive_failures ?? 0) >= Math.max((webhook.disable_after_failures ?? 10) - 2, 1) ? 'text-red-600 font-medium' : 'text-gray-700'">{{ webhook.consecutive_failures ?? 0 }}</span>
-              <span class="text-gray-600 dark:text-gray-400"> / {{ webhook.disable_after_failures ?? 10 }} consecutive</span>
+              <span class="muted"> / {{ webhook.disable_after_failures ?? 10 }} consecutive</span>
             </span>
-            <p class="text-xs text-gray-600 dark:text-gray-400 mt-0.5">Server auto-disables the subscription when threshold is reached.</p>
+            <p class="muted-sm mt-0.5">Server auto-disables the subscription when threshold is reached.</p>
           </div>
         </div>
       </div>
@@ -306,7 +306,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       <div class="card-table">
         <div class="table-cell border-b border-gray-100 flex justify-between items-center">
           <h3 class="text-sm font-medium text-gray-700">Delivery History</h3>
-          <span class="text-xs text-gray-600 dark:text-gray-400">{{ deliveries.length }} deliveries</span>
+          <span class="muted-sm">{{ deliveries.length }} deliveries</span>
         </div>
         <table class="w-full text-sm min-w-[600px]">
           <thead class="table-header">
@@ -323,8 +323,8 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
               <td class="table-cell"><StatusBadge :status="d.status" /></td>
               <td class="table-cell font-mono text-xs" :class="d.http_status && d.http_status >= 400 ? 'text-red-600' : 'text-gray-600 dark:text-gray-500'">{{ d.http_status || '-' }}</td>
               <td class="table-cell text-right text-gray-600 dark:text-gray-500 tabular-nums">{{ d.attempts }}</td>
-              <td class="table-cell font-mono text-xs text-gray-600 dark:text-gray-400">{{ d.event_id }}</td>
-              <td class="table-cell text-gray-600 dark:text-gray-400 text-xs">{{ d.attempted_at ? formatDateTime(d.attempted_at) : d.created_at ? formatDateTime(d.created_at) : '-' }}</td>
+              <td class="table-cell font-mono muted-sm">{{ d.event_id }}</td>
+              <td class="table-cell muted-sm">{{ d.attempted_at ? formatDateTime(d.attempted_at) : d.created_at ? formatDateTime(d.created_at) : '-' }}</td>
             </tr>
             <tr v-if="deliveries.length === 0">
               <td colspan="5"><EmptyState message="No deliveries yet" hint="Deliveries will appear here once events are dispatched" /></td>

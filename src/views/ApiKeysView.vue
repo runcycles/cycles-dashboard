@@ -252,12 +252,12 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         </div>
         <button v-if="hasActiveFilters" @click="clearFilters" class="text-xs text-gray-600 dark:text-gray-500 hover:text-gray-700 cursor-pointer">Clear</button>
         <div v-if="isLoading" class="flex items-center">
-          <svg class="w-4 h-4 text-gray-600 dark:text-gray-400 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+          <svg class="w-4 h-4 muted animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
         </div>
       </div>
     </div>
 
-    <p v-if="filteredKeys.length > 0" class="text-xs text-gray-600 dark:text-gray-400 mb-2">{{ filteredKeys.length }} key{{ filteredKeys.length !== 1 ? 's' : '' }}</p>
+    <p v-if="filteredKeys.length > 0" class="muted-sm mb-2">{{ filteredKeys.length }} key{{ filteredKeys.length !== 1 ? 's' : '' }}</p>
 
     <div class="card-table">
       <table class="w-full text-sm min-w-[900px]">
@@ -288,8 +288,8 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
               </div>
             </td>
             <td class="table-cell text-xs text-gray-600 dark:text-gray-500 font-mono">{{ k.scope_filter?.join(', ') || '-' }}</td>
-            <td class="table-cell text-gray-600 dark:text-gray-400 text-xs whitespace-nowrap">{{ formatDateTime(k.created_at) }}</td>
-            <td class="table-cell text-xs whitespace-nowrap" :class="k.expires_at ? 'text-gray-600 dark:text-gray-500' : 'text-gray-600 dark:text-gray-400'">
+            <td class="table-cell muted-sm whitespace-nowrap">{{ formatDateTime(k.created_at) }}</td>
+            <td class="table-cell text-xs whitespace-nowrap" :class="k.expires_at ? 'text-gray-600 dark:text-gray-500' : 'muted'">
               {{ k.expires_at ? formatDateTime(k.expires_at) : 'Never' }}
             </td>
             <td v-if="canManage" class="table-cell">
@@ -299,8 +299,8 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
                      status — investigating revoked keys is the most
                      common reason to want their history. -->
                 <router-link :to="{ name: 'audit', query: { key_id: k.key_id } }" class="text-xs text-gray-600 hover:text-gray-800 cursor-pointer hover:underline">Activity</router-link>
-                <button v-if="k.status === 'ACTIVE'" @click="openEdit(k)" class="text-xs text-blue-600 hover:text-blue-800 cursor-pointer hover:underline">Edit</button>
-                <button v-if="k.status === 'ACTIVE'" @click="pendingRevoke = k" class="text-xs text-red-600 hover:text-red-800 cursor-pointer hover:underline">Revoke</button>
+                <button v-if="k.status === 'ACTIVE'" @click="openEdit(k)" class="btn-row-primary">Edit</button>
+                <button v-if="k.status === 'ACTIVE'" @click="pendingRevoke = k" class="btn-row-danger">Revoke</button>
               </div>
             </td>
           </tr>
