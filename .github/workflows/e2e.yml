@@ -6,6 +6,13 @@ name: Nightly E2E
 # don't see — specifically the class of bugs that produced v0.1.25.22's
 # nginx proxy_pass path-stripping regression.
 
+# Cancel in-flight runs when a newer commit lands on the same ref.
+# Three rapid pushes to the same PR don't need three parallel compose
+# spin-ups — the latest one supersedes the others.
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   schedule:
     # Daily at 06:00 UTC — off-hours for most contributors and avoids
