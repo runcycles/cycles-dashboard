@@ -1,7 +1,37 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
+**Date:** 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
 **Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.17+ continues to satisfy the governance plane.
+
+### 2026-04-14 — A11y ratchet: WCAG 2.0/2.1 AA serious+critical now enforced
+
+Ratchets the axe blocking threshold from `['critical']` to `['serious', 'critical']` across every major dashboard surface after a focused fix pass. 10 pages now audited (was 3).
+
+**Before** — ~80 serious-level violations across three rule families:
+- `color-contrast` (~63 nodes) — Tailwind gray-400 / gray-500 text on white backgrounds (2.8–4.1:1; AA needs 4.5:1 for normal text).
+- `select-name` (2 critical) — unlabeled `<select>` elements in Tenants + Webhooks filters.
+- `nested-interactive` (~24 nodes) — row-level `role="button"` on Events + Audit expandable rows containing inner buttons / links.
+
+**Fixes:**
+
+| Rule | Change |
+|---|---|
+| `color-contrast` | Scripted rewrite across 21 .vue files: `text-gray-400` → `text-gray-600 dark:text-gray-400`; `text-gray-500` → `text-gray-600 dark:text-gray-500`. Dark-mode preserved. Sidebar excluded (its `text-gray-400` sits on bg-gray-900 = 5.4:1, already AA-compliant). Sidebar's version line bumped from gray-600 → gray-400 because the relationship reverses on a dark background. |
+| `color-contrast` | EmptyState hint `text-gray-300` → `text-gray-600 dark:text-gray-400`. |
+| `color-contrast` | TenantsView em-dash placeholder `text-gray-300` → `text-gray-500` + `aria-hidden="true"` (decorative). |
+| `select-name` | Added `aria-label` on parent-filter select (Tenants) + tenant-filter select (Webhooks). |
+| `nested-interactive` | Removed row-level `role="button" tabindex="0"` + keydown handlers on Events + Audit expandable rows. Converted the chevron SVG in the first cell into a real `<button>` with `aria-expanded`, `aria-label`, and focus ring. Row keeps `@click` for mouse convenience; keyboard + screen-reader users now interact via the dedicated button, not the whole row. |
+
+**Coverage:** `a11y-audit.spec.ts` now audits login, overview, tenants list, tenant detail, budgets list, events, api keys, webhooks, audit, and reservations — 10 specs, all passing.
+
+**Ratchet strategy documented inline in the spec.** Next steps: fix moderate/minor violations, then add those levels to `BLOCKING_IMPACTS`. Today's PR locks serious+critical as the floor.
+
+**Gates:** 24/24 Playwright pass in ~27s. 275/275 Vitest pass. Typecheck clean. No package version bump — no runtime behavior change.
+
+**Out of scope (follow-ups):**
+- `moderate` / `minor` violations (the next ratchet step).
+- Forced-colors media query coverage.
+- Keyboard-navigation E2E flows (tab order, focus trap on modals).
 
 ### 2026-04-14 — v0.1.25.25 grouped PermissionPicker
 
