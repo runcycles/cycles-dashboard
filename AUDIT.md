@@ -1,7 +1,32 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
+**Date:** 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
 **Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.17+ continues to satisfy the governance plane.
+
+### 2026-04-14 — A11y ratchet: all impact levels now enforced (TERMINAL)
+
+Flips `BLOCKING_IMPACTS` to `['minor', 'moderate', 'serious', 'critical']` — every axe-reported violation on a WCAG 2.0/2.1 AA rule now fails the audit. Terminal state of the severity ratchet started with the first a11y PR.
+
+**Free step.** `minor` was already confirmed clean in #54's companion sweep; re-ran the full suite against current main and verified zero violations at every level across all 10 audited pages.
+
+**Practical consequence:** a future UI change that introduces any axe-flagged WCAG 2/2.1 AA violation — even a minor-impact one (landmark labels, region annotations, empty-alt warnings on decorative content) — will fail the e2e workflow. The trade-off is we stop accumulating a11y tech debt altogether. If a specific minor rule turns out to be noisier than useful, disable it per-rule via `.disableRules([...])` rather than lowering the whole floor.
+
+**Changes:**
+
+| File | Change |
+|---|---|
+| `tests/e2e/a11y-audit.spec.ts` | `BLOCKING_IMPACTS` widened to all four levels. Doc-string re-framed around the ratchet's terminal state with the full history. Test titles updated (`has no a11y violations (minor+)`). |
+
+**Ratchet ladder — final state:**
+
+| Impact | Status |
+|---|---|
+| `critical` | ✅ blocking |
+| `serious` | ✅ blocking |
+| `moderate` | ✅ blocking |
+| `minor` | ✅ blocking — terminal |
+
+**Gates:** 24/24 Playwright pass in ~29s (10 a11y + 14 behavioral). 275/275 Vitest pass. Typecheck clean. No runtime change; no version bump.
 
 ### 2026-04-14 — A11y ratchet: moderate now enforced (and minor is also clean)
 
