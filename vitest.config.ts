@@ -6,6 +6,13 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    // Vitest's default discovery globs include **/*.spec.ts, which
+    // picks up Playwright specs in tests/e2e/. Playwright uses a
+    // different runner (@playwright/test, not Vitest); those files
+    // call `test(...)` from '@playwright/test' and can't execute
+    // under Vitest. Exclude the directory so `npm test` only runs
+    // Vitest suites. Playwright specs run via `npm run test:e2e`.
+    exclude: ['**/node_modules/**', '**/dist/**', 'tests/e2e/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'json-summary'],

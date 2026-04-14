@@ -54,38 +54,52 @@ test('clicking the Reserved column header reorders reservations by amount', asyn
   await expect(page.getByRole('row').filter({ hasText: fx.reservationIdSmall })).toBeVisible({ timeout: 10_000 })
   await expect(page.getByRole('row').filter({ hasText: fx.reservationIdLarge })).toBeVisible()
 
-  // Helper: read the reservation_id shown in the first data row. Data
-  // rows are identified by their font-mono first cell matching a
-  // reservation id our fixtures know about.
-  const firstDataRowReservationId = async (): Promise<string> => {
+  // Helper: return the row indexes of the small and large reservation
+  // rows. Comparing these indexes to each other is strictly stronger
+  // than "which id is in the first row" — the latter depends on what
+  // other reservations are in the table (e.g. the force-release spec
+  // may or may not have run first, changing the third row's presence
+  // and therefore the default created_at order). Pairwise ordering of
+  // just small vs large is independent of that.
+  const smallVsLargeOrder = async (): Promise<'small-first' | 'large-first' | 'unknown'> => {
     const rows = page.getByRole('row')
     const count = await rows.count()
+    let smallIdx = -1
+    let largeIdx = -1
     for (let i = 0; i < count; i++) {
-      const rowText = (await rows.nth(i).textContent()) ?? ''
-      if (rowText.includes(fx.reservationIdSmall)) return fx.reservationIdSmall
-      if (rowText.includes(fx.reservationIdLarge)) return fx.reservationIdLarge
+      const txt = (await rows.nth(i).textContent()) ?? ''
+      if (txt.includes(fx.reservationIdSmall)) smallIdx = i
+      if (txt.includes(fx.reservationIdLarge)) largeIdx = i
     }
-    throw new Error('No seeded reservation row found; view not rendering fixtures')
+    if (smallIdx === -1 || largeIdx === -1) return 'unknown'
+    return smallIdx < largeIdx ? 'small-first' : 'large-first'
   }
 
   // Click Reserved → ascending. The accessor must return the numeric
   // .amount for the comparator to actually order these. If the accessor
-  // is broken (returns the object), the sort is a no-op.
+  // is broken (returns the object), the sort degenerates to a stable
+  // no-op preserving created_at order — which, given seed creation
+  // order (forRelease → small → large), would also be small-first for
+  // asc. So the asc assertion alone doesn't catch the bug. The desc
+  // assertion below IS the regression lock: desc requires actual
+  // reordering, which a no-op sort cannot produce.
   await page.getByRole('columnheader', { name: /sort by reserved/i }).click()
 
-  // After ascending sort, the smaller-amount reservation must be first.
-  await expect.poll(firstDataRowReservationId, {
-    message: 'Reserved column asc sort should place the 30k reservation first',
+  await expect.poll(smallVsLargeOrder, {
+    message: 'Reserved column asc sort: small (30k) must precede large (75k)',
     timeout: 5_000,
-  }).toBe(fx.reservationIdSmall)
+  }).toBe('small-first')
 
-  // Click again → descending. Large should be first now.
+  // Click again → descending. Large must precede small. A broken
+  // accessor produces a stable no-op (all compares return 0), which
+  // means the order is unchanged from asc (small-first) — this
+  // assertion then fails, catching the v0.1.25.22 regression class.
   await page.getByRole('columnheader', { name: /sort by reserved/i }).click()
 
-  await expect.poll(firstDataRowReservationId, {
-    message: 'Reserved column desc sort should place the 75k reservation first',
+  await expect.poll(smallVsLargeOrder, {
+    message: 'Reserved column desc sort: large (75k) must precede small (30k)',
     timeout: 5_000,
-  }).toBe(fx.reservationIdLarge)
+  }).toBe('large-first')
 
   // And the aria-sort attribute flipped — belt-and-suspenders: if the
   // visual order changed but the ARIA state didn't (or vice versa),
