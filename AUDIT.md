@@ -1,7 +1,29 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
+**Date:** 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
 **Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.17+ continues to satisfy the governance plane.
+
+### 2026-04-14 — Capability-gated UI visibility test layer
+
+Adds `src/__tests__/capabilities-gating.test.ts` (11 Vitest tests) to close the compliance-grade gap around write-action buttons rendering to read-only users. A user with `manage_X: false` must not *see* the action — server-side rejection is insufficient. A v-if dropped during a refactor, negated accidentally, or typo'd to the wrong cap name previously would have passed every existing test and shipped silently.
+
+**Coverage matrix** — pass + fail assertion per pair:
+
+| View | Capability | Gated surface asserted |
+|---|---|---|
+| `TenantsView` | `manage_tenants` | "Create Tenant" button |
+| `ApiKeysView` | `manage_api_keys` | "Create API Key" button |
+| `WebhooksView` | `manage_webhooks` | "Create Webhook" + "Security Config" buttons |
+| `ReservationsView` | `manage_reservations` | Action column `<th class="w-24">` |
+| `BudgetsView` | `manage_budgets` | Action column `<th class="w-20">` |
+
+Plus one lock-in assertion: `undefined` capability is permissive (`!== false` pattern) — prevents someone "fixing" guards to `=== true` and silently breaking UIs mid-deploy when a new capability flag hasn't propagated through all environments.
+
+**Why Vitest, not Playwright:** capability gating is a pure template-conditional question JSDOM handles fine. ~10× faster per assertion, no compose stack, no browser, runs on every PR in the existing test workflow. Playwright's strength stays focused on real-browser JS-layer bugs.
+
+**Design:** `vi.mock('../api/client')` returns typed-envelope empty responses (`{ tenants: [] }`, `{ keys: [] }`, etc.) so views render in their empty-data state. `vi.mock('../composables/usePolling')` returns the destructured shape views expect. `vue-router` stubbed. Each test mounts the real view with a Pinia auth store pre-populated via `setCaps()`.
+
+**Gates:** 286/286 Vitest pass (275 prior + 11 new). Typecheck clean. No runtime change, no version bump.
 
 ### 2026-04-14 — v0.1.25.26 — style consolidation via @layer components + dark-mode restore
 
