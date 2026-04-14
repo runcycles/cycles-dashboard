@@ -6,6 +6,7 @@ import { listTenants, listApiKeys, revokeApiKey, createApiKey, updateApiKey } fr
 import { useAuthStore } from '../stores/auth'
 import type { Tenant, ApiKey, ApiKeyCreateResponse } from '../types'
 import { PERMISSIONS } from '../types'
+import PermissionPicker from '../components/PermissionPicker.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import MaskedValue from '../components/MaskedValue.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -309,12 +310,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       </div>
       <div>
         <label class="block text-xs text-gray-500 mb-1">Permissions</label>
-        <div class="grid grid-cols-2 gap-1 max-h-40 overflow-y-auto border border-gray-200 rounded p-2">
-          <label v-for="p in PERMISSIONS" :key="p" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
-            <input type="checkbox" :value="p" v-model="createForm.permissions" class="rounded" />
-            {{ p }}
-          </label>
-        </div>
+        <PermissionPicker v-model="createForm.permissions" />
       </div>
       <div>
         <label for="ck-scope" class="block text-xs text-gray-500 mb-1">Scope filter (comma-separated, optional)</label>
@@ -337,12 +333,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       </div>
       <div>
         <label class="block text-xs text-gray-500 mb-1">Permissions</label>
-        <div class="grid grid-cols-2 gap-1 max-h-40 overflow-y-auto border border-gray-200 rounded p-2">
-          <label v-for="p in PERMISSIONS" :key="p" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
-            <input type="checkbox" :value="p" v-model="editForm.permissions" class="rounded" />
-            {{ p }}
-          </label>
-        </div>
+        <PermissionPicker v-model="editForm.permissions" />
       </div>
       <div>
         <label for="ek-scope" class="block text-xs text-gray-500 mb-1">Scope filter (comma-separated)</label>

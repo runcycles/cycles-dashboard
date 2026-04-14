@@ -3,6 +3,25 @@
 **Date:** 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
 **Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.17+ continues to satisfy the governance plane.
 
+### 2026-04-14 — v0.1.25.25 grouped PermissionPicker
+
+Picking from a flat 27-item permission list was painful for operators. Replaced the inline `<label v-for>` blocks in `ApiKeysView` (create + edit) and `TenantDetailView` (create) with a new `PermissionPicker.vue` component that groups by plane + resource and supports bulk select:
+
+- **Tenant** plane — Reservations, Balances, Budgets, Policies, Webhooks, Events
+- **Admin (wildcard)** — `admin:read`, `admin:write` at the plane level (no sub-group)
+- **Admin (per-resource)** — Tenants, Budgets, Policies, API Keys, Webhooks, Events, Audit
+
+Each plane and each sub-section shows a tristate checkbox (click fills if any unchecked, clears when all checked) plus `X/Y` count. Individual checkboxes render the last colon-suffix (`create`, `read`, `write`) since the section header provides context. Spec compliance is preserved — the picker's source of truth is `PERMISSION_GROUPS` in `src/types.ts`, which a new `PermissionGroups.test.ts` asserts is the exact set-cover of `PERMISSIONS` (no drift, no duplicates).
+
+**Changes:**
+- `src/types.ts` — added `PERMISSION_GROUPS` as a typed grouped view of `PERMISSIONS`.
+- `src/components/PermissionPicker.vue` — new component. ~100 LOC. `v-model` over `string[]`.
+- `src/views/ApiKeysView.vue` — replaced two inline permission lists with `<PermissionPicker>`.
+- `src/views/TenantDetailView.vue` — replaced inline permission list; removed now-unused `PERMISSIONS` import.
+- `src/__tests__/PermissionGroups.test.ts` — drift guard (2 tests).
+
+**Not in this PR:** filter/search box in the picker, preset buttons ("read-only", "full tenant"), collapsible sections. Kept scope tight; revisit if operators ask.
+
 ### 2026-04-14 — v0.1.25.25 default sort: newest-first on reservations / api-keys / budgets / tenants
 
 Also shipping in v0.1.25.25: all four list views now default to newest-first ordering by `created_at`. Previously they defaulted to either unsorted (api-keys, tenants), created_at asc (reservations), or unsorted (budgets) — all wrong for the typical "what changed recently" operator workflow.

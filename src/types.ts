@@ -341,6 +341,43 @@ export const PERMISSIONS = [
   'admin:events:read', 'admin:audit:read',
 ] as const
 
+// Grouped view of PERMISSIONS for the edit/create picker. Purely a UI
+// concern — the canonical flat list is PERMISSIONS above. A unit test
+// guards against drift between the two. Structure: plane -> sections ->
+// items. A section with label=null renders items at the plane level
+// without a sub-header (used by the wildcard plane).
+export const PERMISSION_GROUPS = [
+  {
+    plane: 'Tenant',
+    sections: [
+      { label: 'Reservations', items: ['reservations:create', 'reservations:commit', 'reservations:release', 'reservations:extend', 'reservations:list'] },
+      { label: 'Balances', items: ['balances:read'] },
+      { label: 'Budgets', items: ['budgets:read', 'budgets:write'] },
+      { label: 'Policies', items: ['policies:read', 'policies:write'] },
+      { label: 'Webhooks', items: ['webhooks:read', 'webhooks:write'] },
+      { label: 'Events', items: ['events:read'] },
+    ],
+  },
+  {
+    plane: 'Admin (wildcard)',
+    sections: [
+      { label: null, items: ['admin:read', 'admin:write'] },
+    ],
+  },
+  {
+    plane: 'Admin (per-resource)',
+    sections: [
+      { label: 'Tenants', items: ['admin:tenants:read', 'admin:tenants:write'] },
+      { label: 'Budgets', items: ['admin:budgets:read', 'admin:budgets:write'] },
+      { label: 'Policies', items: ['admin:policies:read', 'admin:policies:write'] },
+      { label: 'API Keys', items: ['admin:apikeys:read', 'admin:apikeys:write'] },
+      { label: 'Webhooks', items: ['admin:webhooks:read', 'admin:webhooks:write'] },
+      { label: 'Events', items: ['admin:events:read'] },
+      { label: 'Audit', items: ['admin:audit:read'] },
+    ],
+  },
+] as const
+
 export const EVENT_TYPES = [
   'budget.created', 'budget.updated', 'budget.funded', 'budget.debited', 'budget.reset',
   'budget.debt_repaid', 'budget.frozen', 'budget.unfrozen', 'budget.closed',
