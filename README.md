@@ -74,7 +74,7 @@ src/
 - **Framework:** Vue 3 + TypeScript + Vite
 - **State:** Pinia
 - **Styling:** Tailwind CSS v4 with dark mode support
-- **Testing:** Vitest + @vue/test-utils
+- **Testing:** Vitest + @vue/test-utils (unit); Playwright (E2E against live compose stack)
 - **Router:** Vue Router 4 with auth guard
 - **Security:** SRI hashes (`vite-plugin-sri-gen`), CSP + HSTS headers, login rate limiting
 
@@ -178,10 +178,39 @@ Each page manages its own polling lifecycle via the `usePolling` composable:
 
 ```bash
 npm run build      # Type-check + production build → dist/
-npm run test       # Run Vitest tests
+npm run test       # Run Vitest unit tests
 npm run dev        # Development server with HMR
 npm run preview    # Preview production build locally
 ```
+
+## E2E tests
+
+Two layers run against the live docker-compose stack:
+
+1. **HTTP probes** (`scripts/e2e-probes.sh`) — curl through the dashboard nginx, verify routing + response shape.
+2. **Playwright** (`tests/e2e/`) — drive a real Chromium through critical user flows (login, reservation force-release, sort accessor).
+
+Run locally:
+
+```bash
+# One-time: install Playwright's Chromium + OS deps
+npm run test:e2e:install
+
+# Bring up the full stack (admin + runtime + redis + dashboard on :8080)
+ADMIN_API_KEY=admin-bootstrap-key docker compose -f docker-compose.yml up -d --wait
+
+# Run both layers:
+bash scripts/e2e-probes.sh
+npm run test:e2e
+
+# Interactive UI (pick tests, see traces inline):
+npm run test:e2e:ui
+
+# Tear down
+docker compose -f docker-compose.yml down -v
+```
+
+Both layers are wired into `.github/workflows/e2e.yml` — runs nightly and on PRs that touch nginx, Dockerfile, compose, the API client, `tests/e2e/`, or the workflow/probe files.
 
 ## Docker
 

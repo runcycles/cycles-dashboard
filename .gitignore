@@ -26,3 +26,8 @@ coverage
 *.sln
 *.sw?
 .claude/settings.local.json
+
+# Playwright E2E
+test-results/
+playwright-report/
+playwright/.cache/
