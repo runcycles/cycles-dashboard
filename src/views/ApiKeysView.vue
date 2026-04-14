@@ -163,7 +163,9 @@ const filteredKeys = computed(() => {
   if (filterTenant.value) result = result.filter(k => k.tenant_id === filterTenant.value)
   return result
 })
-const { sortKey, sortDir, toggle, sorted: sortedKeys } = useSort(filteredKeys)
+// Default sort: newest keys first. created_at is an ISO-8601 string, which
+// sorts lexicographically in chronological order, so 'desc' == newest first.
+const { sortKey, sortDir, toggle, sorted: sortedKeys } = useSort(filteredKeys, 'created_at', 'desc')
 
 const statusCounts = computed(() => {
   const counts: Record<string, number> = {}

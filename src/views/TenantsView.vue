@@ -53,7 +53,10 @@ const filteredTenants = computed(() => {
   }
   return out
 })
-const { sortKey, sortDir, toggle, sorted: sortedTenants } = useSort(filteredTenants)
+// Default sort: newest tenants first. created_at is an ISO-8601 string,
+// which sorts lexicographically in chronological order, so 'desc' ==
+// newest first. Click any header to switch to that column's natural order.
+const { sortKey, sortDir, toggle, sorted: sortedTenants } = useSort(filteredTenants, 'created_at', 'desc')
 
 // Parents available in the filter dropdown — union of tenants that have
 // at least one child, so the filter doesn't list tenants with no kids

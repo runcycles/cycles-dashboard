@@ -37,7 +37,13 @@ const hasMore = ref(false)
 const nextCursor = ref('')
 const loadingMore = ref(false)
 const error = ref('')
-const { sortKey, sortDir, toggle, sorted: sortedBudgets } = useSort(budgets, undefined, 'asc', {
+// Default sort: newest budgets first (created_at is ISO-8601, lex-sort
+// matches chrono-sort). The visible columns don't include Created, but
+// the initial order still matters — operators see their most recently
+// provisioned budgets at the top, which matches the "what did we just
+// change?" mental model. Clicking any visible header switches to that
+// column's natural order.
+const { sortKey, sortDir, toggle, sorted: sortedBudgets } = useSort(budgets, 'created_at', 'desc', {
   utilization: (b: BudgetLedger) => b.allocated.amount > 0 ? (b.allocated.amount - b.remaining.amount) / b.allocated.amount : 0,
   debt: (b: BudgetLedger) => b.debt?.amount ?? 0,
 })

@@ -3,6 +3,19 @@
 **Date:** 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
 **Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.17+ continues to satisfy the governance plane.
 
+### 2026-04-14 — v0.1.25.25 default sort: newest-first on reservations / api-keys / budgets / tenants
+
+Also shipping in v0.1.25.25: all four list views now default to newest-first ordering by `created_at`. Previously they defaulted to either unsorted (api-keys, tenants), created_at asc (reservations), or unsorted (budgets) — all wrong for the typical "what changed recently" operator workflow.
+
+**Changes:**
+- `ApiKeysView.vue` / `TenantsView.vue` — `useSort(items, 'created_at', 'desc')`.
+- `BudgetsView.vue` — same. Visible columns don't include Created, but the initial order still matters.
+- `ReservationsView.vue` — `useSort(reservations, 'created_at_ms', 'desc')` (was `'asc'`). Empty-state hint rewritten: default is newest-first; click Created once to flip to asc to find oldest-stuck "hung" reservations.
+
+**Why `created_at` desc is safe for these types:** all four carry `created_at` as an ISO-8601 string (or `created_at_ms` as a number on ReservationSummary). ISO-8601 sorts lexicographically in chronological order, so `desc` means newest first without any custom accessor.
+
+The existing `reservations-sort-reserved.spec.ts` e2e test toggles the Reserved column explicitly, so it's independent of the default sort direction. No test breakage.
+
 ### 2026-04-14 — v0.1.25.25 complete PERMISSIONS enum + unknown-value filter on API-key edit
 
 Follow-up to v0.1.25.24 after the dev still hit `Unrecognized permission: decide (INVALID_REQUEST)` on edit. Root cause: the dashboard's `PERMISSIONS` constant in `src/types.ts` was incomplete — only the 13 tenant-runtime permissions, missing all 14 admin-prefix permissions that the spec (cycles-governance-admin-v0.1.25.yaml, `schemas.Permission`, lines 1337-1384) and admin server enum have. Operators editing any key whose stored `permissions` included a value not rendered as a checkbox (admin permissions, or legacy orphans like `decide` from pre-enum direct Redis writes) would inadvertently round-trip that value — the stored string sits in `editForm.permissions` but has no corresponding checkbox in the UI, so `v-model` can't toggle it off. The v0.1.25.24 diff-before-PATCH fix only helped when the operator never touched the permissions UI; a single checkbox click mutated the array length and re-triggered the send.
