@@ -1,43 +1,46 @@
 import { test, expect } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
-import { loginAsAdmin } from './fixtures'
+import { getFixtures, loginAsAdmin } from './fixtures'
 
 /**
- * Accessibility audit via axe-core. Baseline coverage for the main
- * dashboard surfaces.
+ * Accessibility audit via axe-core. Covers every significant dashboard
+ * surface at the WCAG 2.0/2.1 AA level.
  *
- * Severity ratchet. Currently blocks on 'critical' only. 'Serious'-
- * level violations — color-contrast failures on the Tailwind-grey
- * rows and filters — are observed but not blocking. Rationale: the
- * dashboard has pre-existing color-contrast issues across nearly every
- * view; failing on all serious violations would require a design pass
- * and block this PR's purpose (establishing regression coverage).
+ * Severity ratchet — CURRENT FLOOR: serious + critical.
  *
- * To ratchet the floor:
- *   1. Fix all violations at the current threshold.
- *   2. Confirm the audit is clean.
- *   3. Add the next impact level to BLOCKING_IMPACTS.
- *   4. Cycle.
+ *   Introduced at 'critical' only (earlier PR). Raised to include
+ *   'serious' after a focused fix pass: color-contrast swaps
+ *   (text-gray-400 → text-gray-600 on white with dark:text-gray-400
+ *   preserved for dark mode), missing select-name labels, and
+ *   nested-interactive refactors on Events/Audit rows (whole-row
+ *   role="button" → dedicated chevron button, preserving mouse
+ *   click-to-expand without nesting interactive controls).
+ *
+ *   To ratchet further:
+ *     1. Fix violations at the next impact level.
+ *     2. Confirm the audit is clean.
+ *     3. Add 'moderate' / 'minor' to BLOCKING_IMPACTS.
+ *     4. Repeat.
  *
  * Regression class: DOM/markup changes that remove aria-labels, break
- * label-for associations, or introduce hit-stopping a11y defects
- * (e.g. an unlabeled interactive element, a form without a label).
+ * label-for associations, re-introduce color-contrast failures, or
+ * nest interactive controls inside another interactive element.
  * These pass typecheck + unit tests + other e2e specs but silently
  * make the dashboard unusable for screen readers and keyboard users.
  */
 
-// WCAG 2.0/2.1 AA is the practical target. Axe's built-in tag for that
-// is wcag2aa + wcag21aa (the 2.1 additions). Avoid wcag2a-only to skip
-// overly-lenient rules.
+// WCAG 2.0/2.1 AA target tags.
 const AUDIT_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa']
 
-// Severities that fail the test. Raise the floor by adding 'serious',
-// then 'moderate', then 'minor' as each level gets cleaned up.
-const BLOCKING_IMPACTS: ReadonlyArray<string> = ['critical']
+// Severities that fail the test. Raise to include 'moderate' / 'minor'
+// once those are known clean.
+const BLOCKING_IMPACTS: ReadonlyArray<string> = ['serious', 'critical']
 
-// Pretty-print violations in the failure message so the trace artifact
-// tells the whole story without needing to re-run axe locally.
-function formatViolations(violations: Awaited<ReturnType<AxeBuilder['analyze']>>['violations']): string {
+// Pretty-print violations into the failure message so the CI trace
+// artifact tells the whole story without requiring a local re-run.
+function formatViolations(
+  violations: Awaited<ReturnType<AxeBuilder['analyze']>>['violations'],
+): string {
   if (violations.length === 0) return ''
   return violations
     .map((v) => {
@@ -48,48 +51,109 @@ function formatViolations(violations: Awaited<ReturnType<AxeBuilder['analyze']>>
     .join('\n\n')
 }
 
-test('login page has no critical a11y violations', async ({ page }) => {
-  await page.goto('/login')
-
+async function auditPage(page: import('@playwright/test').Page) {
   const results = await new AxeBuilder({ page }).withTags(AUDIT_TAGS).analyze()
-  const blocking = results.violations.filter((v) =>
-    BLOCKING_IMPACTS.includes(v.impact ?? ''),
-  )
+  return results.violations.filter((v) => BLOCKING_IMPACTS.includes(v.impact ?? ''))
+}
+
+test('login page has no serious/critical a11y violations', async ({ page }) => {
+  await page.goto('/login')
+  const blocking = await auditPage(page)
   expect(blocking, `\n${formatViolations(blocking)}`).toEqual([])
 })
 
-test('overview page (post-login) has no critical a11y violations', async ({ page }) => {
+test('overview page (post-login) has no serious/critical a11y violations', async ({ page }) => {
   await loginAsAdmin(page)
   // loginAsAdmin lands on '/' which is the Overview route.
-
-  const results = await new AxeBuilder({ page })
-    .withTags(AUDIT_TAGS)
-    // Exclude third-party / uncontrollable widgets if any get added
-    // later (e.g. embedded Grafana iframe). Empty today.
-    // .exclude('...')
-    .analyze()
-
-  const blocking = results.violations.filter((v) =>
-    BLOCKING_IMPACTS.includes(v.impact ?? ''),
-  )
+  const blocking = await auditPage(page)
   expect(blocking, `\n${formatViolations(blocking)}`).toEqual([])
 })
 
-test('reservations page (post-login) has no critical a11y violations', async ({ page }) => {
+test('tenants list has no serious/critical a11y violations', async ({ page }) => {
   await loginAsAdmin(page)
-  await page.goto('/reservations')
-
-  // Give the view's initial listTenants + listReservations roundtrip a
-  // beat to settle before auditing — axe reads the live DOM, and a
-  // spinner mid-analysis can produce noisy timing-sensitive reports.
+  await page.goto('/tenants')
   await page.waitForResponse(
     (r) => r.url().includes('/v1/admin/tenants') && r.request().method() === 'GET',
     { timeout: 10_000 },
   )
+  const blocking = await auditPage(page)
+  expect(blocking, `\n${formatViolations(blocking)}`).toEqual([])
+})
 
-  const results = await new AxeBuilder({ page }).withTags(AUDIT_TAGS).analyze()
-  const blocking = results.violations.filter((v) =>
-    BLOCKING_IMPACTS.includes(v.impact ?? ''),
+test('tenant detail has no serious/critical a11y violations', async ({ page }) => {
+  const fx = getFixtures()
+  await loginAsAdmin(page)
+  await page.goto(`/tenants/${fx.tenantId}`)
+  await page.waitForResponse(
+    (r) =>
+      r.url().includes(`/v1/admin/tenants/${fx.tenantId}`) &&
+      r.request().method() === 'GET',
+    { timeout: 10_000 },
   )
+  const blocking = await auditPage(page)
+  expect(blocking, `\n${formatViolations(blocking)}`).toEqual([])
+})
+
+test('budgets list has no serious/critical a11y violations', async ({ page }) => {
+  const fx = getFixtures()
+  await loginAsAdmin(page)
+  await page.goto('/budgets')
+  await page.waitForResponse(
+    (r) => r.url().includes('/v1/admin/tenants') && r.request().method() === 'GET',
+    { timeout: 10_000 },
+  )
+  // Pick the seeded tenant so the table actually has rows to audit —
+  // empty-state-only audits miss table-specific violations.
+  await page.locator('#budget-tenant').selectOption(fx.tenantId).catch(() => {})
+  await page.waitForLoadState('networkidle')
+  const blocking = await auditPage(page)
+  expect(blocking, `\n${formatViolations(blocking)}`).toEqual([])
+})
+
+test('events list has no serious/critical a11y violations', async ({ page }) => {
+  await loginAsAdmin(page)
+  await page.goto('/events')
+  await page.waitForLoadState('networkidle')
+  const blocking = await auditPage(page)
+  expect(blocking, `\n${formatViolations(blocking)}`).toEqual([])
+})
+
+test('api keys list has no serious/critical a11y violations', async ({ page }) => {
+  await loginAsAdmin(page)
+  await page.goto('/api-keys')
+  await page.waitForResponse(
+    (r) => r.url().includes('/v1/admin/tenants') && r.request().method() === 'GET',
+    { timeout: 10_000 },
+  )
+  await page.waitForLoadState('networkidle')
+  const blocking = await auditPage(page)
+  expect(blocking, `\n${formatViolations(blocking)}`).toEqual([])
+})
+
+test('webhooks list has no serious/critical a11y violations', async ({ page }) => {
+  await loginAsAdmin(page)
+  await page.goto('/webhooks')
+  await page.waitForLoadState('networkidle')
+  const blocking = await auditPage(page)
+  expect(blocking, `\n${formatViolations(blocking)}`).toEqual([])
+})
+
+test('audit page has no serious/critical a11y violations', async ({ page }) => {
+  await loginAsAdmin(page)
+  await page.goto('/audit')
+  await page.waitForLoadState('networkidle')
+  const blocking = await auditPage(page)
+  expect(blocking, `\n${formatViolations(blocking)}`).toEqual([])
+})
+
+test('reservations page has no serious/critical a11y violations', async ({ page }) => {
+  await loginAsAdmin(page)
+  await page.goto('/reservations')
+  await page.waitForResponse(
+    (r) => r.url().includes('/v1/admin/tenants') && r.request().method() === 'GET',
+    { timeout: 10_000 },
+  )
+  await page.waitForLoadState('networkidle')
+  const blocking = await auditPage(page)
   expect(blocking, `\n${formatViolations(blocking)}`).toEqual([])
 })

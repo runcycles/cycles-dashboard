@@ -18,7 +18,7 @@ const barColor = computed(() => {
 
 <template>
   <div>
-    <div class="flex justify-between text-xs text-gray-500 mb-1">
+    <div class="flex justify-between text-xs text-gray-600 dark:text-gray-500 mb-1">
       <span>{{ label || 'Utilization' }}</span>
       <span>{{ usedPct.toFixed(0) }}%</span>
     </div>

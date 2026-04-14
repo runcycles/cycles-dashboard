@@ -81,7 +81,7 @@ function logout() {
           </svg>
         </button>
       </div>
-      <p class="text-xs text-gray-600">v{{ version }}</p>
+      <p class="text-xs text-gray-400">v{{ version }}</p>
     </div>
   </aside>
 </template>

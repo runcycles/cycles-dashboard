@@ -100,7 +100,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
     <form @submit.prevent="applyFilters" class="bg-white rounded-lg shadow p-4 mb-4">
       <div class="flex gap-3 flex-wrap items-end">
         <div>
-          <label for="ev-category" class="block text-xs text-gray-500 mb-1">Category</label>
+          <label for="ev-category" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Category</label>
           <select id="ev-category" v-model="category" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
             <option value="">All</option>
             <option>budget</option><option>reservation</option><option>tenant</option>
@@ -108,29 +108,29 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
           </select>
         </div>
         <div>
-          <label for="ev-tenant" class="block text-xs text-gray-500 mb-1">Tenant ID</label>
+          <label for="ev-tenant" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Tenant ID</label>
           <input id="ev-tenant" v-model="tenantId" placeholder="tenant id" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-32" />
         </div>
         <div>
-          <label for="ev-scope" class="block text-xs text-gray-500 mb-1">Scope</label>
+          <label for="ev-scope" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Scope</label>
           <input id="ev-scope" v-model="scope" placeholder="scope prefix" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-40" />
         </div>
         <div>
-          <label for="ev-correlation" class="block text-xs text-gray-500 mb-1">Correlation ID</label>
+          <label for="ev-correlation" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Correlation ID</label>
           <input id="ev-correlation" v-model="correlationId" placeholder="correlation_id" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-40" />
         </div>
         <button type="submit" class="bg-gray-900 text-white px-3 py-1.5 rounded text-sm hover:bg-gray-800 cursor-pointer">Filter</button>
-        <button v-if="hasActiveFilters" type="button" @click="clearFilters" class="text-sm text-gray-500 hover:text-gray-700 cursor-pointer">Clear</button>
+        <button v-if="hasActiveFilters" type="button" @click="clearFilters" class="text-sm text-gray-600 dark:text-gray-500 hover:text-gray-700 cursor-pointer">Clear</button>
       </div>
     </form>
 
     <!-- Results count -->
-    <p v-if="events.length > 0" class="text-xs text-gray-400 mb-2">{{ events.length }} events</p>
+    <p v-if="events.length > 0" class="text-xs text-gray-600 dark:text-gray-400 mb-2">{{ events.length }} events</p>
 
     <!-- Event table -->
     <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
       <table class="w-full text-sm min-w-[640px]">
-        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
+        <thead class="bg-gray-50 text-gray-600 dark:text-gray-500 text-xs uppercase tracking-wider">
           <tr>
             <th class="w-8"></th>
             <SortHeader label="Type" column="event_type" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
@@ -142,11 +142,25 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
         </thead>
         <tbody class="divide-y divide-gray-100">
           <template v-for="e in sortedEvents" :key="e.event_id">
-            <tr class="hover:bg-gray-50 cursor-pointer transition-colors" role="button" tabindex="0" @click="expanded = expanded === e.event_id ? null : e.event_id" @keydown.enter.prevent="expanded = expanded === e.event_id ? null : e.event_id" @keydown.space.prevent="expanded = expanded === e.event_id ? null : e.event_id" :aria-expanded="expanded === e.event_id">
-              <td class="pl-3 py-3 text-gray-400">
-                <svg class="w-3.5 h-3.5 transition-transform" :class="expanded === e.event_id ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
+            <!-- Row is mouse-clickable for convenience but NOT a role=button
+                 element — the chevron <button> in the first cell provides
+                 keyboard + screen-reader access to the expand behavior.
+                 Making the whole row a role=button would nest the inner
+                 TenantLink/action buttons inside another interactive
+                 element (axe rule: nested-interactive, WCAG 4.1.2). -->
+            <tr class="hover:bg-gray-50 cursor-pointer transition-colors" @click="expanded = expanded === e.event_id ? null : e.event_id">
+              <td class="pl-3 py-3 text-gray-600 dark:text-gray-400">
+                <button
+                  type="button"
+                  :aria-expanded="expanded === e.event_id"
+                  :aria-label="expanded === e.event_id ? `Collapse event details` : `Expand event details`"
+                  class="p-0.5 -ml-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-400"
+                  @click.stop="expanded = expanded === e.event_id ? null : e.event_id"
+                >
+                  <svg class="w-3.5 h-3.5 transition-transform" :class="expanded === e.event_id ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
               </td>
               <td class="px-4 py-3 font-mono text-xs">{{ e.event_type }}</td>
               <td class="px-4 py-3"><span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs">{{ e.category }}</span></td>
@@ -154,19 +168,19 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
               <td class="px-4 py-3">
                 <TenantLink v-if="e.tenant_id" :tenant-id="e.tenant_id" @click.stop />
               </td>
-              <td class="px-4 py-3 text-gray-400 whitespace-nowrap text-xs" :title="new Date(e.timestamp).toISOString()">{{ formatDateTime(e.timestamp) }}</td>
+              <td class="px-4 py-3 text-gray-600 dark:text-gray-400 whitespace-nowrap text-xs" :title="new Date(e.timestamp).toISOString()">{{ formatDateTime(e.timestamp) }}</td>
             </tr>
             <tr v-if="expanded === e.event_id" class="bg-gray-50/70">
               <td colspan="6" class="px-4 py-3 pl-11">
                 <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3">
-                  <div><span class="text-gray-400">Event ID:</span> <span class="font-mono">{{ e.event_id }}</span></div>
-                  <div><span class="text-gray-400">Source:</span> {{ e.source }}</div>
-                  <div v-if="e.request_id"><span class="text-gray-400">Request ID:</span> <span class="font-mono">{{ e.request_id }}</span></div>
+                  <div><span class="text-gray-600 dark:text-gray-400">Event ID:</span> <span class="font-mono">{{ e.event_id }}</span></div>
+                  <div><span class="text-gray-600 dark:text-gray-400">Source:</span> {{ e.source }}</div>
+                  <div v-if="e.request_id"><span class="text-gray-600 dark:text-gray-400">Request ID:</span> <span class="font-mono">{{ e.request_id }}</span></div>
                   <div v-if="e.correlation_id">
-                    <span class="text-gray-400">Correlation ID:</span>
+                    <span class="text-gray-600 dark:text-gray-400">Correlation ID:</span>
                     <button @click.stop="viewCorrelated(e.correlation_id!)" class="text-blue-600 hover:underline ml-1 font-mono cursor-pointer">{{ e.correlation_id }}</button>
                   </div>
-                  <div v-if="e.actor"><span class="text-gray-400">Actor:</span> {{ e.actor.type }}<span v-if="e.actor.key_id" class="font-mono"> {{ e.actor.key_id }}</span></div>
+                  <div v-if="e.actor"><span class="text-gray-600 dark:text-gray-400">Actor:</span> {{ e.actor.type }}<span v-if="e.actor.key_id" class="font-mono"> {{ e.actor.key_id }}</span></div>
                 </div>
                 <div v-if="e.data" class="bg-white border border-gray-200 rounded p-3 text-xs font-mono overflow-auto max-h-40">
                   <pre class="whitespace-pre-wrap">{{ safeJsonStringify(e.data) }}</pre>

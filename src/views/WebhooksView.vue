@@ -253,7 +253,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
          actually belong to rather than the full tenant list, so the
          dropdown doesn't show tenants with no subscriptions. -->
     <div class="mb-4">
-      <select v-model="tenantFilter" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+      <select v-model="tenantFilter" aria-label="Filter webhooks by tenant" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
         <option value="">All tenants</option>
         <option v-for="t in tenants.filter(t => webhooks.some(w => w.tenant_id === t.tenant_id))" :key="t.tenant_id" :value="t.tenant_id">
           {{ t.name || t.tenant_id }}
@@ -266,12 +266,12 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       <span class="text-sm text-blue-900">{{ selectedVisibleCount }} selected</span>
       <button @click="openBulk('PAUSED')" class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer">Pause selected</button>
       <button @click="openBulk('ACTIVE')" class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer">Enable selected</button>
-      <button @click="selected = new Set()" class="text-xs text-gray-500 hover:text-gray-700 ml-auto cursor-pointer">Clear</button>
+      <button @click="selected = new Set()" class="text-xs text-gray-600 dark:text-gray-500 hover:text-gray-700 ml-auto cursor-pointer">Clear</button>
     </div>
 
     <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
       <table class="w-full text-sm min-w-[680px]">
-        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
+        <thead class="bg-gray-50 text-gray-600 dark:text-gray-500 text-xs uppercase tracking-wider">
           <tr>
             <th v-if="canManage" class="px-4 py-3 w-10">
               <input type="checkbox" :checked="selectedVisibleAll" @change="toggleSelectAll" aria-label="Select all visible webhooks" />
@@ -292,11 +292,11 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             <td class="px-4 py-3"><span :class="healthColor(w)" class="inline-block w-2.5 h-2.5 rounded-full" :title="healthLabel(w)" /></td>
             <td class="px-4 py-3">
               <router-link :to="{ name: 'webhook-detail', params: { id: w.subscription_id } }" class="text-blue-600 hover:underline truncate block max-w-[300px]">{{ w.url }}</router-link>
-              <span v-if="w.name" class="text-xs text-gray-400">{{ w.name }}</span>
+              <span v-if="w.name" class="text-xs text-gray-600 dark:text-gray-400">{{ w.name }}</span>
             </td>
             <td class="px-4 py-3"><StatusBadge :status="w.status" /></td>
-            <td class="px-4 py-3 text-right tabular-nums" :class="(w.consecutive_failures ?? 0) > 0 ? 'text-red-600 font-medium' : 'text-gray-400'">{{ w.consecutive_failures ?? 0 }}</td>
-            <td class="px-4 py-3 text-xs text-gray-500">{{ w.event_types?.join(', ') || w.event_categories?.join(', ') || 'all' }}</td>
+            <td class="px-4 py-3 text-right tabular-nums" :class="(w.consecutive_failures ?? 0) > 0 ? 'text-red-600 font-medium' : 'text-gray-600 dark:text-gray-400'">{{ w.consecutive_failures ?? 0 }}</td>
+            <td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-500">{{ w.event_types?.join(', ') || w.event_categories?.join(', ') || 'all' }}</td>
             <td v-if="canManage" class="px-4 py-3">
               <button v-if="w.status === 'ACTIVE'" @click="pendingStatusAction = { id: w.subscription_id, url: w.url, action: 'PAUSED' }" class="text-xs text-red-600 hover:text-red-800 cursor-pointer hover:underline">Pause</button>
               <button v-if="w.status === 'PAUSED' || w.status === 'DISABLED'" @click="pendingStatusAction = { id: w.subscription_id, url: w.url, action: 'ACTIVE' }" class="text-xs text-green-700 hover:text-green-900 cursor-pointer hover:underline">Enable</button>
@@ -343,22 +343,22 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
 
     <FormDialog v-if="showCreate" title="Create Webhook" submit-label="Create Webhook" :loading="createLoading" :error="createError" @submit="submitCreate" @cancel="showCreate = false" :wide="true">
       <div>
-        <label for="cw-url" class="block text-xs text-gray-500 mb-1">URL</label>
+        <label for="cw-url" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">URL</label>
         <input id="cw-url" v-model="createForm.url" type="url" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="https://example.com/webhooks" />
       </div>
       <div>
-        <label for="cw-name" class="block text-xs text-gray-500 mb-1">Name (optional)</label>
+        <label for="cw-name" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Name (optional)</label>
         <input id="cw-name" v-model="createForm.name" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" placeholder="Production alerts" />
       </div>
       <div>
-        <label for="cw-tenant" class="block text-xs text-gray-500 mb-1">Tenant (optional — omit for system-wide)</label>
+        <label for="cw-tenant" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Tenant (optional — omit for system-wide)</label>
         <select id="cw-tenant" v-model="createForm.tenant_id" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
           <option value="">System-wide</option>
           <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
         </select>
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Event types</label>
+        <label class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Event types</label>
         <div class="grid grid-cols-2 gap-1 max-h-48 overflow-y-auto border border-gray-200 rounded p-2">
           <label v-for="et in EVENT_TYPES" :key="et" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
             <input type="checkbox" :value="et" v-model="createForm.event_types" class="rounded" />
@@ -367,7 +367,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         </div>
       </div>
       <div>
-        <label for="cw-scope" class="block text-xs text-gray-500 mb-1">Scope filter (optional)</label>
+        <label for="cw-scope" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Scope filter (optional)</label>
         <input id="cw-scope" v-model="createForm.scope_filter" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="tenant:acme/*" />
       </div>
     </FormDialog>
@@ -382,16 +382,16 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
 
     <!-- Webhook security config dialog -->
     <FormDialog v-if="showSecurityConfig" title="Webhook Security Config" submit-label="Save Config" :loading="securityLoading" :error="securityError" @submit="submitSecurityConfig" @cancel="showSecurityConfig = false">
-      <p class="text-xs text-gray-500">Server-level security rules applied to all webhook create/update operations. Changes take effect immediately. Existing subscriptions are not retroactively validated.</p>
+      <p class="text-xs text-gray-600 dark:text-gray-500">Server-level security rules applied to all webhook create/update operations. Changes take effect immediately. Existing subscriptions are not retroactively validated.</p>
       <div>
-        <label for="sc-cidr" class="block text-xs text-gray-500 mb-1">Blocked CIDR ranges (one per line)</label>
+        <label for="sc-cidr" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Blocked CIDR ranges (one per line)</label>
         <textarea id="sc-cidr" v-model="securityForm.blocked_cidr" rows="4" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="10.0.0.0/8&#10;172.16.0.0/12&#10;192.168.0.0/16" />
-        <p class="text-xs text-gray-400 mt-0.5">Webhook URLs resolving to these ranges will be blocked (SSRF protection)</p>
+        <p class="text-xs text-gray-600 dark:text-gray-400 mt-0.5">Webhook URLs resolving to these ranges will be blocked (SSRF protection)</p>
       </div>
       <div>
-        <label for="sc-patterns" class="block text-xs text-gray-500 mb-1">Allowed URL patterns (one per line, glob syntax)</label>
+        <label for="sc-patterns" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Allowed URL patterns (one per line, glob syntax)</label>
         <textarea id="sc-patterns" v-model="securityForm.allowed_patterns" rows="3" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="https://*.example.com/*" />
-        <p class="text-xs text-gray-400 mt-0.5">If non-empty, only URLs matching at least one pattern are allowed</p>
+        <p class="text-xs text-gray-600 dark:text-gray-400 mt-0.5">If non-empty, only URLs matching at least one pattern are allowed</p>
       </div>
       <label class="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
         <input v-model="securityForm.allow_http" type="checkbox" class="rounded" />

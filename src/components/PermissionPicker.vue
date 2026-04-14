@@ -78,7 +78,7 @@ function groupState(items: readonly string[]): 'none' | 'some' | 'all' {
           @change="toggleGroup(plane.sections.flatMap(s => s.items))"
         />
         <span class="flex-1">{{ plane.plane }}</span>
-        <span class="text-gray-400 font-normal">
+        <span class="text-gray-600 dark:text-gray-400 font-normal">
           {{ countSelected(plane.sections.flatMap(s => s.items)) }}
           /
           {{ plane.sections.flatMap(s => s.items).length }}
@@ -100,7 +100,7 @@ function groupState(items: readonly string[]): 'none' | 'some' | 'all' {
             @change="toggleGroup(section.items)"
           />
           <span class="flex-1">{{ section.label }}</span>
-          <span class="text-gray-400">
+          <span class="text-gray-600 dark:text-gray-400">
             {{ countSelected(section.items) }} / {{ section.items.length }}
           </span>
         </label>

@@ -169,9 +169,9 @@ const preview = computed(() => serialize())
            tenant id comes from the route (current tenant detail), which
            makes the admin-on-behalf-of cross-field check trivially pass. -->
       <div class="flex items-center gap-2 px-3 py-2 text-sm bg-gray-50">
-        <span class="inline-block w-24 text-xs font-medium text-gray-500">tenant</span>
+        <span class="inline-block w-24 text-xs font-medium text-gray-600 dark:text-gray-500">tenant</span>
         <span class="font-mono text-sm flex-1">{{ props.tenantId }}</span>
-        <span class="text-xs text-gray-400">locked</span>
+        <span class="text-xs text-gray-600 dark:text-gray-400">locked</span>
       </div>
       <!-- User-added deeper segments. Each row: kind label, id input,
            optional "any (*)" radio for policy patterns, remove button.
@@ -182,7 +182,7 @@ const preview = computed(() => serialize())
            widget would be pointless. -->
       <div v-for="(seg, i) in extra" :key="i" class="px-3 py-2 text-sm">
         <div class="flex items-center gap-2">
-          <span class="inline-block w-24 text-xs font-medium text-gray-500">{{ seg.kind }}</span>
+          <span class="inline-block w-24 text-xs font-medium text-gray-600 dark:text-gray-500">{{ seg.kind }}</span>
           <div class="flex-1 flex items-center gap-3 flex-wrap">
             <!-- Policy wildcard mode: two radios giving equal weight to
                  "literal" and "any". The "literal" radio carries an
@@ -215,7 +215,7 @@ const preview = computed(() => serialize())
             type="button"
             @click="removeRow(i)"
             :aria-label="`Remove ${seg.kind} level`"
-            class="text-gray-400 hover:text-red-600 cursor-pointer text-sm"
+            class="text-gray-600 dark:text-gray-400 hover:text-red-600 cursor-pointer text-sm"
           >✕</button>
         </div>
       </div>
@@ -231,7 +231,7 @@ const preview = computed(() => serialize())
         <option value="">+ Add level</option>
         <option v-for="k in availableKinds" :key="k" :value="k">{{ k }}</option>
       </select>
-      <span v-else class="text-xs text-gray-400">No more levels available.</span>
+      <span v-else class="text-xs text-gray-600 dark:text-gray-400">No more levels available.</span>
     </div>
     <!-- Policy-only: trailing /* for "match everything deeper than the
          last concrete segment." Deliberately below the row list —
@@ -246,7 +246,7 @@ const preview = computed(() => serialize())
     </label>
     <!-- Live preview of the serialized scope. Monospace so users who
          already know the format can sanity-check exactly what gets sent. -->
-    <div class="text-xs text-gray-500 flex items-baseline gap-2">
+    <div class="text-xs text-gray-600 dark:text-gray-500 flex items-baseline gap-2">
       <span>Will create as:</span>
       <code class="font-mono text-gray-800 bg-gray-50 px-2 py-0.5 rounded border border-gray-200 break-all">{{ preview }}</code>
     </div>

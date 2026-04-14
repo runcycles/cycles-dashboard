@@ -228,7 +228,7 @@ function parentName(id: string | undefined): string {
     <!-- Search + parent filter -->
     <div class="mb-4 flex gap-3 flex-wrap items-center">
       <input v-model="search" placeholder="Search by ID or name..." class="border border-gray-300 rounded px-3 py-1.5 text-sm max-w-xs flex-1 min-w-[14rem]" />
-      <select v-model="parentFilter" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+      <select v-model="parentFilter" aria-label="Filter by parent tenant" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
         <option value="">All tenants</option>
         <option value="__root__">(root-level only)</option>
         <option v-for="p in parentOptions" :key="p.tenant_id" :value="p.tenant_id">Children of: {{ p.name || p.tenant_id }}</option>
@@ -242,12 +242,12 @@ function parentName(id: string | undefined): string {
       <span class="text-sm text-blue-900">{{ selectedVisibleCount }} selected</span>
       <button @click="openBulk('SUSPENDED')" class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer">Suspend selected</button>
       <button @click="openBulk('ACTIVE')" class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer">Reactivate selected</button>
-      <button @click="selected = new Set()" class="text-xs text-gray-500 hover:text-gray-700 ml-auto cursor-pointer">Clear</button>
+      <button @click="selected = new Set()" class="text-xs text-gray-600 dark:text-gray-500 hover:text-gray-700 ml-auto cursor-pointer">Clear</button>
     </div>
 
     <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
       <table class="w-full text-sm min-w-[640px]">
-        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
+        <thead class="bg-gray-50 text-gray-600 dark:text-gray-500 text-xs uppercase tracking-wider">
           <tr>
             <th v-if="canManage" class="px-4 py-3 w-10">
               <input type="checkbox" :checked="selectedVisibleAll" @change="toggleSelectAll" aria-label="Select all visible tenants" />
@@ -274,7 +274,7 @@ function parentName(id: string | undefined): string {
               <router-link v-if="t.parent_tenant_id" :to="{ name: 'tenant-detail', params: { id: t.parent_tenant_id } }" class="text-blue-600 hover:underline font-mono">
                 {{ parentName(t.parent_tenant_id) }}
               </router-link>
-              <span v-else class="text-gray-300">—</span>
+              <span v-else class="text-gray-500" aria-hidden="true">—</span>
             </td>
             <td class="px-4 py-3 text-xs">
               <button
@@ -283,10 +283,10 @@ function parentName(id: string | undefined): string {
                 class="text-blue-600 hover:underline cursor-pointer"
                 :aria-label="`Filter list to ${childCountMap[t.tenant_id]} children of ${t.name}`"
               >{{ childCountMap[t.tenant_id] }} child{{ childCountMap[t.tenant_id] === 1 ? '' : 'ren' }}</button>
-              <span v-else class="text-gray-300">—</span>
+              <span v-else class="text-gray-500" aria-hidden="true">—</span>
             </td>
             <td class="px-4 py-3"><StatusBadge :status="t.status" /></td>
-            <td class="px-4 py-3 text-gray-400 text-xs">{{ formatDate(t.created_at) }}</td>
+            <td class="px-4 py-3 text-gray-600 dark:text-gray-400 text-xs">{{ formatDate(t.created_at) }}</td>
             <td v-if="canManage" class="px-4 py-3">
               <button v-if="t.status === 'ACTIVE'" @click="pendingStatusAction = { tenantId: t.tenant_id, name: t.name, action: 'SUSPENDED' }" class="text-xs text-red-600 hover:text-red-800 cursor-pointer hover:underline">Suspend</button>
               <button v-if="t.status === 'SUSPENDED'" @click="pendingStatusAction = { tenantId: t.tenant_id, name: t.name, action: 'ACTIVE' }" class="text-xs text-green-700 hover:text-green-900 cursor-pointer hover:underline">Reactivate</button>
@@ -335,16 +335,16 @@ function parentName(id: string | undefined): string {
 
     <FormDialog v-if="showCreate" title="Create Tenant" submit-label="Create Tenant" :loading="createLoading" :error="createError" @submit="submitCreate" @cancel="showCreate = false">
       <div>
-        <label for="ct-id" class="block text-xs text-gray-500 mb-1">Tenant ID</label>
+        <label for="ct-id" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Tenant ID</label>
         <input id="ct-id" v-model="createForm.tenant_id" required pattern="^[a-z0-9-]+$" minlength="3" maxlength="64" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="acme-corp" />
-        <p class="text-xs text-gray-400 mt-0.5">Lowercase letters, numbers, and hyphens only</p>
+        <p class="text-xs text-gray-600 dark:text-gray-400 mt-0.5">Lowercase letters, numbers, and hyphens only</p>
       </div>
       <div>
-        <label for="ct-name" class="block text-xs text-gray-500 mb-1">Display Name</label>
+        <label for="ct-name" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Display Name</label>
         <input id="ct-name" v-model="createForm.name" required maxlength="256" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" placeholder="Acme Corporation" />
       </div>
       <div>
-        <label for="ct-parent" class="block text-xs text-gray-500 mb-1">Parent Tenant (optional)</label>
+        <label for="ct-parent" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Parent Tenant (optional)</label>
         <select id="ct-parent" v-model="createForm.parent_tenant_id" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
           <option value="">None</option>
           <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
