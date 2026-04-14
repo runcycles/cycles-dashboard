@@ -141,35 +141,35 @@ watch(() => route.query, () => {
     <form @submit.prevent="query" class="bg-white rounded-lg shadow p-4 mb-4">
       <div class="flex gap-3 flex-wrap items-end">
         <div>
-          <label for="audit-tenant" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Tenant ID</label>
+          <label for="audit-tenant" class="form-label">Tenant ID</label>
           <input id="audit-tenant" v-model="tenantId" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-32" placeholder="acme" />
         </div>
         <div>
-          <label for="audit-key" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Key ID</label>
+          <label for="audit-key" class="form-label">Key ID</label>
           <input id="audit-key" v-model="keyId" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-32" placeholder="key_..." />
         </div>
         <div>
-          <label for="audit-operation" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Operation</label>
+          <label for="audit-operation" class="form-label">Operation</label>
           <input id="audit-operation" v-model="operation" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-32" placeholder="createBudget" />
         </div>
         <div>
-          <label for="audit-resource" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Resource Type</label>
-          <select id="audit-resource" v-model="resourceType" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+          <label for="audit-resource" class="form-label">Resource Type</label>
+          <select id="audit-resource" v-model="resourceType" class="form-select">
             <option value="">All</option>
             <option>tenant</option><option>budget</option><option>api_key</option>
             <option>policy</option><option>webhook</option><option>config</option>
           </select>
         </div>
         <div>
-          <label for="audit-resource-id" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Resource ID</label>
+          <label for="audit-resource-id" class="form-label">Resource ID</label>
           <input id="audit-resource-id" v-model="resourceId" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-36" placeholder="key_abc123..." />
         </div>
         <div>
-          <label for="audit-from" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">From</label>
+          <label for="audit-from" class="form-label">From</label>
           <input id="audit-from" v-model="fromDate" type="datetime-local" class="border border-gray-300 rounded px-2 py-1.5 text-sm" />
         </div>
         <div>
-          <label for="audit-to" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">To</label>
+          <label for="audit-to" class="form-label">To</label>
           <input id="audit-to" v-model="toDate" type="datetime-local" class="border border-gray-300 rounded px-2 py-1.5 text-sm" />
         </div>
         <button type="submit" :disabled="loading" class="bg-gray-900 text-white px-4 py-1.5 rounded text-sm hover:bg-gray-800 disabled:opacity-50 cursor-pointer">

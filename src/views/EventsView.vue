@@ -100,23 +100,23 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
     <form @submit.prevent="applyFilters" class="bg-white rounded-lg shadow p-4 mb-4">
       <div class="flex gap-3 flex-wrap items-end">
         <div>
-          <label for="ev-category" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Category</label>
-          <select id="ev-category" v-model="category" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+          <label for="ev-category" class="form-label">Category</label>
+          <select id="ev-category" v-model="category" class="form-select">
             <option value="">All</option>
             <option>budget</option><option>reservation</option><option>tenant</option>
             <option>api_key</option><option>policy</option><option>system</option>
           </select>
         </div>
         <div>
-          <label for="ev-tenant" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Tenant ID</label>
+          <label for="ev-tenant" class="form-label">Tenant ID</label>
           <input id="ev-tenant" v-model="tenantId" placeholder="tenant id" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-32" />
         </div>
         <div>
-          <label for="ev-scope" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Scope</label>
+          <label for="ev-scope" class="form-label">Scope</label>
           <input id="ev-scope" v-model="scope" placeholder="scope prefix" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-40" />
         </div>
         <div>
-          <label for="ev-correlation" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Correlation ID</label>
+          <label for="ev-correlation" class="form-label">Correlation ID</label>
           <input id="ev-correlation" v-model="correlationId" placeholder="correlation_id" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-40" />
         </div>
         <button type="submit" class="bg-gray-900 text-white px-3 py-1.5 rounded text-sm hover:bg-gray-800 cursor-pointer">Filter</button>

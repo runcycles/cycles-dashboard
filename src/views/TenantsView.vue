@@ -228,7 +228,7 @@ function parentName(id: string | undefined): string {
     <!-- Search + parent filter -->
     <div class="mb-4 flex gap-3 flex-wrap items-center">
       <input v-model="search" placeholder="Search by ID or name..." class="border border-gray-300 rounded px-3 py-1.5 text-sm max-w-xs flex-1 min-w-[14rem]" />
-      <select v-model="parentFilter" aria-label="Filter by parent tenant" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+      <select v-model="parentFilter" aria-label="Filter by parent tenant" class="form-select">
         <option value="">All tenants</option>
         <option value="__root__">(root-level only)</option>
         <option v-for="p in parentOptions" :key="p.tenant_id" :value="p.tenant_id">Children of: {{ p.name || p.tenant_id }}</option>
@@ -335,17 +335,17 @@ function parentName(id: string | undefined): string {
 
     <FormDialog v-if="showCreate" title="Create Tenant" submit-label="Create Tenant" :loading="createLoading" :error="createError" @submit="submitCreate" @cancel="showCreate = false">
       <div>
-        <label for="ct-id" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Tenant ID</label>
-        <input id="ct-id" v-model="createForm.tenant_id" required pattern="^[a-z0-9-]+$" minlength="3" maxlength="64" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="acme-corp" />
+        <label for="ct-id" class="form-label">Tenant ID</label>
+        <input id="ct-id" v-model="createForm.tenant_id" required pattern="^[a-z0-9-]+$" minlength="3" maxlength="64" class="form-input-mono" placeholder="acme-corp" />
         <p class="text-xs text-gray-600 dark:text-gray-400 mt-0.5">Lowercase letters, numbers, and hyphens only</p>
       </div>
       <div>
-        <label for="ct-name" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Display Name</label>
-        <input id="ct-name" v-model="createForm.name" required maxlength="256" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" placeholder="Acme Corporation" />
+        <label for="ct-name" class="form-label">Display Name</label>
+        <input id="ct-name" v-model="createForm.name" required maxlength="256" class="form-input" placeholder="Acme Corporation" />
       </div>
       <div>
-        <label for="ct-parent" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Parent Tenant (optional)</label>
-        <select id="ct-parent" v-model="createForm.parent_tenant_id" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
+        <label for="ct-parent" class="form-label">Parent Tenant (optional)</label>
+        <select id="ct-parent" v-model="createForm.parent_tenant_id" class="form-select w-full">
           <option value="">None</option>
           <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
         </select>

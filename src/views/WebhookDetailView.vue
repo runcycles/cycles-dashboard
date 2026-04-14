@@ -251,19 +251,19 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           </div>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-          <div class="bg-gray-50 rounded p-3"><span class="text-gray-600 dark:text-gray-500 block text-xs mb-1">URL</span><span class="font-mono text-xs break-all">{{ webhook.url }}</span></div>
-          <div class="bg-gray-50 rounded p-3"><span class="text-gray-600 dark:text-gray-500 block text-xs mb-1">Tenant</span><TenantLink :tenant-id="webhook.tenant_id" /></div>
-          <div class="bg-gray-50 rounded p-3"><span class="text-gray-600 dark:text-gray-500 block text-xs mb-1">Subscribed Event Types</span><div class="flex flex-wrap gap-1 mt-1"><span v-for="et in (webhook.event_types || [])" :key="et" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs font-mono">{{ et }}</span><span v-if="!webhook.event_types?.length" class="text-xs text-gray-600 dark:text-gray-400">all events</span></div></div>
-          <div v-if="webhook.scope_filter" class="bg-gray-50 rounded p-3"><span class="text-gray-600 dark:text-gray-500 block text-xs mb-1">Scope Filter</span><span class="font-mono text-xs">{{ webhook.scope_filter }}</span></div>
-          <div v-if="webhook.last_success_at" class="bg-gray-50 rounded p-3"><span class="text-gray-600 dark:text-gray-500 block text-xs mb-1">Last Success</span>{{ formatDateTime(webhook.last_success_at) }}</div>
-          <div v-if="webhook.last_failure_at" class="bg-gray-50 rounded p-3"><span class="text-gray-600 dark:text-gray-500 block text-xs mb-1">Last Failure</span>{{ formatDateTime(webhook.last_failure_at) }}</div>
+          <div class="bg-gray-50 rounded p-3"><span class="form-label">URL</span><span class="font-mono text-xs break-all">{{ webhook.url }}</span></div>
+          <div class="bg-gray-50 rounded p-3"><span class="form-label">Tenant</span><TenantLink :tenant-id="webhook.tenant_id" /></div>
+          <div class="bg-gray-50 rounded p-3"><span class="form-label">Subscribed Event Types</span><div class="flex flex-wrap gap-1 mt-1"><span v-for="et in (webhook.event_types || [])" :key="et" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs font-mono">{{ et }}</span><span v-if="!webhook.event_types?.length" class="text-xs text-gray-600 dark:text-gray-400">all events</span></div></div>
+          <div v-if="webhook.scope_filter" class="bg-gray-50 rounded p-3"><span class="form-label">Scope Filter</span><span class="font-mono text-xs">{{ webhook.scope_filter }}</span></div>
+          <div v-if="webhook.last_success_at" class="bg-gray-50 rounded p-3"><span class="form-label">Last Success</span>{{ formatDateTime(webhook.last_success_at) }}</div>
+          <div v-if="webhook.last_failure_at" class="bg-gray-50 rounded p-3"><span class="form-label">Last Failure</span>{{ formatDateTime(webhook.last_failure_at) }}</div>
           <!-- v0.1.25.21 (#10): expose disable_after_failures so ops can
                see the auto-disable threshold at a glance without
                opening the edit form. Color the consecutive_failures
                cell red as it approaches the threshold so a "trending
                toward auto-disable" subscription is visually obvious. -->
           <div class="bg-gray-50 rounded p-3">
-            <span class="text-gray-600 dark:text-gray-500 block text-xs mb-1">Failure threshold</span>
+            <span class="form-label">Failure threshold</span>
             <span class="tabular-nums">
               <!-- Danger zone = within 2 of the auto-disable threshold,
                    floored at 1 so a low threshold (e.g. 1 or 2) doesn't
@@ -377,15 +377,15 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <FormDialog v-if="showReplay" title="Replay Events" submit-label="Start Replay" :loading="replayLoading" :error="replayError" @submit="submitReplay" @cancel="showReplay = false">
       <p class="text-xs text-gray-600 dark:text-gray-500">Re-delivers historical events to this webhook. May cause duplicate deliveries.</p>
       <div>
-        <label for="rp-from" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">From</label>
-        <input id="rp-from" v-model="replayForm.from" type="datetime-local" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
+        <label for="rp-from" class="form-label">From</label>
+        <input id="rp-from" v-model="replayForm.from" type="datetime-local" class="form-input" />
       </div>
       <div>
-        <label for="rp-to" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">To</label>
-        <input id="rp-to" v-model="replayForm.to" type="datetime-local" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
+        <label for="rp-to" class="form-label">To</label>
+        <input id="rp-to" v-model="replayForm.to" type="datetime-local" class="form-input" />
       </div>
       <div>
-        <label for="rp-max" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Max events (1–1000)</label>
+        <label for="rp-max" class="form-label">Max events (1–1000)</label>
         <input id="rp-max" v-model="replayForm.max_events" type="number" min="1" max="1000" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-32" />
       </div>
     </FormDialog>
@@ -407,15 +407,15 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <!-- Edit webhook dialog -->
     <FormDialog v-if="showEdit" title="Edit Webhook" submit-label="Save Changes" :loading="editLoading" :error="editError" @submit="submitEdit" @cancel="showEdit = false" :wide="true">
       <div>
-        <label for="ew-name" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Name</label>
-        <input id="ew-name" v-model="editForm.name" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
+        <label for="ew-name" class="form-label">Name</label>
+        <input id="ew-name" v-model="editForm.name" class="form-input" />
       </div>
       <div>
-        <label for="ew-url" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">URL</label>
-        <input id="ew-url" v-model="editForm.url" type="url" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
+        <label for="ew-url" class="form-label">URL</label>
+        <input id="ew-url" v-model="editForm.url" type="url" required class="form-input-mono" />
       </div>
       <div>
-        <label class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Event types</label>
+        <label class="form-label">Event types</label>
         <div class="grid grid-cols-2 gap-1 max-h-48 overflow-y-auto border border-gray-200 rounded p-2">
           <label v-for="et in EVENT_TYPES" :key="et" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
             <input type="checkbox" :value="et" v-model="editForm.event_types" class="rounded" />
@@ -425,12 +425,12 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       </div>
       <div class="grid grid-cols-2 gap-3">
         <div>
-          <label for="ew-scope" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Scope filter</label>
-          <input id="ew-scope" v-model="editForm.scope_filter" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="tenant:acme/*" />
+          <label for="ew-scope" class="form-label">Scope filter</label>
+          <input id="ew-scope" v-model="editForm.scope_filter" class="form-input-mono" placeholder="tenant:acme/*" />
         </div>
         <div>
-          <label for="ew-failures" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Disable after failures</label>
-          <input id="ew-failures" v-model="editForm.disable_after_failures" type="number" min="1" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
+          <label for="ew-failures" class="form-label">Disable after failures</label>
+          <input id="ew-failures" v-model="editForm.disable_after_failures" type="number" min="1" class="form-input" />
         </div>
       </div>
     </FormDialog>

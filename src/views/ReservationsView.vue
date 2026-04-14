@@ -176,15 +176,15 @@ function isExpired(r: ReservationSummary): boolean {
          ACTIVE because that's the operationally-interesting set. -->
     <div class="mb-4 flex gap-3 flex-wrap items-end">
       <div>
-        <label for="res-tenant" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Tenant *</label>
-        <select id="res-tenant" v-model="tenantFilter" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+        <label for="res-tenant" class="form-label">Tenant *</label>
+        <select id="res-tenant" v-model="tenantFilter" class="form-select">
           <option value="" disabled>— pick a tenant —</option>
           <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
         </select>
       </div>
       <div>
-        <label for="res-status" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Status</label>
-        <select id="res-status" v-model="statusFilter" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+        <label for="res-status" class="form-label">Status</label>
+        <select id="res-status" v-model="statusFilter" class="form-select">
           <option value="">All</option>
           <option v-for="s in RESERVATION_STATUSES" :key="s" :value="s">{{ s }}</option>
         </select>
@@ -278,7 +278,7 @@ function isExpired(r: ReservationSummary): boolean {
         via the Audit tab.
       </p>
       <div>
-        <label for="release-reason" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Reason (for audit log)</label>
+        <label for="release-reason" class="form-label">Reason (for audit log)</label>
         <input
           id="release-reason"
           v-model="releaseReason"

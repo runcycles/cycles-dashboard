@@ -613,7 +613,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         <h3 class="text-sm font-semibold text-red-600 mb-2">Permanently close this tenant?</h3>
         <p class="text-sm text-gray-600 mb-3">This action is <strong>irreversible</strong>. Closing <strong>{{ tenant?.name || id }}</strong> will permanently archive this tenant. All API access, keys, budgets, and webhooks will become unusable and cannot be restored.</p>
         <p class="text-sm text-gray-600 mb-2">To confirm, type the tenant name below:</p>
-        <input v-model="closeConfirmInput" type="text" :placeholder="tenant?.name || id" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full mb-4 font-mono" autocomplete="off" />
+        <input v-model="closeConfirmInput" type="text" :placeholder="tenant?.name || id" class="form-input mb-4 font-mono" autocomplete="off" />
         <div class="flex justify-end gap-2">
           <button @click="pendingTenantAction = null; closeConfirmInput = ''" class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 rounded hover:bg-gray-100 cursor-pointer">Cancel</button>
           <button @click="executeTenantAction(); closeConfirmInput = ''" :disabled="closeConfirmInput !== (tenant?.name || id)" class="px-3 py-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Close Permanently</button>
@@ -634,12 +634,12 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <!-- Edit tenant dialog -->
     <FormDialog v-if="showEditTenant" title="Edit Tenant" submit-label="Save Changes" :loading="editTenantLoading" :error="editTenantError" @submit="submitEditTenant" @cancel="showEditTenant = false">
       <div>
-        <label for="et-name" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Display Name</label>
-        <input id="et-name" v-model="editTenantForm.name" required maxlength="256" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
+        <label for="et-name" class="form-label">Display Name</label>
+        <input id="et-name" v-model="editTenantForm.name" required maxlength="256" class="form-input" />
       </div>
       <div>
-        <label for="et-overage" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Default Commit Overage Policy</label>
-        <select id="et-overage" v-model="editTenantForm.default_commit_overage_policy" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
+        <label for="et-overage" class="form-label">Default Commit Overage Policy</label>
+        <select id="et-overage" v-model="editTenantForm.default_commit_overage_policy" class="form-select w-full">
           <option value="">Inherit</option>
           <option value="REJECT">Reject</option>
           <option value="ALLOW_IF_AVAILABLE">Allow if available</option>
@@ -648,12 +648,12 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       </div>
       <div class="grid grid-cols-2 gap-3">
         <div>
-          <label for="et-ttl" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Default Reservation TTL (ms)</label>
-          <input id="et-ttl" v-model="editTenantForm.default_reservation_ttl_ms" type="number" min="1000" max="86400000" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" placeholder="60000" />
+          <label for="et-ttl" class="form-label">Default Reservation TTL (ms)</label>
+          <input id="et-ttl" v-model="editTenantForm.default_reservation_ttl_ms" type="number" min="1000" max="86400000" class="form-input" placeholder="60000" />
         </div>
         <div>
-          <label for="et-max-ttl" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Max Reservation TTL (ms)</label>
-          <input id="et-max-ttl" v-model="editTenantForm.max_reservation_ttl_ms" type="number" min="1000" max="86400000" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" placeholder="3600000" />
+          <label for="et-max-ttl" class="form-label">Max Reservation TTL (ms)</label>
+          <input id="et-max-ttl" v-model="editTenantForm.max_reservation_ttl_ms" type="number" min="1000" max="86400000" class="form-input" placeholder="3600000" />
         </div>
       </div>
     </FormDialog>
@@ -661,19 +661,19 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <!-- Create API key for this tenant -->
     <FormDialog v-if="showCreateKey" title="Create API Key" submit-label="Create Key" :loading="createKeyLoading" :error="createKeyError" @submit="submitCreateKey" @cancel="showCreateKey = false">
       <div>
-        <label for="ck2-name" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Name</label>
-        <input id="ck2-name" v-model="createKeyForm.name" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" placeholder="my-service-key" />
+        <label for="ck2-name" class="form-label">Name</label>
+        <input id="ck2-name" v-model="createKeyForm.name" required class="form-input" placeholder="my-service-key" />
       </div>
       <div>
-        <label class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Permissions</label>
+        <label class="form-label">Permissions</label>
         <PermissionPicker v-model="createKeyForm.permissions" />
       </div>
       <div>
-        <label for="ck2-scope" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Scope filter (comma-separated, optional)</label>
-        <input id="ck2-scope" v-model="createKeyForm.scope_filter" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
+        <label for="ck2-scope" class="form-label">Scope filter (comma-separated, optional)</label>
+        <input id="ck2-scope" v-model="createKeyForm.scope_filter" class="form-input-mono" />
       </div>
       <div>
-        <label for="ck2-expires" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Expires at (optional)</label>
+        <label for="ck2-expires" class="form-label">Expires at (optional)</label>
         <input id="ck2-expires" v-model="createKeyForm.expires_at" type="datetime-local" class="border border-gray-300 rounded px-2 py-1.5 text-sm" />
       </div>
     </FormDialog>
@@ -701,7 +701,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <!-- v0.1.25.20: Create Budget (admin-on-behalf-of) -->
     <FormDialog v-if="showCreateBudget" title="Create Budget" submit-label="Create" :loading="createBudgetLoading" :error="createBudgetError" @submit="submitCreateBudget" @cancel="showCreateBudget = false">
       <div>
-        <label class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Scope</label>
+        <label class="form-label">Scope</label>
         <!-- v0.1.25.20: structured builder replaces the free-text input.
              Tenant row is locked to the current detail's tenant, so the
              admin-on-behalf-of cross-field check passes by construction.
@@ -710,8 +710,8 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         <ScopeBuilder v-model="createBudgetForm.scope" :tenant-id="id" />
       </div>
       <div>
-        <label for="cb-unit" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Unit</label>
-        <select id="cb-unit" v-model="createBudgetForm.unit" required class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
+        <label for="cb-unit" class="form-label">Unit</label>
+        <select id="cb-unit" v-model="createBudgetForm.unit" required class="form-select w-full">
           <option value="USD_MICROCENTS">USD_MICROCENTS</option>
           <option value="TOKENS">TOKENS</option>
           <option value="CREDITS">CREDITS</option>
@@ -719,16 +719,16 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         </select>
       </div>
       <div>
-        <label for="cb-allocated" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Initial allocation</label>
-        <input id="cb-allocated" v-model="createBudgetForm.allocated" type="number" min="0" step="1" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
+        <label for="cb-allocated" class="form-label">Initial allocation</label>
+        <input id="cb-allocated" v-model="createBudgetForm.allocated" type="number" min="0" step="1" required class="form-input-mono" />
       </div>
       <div>
-        <label for="cb-overdraft" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Overdraft limit (optional)</label>
-        <input id="cb-overdraft" v-model="createBudgetForm.overdraft_limit" type="number" min="0" step="1" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
+        <label for="cb-overdraft" class="form-label">Overdraft limit (optional)</label>
+        <input id="cb-overdraft" v-model="createBudgetForm.overdraft_limit" type="number" min="0" step="1" class="form-input-mono" />
       </div>
       <div>
-        <label for="cb-cop" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Commit overage policy (optional)</label>
-        <select id="cb-cop" v-model="createBudgetForm.commit_overage_policy" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
+        <label for="cb-cop" class="form-label">Commit overage policy (optional)</label>
+        <select id="cb-cop" v-model="createBudgetForm.commit_overage_policy" class="form-select w-full">
           <option value="">— Inherit from tenant —</option>
           <option v-for="p in COMMIT_OVERAGE_POLICIES" :key="p" :value="p">{{ p }}</option>
         </select>
@@ -738,27 +738,27 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <!-- v0.1.25.20: Create Policy (admin-on-behalf-of) -->
     <FormDialog v-if="showCreatePolicy" title="Create Policy" submit-label="Create" :loading="createPolicyLoading" :error="createPolicyError" @submit="submitCreatePolicy" @cancel="showCreatePolicy = false">
       <div>
-        <label for="cp-name" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Name</label>
-        <input id="cp-name" v-model="createPolicyForm.name" required maxlength="256" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
+        <label for="cp-name" class="form-label">Name</label>
+        <input id="cp-name" v-model="createPolicyForm.name" required maxlength="256" class="form-input" />
       </div>
       <div>
-        <label class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Scope pattern</label>
+        <label class="form-label">Scope pattern</label>
         <!-- Policy patterns enable wildcards: per-row "any <kind> (*)"
              radio for id-wildcards, and a trailing /* checkbox for
              "match everything deeper." -->
         <ScopeBuilder v-model="createPolicyForm.scope_pattern" :tenant-id="id" allow-wildcards />
       </div>
       <div>
-        <label for="cp-desc" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Description (optional)</label>
-        <input id="cp-desc" v-model="createPolicyForm.description" maxlength="1024" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
+        <label for="cp-desc" class="form-label">Description (optional)</label>
+        <input id="cp-desc" v-model="createPolicyForm.description" maxlength="1024" class="form-input" />
       </div>
       <div>
-        <label for="cp-priority" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Priority (higher wins on overlap)</label>
-        <input id="cp-priority" v-model="createPolicyForm.priority" type="number" step="1" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="0" />
+        <label for="cp-priority" class="form-label">Priority (higher wins on overlap)</label>
+        <input id="cp-priority" v-model="createPolicyForm.priority" type="number" step="1" class="form-input-mono" placeholder="0" />
       </div>
       <div>
-        <label for="cp-cop" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Commit overage policy (optional)</label>
-        <select id="cp-cop" v-model="createPolicyForm.commit_overage_policy" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
+        <label for="cp-cop" class="form-label">Commit overage policy (optional)</label>
+        <select id="cp-cop" v-model="createPolicyForm.commit_overage_policy" class="form-select w-full">
           <option value="">— Default —</option>
           <option v-for="p in COMMIT_OVERAGE_POLICIES" :key="p" :value="p">{{ p }}</option>
         </select>
@@ -768,20 +768,20 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <!-- v0.1.25.20: Edit Policy -->
     <FormDialog v-if="showEditPolicy" title="Edit Policy" submit-label="Save Changes" :loading="editPolicyLoading" :error="editPolicyError" @submit="submitEditPolicy" @cancel="showEditPolicy = false">
       <div>
-        <label for="ep-name" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Name</label>
-        <input id="ep-name" v-model="editPolicyForm.name" maxlength="256" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
+        <label for="ep-name" class="form-label">Name</label>
+        <input id="ep-name" v-model="editPolicyForm.name" maxlength="256" class="form-input" />
       </div>
       <div>
-        <label for="ep-desc" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Description (optional)</label>
-        <input id="ep-desc" v-model="editPolicyForm.description" maxlength="1024" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
+        <label for="ep-desc" class="form-label">Description (optional)</label>
+        <input id="ep-desc" v-model="editPolicyForm.description" maxlength="1024" class="form-input" />
       </div>
       <div>
-        <label for="ep-priority" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Priority</label>
-        <input id="ep-priority" v-model="editPolicyForm.priority" type="number" step="1" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
+        <label for="ep-priority" class="form-label">Priority</label>
+        <input id="ep-priority" v-model="editPolicyForm.priority" type="number" step="1" class="form-input-mono" />
       </div>
       <div>
-        <label for="ep-cop" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Commit overage policy (optional)</label>
-        <select id="ep-cop" v-model="editPolicyForm.commit_overage_policy" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
+        <label for="ep-cop" class="form-label">Commit overage policy (optional)</label>
+        <select id="ep-cop" v-model="editPolicyForm.commit_overage_policy" class="form-select w-full">
           <option value="">— Unchanged —</option>
           <option v-for="p in COMMIT_OVERAGE_POLICIES" :key="p" :value="p">{{ p }}</option>
         </select>

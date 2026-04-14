@@ -253,7 +253,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
          actually belong to rather than the full tenant list, so the
          dropdown doesn't show tenants with no subscriptions. -->
     <div class="mb-4">
-      <select v-model="tenantFilter" aria-label="Filter webhooks by tenant" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+      <select v-model="tenantFilter" aria-label="Filter webhooks by tenant" class="form-select">
         <option value="">All tenants</option>
         <option v-for="t in tenants.filter(t => webhooks.some(w => w.tenant_id === t.tenant_id))" :key="t.tenant_id" :value="t.tenant_id">
           {{ t.name || t.tenant_id }}
@@ -343,22 +343,22 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
 
     <FormDialog v-if="showCreate" title="Create Webhook" submit-label="Create Webhook" :loading="createLoading" :error="createError" @submit="submitCreate" @cancel="showCreate = false" :wide="true">
       <div>
-        <label for="cw-url" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">URL</label>
-        <input id="cw-url" v-model="createForm.url" type="url" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="https://example.com/webhooks" />
+        <label for="cw-url" class="form-label">URL</label>
+        <input id="cw-url" v-model="createForm.url" type="url" required class="form-input-mono" placeholder="https://example.com/webhooks" />
       </div>
       <div>
-        <label for="cw-name" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Name (optional)</label>
-        <input id="cw-name" v-model="createForm.name" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" placeholder="Production alerts" />
+        <label for="cw-name" class="form-label">Name (optional)</label>
+        <input id="cw-name" v-model="createForm.name" class="form-input" placeholder="Production alerts" />
       </div>
       <div>
-        <label for="cw-tenant" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Tenant (optional — omit for system-wide)</label>
-        <select id="cw-tenant" v-model="createForm.tenant_id" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
+        <label for="cw-tenant" class="form-label">Tenant (optional — omit for system-wide)</label>
+        <select id="cw-tenant" v-model="createForm.tenant_id" class="form-select w-full">
           <option value="">System-wide</option>
           <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
         </select>
       </div>
       <div>
-        <label class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Event types</label>
+        <label class="form-label">Event types</label>
         <div class="grid grid-cols-2 gap-1 max-h-48 overflow-y-auto border border-gray-200 rounded p-2">
           <label v-for="et in EVENT_TYPES" :key="et" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
             <input type="checkbox" :value="et" v-model="createForm.event_types" class="rounded" />
@@ -367,8 +367,8 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         </div>
       </div>
       <div>
-        <label for="cw-scope" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Scope filter (optional)</label>
-        <input id="cw-scope" v-model="createForm.scope_filter" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="tenant:acme/*" />
+        <label for="cw-scope" class="form-label">Scope filter (optional)</label>
+        <input id="cw-scope" v-model="createForm.scope_filter" class="form-input-mono" placeholder="tenant:acme/*" />
       </div>
     </FormDialog>
 
@@ -384,13 +384,13 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <FormDialog v-if="showSecurityConfig" title="Webhook Security Config" submit-label="Save Config" :loading="securityLoading" :error="securityError" @submit="submitSecurityConfig" @cancel="showSecurityConfig = false">
       <p class="text-xs text-gray-600 dark:text-gray-500">Server-level security rules applied to all webhook create/update operations. Changes take effect immediately. Existing subscriptions are not retroactively validated.</p>
       <div>
-        <label for="sc-cidr" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Blocked CIDR ranges (one per line)</label>
-        <textarea id="sc-cidr" v-model="securityForm.blocked_cidr" rows="4" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="10.0.0.0/8&#10;172.16.0.0/12&#10;192.168.0.0/16" />
+        <label for="sc-cidr" class="form-label">Blocked CIDR ranges (one per line)</label>
+        <textarea id="sc-cidr" v-model="securityForm.blocked_cidr" rows="4" class="form-input-mono" placeholder="10.0.0.0/8&#10;172.16.0.0/12&#10;192.168.0.0/16" />
         <p class="text-xs text-gray-600 dark:text-gray-400 mt-0.5">Webhook URLs resolving to these ranges will be blocked (SSRF protection)</p>
       </div>
       <div>
-        <label for="sc-patterns" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Allowed URL patterns (one per line, glob syntax)</label>
-        <textarea id="sc-patterns" v-model="securityForm.allowed_patterns" rows="3" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="https://*.example.com/*" />
+        <label for="sc-patterns" class="form-label">Allowed URL patterns (one per line, glob syntax)</label>
+        <textarea id="sc-patterns" v-model="securityForm.allowed_patterns" rows="3" class="form-input-mono" placeholder="https://*.example.com/*" />
         <p class="text-xs text-gray-600 dark:text-gray-400 mt-0.5">If non-empty, only URLs matching at least one pattern are allowed</p>
       </div>
       <label class="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">

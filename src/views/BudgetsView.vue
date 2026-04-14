@@ -366,13 +366,13 @@ watch(() => route.query, () => {
           <button v-if="canManage && detail.status === 'FROZEN'" @click="requestFreeze(detail.scope, detail.unit, 'unfreeze')" class="text-xs text-green-700 hover:text-green-900 border border-green-200 rounded px-2.5 py-1 hover:bg-green-50 cursor-pointer transition-colors">Unfreeze</button>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
-          <div class="bg-gray-50 rounded p-3"><span class="text-gray-600 dark:text-gray-500 block text-xs mb-1">Allocated</span><span class="font-semibold">{{ detail.allocated.amount.toLocaleString() }}</span></div>
-          <div class="bg-gray-50 rounded p-3"><span class="text-gray-600 dark:text-gray-500 block text-xs mb-1">Remaining</span><span class="font-semibold">{{ detail.remaining.amount.toLocaleString() }}</span></div>
-          <div class="bg-gray-50 rounded p-3"><span class="text-gray-600 dark:text-gray-500 block text-xs mb-1">Reserved</span><span class="font-semibold">{{ detail.reserved?.amount.toLocaleString() || '0' }}</span></div>
-          <div class="bg-gray-50 rounded p-3"><span class="text-gray-600 dark:text-gray-500 block text-xs mb-1">Spent</span><span class="font-semibold">{{ detail.spent?.amount.toLocaleString() || '0' }}</span></div>
-          <div class="bg-gray-50 rounded p-3"><span class="text-gray-600 dark:text-gray-500 block text-xs mb-1">Debt</span><span class="font-semibold" :class="detail.debt && detail.debt.amount > 0 ? 'text-red-600' : ''">{{ detail.debt?.amount.toLocaleString() || '0' }}</span></div>
-          <div class="bg-gray-50 rounded p-3"><span class="text-gray-600 dark:text-gray-500 block text-xs mb-1">Overdraft Limit</span><span class="font-semibold">{{ detail.overdraft_limit?.amount.toLocaleString() || '0' }}</span></div>
-          <div class="bg-gray-50 rounded p-3"><span class="text-gray-600 dark:text-gray-500 block text-xs mb-1">Overage Policy</span><span class="font-semibold text-xs">{{ detail.commit_overage_policy || 'Inherit' }}</span></div>
+          <div class="bg-gray-50 rounded p-3"><span class="form-label">Allocated</span><span class="font-semibold">{{ detail.allocated.amount.toLocaleString() }}</span></div>
+          <div class="bg-gray-50 rounded p-3"><span class="form-label">Remaining</span><span class="font-semibold">{{ detail.remaining.amount.toLocaleString() }}</span></div>
+          <div class="bg-gray-50 rounded p-3"><span class="form-label">Reserved</span><span class="font-semibold">{{ detail.reserved?.amount.toLocaleString() || '0' }}</span></div>
+          <div class="bg-gray-50 rounded p-3"><span class="form-label">Spent</span><span class="font-semibold">{{ detail.spent?.amount.toLocaleString() || '0' }}</span></div>
+          <div class="bg-gray-50 rounded p-3"><span class="form-label">Debt</span><span class="font-semibold" :class="detail.debt && detail.debt.amount > 0 ? 'text-red-600' : ''">{{ detail.debt?.amount.toLocaleString() || '0' }}</span></div>
+          <div class="bg-gray-50 rounded p-3"><span class="form-label">Overdraft Limit</span><span class="font-semibold">{{ detail.overdraft_limit?.amount.toLocaleString() || '0' }}</span></div>
+          <div class="bg-gray-50 rounded p-3"><span class="form-label">Overage Policy</span><span class="font-semibold text-xs">{{ detail.commit_overage_policy || 'Inherit' }}</span></div>
         </div>
         <div class="mt-4">
           <UtilizationBar :remaining="detail.remaining.amount" :allocated="detail.allocated.amount" />
@@ -405,35 +405,35 @@ watch(() => route.query, () => {
       <div v-if="!isCrossTenantFilter" class="bg-white rounded-lg shadow p-4 mb-4">
         <div class="flex gap-3 flex-wrap items-end">
           <div>
-            <label for="budget-tenant" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Tenant</label>
-            <select id="budget-tenant" v-model="selectedTenant" @change="loadList" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+            <label for="budget-tenant" class="form-label">Tenant</label>
+            <select id="budget-tenant" v-model="selectedTenant" @change="loadList" class="form-select">
               <option value="">All tenants</option>
               <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
             </select>
             <p v-if="tenantsError" class="text-xs text-red-600 mt-1" role="alert">{{ tenantsError }}</p>
           </div>
           <div>
-            <label for="budget-status" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Status</label>
-            <select id="budget-status" v-model="filterStatus" @change="loadList" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+            <label for="budget-status" class="form-label">Status</label>
+            <select id="budget-status" v-model="filterStatus" @change="loadList" class="form-select">
               <option value="">All</option>
               <option>ACTIVE</option><option>FROZEN</option><option>CLOSED</option>
             </select>
           </div>
           <div>
-            <label for="budget-unit" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Unit</label>
-            <select id="budget-unit" v-model="filterUnit" @change="loadList" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+            <label for="budget-unit" class="form-label">Unit</label>
+            <select id="budget-unit" v-model="filterUnit" @change="loadList" class="form-select">
               <option value="">All</option>
               <option>USD_MICROCENTS</option><option>TOKENS</option><option>CREDITS</option><option>RISK_POINTS</option>
             </select>
           </div>
           <div>
-            <label for="budget-scope" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Scope prefix</label>
+            <label for="budget-scope" class="form-label">Scope prefix</label>
             <input id="budget-scope" v-model="filterScope" @change="loadList" @keyup.enter="loadList" placeholder="tenant:acme" class="border border-gray-300 rounded px-2 py-1.5 text-sm" />
           </div>
           <!-- v0.1.25.21 (#9): utilization range. Pure client-side
                filter on the loaded result set; doesn't refetch. -->
           <div>
-            <label for="budget-util-min" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Utilization %</label>
+            <label for="budget-util-min" class="form-label">Utilization %</label>
             <div class="flex items-center gap-1">
               <input id="budget-util-min" v-model="filterUtilMin" @change="loadList" @keyup.enter="loadList" type="number" min="0" max="100" placeholder="min" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-16" aria-label="Minimum utilization percent" />
               <span class="text-xs text-gray-600 dark:text-gray-400">to</span>
@@ -509,8 +509,8 @@ watch(() => route.query, () => {
         <div><span class="text-gray-600 dark:text-gray-400 block">Debt</span><span class="font-semibold" :class="(detail?.debt?.amount ?? 0) > 0 ? 'text-red-600' : ''">{{ (detail?.debt?.amount ?? 0).toLocaleString() }}</span></div>
       </div>
       <div>
-        <label for="fund-op" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Operation</label>
-        <select id="fund-op" v-model="fundForm.operation" required class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
+        <label for="fund-op" class="form-label">Operation</label>
+        <select id="fund-op" v-model="fundForm.operation" required class="form-select w-full">
           <option value="CREDIT">Credit — add funds</option>
           <option value="DEBIT">Debit — remove funds</option>
           <option value="RESET">Reset — set exact amount</option>
@@ -519,25 +519,25 @@ watch(() => route.query, () => {
         <p class="text-xs text-gray-600 dark:text-gray-400 mt-0.5">{{ fundHints[fundForm.operation] }}</p>
       </div>
       <div>
-        <label for="fund-amount" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Amount ({{ detail?.unit }})</label>
-        <input id="fund-amount" v-model="fundForm.amount" type="number" min="0" step="1" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
+        <label for="fund-amount" class="form-label">Amount ({{ detail?.unit }})</label>
+        <input id="fund-amount" v-model="fundForm.amount" type="number" min="0" step="1" required class="form-input-mono" />
       </div>
       <div>
-        <label for="fund-reason" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Reason (optional, for audit trail)</label>
-        <input id="fund-reason" v-model="fundForm.reason" maxlength="512" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" placeholder="Emergency top-up for production" />
+        <label for="fund-reason" class="form-label">Reason (optional, for audit trail)</label>
+        <input id="fund-reason" v-model="fundForm.reason" maxlength="512" class="form-input" placeholder="Emergency top-up for production" />
       </div>
     </FormDialog>
 
     <FormDialog v-if="showEditBudget" title="Edit Budget Config" submit-label="Save Changes" :loading="editBudgetLoading" :error="editBudgetError" @submit="submitEditBudget" @cancel="showEditBudget = false">
       <p class="text-xs text-gray-600 dark:text-gray-500">Edit overdraft limit and commit overage policy for <span class="font-mono">{{ detail?.scope }}</span> ({{ detail?.unit }}).</p>
       <div>
-        <label for="eb-overdraft" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Overdraft Limit ({{ detail?.unit }})</label>
-        <input id="eb-overdraft" v-model="editBudgetForm.overdraft_limit" type="number" min="0" step="1" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
+        <label for="eb-overdraft" class="form-label">Overdraft Limit ({{ detail?.unit }})</label>
+        <input id="eb-overdraft" v-model="editBudgetForm.overdraft_limit" type="number" min="0" step="1" class="form-input-mono" />
         <p class="text-xs text-gray-600 dark:text-gray-400 mt-0.5">Maximum debt allowed. Set to 0 to disable overdraft.</p>
       </div>
       <div>
-        <label for="eb-overage" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Commit Overage Policy</label>
-        <select id="eb-overage" v-model="editBudgetForm.commit_overage_policy" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
+        <label for="eb-overage" class="form-label">Commit Overage Policy</label>
+        <select id="eb-overage" v-model="editBudgetForm.commit_overage_policy" class="form-select w-full">
           <option value="">Inherit from tenant</option>
           <option v-for="p in COMMIT_OVERAGE_POLICIES" :key="p" :value="p">{{ p }}</option>
         </select>

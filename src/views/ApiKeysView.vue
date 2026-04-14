@@ -235,15 +235,15 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <div class="bg-white rounded-lg shadow p-4 mb-4">
       <div class="flex gap-3 flex-wrap items-end">
         <div>
-          <label for="keys-tenant" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Tenant</label>
-          <select id="keys-tenant" v-model="filterTenant" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+          <label for="keys-tenant" class="form-label">Tenant</label>
+          <select id="keys-tenant" v-model="filterTenant" class="form-select">
             <option value="">All tenants</option>
             <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
           </select>
         </div>
         <div>
-          <label for="keys-status" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Status</label>
-          <select id="keys-status" v-model="filterStatus" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
+          <label for="keys-status" class="form-label">Status</label>
+          <select id="keys-status" v-model="filterStatus" class="form-select">
             <option value="">All</option>
             <option>ACTIVE</option>
             <option>REVOKED</option>
@@ -316,25 +316,25 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <!-- Create API Key dialog -->
     <FormDialog v-if="showCreate" title="Create API Key" submit-label="Create Key" :loading="createLoading" :error="createError" @submit="submitCreate" @cancel="showCreate = false">
       <div>
-        <label for="ck-tenant" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Tenant</label>
-        <select id="ck-tenant" v-model="createForm.tenant_id" required class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
+        <label for="ck-tenant" class="form-label">Tenant</label>
+        <select id="ck-tenant" v-model="createForm.tenant_id" required class="form-select w-full">
           <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
         </select>
       </div>
       <div>
-        <label for="ck-name" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Name</label>
-        <input id="ck-name" v-model="createForm.name" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" placeholder="my-service-key" />
+        <label for="ck-name" class="form-label">Name</label>
+        <input id="ck-name" v-model="createForm.name" required class="form-input" placeholder="my-service-key" />
       </div>
       <div>
-        <label class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Permissions</label>
+        <label class="form-label">Permissions</label>
         <PermissionPicker v-model="createForm.permissions" />
       </div>
       <div>
-        <label for="ck-scope" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Scope filter (comma-separated, optional)</label>
-        <input id="ck-scope" v-model="createForm.scope_filter" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="tenant:acme, tenant:acme/*" />
+        <label for="ck-scope" class="form-label">Scope filter (comma-separated, optional)</label>
+        <input id="ck-scope" v-model="createForm.scope_filter" class="form-input-mono" placeholder="tenant:acme, tenant:acme/*" />
       </div>
       <div>
-        <label for="ck-expires" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Expires at (optional)</label>
+        <label for="ck-expires" class="form-label">Expires at (optional)</label>
         <input id="ck-expires" v-model="createForm.expires_at" type="datetime-local" class="border border-gray-300 rounded px-2 py-1.5 text-sm" />
       </div>
     </FormDialog>
@@ -345,11 +345,11 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <!-- Edit API Key dialog -->
     <FormDialog v-if="editingKey" title="Edit API Key" submit-label="Save Changes" :loading="editLoading" :error="editError" @submit="submitEdit" @cancel="editingKey = null">
       <div>
-        <label for="ek-name" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Name</label>
-        <input id="ek-name" v-model="editForm.name" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
+        <label for="ek-name" class="form-label">Name</label>
+        <input id="ek-name" v-model="editForm.name" required class="form-input" />
       </div>
       <div>
-        <label class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Permissions</label>
+        <label class="form-label">Permissions</label>
         <PermissionPicker v-model="editForm.permissions" />
         <!--
           Pending-changes summary. Rendered only when there's actually a
@@ -382,8 +382,8 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         </div>
       </div>
       <div>
-        <label for="ek-scope" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Scope filter (comma-separated)</label>
-        <input id="ek-scope" v-model="editForm.scope_filter" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
+        <label for="ek-scope" class="form-label">Scope filter (comma-separated)</label>
+        <input id="ek-scope" v-model="editForm.scope_filter" class="form-input-mono" />
       </div>
     </FormDialog>
 
