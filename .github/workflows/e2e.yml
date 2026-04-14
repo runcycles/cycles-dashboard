@@ -30,6 +30,11 @@ on:
       - 'src/api/client.ts'
       - 'src/views/**'
       - 'src/components/**'
+      # Style changes can break visual rendering (e.g. dark-mode cascade
+      # regressions from @apply-inlined component classes) — Vitest and
+      # axe both miss these, Playwright flows catch them by running the
+      # actual dashboard in a real browser.
+      - 'src/style.css'
       - 'src/stores/**'
       - 'src/router.ts'
       - '.github/workflows/e2e.yml'
