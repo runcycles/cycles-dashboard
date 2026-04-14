@@ -94,7 +94,7 @@ onUnmounted(() => {
         <h1 class="text-xl font-semibold text-gray-900 dark:text-white">Cycles Admin</h1>
       </div>
       <p v-if="expired" class="text-sm text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 mb-4">Your session expired due to inactivity. Please log in again.</p>
-      <p class="text-sm text-gray-600 dark:text-gray-500 dark:text-gray-400 mb-6">Enter your admin API key to continue.</p>
+      <p class="text-sm muted mb-6">Enter your admin API key to continue.</p>
       <form @submit.prevent="submit">
         <label for="admin-api-key" class="sr-only">Admin API Key</label>
         <input

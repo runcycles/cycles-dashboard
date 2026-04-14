@@ -81,9 +81,21 @@
   .btn-row-success  { @apply text-xs text-green-700 hover:text-green-900 cursor-pointer hover:underline; }
   .btn-row-primary  { @apply text-xs text-blue-600 hover:text-blue-800 cursor-pointer hover:underline; }
 
-  .btn-pill-danger  { @apply text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors; }
-  .btn-pill-success { @apply text-xs text-green-700 hover:text-green-900 border border-green-200 rounded px-2.5 py-1 hover:bg-green-50 cursor-pointer transition-colors; }
-  .btn-pill-primary { @apply text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-2.5 py-1 hover:bg-blue-50 cursor-pointer transition-colors; }
+  .btn-pill-danger    { @apply text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors; }
+  .btn-pill-success   { @apply text-xs text-green-700 hover:text-green-900 border border-green-200 rounded px-2.5 py-1 hover:bg-green-50 cursor-pointer transition-colors; }
+  .btn-pill-primary   { @apply text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded px-2.5 py-1 hover:bg-blue-50 cursor-pointer transition-colors; }
+  /* Neutral pill — edit / send-test / secondary actions. Uses gray rather
+     than a semantic color so it visually recedes next to danger/success. */
+  .btn-pill-secondary { @apply text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors; }
+
+  /* ── Count / status badge pills ─────────────────────────────────
+     Small numeric or short-label tints used on Overview counters
+     and inline status indicators. Dark-mode backgrounds come from
+     the generic `.dark .bg-{color}-100` rules below. */
+
+  .badge-danger   { @apply bg-red-100 text-red-700 px-1.5 py-0.5 rounded text-xs; }
+  .badge-warning  { @apply bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded text-xs; }
+  .badge-success  { @apply bg-green-100 text-green-700 px-1.5 py-0.5 rounded text-xs; }
 }
 
 /* ── Dark mode overrides ──────────────────────────────────────────────

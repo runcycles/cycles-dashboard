@@ -240,10 +240,10 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           <span v-if="(webhook.consecutive_failures ?? 0) > 0" class="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-medium">{{ webhook.consecutive_failures }} failures</span>
           <span class="flex-1" />
           <div v-if="canManage" class="flex gap-2 flex-wrap">
-            <button @click="openEdit"class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Edit</button>
-            <button @click="runTest" :disabled="testLoading" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors disabled:opacity-50">{{ testLoading ? 'Testing...' : 'Send Test' }}</button>
-            <button @click="openRotate" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Rotate Secret</button>
-            <button @click="showReplay = true" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Replay</button>
+            <button @click="openEdit"class="btn-pill-secondary">Edit</button>
+            <button @click="runTest" :disabled="testLoading" class="btn-pill-secondary disabled:opacity-50">{{ testLoading ? 'Testing...' : 'Send Test' }}</button>
+            <button @click="openRotate" class="btn-pill-secondary">Rotate Secret</button>
+            <button @click="showReplay = true" class="btn-pill-secondary">Replay</button>
             <button v-if="(webhook.consecutive_failures ?? 0) > 0 && webhook.status !== 'ACTIVE'" @click="pendingAction = 'reset'" class="btn-pill-primary">Reset &amp; Re-enable</button>
             <button v-if="webhook.status === 'ACTIVE'" @click="pendingAction = 'PAUSED'" class="btn-pill-danger">Pause</button>
             <button v-if="webhook.status === 'DISABLED' || webhook.status === 'PAUSED'" @click="pendingAction = 'ACTIVE'" class="btn-pill-success">Enable</button>
@@ -321,8 +321,8 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           <tbody class="divide-y divide-gray-100">
             <tr v-for="d in deliveries" :key="d.delivery_id" class="table-row-hover">
               <td class="table-cell"><StatusBadge :status="d.status" /></td>
-              <td class="table-cell font-mono text-xs" :class="d.http_status && d.http_status >= 400 ? 'text-red-600' : 'text-gray-600 dark:text-gray-500'">{{ d.http_status || '-' }}</td>
-              <td class="table-cell text-right text-gray-600 dark:text-gray-500 tabular-nums">{{ d.attempts }}</td>
+              <td class="table-cell font-mono text-xs" :class="d.http_status && d.http_status >= 400 ? 'text-red-600' : 'muted'">{{ d.http_status || '-' }}</td>
+              <td class="table-cell text-right muted tabular-nums">{{ d.attempts }}</td>
               <td class="table-cell font-mono muted-sm">{{ d.event_id }}</td>
               <td class="table-cell muted-sm">{{ d.attempted_at ? formatDateTime(d.attempted_at) : d.created_at ? formatDateTime(d.created_at) : '-' }}</td>
             </tr>
@@ -375,7 +375,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     />
 
     <FormDialog v-if="showReplay" title="Replay Events" submit-label="Start Replay" :loading="replayLoading" :error="replayError" @submit="submitReplay" @cancel="showReplay = false">
-      <p class="text-xs text-gray-600 dark:text-gray-500">Re-delivers historical events to this webhook. May cause duplicate deliveries.</p>
+      <p class="muted-sm">Re-delivers historical events to this webhook. May cause duplicate deliveries.</p>
       <div>
         <label for="rp-from" class="form-label">From</label>
         <input id="rp-from" v-model="replayForm.from" type="datetime-local" class="form-input" />

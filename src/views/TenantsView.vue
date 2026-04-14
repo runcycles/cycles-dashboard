@@ -242,7 +242,7 @@ function parentName(id: string | undefined): string {
       <span class="text-sm text-blue-900">{{ selectedVisibleCount }} selected</span>
       <button @click="openBulk('SUSPENDED')" class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer">Suspend selected</button>
       <button @click="openBulk('ACTIVE')" class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer">Reactivate selected</button>
-      <button @click="selected = new Set()" class="text-xs text-gray-600 dark:text-gray-500 hover:text-gray-700 ml-auto cursor-pointer">Clear</button>
+      <button @click="selected = new Set()" class="muted-sm hover:text-gray-700 ml-auto cursor-pointer">Clear</button>
     </div>
 
     <div class="card-table">

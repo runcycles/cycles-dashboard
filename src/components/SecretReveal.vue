@@ -41,7 +41,7 @@ onUnmounted(() => {
       <h3 class="text-sm font-semibold text-gray-900 mb-1">{{ title }}</h3>
       <p class="text-xs text-red-600 mb-4">This secret will not be shown again. Copy it now.</p>
 
-      <div class="mb-1 text-xs text-gray-600 dark:text-gray-500">{{ label }}</div>
+      <div class="mb-1 muted-sm">{{ label }}</div>
       <div class="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 rounded p-3 mb-4">
         <code class="flex-1 text-sm font-mono break-all text-gray-900 dark:text-gray-100 select-all">{{ secret }}</code>
         <button @click="copy(secret)" class="shrink-0 text-xs text-blue-600 hover:text-blue-800 cursor-pointer px-2 py-1 rounded hover:bg-blue-50 border border-blue-200 transition-colors">
