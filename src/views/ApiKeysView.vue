@@ -120,6 +120,23 @@ function sameStringSet(a: string[] | undefined, b: string[] | undefined): boolea
   return true
 }
 
+// Pending-changes summary for the edit dialog. Shows what the operator
+// will add / remove on Save, so the picker's state-change intent is
+// visible at a glance before the PATCH goes out. Also catches the
+// openEdit-time legacy-perm filter (e.g. `decide` shows up as a
+// pending removal alongside the toast) which makes the cleanup
+// behavior explicit rather than implicit.
+const pendingPermAdds = computed<string[]>(() => {
+  if (!editingKey.value) return []
+  const orig = new Set(editingKey.value.permissions || [])
+  return editForm.value.permissions.filter(p => !orig.has(p))
+})
+const pendingPermRemoves = computed<string[]>(() => {
+  if (!editingKey.value) return []
+  const curr = new Set(editForm.value.permissions)
+  return (editingKey.value.permissions || []).filter(p => !curr.has(p))
+})
+
 async function submitEdit() {
   if (!editingKey.value) return
   editError.value = ''
@@ -334,6 +351,35 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       <div>
         <label class="block text-xs text-gray-500 mb-1">Permissions</label>
         <PermissionPicker v-model="editForm.permissions" />
+        <!--
+          Pending-changes summary. Rendered only when there's actually a
+          diff — avoids visual noise on rename-only edits. Adds in green,
+          removes in red; flex-wrap keeps the chip list tidy on narrow
+          dialogs. aria-live so screen readers catch a newly-meaningful
+          change as checkboxes toggle.
+        -->
+        <div
+          v-if="pendingPermAdds.length || pendingPermRemoves.length"
+          class="mt-2 text-xs flex flex-wrap gap-1 items-center"
+          aria-live="polite"
+        >
+          <template v-if="pendingPermAdds.length">
+            <span class="text-green-700 font-medium">Adding:</span>
+            <span
+              v-for="p in pendingPermAdds"
+              :key="'add:' + p"
+              class="bg-green-50 text-green-700 border border-green-200 rounded px-1.5 py-0.5 font-mono"
+            >+{{ p }}</span>
+          </template>
+          <template v-if="pendingPermRemoves.length">
+            <span class="text-red-700 font-medium" :class="pendingPermAdds.length ? 'ml-3' : ''">Removing:</span>
+            <span
+              v-for="p in pendingPermRemoves"
+              :key="'rem:' + p"
+              class="bg-red-50 text-red-700 border border-red-200 rounded px-1.5 py-0.5 font-mono"
+            >−{{ p }}</span>
+          </template>
+        </div>
       </div>
       <div>
         <label for="ek-scope" class="block text-xs text-gray-500 mb-1">Scope filter (comma-separated)</label>

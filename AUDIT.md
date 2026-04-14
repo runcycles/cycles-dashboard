@@ -20,7 +20,11 @@ Each plane and each sub-section shows a tristate checkbox (click fills if any un
 - `src/views/TenantDetailView.vue` — replaced inline permission list; removed now-unused `PERMISSIONS` import.
 - `src/__tests__/PermissionGroups.test.ts` — drift guard (2 tests).
 
-**Not in this PR:** filter/search box in the picker, preset buttons ("read-only", "full tenant"), collapsible sections. Kept scope tight; revisit if operators ask.
+**Picker layout refinements (same release):**
+- Planes now sit side-by-side as 3 columns on md+ (≥768px) screens; stack on narrow. Cuts scroll distance in half on typical desktop dialogs.
+- Edit dialog shows a pending-changes summary beneath the picker: green `+perm` chips for adds, red `−perm` chips for removes. Renders only when there's actually a diff. Makes the Save-button intent visible at a glance and also surfaces the `openEdit`-time legacy-perm filter (e.g. `decide` appears as an explicit pending removal alongside the toast). `aria-live="polite"` so screen readers pick it up as checkboxes toggle.
+
+**Not in this PR:** filter/search box in the picker, preset buttons ("read-only", "full tenant"), collapsible sections, and the fuller matrix layout proposed as "option A." Kept scope tight; revisit if operators ask.
 
 ### 2026-04-14 — v0.1.25.25 default sort: newest-first on reservations / api-keys / budgets / tenants
 
