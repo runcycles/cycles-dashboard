@@ -1,7 +1,25 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
+**Date:** 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
 **Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.17+ continues to satisfy the governance plane.
+
+### 2026-04-14 — A11y ratchet: moderate now enforced (and minor is also clean)
+
+Free ratchet. A discovery sweep at the `moderate` threshold after the previous serious+critical fix pass found **zero violations** across all 10 audited pages — the color-contrast swaps, select-name labels, and nested-interactive refactors happened to cover every moderate-level rule as well.
+
+**Did NOT stop there — also verified `minor`:** re-ran the sweep with `IMPACTS=['minor', 'moderate', 'serious', 'critical']`. Also zero violations across all 10 pages.
+
+So why hold at `moderate` instead of going to all-levels?
+
+The current floor deliberately leaves `minor` as observe-only so incidental UI tweaks (landmark labels, region annotations, empty-alt warnings) don't block unrelated PRs. When strictest-possible enforcement is desired, flipping the threshold is a one-line change — the spec comment documents the path.
+
+**Changes:**
+
+| File | Change |
+|---|---|
+| `tests/e2e/a11y-audit.spec.ts` | `BLOCKING_IMPACTS: ['serious', 'critical']` → `['moderate', 'serious', 'critical']`. Ratchet comment updated to note minor is also clean and how to flip to all-levels. |
+
+**Gates:** 24/24 Playwright pass, 10 a11y specs in ~17s. 275/275 Vitest still pass. Typecheck clean. No runtime behavior change, no package version bump.
 
 ### 2026-04-14 — A11y ratchet: WCAG 2.0/2.1 AA serious+critical now enforced
 

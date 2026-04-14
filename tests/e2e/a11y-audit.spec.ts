@@ -6,21 +6,29 @@ import { getFixtures, loginAsAdmin } from './fixtures'
  * Accessibility audit via axe-core. Covers every significant dashboard
  * surface at the WCAG 2.0/2.1 AA level.
  *
- * Severity ratchet — CURRENT FLOOR: serious + critical.
+ * Severity ratchet — CURRENT FLOOR: moderate + serious + critical.
  *
  *   Introduced at 'critical' only (earlier PR). Raised to include
  *   'serious' after a focused fix pass: color-contrast swaps
  *   (text-gray-400 → text-gray-600 on white with dark:text-gray-400
  *   preserved for dark mode), missing select-name labels, and
- *   nested-interactive refactors on Events/Audit rows (whole-row
- *   role="button" → dedicated chevron button, preserving mouse
- *   click-to-expand without nesting interactive controls).
+ *   nested-interactive refactors on Events/Audit rows.
  *
- *   To ratchet further:
- *     1. Fix violations at the next impact level.
- *     2. Confirm the audit is clean.
- *     3. Add 'moderate' / 'minor' to BLOCKING_IMPACTS.
- *     4. Repeat.
+ *   Ratchet to 'moderate' was a free step — a discovery sweep found
+ *   zero moderate-level violations after the serious fix pass
+ *   (many moderate rules happen to overlap with the serious ones
+ *   we already addressed, and the remainder didn't trigger on this
+ *   codebase).
+ *
+ *   'minor' is ALSO currently clean. We deliberately hold the floor
+ *   at moderate so incidental UI tweaks (landmark labels, region
+ *   annotations) don't block unrelated PRs; keep 'minor' as the
+ *   next step when you want stricter enforcement.
+ *
+ *   To ratchet to all-levels (minor included):
+ *     1. Sweep with IMPACTS=['minor', …] to confirm still clean.
+ *     2. Add 'minor' to BLOCKING_IMPACTS.
+ *     3. Profit.
  *
  * Regression class: DOM/markup changes that remove aria-labels, break
  * label-for associations, re-introduce color-contrast failures, or
@@ -32,9 +40,10 @@ import { getFixtures, loginAsAdmin } from './fixtures'
 // WCAG 2.0/2.1 AA target tags.
 const AUDIT_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa']
 
-// Severities that fail the test. Raise to include 'moderate' / 'minor'
-// once those are known clean.
-const BLOCKING_IMPACTS: ReadonlyArray<string> = ['serious', 'critical']
+// Severities that fail the test. Raise to include 'minor' once we
+// want the strictest enforcement (currently also clean — verified
+// 2026-04-14).
+const BLOCKING_IMPACTS: ReadonlyArray<string> = ['moderate', 'serious', 'critical']
 
 // Pretty-print violations into the failure message so the CI trace
 // artifact tells the whole story without requiring a local re-run.
@@ -56,20 +65,20 @@ async function auditPage(page: import('@playwright/test').Page) {
   return results.violations.filter((v) => BLOCKING_IMPACTS.includes(v.impact ?? ''))
 }
 
-test('login page has no serious/critical a11y violations', async ({ page }) => {
+test('login page has no moderate+ a11y violations', async ({ page }) => {
   await page.goto('/login')
   const blocking = await auditPage(page)
   expect(blocking, `\n${formatViolations(blocking)}`).toEqual([])
 })
 
-test('overview page (post-login) has no serious/critical a11y violations', async ({ page }) => {
+test('overview page (post-login) has no moderate+ a11y violations', async ({ page }) => {
   await loginAsAdmin(page)
   // loginAsAdmin lands on '/' which is the Overview route.
   const blocking = await auditPage(page)
   expect(blocking, `\n${formatViolations(blocking)}`).toEqual([])
 })
 
-test('tenants list has no serious/critical a11y violations', async ({ page }) => {
+test('tenants list has no moderate+ a11y violations', async ({ page }) => {
   await loginAsAdmin(page)
   await page.goto('/tenants')
   await page.waitForResponse(
@@ -80,7 +89,7 @@ test('tenants list has no serious/critical a11y violations', async ({ page }) =>
   expect(blocking, `\n${formatViolations(blocking)}`).toEqual([])
 })
 
-test('tenant detail has no serious/critical a11y violations', async ({ page }) => {
+test('tenant detail has no moderate+ a11y violations', async ({ page }) => {
   const fx = getFixtures()
   await loginAsAdmin(page)
   await page.goto(`/tenants/${fx.tenantId}`)
@@ -94,7 +103,7 @@ test('tenant detail has no serious/critical a11y violations', async ({ page }) =
   expect(blocking, `\n${formatViolations(blocking)}`).toEqual([])
 })
 
-test('budgets list has no serious/critical a11y violations', async ({ page }) => {
+test('budgets list has no moderate+ a11y violations', async ({ page }) => {
   const fx = getFixtures()
   await loginAsAdmin(page)
   await page.goto('/budgets')
@@ -110,7 +119,7 @@ test('budgets list has no serious/critical a11y violations', async ({ page }) =>
   expect(blocking, `\n${formatViolations(blocking)}`).toEqual([])
 })
 
-test('events list has no serious/critical a11y violations', async ({ page }) => {
+test('events list has no moderate+ a11y violations', async ({ page }) => {
   await loginAsAdmin(page)
   await page.goto('/events')
   await page.waitForLoadState('networkidle')
@@ -118,7 +127,7 @@ test('events list has no serious/critical a11y violations', async ({ page }) => 
   expect(blocking, `\n${formatViolations(blocking)}`).toEqual([])
 })
 
-test('api keys list has no serious/critical a11y violations', async ({ page }) => {
+test('api keys list has no moderate+ a11y violations', async ({ page }) => {
   await loginAsAdmin(page)
   await page.goto('/api-keys')
   await page.waitForResponse(
@@ -130,7 +139,7 @@ test('api keys list has no serious/critical a11y violations', async ({ page }) =
   expect(blocking, `\n${formatViolations(blocking)}`).toEqual([])
 })
 
-test('webhooks list has no serious/critical a11y violations', async ({ page }) => {
+test('webhooks list has no moderate+ a11y violations', async ({ page }) => {
   await loginAsAdmin(page)
   await page.goto('/webhooks')
   await page.waitForLoadState('networkidle')
@@ -138,7 +147,7 @@ test('webhooks list has no serious/critical a11y violations', async ({ page }) =
   expect(blocking, `\n${formatViolations(blocking)}`).toEqual([])
 })
 
-test('audit page has no serious/critical a11y violations', async ({ page }) => {
+test('audit page has no moderate+ a11y violations', async ({ page }) => {
   await loginAsAdmin(page)
   await page.goto('/audit')
   await page.waitForLoadState('networkidle')
@@ -146,7 +155,7 @@ test('audit page has no serious/critical a11y violations', async ({ page }) => {
   expect(blocking, `\n${formatViolations(blocking)}`).toEqual([])
 })
 
-test('reservations page has no serious/critical a11y violations', async ({ page }) => {
+test('reservations page has no moderate+ a11y violations', async ({ page }) => {
   await loginAsAdmin(page)
   await page.goto('/reservations')
   await page.waitForResponse(
