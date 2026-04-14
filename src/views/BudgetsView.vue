@@ -361,7 +361,7 @@ watch(() => route.query, () => {
           <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs font-medium">{{ detail.unit }}</span>
           <span v-if="detail.is_over_limit" class="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-medium">OVER LIMIT</span>
           <span class="flex-1" />
-          <button v-if="canManage" @click="openEditBudget" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Edit</button>
+          <button v-if="canManage" @click="openEditBudget" class="btn-pill-secondary">Edit</button>
           <button v-if="canManage && detail.status === 'ACTIVE'" @click="requestFreeze(detail.scope, detail.unit, 'freeze')" class="btn-pill-danger">Freeze</button>
           <button v-if="canManage && detail.status === 'FROZEN'" @click="requestFreeze(detail.scope, detail.unit, 'unfreeze')" class="btn-pill-success">Unfreeze</button>
         </div>
@@ -383,7 +383,7 @@ watch(() => route.query, () => {
 
         <!-- Fund budget -->
         <div v-if="canManage && detail.status === 'ACTIVE'" class="mt-4 pt-4 border-t border-gray-200 flex items-center justify-between">
-          <span class="text-xs text-gray-600 dark:text-gray-500">Credit, debit, reset allocation, or repay debt</span>
+          <span class="muted-sm">Credit, debit, reset allocation, or repay debt</span>
           <button @click="openFund" class="btn-pill-primary">Fund Budget</button>
         </div>
       </div>
@@ -464,7 +464,7 @@ watch(() => route.query, () => {
                 <router-link :to="{ name: 'budgets', query: { scope: b.scope, unit: b.unit } }" class="text-blue-600 hover:underline font-mono text-xs">{{ b.scope }}</router-link>
                 <span v-if="b.is_over_limit" class="ml-1.5 bg-red-100 text-red-700 px-1 py-0.5 rounded text-xs font-medium">OVER</span>
               </td>
-              <td class="table-cell text-gray-600 dark:text-gray-500">{{ b.unit }}</td>
+              <td class="table-cell muted">{{ b.unit }}</td>
               <td class="table-cell"><StatusBadge :status="b.status" /></td>
               <td class="table-cell">
                 <UtilizationBar :remaining="b.remaining.amount" :allocated="b.allocated.amount" />
@@ -529,7 +529,7 @@ watch(() => route.query, () => {
     </FormDialog>
 
     <FormDialog v-if="showEditBudget" title="Edit Budget Config" submit-label="Save Changes" :loading="editBudgetLoading" :error="editBudgetError" @submit="submitEditBudget" @cancel="showEditBudget = false">
-      <p class="text-xs text-gray-600 dark:text-gray-500">Edit overdraft limit and commit overage policy for <span class="font-mono">{{ detail?.scope }}</span> ({{ detail?.unit }}).</p>
+      <p class="muted-sm">Edit overdraft limit and commit overage policy for <span class="font-mono">{{ detail?.scope }}</span> ({{ detail?.unit }}).</p>
       <div>
         <label for="eb-overdraft" class="form-label">Overdraft Limit ({{ detail?.unit }})</label>
         <input id="eb-overdraft" v-model="editBudgetForm.overdraft_limit" type="number" min="0" step="1" class="form-input-mono" />

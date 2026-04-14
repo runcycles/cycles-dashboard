@@ -458,7 +458,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           <StatusBadge :status="tenant.status" />
           <span class="flex-1" />
           <div v-if="canManageTenants" class="flex gap-2 flex-wrap">
-            <button @click="openEditTenant" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Edit</button>
+            <button @click="openEditTenant" class="btn-pill-secondary">Edit</button>
             <!-- #7 Emergency Freeze: only shown if there are ACTIVE budgets
                  to freeze. Otherwise the button would just confirm a no-op. -->
             <button v-if="canManageBudgets && activeBudgets.length > 0" @click="openEmergencyFreeze" class="btn-pill-danger">Emergency Freeze ({{ activeBudgets.length }})</button>
@@ -467,14 +467,14 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             <button v-if="tenant.status !== 'CLOSED'" @click="pendingTenantAction = 'CLOSED'" class="btn-pill-danger">Close</button>
           </div>
         </div>
-        <p class="text-sm text-gray-600 dark:text-gray-500 font-mono">{{ tenant.tenant_id }}</p>
+        <p class="text-sm muted font-mono">{{ tenant.tenant_id }}</p>
         <!-- Hierarchy: parent link + child list (#2). Children show only
              the first 6 inline; if there are more, a "View all" link
              drops into TenantsView filtered by this tenant as parent. -->
         <p v-if="tenant.parent_tenant_id" class="text-sm muted mt-1">
           Parent: <router-link :to="{ name: 'tenant-detail', params: { id: tenant.parent_tenant_id } }" class="text-blue-600 hover:underline">{{ tenant.parent_tenant_id }}</router-link>
         </p>
-        <div v-if="childTenants.length > 0" class="text-sm text-gray-600 dark:text-gray-500 mt-2 flex items-center gap-1 flex-wrap">
+        <div v-if="childTenants.length > 0" class="text-sm muted mt-2 flex items-center gap-1 flex-wrap">
           <span class="muted">Children ({{ childTenants.length }}):</span>
           <router-link
             v-for="c in childTenants.slice(0, 6)"
@@ -482,7 +482,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             :to="{ name: 'tenant-detail', params: { id: c.tenant_id } }"
             class="text-blue-600 hover:underline text-xs font-mono"
           >{{ c.tenant_id }}</router-link>
-          <router-link v-if="childTenants.length > 6" :to="{ name: 'tenants', query: { parent: tenant.tenant_id } }" class="text-xs text-gray-600 dark:text-gray-500 hover:text-gray-700 hover:underline">… +{{ childTenants.length - 6 }} more</router-link>
+          <router-link v-if="childTenants.length > 6" :to="{ name: 'tenants', query: { parent: tenant.tenant_id } }" class="muted-sm hover:text-gray-700 hover:underline">… +{{ childTenants.length - 6 }} more</router-link>
         </div>
       </div>
 
@@ -514,7 +514,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       <div class="flex border-b border-gray-200 mb-4">
         <button v-for="t in (['budgets', 'keys', 'policies'] as const)" :key="t"
           @click="tab = t"
-          :class="tab === t ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-600 dark:text-gray-500 hover:text-gray-700'"
+          :class="tab === t ? 'border-gray-900 text-gray-900' : 'border-transparent muted hover:text-gray-700'"
           class="px-4 py-2 text-sm font-medium border-b-2 -mb-px cursor-pointer transition-colors">
           {{ t === 'keys' ? 'API Keys' : t.charAt(0).toUpperCase() + t.slice(1) }}
           <span class="ml-1 muted-sm">({{ t === 'budgets' ? budgets.length : t === 'keys' ? apiKeys.length : policies.length }})</span>
@@ -533,9 +533,9 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           <tbody class="divide-y divide-gray-100">
             <tr v-for="b in budgets" :key="b.ledger_id" class="table-row-hover">
               <td class="table-cell"><router-link :to="{ name: 'budgets', query: { scope: b.scope, unit: b.unit } }" class="text-blue-600 hover:underline font-mono text-xs">{{ b.scope }}</router-link></td>
-              <td class="table-cell text-gray-600 dark:text-gray-500">{{ b.unit }}</td>
+              <td class="table-cell muted">{{ b.unit }}</td>
               <td class="table-cell"><StatusBadge :status="b.status" /></td>
-              <td class="table-cell text-right text-gray-600 dark:text-gray-500 tabular-nums">{{ b.allocated.amount.toLocaleString() }}</td>
+              <td class="table-cell text-right muted tabular-nums">{{ b.allocated.amount.toLocaleString() }}</td>
             </tr>
             <tr v-if="budgets.length === 0"><td colspan="4"><EmptyState message="No budgets" hint="Budgets will appear here once allocated" /></td></tr>
           </tbody>
@@ -556,7 +556,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
               <td class="table-cell"><MaskedValue :value="k.key_id" /></td>
               <td class="table-cell text-gray-700">{{ k.name || '-' }}</td>
               <td class="table-cell"><StatusBadge :status="k.status" /></td>
-              <td class="table-cell text-xs text-gray-600 dark:text-gray-500">{{ k.permissions.join(', ') }}</td>
+              <td class="table-cell muted-sm">{{ k.permissions.join(', ') }}</td>
               <td v-if="canManageKeys" class="table-cell">
                 <div class="flex gap-2">
                   <!-- #8: same drill-down as ApiKeysView.vue. -->
@@ -583,7 +583,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             <tr v-for="p in policies" :key="p.policy_id" class="table-row-hover">
               <td class="table-cell font-mono text-xs">{{ p.policy_id }}</td>
               <td class="table-cell text-gray-700">{{ p.name }}</td>
-              <td class="table-cell text-gray-600 dark:text-gray-500 font-mono text-xs">{{ p.scope_pattern }}</td>
+              <td class="table-cell muted font-mono text-xs">{{ p.scope_pattern }}</td>
               <td class="table-cell"><StatusBadge :status="p.status" /></td>
               <td v-if="canManagePolicies" class="table-cell">
                 <button @click="openEditPolicy(p)" class="text-xs text-gray-600 hover:text-gray-800 cursor-pointer hover:underline">Edit</button>

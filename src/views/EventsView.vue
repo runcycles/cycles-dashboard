@@ -120,7 +120,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
           <input id="ev-correlation" v-model="correlationId" placeholder="correlation_id" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-40" />
         </div>
         <button type="submit" class="bg-gray-900 text-white px-3 py-1.5 rounded text-sm hover:bg-gray-800 cursor-pointer">Filter</button>
-        <button v-if="hasActiveFilters" type="button" @click="clearFilters" class="text-sm text-gray-600 dark:text-gray-500 hover:text-gray-700 cursor-pointer">Clear</button>
+        <button v-if="hasActiveFilters" type="button" @click="clearFilters" class="text-sm muted hover:text-gray-700 cursor-pointer">Clear</button>
       </div>
     </form>
 

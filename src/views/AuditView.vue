@@ -179,7 +179,7 @@ watch(() => route.query, () => {
       <div class="flex gap-2 mt-3 pt-3 border-t border-gray-100">
         <span class="muted-sm py-1">Quick range:</span>
         <button v-for="h in [1, 6, 24, 168]" :key="h" type="button" @click="setTimeRange(h)"
-          class="text-xs text-gray-600 dark:text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 cursor-pointer">
+          class="muted-sm hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 cursor-pointer">
           {{ h < 24 ? `${h}h` : `${h / 24}d` }}
         </button>
       </div>
@@ -188,11 +188,11 @@ watch(() => route.query, () => {
     <div v-if="!loading" class="flex items-center justify-between mb-2">
       <p class="muted-sm">{{ entries.length }} result{{ entries.length !== 1 ? 's' : '' }}</p>
       <div v-if="entries.length > 0" class="flex gap-2">
-        <button @click="confirmExport('csv')" class="inline-flex items-center gap-1 text-xs text-gray-600 dark:text-gray-500 hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100">
+        <button @click="confirmExport('csv')" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100">
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
           Export CSV
         </button>
-        <button @click="confirmExport('json')" class="inline-flex items-center gap-1 text-xs text-gray-600 dark:text-gray-500 hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100">
+        <button @click="confirmExport('json')" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100">
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
           Export JSON
         </button>
@@ -246,7 +246,7 @@ watch(() => route.query, () => {
                 <span v-if="e.resource_id" class="ml-1 font-mono muted">{{ e.resource_id }}</span>
                 <span v-if="!e.resource_type && !e.resource_id" class="muted">-</span>
               </td>
-              <td class="table-cell text-gray-600 dark:text-gray-500 text-xs">
+              <td class="table-cell muted-sm">
                 <TenantLink v-if="e.tenant_id" :tenant-id="e.tenant_id" />
                 <span v-else class="muted-sm">-</span>
               </td>

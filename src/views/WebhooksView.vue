@@ -243,7 +243,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   <div>
     <PageHeader title="Webhooks" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
       <template #actions>
-        <button v-if="canManage" @click="openSecurityConfig" class="text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors">Security Config</button>
+        <button v-if="canManage" @click="openSecurityConfig" class="btn-pill-secondary">Security Config</button>
         <button v-if="canManage" @click="openCreate" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Webhook</button>
       </template>
     </PageHeader>
@@ -266,7 +266,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       <span class="text-sm text-blue-900">{{ selectedVisibleCount }} selected</span>
       <button @click="openBulk('PAUSED')" class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer">Pause selected</button>
       <button @click="openBulk('ACTIVE')" class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer">Enable selected</button>
-      <button @click="selected = new Set()" class="text-xs text-gray-600 dark:text-gray-500 hover:text-gray-700 ml-auto cursor-pointer">Clear</button>
+      <button @click="selected = new Set()" class="muted-sm hover:text-gray-700 ml-auto cursor-pointer">Clear</button>
     </div>
 
     <div class="card-table">
@@ -296,7 +296,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             </td>
             <td class="table-cell"><StatusBadge :status="w.status" /></td>
             <td class="table-cell text-right tabular-nums" :class="(w.consecutive_failures ?? 0) > 0 ? 'text-red-600 font-medium' : 'muted'">{{ w.consecutive_failures ?? 0 }}</td>
-            <td class="table-cell text-xs text-gray-600 dark:text-gray-500">{{ w.event_types?.join(', ') || w.event_categories?.join(', ') || 'all' }}</td>
+            <td class="table-cell muted-sm">{{ w.event_types?.join(', ') || w.event_categories?.join(', ') || 'all' }}</td>
             <td v-if="canManage" class="table-cell">
               <button v-if="w.status === 'ACTIVE'" @click="pendingStatusAction = { id: w.subscription_id, url: w.url, action: 'PAUSED' }" class="btn-row-danger">Pause</button>
               <button v-if="w.status === 'PAUSED' || w.status === 'DISABLED'" @click="pendingStatusAction = { id: w.subscription_id, url: w.url, action: 'ACTIVE' }" class="btn-row-success">Enable</button>
@@ -382,7 +382,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
 
     <!-- Webhook security config dialog -->
     <FormDialog v-if="showSecurityConfig" title="Webhook Security Config" submit-label="Save Config" :loading="securityLoading" :error="securityError" @submit="submitSecurityConfig" @cancel="showSecurityConfig = false">
-      <p class="text-xs text-gray-600 dark:text-gray-500">Server-level security rules applied to all webhook create/update operations. Changes take effect immediately. Existing subscriptions are not retroactively validated.</p>
+      <p class="muted-sm">Server-level security rules applied to all webhook create/update operations. Changes take effect immediately. Existing subscriptions are not retroactively validated.</p>
       <div>
         <label for="sc-cidr" class="form-label">Blocked CIDR ranges (one per line)</label>
         <textarea id="sc-cidr" v-model="securityForm.blocked_cidr" rows="4" class="form-input-mono" placeholder="10.0.0.0/8&#10;172.16.0.0/12&#10;192.168.0.0/16" />

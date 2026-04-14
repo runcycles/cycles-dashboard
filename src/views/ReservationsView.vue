@@ -218,10 +218,10 @@ function isExpired(r: ReservationSummary): boolean {
               {{ r.reserved.amount.toLocaleString() }}
               <span class="muted-sm">{{ r.reserved.unit }}</span>
             </td>
-            <td class="table-cell text-gray-600 dark:text-gray-500 text-xs" :title="formatDateTime(new Date(r.created_at_ms).toISOString())">
+            <td class="table-cell muted-sm" :title="formatDateTime(new Date(r.created_at_ms).toISOString())">
               {{ ageLabel(r) }}
             </td>
-            <td class="table-cell text-xs" :class="isExpired(r) && r.status === 'ACTIVE' ? 'text-red-600 font-medium' : 'text-gray-600 dark:text-gray-500'">
+            <td class="table-cell text-xs" :class="isExpired(r) && r.status === 'ACTIVE' ? 'text-red-600 font-medium' : 'muted'">
               <!-- Overdue indicator: ACTIVE + past expiry is the
                    definitional "hung" state. Tooltip shows the exact
                    expiry time for drill-down. -->
@@ -273,7 +273,7 @@ function isExpired(r: ReservationSummary): boolean {
         <code class="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">{{ pendingRelease.scope_path }}</code>
         will be available for new reservations immediately.
       </p>
-      <p class="text-xs text-gray-600 dark:text-gray-500">
+      <p class="muted-sm">
         Audit log records <code class="font-mono">actor_type=admin_on_behalf_of</code> so this action is traceable
         via the Audit tab.
       </p>

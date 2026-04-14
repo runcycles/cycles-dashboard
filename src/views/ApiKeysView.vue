@@ -250,7 +250,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             <option>EXPIRED</option>
           </select>
         </div>
-        <button v-if="hasActiveFilters" @click="clearFilters" class="text-xs text-gray-600 dark:text-gray-500 hover:text-gray-700 cursor-pointer">Clear</button>
+        <button v-if="hasActiveFilters" @click="clearFilters" class="muted-sm hover:text-gray-700 cursor-pointer">Clear</button>
         <div v-if="isLoading" class="flex items-center">
           <svg class="w-4 h-4 muted animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
         </div>
@@ -282,14 +282,14 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
               <TenantLink :tenant-id="k.tenant_id" />
             </td>
             <td class="table-cell"><StatusBadge :status="k.status" /></td>
-            <td class="table-cell text-xs text-gray-600 dark:text-gray-500">
+            <td class="table-cell muted-sm">
               <div class="flex flex-wrap gap-1">
                 <span v-for="p in k.permissions" :key="p" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{{ p }}</span>
               </div>
             </td>
-            <td class="table-cell text-xs text-gray-600 dark:text-gray-500 font-mono">{{ k.scope_filter?.join(', ') || '-' }}</td>
+            <td class="table-cell muted-sm font-mono">{{ k.scope_filter?.join(', ') || '-' }}</td>
             <td class="table-cell muted-sm whitespace-nowrap">{{ formatDateTime(k.created_at) }}</td>
-            <td class="table-cell text-xs whitespace-nowrap" :class="k.expires_at ? 'text-gray-600 dark:text-gray-500' : 'muted'">
+            <td class="table-cell text-xs whitespace-nowrap" :class="k.expires_at ? 'muted' : 'muted'">
               {{ k.expires_at ? formatDateTime(k.expires_at) : 'Never' }}
             </td>
             <td v-if="canManage" class="table-cell">
