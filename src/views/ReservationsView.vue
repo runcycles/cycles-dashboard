@@ -176,20 +176,20 @@ function isExpired(r: ReservationSummary): boolean {
          ACTIVE because that's the operationally-interesting set. -->
     <div class="mb-4 flex gap-3 flex-wrap items-end">
       <div>
-        <label for="res-tenant" class="block text-xs text-gray-500 mb-1">Tenant *</label>
+        <label for="res-tenant" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Tenant *</label>
         <select id="res-tenant" v-model="tenantFilter" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
           <option value="" disabled>— pick a tenant —</option>
           <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
         </select>
       </div>
       <div>
-        <label for="res-status" class="block text-xs text-gray-500 mb-1">Status</label>
+        <label for="res-status" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Status</label>
         <select id="res-status" v-model="statusFilter" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
           <option value="">All</option>
           <option v-for="s in RESERVATION_STATUSES" :key="s" :value="s">{{ s }}</option>
         </select>
       </div>
-      <p class="text-xs text-gray-400 flex-1 min-w-[16rem]">
+      <p class="text-xs text-gray-600 dark:text-gray-400 flex-1 min-w-[16rem]">
         Default sort is Created (newest first). Click the Created header to flip
         to ascending — reservations past their grace window but still ACTIVE rise
         to the top, which is the fast way to find "hung" ones.
@@ -198,7 +198,7 @@ function isExpired(r: ReservationSummary): boolean {
 
     <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
       <table class="w-full text-sm min-w-[720px]">
-        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
+        <thead class="bg-gray-50 text-gray-600 dark:text-gray-500 text-xs uppercase tracking-wider">
           <tr>
             <SortHeader label="Reservation ID" column="reservation_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <th class="px-4 py-3 text-left">Scope</th>
@@ -216,12 +216,12 @@ function isExpired(r: ReservationSummary): boolean {
             <td class="px-4 py-3"><StatusBadge :status="r.status" /></td>
             <td class="px-4 py-3 text-right tabular-nums">
               {{ r.reserved.amount.toLocaleString() }}
-              <span class="text-xs text-gray-400">{{ r.reserved.unit }}</span>
+              <span class="text-xs text-gray-600 dark:text-gray-400">{{ r.reserved.unit }}</span>
             </td>
-            <td class="px-4 py-3 text-gray-500 text-xs" :title="formatDateTime(new Date(r.created_at_ms).toISOString())">
+            <td class="px-4 py-3 text-gray-600 dark:text-gray-500 text-xs" :title="formatDateTime(new Date(r.created_at_ms).toISOString())">
               {{ ageLabel(r) }}
             </td>
-            <td class="px-4 py-3 text-xs" :class="isExpired(r) && r.status === 'ACTIVE' ? 'text-red-600 font-medium' : 'text-gray-500'">
+            <td class="px-4 py-3 text-xs" :class="isExpired(r) && r.status === 'ACTIVE' ? 'text-red-600 font-medium' : 'text-gray-600 dark:text-gray-500'">
               <!-- Overdue indicator: ACTIVE + past expiry is the
                    definitional "hung" state. Tooltip shows the exact
                    expiry time for drill-down. -->
@@ -273,12 +273,12 @@ function isExpired(r: ReservationSummary): boolean {
         <code class="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">{{ pendingRelease.scope_path }}</code>
         will be available for new reservations immediately.
       </p>
-      <p class="text-xs text-gray-500">
+      <p class="text-xs text-gray-600 dark:text-gray-500">
         Audit log records <code class="font-mono">actor_type=admin_on_behalf_of</code> so this action is traceable
         via the Audit tab.
       </p>
       <div>
-        <label for="release-reason" class="block text-xs text-gray-500 mb-1">Reason (for audit log)</label>
+        <label for="release-reason" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Reason (for audit log)</label>
         <input
           id="release-reason"
           v-model="releaseReason"
@@ -286,7 +286,7 @@ function isExpired(r: ReservationSummary): boolean {
           class="border border-gray-300 rounded px-2 py-1 text-sm w-full"
           placeholder="[INCIDENT_FORCE_RELEASE] hung after redis restart"
         />
-        <p class="text-xs text-gray-400 mt-0.5">
+        <p class="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
           Stored on the audit-log entry. Structured prefix like
           <code class="font-mono">[INCIDENT_FORCE_RELEASE]</code> makes later grep easier.
         </p>

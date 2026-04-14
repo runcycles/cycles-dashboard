@@ -442,7 +442,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   <div>
     <PageHeader title="Tenant Detail" :subtitle="tenant?.tenant_id" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
       <template #back>
-        <button @click="router.push('/tenants')" aria-label="Back to tenants" class="text-gray-400 hover:text-gray-700 cursor-pointer">
+        <button @click="router.push('/tenants')" aria-label="Back to tenants" class="text-gray-600 dark:text-gray-400 hover:text-gray-700 cursor-pointer">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
@@ -467,22 +467,22 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             <button v-if="tenant.status !== 'CLOSED'" @click="pendingTenantAction = 'CLOSED'" class="text-xs text-red-600 hover:text-red-800 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 cursor-pointer transition-colors">Close</button>
           </div>
         </div>
-        <p class="text-sm text-gray-500 font-mono">{{ tenant.tenant_id }}</p>
+        <p class="text-sm text-gray-600 dark:text-gray-500 font-mono">{{ tenant.tenant_id }}</p>
         <!-- Hierarchy: parent link + child list (#2). Children show only
              the first 6 inline; if there are more, a "View all" link
              drops into TenantsView filtered by this tenant as parent. -->
-        <p v-if="tenant.parent_tenant_id" class="text-sm text-gray-400 mt-1">
+        <p v-if="tenant.parent_tenant_id" class="text-sm text-gray-600 dark:text-gray-400 mt-1">
           Parent: <router-link :to="{ name: 'tenant-detail', params: { id: tenant.parent_tenant_id } }" class="text-blue-600 hover:underline">{{ tenant.parent_tenant_id }}</router-link>
         </p>
-        <div v-if="childTenants.length > 0" class="text-sm text-gray-500 mt-2 flex items-center gap-1 flex-wrap">
-          <span class="text-gray-400">Children ({{ childTenants.length }}):</span>
+        <div v-if="childTenants.length > 0" class="text-sm text-gray-600 dark:text-gray-500 mt-2 flex items-center gap-1 flex-wrap">
+          <span class="text-gray-600 dark:text-gray-400">Children ({{ childTenants.length }}):</span>
           <router-link
             v-for="c in childTenants.slice(0, 6)"
             :key="c.tenant_id"
             :to="{ name: 'tenant-detail', params: { id: c.tenant_id } }"
             class="text-blue-600 hover:underline text-xs font-mono"
           >{{ c.tenant_id }}</router-link>
-          <router-link v-if="childTenants.length > 6" :to="{ name: 'tenants', query: { parent: tenant.tenant_id } }" class="text-xs text-gray-500 hover:text-gray-700 hover:underline">… +{{ childTenants.length - 6 }} more</router-link>
+          <router-link v-if="childTenants.length > 6" :to="{ name: 'tenants', query: { parent: tenant.tenant_id } }" class="text-xs text-gray-600 dark:text-gray-500 hover:text-gray-700 hover:underline">… +{{ childTenants.length - 6 }} more</router-link>
         </div>
       </div>
 
@@ -496,15 +496,15 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         <div class="space-y-3">
           <div v-for="u in rollupUnits" :key="u" class="grid grid-cols-5 gap-3 text-sm items-baseline">
             <div class="col-span-1">
-              <div class="text-xs text-gray-400">{{ u }}</div>
-              <div class="text-xs text-gray-400">{{ rollupByUnit[u].count }} ledger{{ rollupByUnit[u].count === 1 ? '' : 's' }}</div>
+              <div class="text-xs text-gray-600 dark:text-gray-400">{{ u }}</div>
+              <div class="text-xs text-gray-600 dark:text-gray-400">{{ rollupByUnit[u].count }} ledger{{ rollupByUnit[u].count === 1 ? '' : 's' }}</div>
             </div>
-            <div><div class="text-xs text-gray-400">Allocated</div><div class="font-semibold tabular-nums">{{ rollupByUnit[u].allocated.toLocaleString() }}</div></div>
-            <div><div class="text-xs text-gray-400">Remaining</div><div class="font-semibold tabular-nums">{{ rollupByUnit[u].remaining.toLocaleString() }}</div></div>
-            <div><div class="text-xs text-gray-400">Spent</div><div class="font-semibold tabular-nums">{{ rollupByUnit[u].spent.toLocaleString() }}</div></div>
+            <div><div class="text-xs text-gray-600 dark:text-gray-400">Allocated</div><div class="font-semibold tabular-nums">{{ rollupByUnit[u].allocated.toLocaleString() }}</div></div>
+            <div><div class="text-xs text-gray-600 dark:text-gray-400">Remaining</div><div class="font-semibold tabular-nums">{{ rollupByUnit[u].remaining.toLocaleString() }}</div></div>
+            <div><div class="text-xs text-gray-600 dark:text-gray-400">Spent</div><div class="font-semibold tabular-nums">{{ rollupByUnit[u].spent.toLocaleString() }}</div></div>
             <div>
-              <div class="text-xs text-gray-400">Debt</div>
-              <div class="font-semibold tabular-nums" :class="rollupByUnit[u].debt > 0 ? 'text-red-600' : 'text-gray-400'">{{ rollupByUnit[u].debt.toLocaleString() }}</div>
+              <div class="text-xs text-gray-600 dark:text-gray-400">Debt</div>
+              <div class="font-semibold tabular-nums" :class="rollupByUnit[u].debt > 0 ? 'text-red-600' : 'text-gray-600 dark:text-gray-400'">{{ rollupByUnit[u].debt.toLocaleString() }}</div>
             </div>
           </div>
         </div>
@@ -514,10 +514,10 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       <div class="flex border-b border-gray-200 mb-4">
         <button v-for="t in (['budgets', 'keys', 'policies'] as const)" :key="t"
           @click="tab = t"
-          :class="tab === t ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'"
+          :class="tab === t ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-600 dark:text-gray-500 hover:text-gray-700'"
           class="px-4 py-2 text-sm font-medium border-b-2 -mb-px cursor-pointer transition-colors">
           {{ t === 'keys' ? 'API Keys' : t.charAt(0).toUpperCase() + t.slice(1) }}
-          <span class="ml-1 text-xs text-gray-400">({{ t === 'budgets' ? budgets.length : t === 'keys' ? apiKeys.length : policies.length }})</span>
+          <span class="ml-1 text-xs text-gray-600 dark:text-gray-400">({{ t === 'budgets' ? budgets.length : t === 'keys' ? apiKeys.length : policies.length }})</span>
         </button>
       </div>
 
@@ -527,15 +527,15 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       </div>
       <div v-if="tab === 'budgets'" class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
         <table class="w-full text-sm min-w-[520px]">
-          <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
+          <thead class="bg-gray-50 text-gray-600 dark:text-gray-500 text-xs uppercase tracking-wider">
             <tr><th class="px-4 py-3 text-left">Scope</th><th class="px-4 py-3 text-left">Unit</th><th class="px-4 py-3 text-left">Status</th><th class="px-4 py-3 text-right">Allocated</th></tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
             <tr v-for="b in budgets" :key="b.ledger_id" class="hover:bg-gray-50 transition-colors">
               <td class="px-4 py-3"><router-link :to="{ name: 'budgets', query: { scope: b.scope, unit: b.unit } }" class="text-blue-600 hover:underline font-mono text-xs">{{ b.scope }}</router-link></td>
-              <td class="px-4 py-3 text-gray-500">{{ b.unit }}</td>
+              <td class="px-4 py-3 text-gray-600 dark:text-gray-500">{{ b.unit }}</td>
               <td class="px-4 py-3"><StatusBadge :status="b.status" /></td>
-              <td class="px-4 py-3 text-right text-gray-500 tabular-nums">{{ b.allocated.amount.toLocaleString() }}</td>
+              <td class="px-4 py-3 text-right text-gray-600 dark:text-gray-500 tabular-nums">{{ b.allocated.amount.toLocaleString() }}</td>
             </tr>
             <tr v-if="budgets.length === 0"><td colspan="4"><EmptyState message="No budgets" hint="Budgets will appear here once allocated" /></td></tr>
           </tbody>
@@ -548,7 +548,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       </div>
       <div v-if="tab === 'keys'" class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
         <table class="w-full text-sm min-w-[520px]">
-          <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
+          <thead class="bg-gray-50 text-gray-600 dark:text-gray-500 text-xs uppercase tracking-wider">
             <tr><th class="px-4 py-3 text-left">Key ID</th><th class="px-4 py-3 text-left">Name</th><th class="px-4 py-3 text-left">Status</th><th class="px-4 py-3 text-left">Permissions</th><th v-if="canManageKeys" class="px-4 py-3 w-20"></th></tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
@@ -556,7 +556,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
               <td class="px-4 py-3"><MaskedValue :value="k.key_id" /></td>
               <td class="px-4 py-3 text-gray-700">{{ k.name || '-' }}</td>
               <td class="px-4 py-3"><StatusBadge :status="k.status" /></td>
-              <td class="px-4 py-3 text-xs text-gray-500">{{ k.permissions.join(', ') }}</td>
+              <td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-500">{{ k.permissions.join(', ') }}</td>
               <td v-if="canManageKeys" class="px-4 py-3">
                 <div class="flex gap-2">
                   <!-- #8: same drill-down as ApiKeysView.vue. -->
@@ -576,14 +576,14 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       </div>
       <div v-if="tab === 'policies'" class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
         <table class="w-full text-sm min-w-[520px]">
-          <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
+          <thead class="bg-gray-50 text-gray-600 dark:text-gray-500 text-xs uppercase tracking-wider">
             <tr><th class="px-4 py-3 text-left">Policy ID</th><th class="px-4 py-3 text-left">Name</th><th class="px-4 py-3 text-left">Scope</th><th class="px-4 py-3 text-left">Status</th><th v-if="canManagePolicies" class="px-4 py-3 w-20"></th></tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
             <tr v-for="p in policies" :key="p.policy_id" class="hover:bg-gray-50 transition-colors">
               <td class="px-4 py-3 font-mono text-xs">{{ p.policy_id }}</td>
               <td class="px-4 py-3 text-gray-700">{{ p.name }}</td>
-              <td class="px-4 py-3 text-gray-500 font-mono text-xs">{{ p.scope_pattern }}</td>
+              <td class="px-4 py-3 text-gray-600 dark:text-gray-500 font-mono text-xs">{{ p.scope_pattern }}</td>
               <td class="px-4 py-3"><StatusBadge :status="p.status" /></td>
               <td v-if="canManagePolicies" class="px-4 py-3">
                 <button @click="openEditPolicy(p)" class="text-xs text-gray-600 hover:text-gray-800 cursor-pointer hover:underline">Edit</button>
@@ -634,11 +634,11 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <!-- Edit tenant dialog -->
     <FormDialog v-if="showEditTenant" title="Edit Tenant" submit-label="Save Changes" :loading="editTenantLoading" :error="editTenantError" @submit="submitEditTenant" @cancel="showEditTenant = false">
       <div>
-        <label for="et-name" class="block text-xs text-gray-500 mb-1">Display Name</label>
+        <label for="et-name" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Display Name</label>
         <input id="et-name" v-model="editTenantForm.name" required maxlength="256" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
       </div>
       <div>
-        <label for="et-overage" class="block text-xs text-gray-500 mb-1">Default Commit Overage Policy</label>
+        <label for="et-overage" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Default Commit Overage Policy</label>
         <select id="et-overage" v-model="editTenantForm.default_commit_overage_policy" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
           <option value="">Inherit</option>
           <option value="REJECT">Reject</option>
@@ -648,11 +648,11 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       </div>
       <div class="grid grid-cols-2 gap-3">
         <div>
-          <label for="et-ttl" class="block text-xs text-gray-500 mb-1">Default Reservation TTL (ms)</label>
+          <label for="et-ttl" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Default Reservation TTL (ms)</label>
           <input id="et-ttl" v-model="editTenantForm.default_reservation_ttl_ms" type="number" min="1000" max="86400000" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" placeholder="60000" />
         </div>
         <div>
-          <label for="et-max-ttl" class="block text-xs text-gray-500 mb-1">Max Reservation TTL (ms)</label>
+          <label for="et-max-ttl" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Max Reservation TTL (ms)</label>
           <input id="et-max-ttl" v-model="editTenantForm.max_reservation_ttl_ms" type="number" min="1000" max="86400000" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" placeholder="3600000" />
         </div>
       </div>
@@ -661,19 +661,19 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <!-- Create API key for this tenant -->
     <FormDialog v-if="showCreateKey" title="Create API Key" submit-label="Create Key" :loading="createKeyLoading" :error="createKeyError" @submit="submitCreateKey" @cancel="showCreateKey = false">
       <div>
-        <label for="ck2-name" class="block text-xs text-gray-500 mb-1">Name</label>
+        <label for="ck2-name" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Name</label>
         <input id="ck2-name" v-model="createKeyForm.name" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" placeholder="my-service-key" />
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Permissions</label>
+        <label class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Permissions</label>
         <PermissionPicker v-model="createKeyForm.permissions" />
       </div>
       <div>
-        <label for="ck2-scope" class="block text-xs text-gray-500 mb-1">Scope filter (comma-separated, optional)</label>
+        <label for="ck2-scope" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Scope filter (comma-separated, optional)</label>
         <input id="ck2-scope" v-model="createKeyForm.scope_filter" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
       </div>
       <div>
-        <label for="ck2-expires" class="block text-xs text-gray-500 mb-1">Expires at (optional)</label>
+        <label for="ck2-expires" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Expires at (optional)</label>
         <input id="ck2-expires" v-model="createKeyForm.expires_at" type="datetime-local" class="border border-gray-300 rounded px-2 py-1.5 text-sm" />
       </div>
     </FormDialog>
@@ -701,7 +701,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <!-- v0.1.25.20: Create Budget (admin-on-behalf-of) -->
     <FormDialog v-if="showCreateBudget" title="Create Budget" submit-label="Create" :loading="createBudgetLoading" :error="createBudgetError" @submit="submitCreateBudget" @cancel="showCreateBudget = false">
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Scope</label>
+        <label class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Scope</label>
         <!-- v0.1.25.20: structured builder replaces the free-text input.
              Tenant row is locked to the current detail's tenant, so the
              admin-on-behalf-of cross-field check passes by construction.
@@ -710,7 +710,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         <ScopeBuilder v-model="createBudgetForm.scope" :tenant-id="id" />
       </div>
       <div>
-        <label for="cb-unit" class="block text-xs text-gray-500 mb-1">Unit</label>
+        <label for="cb-unit" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Unit</label>
         <select id="cb-unit" v-model="createBudgetForm.unit" required class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
           <option value="USD_MICROCENTS">USD_MICROCENTS</option>
           <option value="TOKENS">TOKENS</option>
@@ -719,15 +719,15 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         </select>
       </div>
       <div>
-        <label for="cb-allocated" class="block text-xs text-gray-500 mb-1">Initial allocation</label>
+        <label for="cb-allocated" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Initial allocation</label>
         <input id="cb-allocated" v-model="createBudgetForm.allocated" type="number" min="0" step="1" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
       </div>
       <div>
-        <label for="cb-overdraft" class="block text-xs text-gray-500 mb-1">Overdraft limit (optional)</label>
+        <label for="cb-overdraft" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Overdraft limit (optional)</label>
         <input id="cb-overdraft" v-model="createBudgetForm.overdraft_limit" type="number" min="0" step="1" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
       </div>
       <div>
-        <label for="cb-cop" class="block text-xs text-gray-500 mb-1">Commit overage policy (optional)</label>
+        <label for="cb-cop" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Commit overage policy (optional)</label>
         <select id="cb-cop" v-model="createBudgetForm.commit_overage_policy" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
           <option value="">— Inherit from tenant —</option>
           <option v-for="p in COMMIT_OVERAGE_POLICIES" :key="p" :value="p">{{ p }}</option>
@@ -738,26 +738,26 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <!-- v0.1.25.20: Create Policy (admin-on-behalf-of) -->
     <FormDialog v-if="showCreatePolicy" title="Create Policy" submit-label="Create" :loading="createPolicyLoading" :error="createPolicyError" @submit="submitCreatePolicy" @cancel="showCreatePolicy = false">
       <div>
-        <label for="cp-name" class="block text-xs text-gray-500 mb-1">Name</label>
+        <label for="cp-name" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Name</label>
         <input id="cp-name" v-model="createPolicyForm.name" required maxlength="256" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Scope pattern</label>
+        <label class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Scope pattern</label>
         <!-- Policy patterns enable wildcards: per-row "any <kind> (*)"
              radio for id-wildcards, and a trailing /* checkbox for
              "match everything deeper." -->
         <ScopeBuilder v-model="createPolicyForm.scope_pattern" :tenant-id="id" allow-wildcards />
       </div>
       <div>
-        <label for="cp-desc" class="block text-xs text-gray-500 mb-1">Description (optional)</label>
+        <label for="cp-desc" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Description (optional)</label>
         <input id="cp-desc" v-model="createPolicyForm.description" maxlength="1024" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
       </div>
       <div>
-        <label for="cp-priority" class="block text-xs text-gray-500 mb-1">Priority (higher wins on overlap)</label>
+        <label for="cp-priority" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Priority (higher wins on overlap)</label>
         <input id="cp-priority" v-model="createPolicyForm.priority" type="number" step="1" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="0" />
       </div>
       <div>
-        <label for="cp-cop" class="block text-xs text-gray-500 mb-1">Commit overage policy (optional)</label>
+        <label for="cp-cop" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Commit overage policy (optional)</label>
         <select id="cp-cop" v-model="createPolicyForm.commit_overage_policy" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
           <option value="">— Default —</option>
           <option v-for="p in COMMIT_OVERAGE_POLICIES" :key="p" :value="p">{{ p }}</option>
@@ -768,19 +768,19 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <!-- v0.1.25.20: Edit Policy -->
     <FormDialog v-if="showEditPolicy" title="Edit Policy" submit-label="Save Changes" :loading="editPolicyLoading" :error="editPolicyError" @submit="submitEditPolicy" @cancel="showEditPolicy = false">
       <div>
-        <label for="ep-name" class="block text-xs text-gray-500 mb-1">Name</label>
+        <label for="ep-name" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Name</label>
         <input id="ep-name" v-model="editPolicyForm.name" maxlength="256" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
       </div>
       <div>
-        <label for="ep-desc" class="block text-xs text-gray-500 mb-1">Description (optional)</label>
+        <label for="ep-desc" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Description (optional)</label>
         <input id="ep-desc" v-model="editPolicyForm.description" maxlength="1024" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
       </div>
       <div>
-        <label for="ep-priority" class="block text-xs text-gray-500 mb-1">Priority</label>
+        <label for="ep-priority" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Priority</label>
         <input id="ep-priority" v-model="editPolicyForm.priority" type="number" step="1" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
       </div>
       <div>
-        <label for="ep-cop" class="block text-xs text-gray-500 mb-1">Commit overage policy (optional)</label>
+        <label for="ep-cop" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Commit overage policy (optional)</label>
         <select id="ep-cop" v-model="editPolicyForm.commit_overage_policy" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
           <option value="">— Unchanged —</option>
           <option v-for="p in COMMIT_OVERAGE_POLICIES" :key="p" :value="p">{{ p }}</option>

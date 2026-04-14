@@ -224,7 +224,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   <div>
     <PageHeader title="Webhook Detail" :subtitle="webhook?.name || webhook?.subscription_id" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
       <template #back>
-        <button @click="router.push('/webhooks')" aria-label="Back to webhooks" class="text-gray-400 hover:text-gray-700 cursor-pointer">
+        <button @click="router.push('/webhooks')" aria-label="Back to webhooks" class="text-gray-600 dark:text-gray-400 hover:text-gray-700 cursor-pointer">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
@@ -251,28 +251,28 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           </div>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-          <div class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">URL</span><span class="font-mono text-xs break-all">{{ webhook.url }}</span></div>
-          <div class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Tenant</span><TenantLink :tenant-id="webhook.tenant_id" /></div>
-          <div class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Subscribed Event Types</span><div class="flex flex-wrap gap-1 mt-1"><span v-for="et in (webhook.event_types || [])" :key="et" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs font-mono">{{ et }}</span><span v-if="!webhook.event_types?.length" class="text-xs text-gray-400">all events</span></div></div>
-          <div v-if="webhook.scope_filter" class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Scope Filter</span><span class="font-mono text-xs">{{ webhook.scope_filter }}</span></div>
-          <div v-if="webhook.last_success_at" class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Last Success</span>{{ formatDateTime(webhook.last_success_at) }}</div>
-          <div v-if="webhook.last_failure_at" class="bg-gray-50 rounded p-3"><span class="text-gray-500 block text-xs mb-1">Last Failure</span>{{ formatDateTime(webhook.last_failure_at) }}</div>
+          <div class="bg-gray-50 rounded p-3"><span class="text-gray-600 dark:text-gray-500 block text-xs mb-1">URL</span><span class="font-mono text-xs break-all">{{ webhook.url }}</span></div>
+          <div class="bg-gray-50 rounded p-3"><span class="text-gray-600 dark:text-gray-500 block text-xs mb-1">Tenant</span><TenantLink :tenant-id="webhook.tenant_id" /></div>
+          <div class="bg-gray-50 rounded p-3"><span class="text-gray-600 dark:text-gray-500 block text-xs mb-1">Subscribed Event Types</span><div class="flex flex-wrap gap-1 mt-1"><span v-for="et in (webhook.event_types || [])" :key="et" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs font-mono">{{ et }}</span><span v-if="!webhook.event_types?.length" class="text-xs text-gray-600 dark:text-gray-400">all events</span></div></div>
+          <div v-if="webhook.scope_filter" class="bg-gray-50 rounded p-3"><span class="text-gray-600 dark:text-gray-500 block text-xs mb-1">Scope Filter</span><span class="font-mono text-xs">{{ webhook.scope_filter }}</span></div>
+          <div v-if="webhook.last_success_at" class="bg-gray-50 rounded p-3"><span class="text-gray-600 dark:text-gray-500 block text-xs mb-1">Last Success</span>{{ formatDateTime(webhook.last_success_at) }}</div>
+          <div v-if="webhook.last_failure_at" class="bg-gray-50 rounded p-3"><span class="text-gray-600 dark:text-gray-500 block text-xs mb-1">Last Failure</span>{{ formatDateTime(webhook.last_failure_at) }}</div>
           <!-- v0.1.25.21 (#10): expose disable_after_failures so ops can
                see the auto-disable threshold at a glance without
                opening the edit form. Color the consecutive_failures
                cell red as it approaches the threshold so a "trending
                toward auto-disable" subscription is visually obvious. -->
           <div class="bg-gray-50 rounded p-3">
-            <span class="text-gray-500 block text-xs mb-1">Failure threshold</span>
+            <span class="text-gray-600 dark:text-gray-500 block text-xs mb-1">Failure threshold</span>
             <span class="tabular-nums">
               <!-- Danger zone = within 2 of the auto-disable threshold,
                    floored at 1 so a low threshold (e.g. 1 or 2) doesn't
                    make 0 failures show as red (false alarm on a
                    perfectly healthy webhook). -->
               <span :class="(webhook.consecutive_failures ?? 0) >= Math.max((webhook.disable_after_failures ?? 10) - 2, 1) ? 'text-red-600 font-medium' : 'text-gray-700'">{{ webhook.consecutive_failures ?? 0 }}</span>
-              <span class="text-gray-400"> / {{ webhook.disable_after_failures ?? 10 }} consecutive</span>
+              <span class="text-gray-600 dark:text-gray-400"> / {{ webhook.disable_after_failures ?? 10 }} consecutive</span>
             </span>
-            <p class="text-xs text-gray-400 mt-0.5">Server auto-disables the subscription when threshold is reached.</p>
+            <p class="text-xs text-gray-600 dark:text-gray-400 mt-0.5">Server auto-disables the subscription when threshold is reached.</p>
           </div>
         </div>
       </div>
@@ -306,10 +306,10 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
         <div class="px-4 py-3 border-b border-gray-100 flex justify-between items-center">
           <h3 class="text-sm font-medium text-gray-700">Delivery History</h3>
-          <span class="text-xs text-gray-400">{{ deliveries.length }} deliveries</span>
+          <span class="text-xs text-gray-600 dark:text-gray-400">{{ deliveries.length }} deliveries</span>
         </div>
         <table class="w-full text-sm min-w-[600px]">
-          <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
+          <thead class="bg-gray-50 text-gray-600 dark:text-gray-500 text-xs uppercase tracking-wider">
             <tr>
               <th class="px-4 py-3 text-left">Status</th>
               <th class="px-4 py-3 text-left">HTTP Code</th>
@@ -321,10 +321,10 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           <tbody class="divide-y divide-gray-100">
             <tr v-for="d in deliveries" :key="d.delivery_id" class="hover:bg-gray-50 transition-colors">
               <td class="px-4 py-3"><StatusBadge :status="d.status" /></td>
-              <td class="px-4 py-3 font-mono text-xs" :class="d.http_status && d.http_status >= 400 ? 'text-red-600' : 'text-gray-500'">{{ d.http_status || '-' }}</td>
-              <td class="px-4 py-3 text-right text-gray-500 tabular-nums">{{ d.attempts }}</td>
-              <td class="px-4 py-3 font-mono text-xs text-gray-400">{{ d.event_id }}</td>
-              <td class="px-4 py-3 text-gray-400 text-xs">{{ d.attempted_at ? formatDateTime(d.attempted_at) : d.created_at ? formatDateTime(d.created_at) : '-' }}</td>
+              <td class="px-4 py-3 font-mono text-xs" :class="d.http_status && d.http_status >= 400 ? 'text-red-600' : 'text-gray-600 dark:text-gray-500'">{{ d.http_status || '-' }}</td>
+              <td class="px-4 py-3 text-right text-gray-600 dark:text-gray-500 tabular-nums">{{ d.attempts }}</td>
+              <td class="px-4 py-3 font-mono text-xs text-gray-600 dark:text-gray-400">{{ d.event_id }}</td>
+              <td class="px-4 py-3 text-gray-600 dark:text-gray-400 text-xs">{{ d.attempted_at ? formatDateTime(d.attempted_at) : d.created_at ? formatDateTime(d.created_at) : '-' }}</td>
             </tr>
             <tr v-if="deliveries.length === 0">
               <td colspan="5"><EmptyState message="No deliveries yet" hint="Deliveries will appear here once events are dispatched" /></td>
@@ -375,17 +375,17 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     />
 
     <FormDialog v-if="showReplay" title="Replay Events" submit-label="Start Replay" :loading="replayLoading" :error="replayError" @submit="submitReplay" @cancel="showReplay = false">
-      <p class="text-xs text-gray-500">Re-delivers historical events to this webhook. May cause duplicate deliveries.</p>
+      <p class="text-xs text-gray-600 dark:text-gray-500">Re-delivers historical events to this webhook. May cause duplicate deliveries.</p>
       <div>
-        <label for="rp-from" class="block text-xs text-gray-500 mb-1">From</label>
+        <label for="rp-from" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">From</label>
         <input id="rp-from" v-model="replayForm.from" type="datetime-local" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
       </div>
       <div>
-        <label for="rp-to" class="block text-xs text-gray-500 mb-1">To</label>
+        <label for="rp-to" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">To</label>
         <input id="rp-to" v-model="replayForm.to" type="datetime-local" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
       </div>
       <div>
-        <label for="rp-max" class="block text-xs text-gray-500 mb-1">Max events (1–1000)</label>
+        <label for="rp-max" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Max events (1–1000)</label>
         <input id="rp-max" v-model="replayForm.max_events" type="number" min="1" max="1000" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-32" />
       </div>
     </FormDialog>
@@ -407,15 +407,15 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <!-- Edit webhook dialog -->
     <FormDialog v-if="showEdit" title="Edit Webhook" submit-label="Save Changes" :loading="editLoading" :error="editError" @submit="submitEdit" @cancel="showEdit = false" :wide="true">
       <div>
-        <label for="ew-name" class="block text-xs text-gray-500 mb-1">Name</label>
+        <label for="ew-name" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Name</label>
         <input id="ew-name" v-model="editForm.name" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
       </div>
       <div>
-        <label for="ew-url" class="block text-xs text-gray-500 mb-1">URL</label>
+        <label for="ew-url" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">URL</label>
         <input id="ew-url" v-model="editForm.url" type="url" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Event types</label>
+        <label class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Event types</label>
         <div class="grid grid-cols-2 gap-1 max-h-48 overflow-y-auto border border-gray-200 rounded p-2">
           <label v-for="et in EVENT_TYPES" :key="et" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
             <input type="checkbox" :value="et" v-model="editForm.event_types" class="rounded" />
@@ -425,11 +425,11 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       </div>
       <div class="grid grid-cols-2 gap-3">
         <div>
-          <label for="ew-scope" class="block text-xs text-gray-500 mb-1">Scope filter</label>
+          <label for="ew-scope" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Scope filter</label>
           <input id="ew-scope" v-model="editForm.scope_filter" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="tenant:acme/*" />
         </div>
         <div>
-          <label for="ew-failures" class="block text-xs text-gray-500 mb-1">Disable after failures</label>
+          <label for="ew-failures" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Disable after failures</label>
           <input id="ew-failures" v-model="editForm.disable_after_failures" type="number" min="1" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
         </div>
       </div>

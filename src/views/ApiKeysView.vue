@@ -235,14 +235,14 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <div class="bg-white rounded-lg shadow p-4 mb-4">
       <div class="flex gap-3 flex-wrap items-end">
         <div>
-          <label for="keys-tenant" class="block text-xs text-gray-500 mb-1">Tenant</label>
+          <label for="keys-tenant" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Tenant</label>
           <select id="keys-tenant" v-model="filterTenant" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
             <option value="">All tenants</option>
             <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
           </select>
         </div>
         <div>
-          <label for="keys-status" class="block text-xs text-gray-500 mb-1">Status</label>
+          <label for="keys-status" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Status</label>
           <select id="keys-status" v-model="filterStatus" class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white">
             <option value="">All</option>
             <option>ACTIVE</option>
@@ -250,18 +250,18 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
             <option>EXPIRED</option>
           </select>
         </div>
-        <button v-if="hasActiveFilters" @click="clearFilters" class="text-xs text-gray-500 hover:text-gray-700 cursor-pointer">Clear</button>
+        <button v-if="hasActiveFilters" @click="clearFilters" class="text-xs text-gray-600 dark:text-gray-500 hover:text-gray-700 cursor-pointer">Clear</button>
         <div v-if="isLoading" class="flex items-center">
-          <svg class="w-4 h-4 text-gray-400 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+          <svg class="w-4 h-4 text-gray-600 dark:text-gray-400 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
         </div>
       </div>
     </div>
 
-    <p v-if="filteredKeys.length > 0" class="text-xs text-gray-400 mb-2">{{ filteredKeys.length }} key{{ filteredKeys.length !== 1 ? 's' : '' }}</p>
+    <p v-if="filteredKeys.length > 0" class="text-xs text-gray-600 dark:text-gray-400 mb-2">{{ filteredKeys.length }} key{{ filteredKeys.length !== 1 ? 's' : '' }}</p>
 
     <div class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto">
       <table class="w-full text-sm min-w-[900px]">
-        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
+        <thead class="bg-gray-50 text-gray-600 dark:text-gray-500 text-xs uppercase tracking-wider">
           <tr>
             <th class="px-4 py-3 text-left">Key ID</th>
             <SortHeader label="Name" column="name" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
@@ -282,14 +282,14 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
               <TenantLink :tenant-id="k.tenant_id" />
             </td>
             <td class="px-4 py-3"><StatusBadge :status="k.status" /></td>
-            <td class="px-4 py-3 text-xs text-gray-500">
+            <td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-500">
               <div class="flex flex-wrap gap-1">
                 <span v-for="p in k.permissions" :key="p" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{{ p }}</span>
               </div>
             </td>
-            <td class="px-4 py-3 text-xs text-gray-500 font-mono">{{ k.scope_filter?.join(', ') || '-' }}</td>
-            <td class="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">{{ formatDateTime(k.created_at) }}</td>
-            <td class="px-4 py-3 text-xs whitespace-nowrap" :class="k.expires_at ? 'text-gray-500' : 'text-gray-400'">
+            <td class="px-4 py-3 text-xs text-gray-600 dark:text-gray-500 font-mono">{{ k.scope_filter?.join(', ') || '-' }}</td>
+            <td class="px-4 py-3 text-gray-600 dark:text-gray-400 text-xs whitespace-nowrap">{{ formatDateTime(k.created_at) }}</td>
+            <td class="px-4 py-3 text-xs whitespace-nowrap" :class="k.expires_at ? 'text-gray-600 dark:text-gray-500' : 'text-gray-600 dark:text-gray-400'">
               {{ k.expires_at ? formatDateTime(k.expires_at) : 'Never' }}
             </td>
             <td v-if="canManage" class="px-4 py-3">
@@ -316,25 +316,25 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <!-- Create API Key dialog -->
     <FormDialog v-if="showCreate" title="Create API Key" submit-label="Create Key" :loading="createLoading" :error="createError" @submit="submitCreate" @cancel="showCreate = false">
       <div>
-        <label for="ck-tenant" class="block text-xs text-gray-500 mb-1">Tenant</label>
+        <label for="ck-tenant" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Tenant</label>
         <select id="ck-tenant" v-model="createForm.tenant_id" required class="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white w-full">
           <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
         </select>
       </div>
       <div>
-        <label for="ck-name" class="block text-xs text-gray-500 mb-1">Name</label>
+        <label for="ck-name" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Name</label>
         <input id="ck-name" v-model="createForm.name" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" placeholder="my-service-key" />
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Permissions</label>
+        <label class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Permissions</label>
         <PermissionPicker v-model="createForm.permissions" />
       </div>
       <div>
-        <label for="ck-scope" class="block text-xs text-gray-500 mb-1">Scope filter (comma-separated, optional)</label>
+        <label for="ck-scope" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Scope filter (comma-separated, optional)</label>
         <input id="ck-scope" v-model="createForm.scope_filter" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" placeholder="tenant:acme, tenant:acme/*" />
       </div>
       <div>
-        <label for="ck-expires" class="block text-xs text-gray-500 mb-1">Expires at (optional)</label>
+        <label for="ck-expires" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Expires at (optional)</label>
         <input id="ck-expires" v-model="createForm.expires_at" type="datetime-local" class="border border-gray-300 rounded px-2 py-1.5 text-sm" />
       </div>
     </FormDialog>
@@ -345,11 +345,11 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     <!-- Edit API Key dialog -->
     <FormDialog v-if="editingKey" title="Edit API Key" submit-label="Save Changes" :loading="editLoading" :error="editError" @submit="submitEdit" @cancel="editingKey = null">
       <div>
-        <label for="ek-name" class="block text-xs text-gray-500 mb-1">Name</label>
+        <label for="ek-name" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Name</label>
         <input id="ek-name" v-model="editForm.name" required class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Permissions</label>
+        <label class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Permissions</label>
         <PermissionPicker v-model="editForm.permissions" />
         <!--
           Pending-changes summary. Rendered only when there's actually a
@@ -382,7 +382,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         </div>
       </div>
       <div>
-        <label for="ek-scope" class="block text-xs text-gray-500 mb-1">Scope filter (comma-separated)</label>
+        <label for="ek-scope" class="block text-xs text-gray-600 dark:text-gray-500 mb-1">Scope filter (comma-separated)</label>
         <input id="ek-scope" v-model="editForm.scope_filter" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-full font-mono" />
       </div>
     </FormDialog>
