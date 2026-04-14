@@ -28,7 +28,7 @@ Also shipping in v0.1.25.25: all four list views now default to newest-first ord
 
 **Changes:**
 - `ApiKeysView.vue` / `TenantsView.vue` — `useSort(items, 'created_at', 'desc')`.
-- `BudgetsView.vue` — same. Visible columns don't include Created, but the initial order still matters.
+- `BudgetsView.vue` — defaults to **highest-utilization first** (`('utilization', 'desc')`) rather than `created_at`. Operators triaging budgets care about "which scopes are closest to running dry" more than provisioning order — the near-exhausted rows are the actionable ones, so floating them to the top is the right default.
 - `ReservationsView.vue` — `useSort(reservations, 'created_at_ms', 'desc')` (was `'asc'`). Empty-state hint rewritten: default is newest-first; click Created once to flip to asc to find oldest-stuck "hung" reservations.
 
 **Why `created_at` desc is safe for these types:** all four carry `created_at` as an ISO-8601 string (or `created_at_ms` as a number on ReservationSummary). ISO-8601 sorts lexicographically in chronological order, so `desc` means newest first without any custom accessor.
