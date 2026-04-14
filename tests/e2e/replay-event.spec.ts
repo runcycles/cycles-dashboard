@@ -27,23 +27,26 @@ test.beforeAll(async () => {
   const ctx = await pwRequest.newContext({ baseURL: process.env.DASHBOARD_URL || 'http://localhost:8080' })
   const res = await ctx.post('/v1/admin/webhooks', {
     headers: { 'X-Admin-API-Key': ADMIN_KEY },
+    // tenant_id goes in query params for admin webhook creation, NOT
+    // the body — matches webhooks-bulk-pause.spec.ts's pattern.
+    params: { tenant_id: fx.tenantId },
     data: {
-      tenant_id: fx.tenantId,
-      url: `https://example.invalid/e2e-replay-${Date.now()}`,
-      // Server requires at least one event type. `budget.created` is the
-      // same event used by webhooks-bulk-pause's setup; no tenant events
-      // are actually needed for the replay flow (the endpoint returns
-      // 2xx with events_queued=0 when the time window is empty).
+      // example.com is IANA-reserved AND DNS-resolvable; the server's
+      // WebhookURLValidator rejects unresolvable hosts like .invalid
+      // or .test (per webhooks-bulk-pause.spec.ts comment).
+      url: `https://example.com/cycles-e2e-replay-${Date.now()}`,
+      // Server requires at least one event type.
       event_types: ['budget.created'],
     },
   })
   if (!res.ok()) {
     throw new Error(`replay-event setup: create webhook failed: ${res.status()} ${await res.text()}`)
   }
-  const body = await res.json()
-  webhookId = body.subscription_id
+  // Response envelope: { subscription: { subscription_id, ... } }
+  const body = (await res.json()) as { subscription: { subscription_id: string } }
+  webhookId = body.subscription?.subscription_id
   if (!webhookId) {
-    throw new Error(`replay-event setup: response missing subscription_id: ${JSON.stringify(body)}`)
+    throw new Error(`replay-event setup: response missing subscription.subscription_id: ${JSON.stringify(body)}`)
   }
   await ctx.dispose()
 })
