@@ -1,7 +1,45 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
+**Date:** 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
 **Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.15+ continues to satisfy the governance plane.
+
+### 2026-04-14 — Playwright E2E layer
+
+Closes a long-standing test-coverage gap: bugs in JavaScript/DOM behavior that pass unit tests and HTTP probes but break the UI. The v0.1.25.22 sort-accessor regression is the canonical example — Vue stringified `{unit, amount}` to `"[object Object]"` for every row, silently making the Reserved column header a no-op. Unit tests (mocked fetch) didn't exercise the DOM; the HTTP probe suite (`scripts/e2e-probes.sh`) doesn't drive the JavaScript at all. Only manual review caught it.
+
+**What landed:**
+
+| File | Purpose |
+|---|---|
+| `playwright.config.ts` | Chromium only, compose-owned lifecycle (no `webServer`), HTML + list reporters, traces/screenshots/video retained only on failure. |
+| `tests/e2e/global.setup.ts` | Seeds a tenant, tenant API key, budget, and three reservations (30k, 50k, 75k) via the admin API. All calls route through the dashboard nginx proxy (same path the browser takes), so a proxy misconfig fails loudly at setup, not in cryptic spec failures. |
+| `tests/e2e/fixtures.ts` | Reads `test-results/fixtures.json`; exposes typed getters and a reusable `loginAsAdmin(page)` helper. |
+| `tests/e2e/login.spec.ts` | Flow 1 — admin key login → introspect → all 8 capability-gated sidebar entries render → direct-nav to `/tenants` works. Plus an invalid-key test asserting the `/login` URL stays put + the red error message renders. |
+| `tests/e2e/reservations-force-release.spec.ts` | Flow 2 — navigate to Reservations, select seeded tenant, click Force release on the seeded reservation, confirm, verify the request carried a UUID `idempotency_key` (side-channel assertion via `waitForResponse`), verify the dialog closes and the row drops out of the list on refresh. |
+| `tests/e2e/reservations-sort-reserved.spec.ts` | Flow 3 — the direct v0.1.25.22 regression lock. Click the Reserved column header, assert the 30k reservation row comes first; click again, assert the 75k row comes first; verify `aria-sort` attribute flipped correspondingly. |
+| `.github/workflows/e2e.yml` | Runs Playwright after the existing HTTP probes in the same compose-stack job. Browser install cached by `package-lock.json` hash. Playwright HTML report + `test-results/` uploaded as an artifact on failure (separate from the compose logs artifact). Path trigger extended to include `tests/e2e/**` and `playwright.config.ts`. |
+| `package.json` | Adds `@playwright/test` devDep; `test:e2e`, `test:e2e:install`, `test:e2e:ui` scripts. |
+| `README.md` | New **E2E tests** section documenting the two-layer approach and the local dev loop. |
+
+**Design decisions:**
+
+- **No data-testid additions.** Role-based selectors (`getByRole('columnheader', { name: /sort by reserved/i })`, `getByRole('dialog', { name: /force release this reservation/i })`) work against the current markup. Adding testids site-wide couples tests to implementation details and adds markup noise; targeted selectors read better and exercise real accessibility.
+- **Global seed, single worker, `fullyParallel: false`.** All three specs share one fixture set. Per-test seeding would triple runtime with no isolation benefit. If one spec mutates state in a way that breaks another, that IS a bug we want to surface — the alternative hides the class of regression we built the suite for.
+- **Compose owns lifecycle.** Playwright's `webServer` option is NOT used — double-management is error-prone. CI step `docker compose up -d --wait` brings up the stack; Playwright runs after HTTP probes.
+- **Chromium only in CI.** Firefox/WebKit double runtime and add flake without catching the bug classes we care about here.
+- **Fixture TTL of 1 hour** on seeded reservations — comfortably longer than any realistic suite runtime so the force-release spec's "must be ACTIVE" precondition doesn't race with expiry.
+
+**Regression-catch validation (one-time):** re-introduced the v0.1.25.22 sort-accessor bug locally (`{ reserved: (r) => r.reserved.amount }` → `undefined`), rebuilt the dashboard image, re-ran `npm run test:e2e`. Confirmed `reservations-sort-reserved.spec.ts` fails with "element not found / unexpected order" as designed. Restored the fix; all 4 tests pass in ~4.5s.
+
+**What's still uncovered** (file as follow-up issues if needed):
+- Login rate-limit / lockout UX (countdown timer + form re-enable).
+- Create tenant → duplicate 409 → error toast path (parsed ApiError body).
+- Webhook bulk pause with cancel mid-operation.
+- Cross-browser (Firefox/WebKit) — would need a separate weekly workflow.
+
+---
+
+
 
 ### 2026-04-13 — v0.1.25.23: hotfix — nginx proxy_pass dropped path for non-reservations /v1/*
 
