@@ -297,9 +297,26 @@ export const freezeBudget = (scope: string, unit: string, reason?: string) =>
 export const unfreezeBudget = (scope: string, unit: string, reason?: string) =>
   post<import('../types').BudgetLedger>(`${BASE}/admin/budgets/unfreeze`, reason ? { reason } : {}, { scope, unit })
 
-export function fundBudget(tenantId: string, scope: string, unit: string, operation: string, amount: number, idempotencyKey: string, reason?: string): Promise<import('../types').BudgetLedger> {
+// v0.1.25.27: adds optional `spent` for the RESET_SPENT operation introduced
+// in cycles-server-admin 0.1.25.18 (billing-period rollover — reset the
+// "spent" tally without touching allocated). The server only reads `spent`
+// when operation === 'RESET_SPENT'; for all other operations it's omitted
+// from the body so we don't send payload the server would ignore.
+export function fundBudget(
+  tenantId: string,
+  scope: string,
+  unit: string,
+  operation: string,
+  amount: number,
+  idempotencyKey: string,
+  reason?: string,
+  spent?: number,
+): Promise<import('../types').BudgetLedger> {
   const body: Record<string, unknown> = { operation, amount: { unit, amount }, idempotency_key: idempotencyKey }
   if (reason) body.reason = reason
+  if (operation === 'RESET_SPENT' && typeof spent === 'number') {
+    body.spent = { unit, amount: spent }
+  }
   return post<import('../types').BudgetLedger>(`${BASE}/admin/budgets/fund`, body, { tenant_id: tenantId, scope, unit })
 }
 

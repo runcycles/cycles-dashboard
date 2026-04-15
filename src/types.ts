@@ -380,6 +380,7 @@ export const PERMISSION_GROUPS = [
 
 export const EVENT_TYPES = [
   'budget.created', 'budget.updated', 'budget.funded', 'budget.debited', 'budget.reset',
+  'budget.reset_spent',
   'budget.debt_repaid', 'budget.frozen', 'budget.unfrozen', 'budget.closed',
   'budget.threshold_crossed', 'budget.exhausted', 'budget.over_limit_entered', 'budget.over_limit_exited',
   'budget.debt_incurred', 'budget.burn_rate_anomaly',
