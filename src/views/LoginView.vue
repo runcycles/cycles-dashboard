@@ -16,6 +16,15 @@ const showLoading = ref(false)
 let loadingVisualTimer: ReturnType<typeof setTimeout> | null = null
 const expired = route.query.expired === '1'
 
+// Environment indicator: the dashboard talks to /v1 relative-path, so the
+// API host is whatever the browser is hitting (admin server lives behind
+// the same nginx in prod, behind Vite proxy in dev). Showing the host on
+// the login screen is the cheapest guard against an operator typing a
+// prod admin key into a staging window — the most common login pitfall
+// for multi-env console tools.
+const apiHost = window.location.host
+const version = __APP_VERSION__
+
 // Rate limiting: exponential backoff after failed attempts
 const failedAttempts = ref(0)
 const lockedUntil = ref(0)
@@ -87,14 +96,18 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
+  <div class="min-h-screen flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">
     <div class="bg-white dark:bg-gray-900 rounded-lg shadow-md p-8 w-full max-w-sm">
       <div class="flex items-center gap-3 mb-4">
         <img src="/runcycles-logo.svg" alt="Cycles" class="w-10 h-10" />
         <h1 class="text-xl font-semibold text-gray-900 dark:text-white">Cycles Admin</h1>
       </div>
       <p v-if="expired" class="text-sm text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 mb-4">Your session expired due to inactivity. Please log in again.</p>
-      <p class="text-sm muted mb-6">Enter your admin API key to continue.</p>
+      <p class="text-sm muted mb-2">Enter your admin API key to continue.</p>
+      <p class="text-xs text-gray-500 dark:text-gray-400 mb-6">
+        API:
+        <span class="font-mono text-gray-700 dark:text-gray-300" :title="`Admin API host this dashboard talks to (${apiHost})`">{{ apiHost }}</span>
+      </p>
       <form @submit.prevent="submit">
         <label for="admin-api-key" class="sr-only">Admin API Key</label>
         <input
@@ -117,5 +130,15 @@ onUnmounted(() => {
         </button>
       </form>
     </div>
+    <footer class="mt-6 flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+      <span>v{{ version }}</span>
+      <span aria-hidden="true">·</span>
+      <a
+        href="https://runcycles.io/docs"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="hover:text-gray-700 dark:hover:text-gray-200 underline-offset-2 hover:underline"
+      >Documentation</a>
+    </footer>
   </div>
 </template>
