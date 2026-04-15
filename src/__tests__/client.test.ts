@@ -310,6 +310,41 @@ describe('endpoint wrappers — smoke', () => {
     expect(body.amount).toEqual({ unit: 'USD', amount: 100 })
     expect(body.idempotency_key).toBe('idem-1')
     expect(body.reason).toBe('monthly')
+    // v0.1.25.27: spent is only attached for RESET_SPENT — must be absent here.
+    expect(body.spent).toBeUndefined()
+  })
+
+  // v0.1.25.27: RESET_SPENT operation (cycles-server-admin 0.1.25.18 billing-
+  // period rollover). Server semantics (BudgetRepository FUND_LUA): sets
+  // allocated = amount AND spent = override (default 0). `amount` is the
+  // new allocated for the new period — typically the same as current
+  // allocated for a "pure rollover", but operators can change it.
+  // `spent` is an optional Amount sent ONLY when operation === 'RESET_SPENT'.
+  it('fundBudget RESET_SPENT → body includes amount (new allocated) and spent Amount', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({})))
+    await api.fundBudget('acme', 'tenant:acme', 'USD', 'RESET_SPENT', 1000, 'idem-rs', 'monthly rollover', 42)
+    const body = JSON.parse(lastCall()[1].body)
+    expect(body.operation).toBe('RESET_SPENT')
+    expect(body.amount).toEqual({ unit: 'USD', amount: 1000 })
+    expect(body.spent).toEqual({ unit: 'USD', amount: 42 })
+    expect(body.idempotency_key).toBe('idem-rs')
+  })
+
+  it('fundBudget RESET_SPENT without spent → body omits spent (server resets to zero)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({})))
+    await api.fundBudget('acme', 'tenant:acme', 'USD', 'RESET_SPENT', 1000, 'idem-rs2')
+    const body = JSON.parse(lastCall()[1].body)
+    expect(body.operation).toBe('RESET_SPENT')
+    expect(body.amount).toEqual({ unit: 'USD', amount: 1000 })
+    expect(body.spent).toBeUndefined()
+  })
+
+  it('fundBudget CREDIT with spent arg → spent is ignored (not sent) for non-RESET_SPENT', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({})))
+    await api.fundBudget('acme', 'tenant:acme', 'USD', 'CREDIT', 100, 'idem-c', 'note', 999)
+    const body = JSON.parse(lastCall()[1].body)
+    expect(body.operation).toBe('CREDIT')
+    expect(body.spent).toBeUndefined()
   })
 
   // v0.1.25.20: admin-on-behalf-of write wrappers (server v0.1.25.14, spec

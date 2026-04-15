@@ -38,6 +38,7 @@ Tier 1 incident-response actions available directly from the dashboard (capabili
 | **Unfreeze budget** | Budget detail | Re-enables normal operations |
 | **Create budget** | Budgets list, Tenant detail | Admin-on-behalf-of (dual-auth) — modal with ScopeBuilder + tenant selector |
 | **Adjust budget allocation** | Budget detail | Inline form — uses fund endpoint with RESET operation |
+| **Rollover billing period (RESET_SPENT)** | Budget detail → Fund → RESET_SPENT | Resets `spent` tally without touching `allocated`; optional exact-spent override (blank = zero). Requires cycles-server-admin v0.1.25.18+ |
 | **Emergency Freeze (tenant-wide)** | Tenant detail | Sequential freeze across all ACTIVE budgets — one-click lockdown with confirm + blast-radius summary |
 | **Create policy** | Policies tab (Tenant detail) | Admin-on-behalf-of — modal form, tenant-scoped |
 | **Edit policy** | Policies tab | Admin-on-behalf-of — patch policy_id, server resolves owning tenant |
