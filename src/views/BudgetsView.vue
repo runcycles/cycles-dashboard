@@ -408,6 +408,12 @@ watch(() => route.query, () => {
           <h2 class="text-lg font-medium text-gray-900 font-mono">{{ detail.scope }}</h2>
           <StatusBadge :status="detail.status" />
           <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs font-medium">{{ detail.unit }}</span>
+          <span
+            class="bg-gray-50 text-gray-500 border border-gray-200 px-2 py-0.5 rounded text-xs font-medium"
+            :title="detail.commit_overage_policy ? 'Commit overage policy (budget-level override)' : 'Commit overage policy (inherited from tenant)'"
+          >
+            Overage: <span class="font-mono">{{ detail.commit_overage_policy || 'Inherit' }}</span>
+          </span>
           <span v-if="detail.is_over_limit" class="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-medium">OVER LIMIT</span>
           <span class="flex-1" />
           <button v-if="canManage" @click="openEditBudget" class="btn-pill-secondary">Edit</button>
@@ -421,7 +427,6 @@ watch(() => route.query, () => {
           <div class="info-panel"><span class="form-label">Spent</span><span class="font-semibold">{{ detail.spent?.amount.toLocaleString() || '0' }}</span></div>
           <div class="info-panel"><span class="form-label">Debt</span><span class="font-semibold" :class="detail.debt && detail.debt.amount > 0 ? 'text-red-600' : ''">{{ detail.debt?.amount.toLocaleString() || '0' }}</span></div>
           <div class="info-panel"><span class="form-label">Overdraft Limit</span><span class="font-semibold">{{ detail.overdraft_limit?.amount.toLocaleString() || '0' }}</span></div>
-          <div class="info-panel"><span class="form-label">Overage Policy</span><span class="font-semibold text-xs">{{ detail.commit_overage_policy || 'Inherit' }}</span></div>
         </div>
         <div class="mt-4">
           <UtilizationBar :remaining="detail.remaining.amount" :allocated="detail.allocated.amount" />
