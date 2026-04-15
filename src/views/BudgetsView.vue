@@ -507,6 +507,7 @@ watch(() => route.query, () => {
               <SortHeader label="Scope" column="scope" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
               <SortHeader label="Unit" column="unit" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
               <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+              <th class="table-cell text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Overage</th>
               <SortHeader label="Utilization" column="utilization" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
               <SortHeader label="Debt" column="debt" :active-column="sortKey" :direction="sortDir" @sort="toggle" align="right" />
               <th v-if="canManage" class="table-cell w-20"></th>
@@ -520,6 +521,11 @@ watch(() => route.query, () => {
               </td>
               <td class="table-cell muted">{{ b.unit }}</td>
               <td class="table-cell"><StatusBadge :status="b.status" /></td>
+              <td
+                class="table-cell font-mono text-xs"
+                :class="b.commit_overage_policy ? 'text-gray-700' : 'text-gray-400'"
+                :title="b.commit_overage_policy ? 'Budget-level override' : 'Inherited from tenant'"
+              >{{ b.commit_overage_policy || 'Inherit' }}</td>
               <td class="table-cell">
                 <UtilizationBar :remaining="b.remaining.amount" :allocated="b.allocated.amount" />
               </td>
@@ -530,7 +536,7 @@ watch(() => route.query, () => {
               </td>
             </tr>
             <tr v-if="budgets.length === 0">
-              <td :colspan="canManage ? 6 : 5">
+              <td :colspan="canManage ? 7 : 6">
                 <EmptyState message="No budgets found" :hint="!selectedTenant ? 'Select a tenant to view budgets' : undefined" />
               </td>
             </tr>
