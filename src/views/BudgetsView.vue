@@ -523,7 +523,7 @@ watch(() => route.query, () => {
               <td class="table-cell"><StatusBadge :status="b.status" /></td>
               <td
                 class="table-cell font-mono text-xs"
-                :class="b.commit_overage_policy ? 'text-gray-700' : 'text-gray-400'"
+                :class="b.commit_overage_policy ? 'text-gray-700' : 'text-gray-500 italic'"
                 :title="b.commit_overage_policy ? 'Budget-level override' : 'Inherited from tenant'"
               >{{ b.commit_overage_policy || 'Inherit' }}</td>
               <td class="table-cell">
