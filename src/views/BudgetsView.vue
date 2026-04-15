@@ -237,10 +237,14 @@ const showFund = ref(false)
 // `<input type="number">` writes back a number after user input, but we
 // initialize with an empty string so the field starts blank rather than
 // pre-filled with 0. Any consumer must coerce via Number() and validate.
-const fundForm = ref<{ operation: string; amount: number | string; reason: string }>({
+// v0.1.25.27: `spent` field is optional and only sent when operation =
+// RESET_SPENT (cycles-server-admin 0.1.25.18+). When left blank on a
+// RESET_SPENT submit, the server resets `spent` to zero (pure rollover).
+const fundForm = ref<{ operation: string; amount: number | string; reason: string; spent: number | string }>({
   operation: 'CREDIT',
   amount: '',
   reason: '',
+  spent: '',
 })
 const fundLoading = ref(false)
 const fundError = ref('')
@@ -249,14 +253,29 @@ const fundHints: Record<string, string> = {
   CREDIT: 'Adds funds to allocated and remaining balance.',
   DEBIT: 'Removes funds. Fails if remaining would go negative.',
   RESET: 'Sets allocated to exact amount, recalculates remaining.',
+  RESET_SPENT: 'Billing-period rollover — sets allocated for the new period AND resets spent (default 0, override optional). Pre-filled with current allocated; change it to start the new period at a different allocation. Reserved + debt are preserved across the boundary (requires cycles-server-admin 0.1.25.18+).',
   REPAY_DEBT: 'Reduces outstanding debt by this amount.',
 }
 
 function openFund() {
-  fundForm.value = { operation: 'CREDIT', amount: '', reason: '' }
+  fundForm.value = { operation: 'CREDIT', amount: '', reason: '', spent: '' }
   fundError.value = ''
   showFund.value = true
 }
+
+// When the operator switches operation, prefill `amount` with the current
+// allocated for RESET_SPENT (the common "rollover, keep allocation" case).
+// For other operations, clear it back to blank so the prior RESET_SPENT
+// prefill doesn't bleed into a CREDIT/DEBIT submission.
+watch(() => fundForm.value.operation, (op, prevOp) => {
+  if (op === 'RESET_SPENT' && prevOp !== 'RESET_SPENT') {
+    const current = detail.value?.allocated?.amount
+    fundForm.value.amount = typeof current === 'number' ? current : ''
+  } else if (op !== 'RESET_SPENT' && prevOp === 'RESET_SPENT') {
+    fundForm.value.amount = ''
+    fundForm.value.spent = ''
+  }
+})
 
 async function submitFund() {
   if (!detail.value) return
@@ -266,10 +285,40 @@ async function submitFund() {
   // Vue 3 v-model on type="number" inputs. Returns null for empty / 0 /
   // negative / NaN / non-numeric. See utils/safe.ts for why this isn't
   // inlined.
-  const amount = parsePositiveAmount(fundForm.value.amount)
-  if (amount === null) {
-    fundError.value = 'Amount must be a positive number'
-    return
+  // RESET_SPENT semantics (cycles-server-admin 0.1.25.18 BudgetRepository
+  // FUND_LUA): server sets allocated = amount AND sets spent = override
+  // (default 0). The dashboard pre-fills `amount` with the budget's
+  // current allocated when opening the Fund dialog for RESET_SPENT, so
+  // a "pure rollover" submit keeps allocated unchanged. Operators wanting
+  // to change the allocation for the new billing period edit the field.
+  const isResetSpent = fundForm.value.operation === 'RESET_SPENT'
+  // Allocated = 0 is a legal request for RESET_SPENT (rare but valid —
+  // closes a budget into the new period at zero). Other operations still
+  // require strictly positive.
+  let amount: number | null
+  if (isResetSpent) {
+    const parsedAmt = Number(fundForm.value.amount)
+    if (!Number.isFinite(parsedAmt) || parsedAmt < 0) {
+      fundError.value = 'Allocated must be zero or a positive number'
+      return
+    }
+    amount = parsedAmt
+  } else {
+    amount = parsePositiveAmount(fundForm.value.amount)
+    if (amount === null) {
+      fundError.value = 'Amount must be a positive number'
+      return
+    }
+  }
+  // Optional spent override — blank means reset-to-zero on the server.
+  let spent: number | undefined
+  if (isResetSpent && fundForm.value.spent !== '' && fundForm.value.spent !== null) {
+    const parsed = Number(fundForm.value.spent)
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      fundError.value = 'Spent override must be zero or a positive number'
+      return
+    }
+    spent = parsed
   }
   // Prefer the dropdown selection; otherwise derive from the ledger scope.
   // Previously this silently returned when selectedTenant was '' — users
@@ -289,10 +338,10 @@ async function submitFund() {
     const rand = crypto.getRandomValues(new Uint8Array(8))
     const suffix = Array.from(rand, b => b.toString(16).padStart(2, '0')).join('')
     const idempotencyKey = `dashboard-${fundForm.value.operation.toLowerCase()}-${detail.value.scope}-${Date.now()}-${suffix}`
-    await fundBudget(tenantId, detail.value.scope, detail.value.unit, fundForm.value.operation, amount, idempotencyKey, fundForm.value.reason || `${fundForm.value.operation} via admin dashboard`)
+    await fundBudget(tenantId, detail.value.scope, detail.value.unit, fundForm.value.operation, amount, idempotencyKey, fundForm.value.reason || `${fundForm.value.operation} via admin dashboard`, spent)
     await loadDetail()
     showFund.value = false
-    const labels: Record<string, string> = { CREDIT: 'Budget credited', DEBIT: 'Budget debited', RESET: 'Budget allocation reset', REPAY_DEBT: 'Debt repaid' }
+    const labels: Record<string, string> = { CREDIT: 'Budget credited', DEBIT: 'Budget debited', RESET: 'Budget allocation reset', RESET_SPENT: 'Budget spent reset', REPAY_DEBT: 'Debt repaid' }
     toast.success(labels[fundForm.value.operation] || 'Budget updated')
   } catch (e) { fundError.value = toMessage(e) }
   finally { fundLoading.value = false }
@@ -359,6 +408,12 @@ watch(() => route.query, () => {
           <h2 class="text-lg font-medium text-gray-900 font-mono">{{ detail.scope }}</h2>
           <StatusBadge :status="detail.status" />
           <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs font-medium">{{ detail.unit }}</span>
+          <span
+            class="bg-gray-50 text-gray-500 border border-gray-200 px-2 py-0.5 rounded text-xs font-medium"
+            :title="detail.commit_overage_policy ? 'Commit overage policy (budget-level override)' : 'Commit overage policy (inherited from tenant)'"
+          >
+            Overage: <span class="font-mono">{{ detail.commit_overage_policy || 'Inherit' }}</span>
+          </span>
           <span v-if="detail.is_over_limit" class="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-medium">OVER LIMIT</span>
           <span class="flex-1" />
           <button v-if="canManage" @click="openEditBudget" class="btn-pill-secondary">Edit</button>
@@ -372,7 +427,6 @@ watch(() => route.query, () => {
           <div class="info-panel"><span class="form-label">Spent</span><span class="font-semibold">{{ detail.spent?.amount.toLocaleString() || '0' }}</span></div>
           <div class="info-panel"><span class="form-label">Debt</span><span class="font-semibold" :class="detail.debt && detail.debt.amount > 0 ? 'text-red-600' : ''">{{ detail.debt?.amount.toLocaleString() || '0' }}</span></div>
           <div class="info-panel"><span class="form-label">Overdraft Limit</span><span class="font-semibold">{{ detail.overdraft_limit?.amount.toLocaleString() || '0' }}</span></div>
-          <div class="info-panel"><span class="form-label">Overage Policy</span><span class="font-semibold text-xs">{{ detail.commit_overage_policy || 'Inherit' }}</span></div>
         </div>
         <div class="mt-4">
           <UtilizationBar :remaining="detail.remaining.amount" :allocated="detail.allocated.amount" />
@@ -453,6 +507,7 @@ watch(() => route.query, () => {
               <SortHeader label="Scope" column="scope" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
               <SortHeader label="Unit" column="unit" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
               <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+              <th class="table-cell text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Overage</th>
               <SortHeader label="Utilization" column="utilization" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
               <SortHeader label="Debt" column="debt" :active-column="sortKey" :direction="sortDir" @sort="toggle" align="right" />
               <th v-if="canManage" class="table-cell w-20"></th>
@@ -466,6 +521,11 @@ watch(() => route.query, () => {
               </td>
               <td class="table-cell muted">{{ b.unit }}</td>
               <td class="table-cell"><StatusBadge :status="b.status" /></td>
+              <td
+                class="table-cell font-mono text-xs"
+                :class="b.commit_overage_policy ? 'text-gray-700' : 'text-gray-500 italic'"
+                :title="b.commit_overage_policy ? 'Budget-level override' : 'Inherited from tenant'"
+              >{{ b.commit_overage_policy || 'Inherit' }}</td>
               <td class="table-cell">
                 <UtilizationBar :remaining="b.remaining.amount" :allocated="b.allocated.amount" />
               </td>
@@ -476,7 +536,7 @@ watch(() => route.query, () => {
               </td>
             </tr>
             <tr v-if="budgets.length === 0">
-              <td :colspan="canManage ? 6 : 5">
+              <td :colspan="canManage ? 7 : 6">
                 <EmptyState message="No budgets found" :hint="!selectedTenant ? 'Select a tenant to view budgets' : undefined" />
               </td>
             </tr>
@@ -514,13 +574,22 @@ watch(() => route.query, () => {
           <option value="CREDIT">Credit — add funds</option>
           <option value="DEBIT">Debit — remove funds</option>
           <option value="RESET">Reset — set exact amount</option>
+          <option value="RESET_SPENT">Reset Spent — billing-period rollover</option>
           <option value="REPAY_DEBT">Repay Debt — reduce debt</option>
         </select>
         <p class="muted-sm mt-0.5">{{ fundHints[fundForm.operation] }}</p>
       </div>
       <div>
-        <label for="fund-amount" class="form-label">Amount ({{ detail?.unit }})</label>
-        <input id="fund-amount" v-model="fundForm.amount" type="number" min="0" step="1" required class="form-input-mono" />
+        <label for="fund-amount" class="form-label">
+          {{ fundForm.operation === 'RESET_SPENT' ? `Allocated for new period (${detail?.unit})` : `Amount (${detail?.unit})` }}
+        </label>
+        <input id="fund-amount" v-model="fundForm.amount" type="number" :min="fundForm.operation === 'RESET_SPENT' ? 0 : 0" step="1" required class="form-input-mono" />
+        <p v-if="fundForm.operation === 'RESET_SPENT'" class="muted-sm mt-0.5">Pre-filled with current allocated. Change to start the new billing period at a different allocation.</p>
+      </div>
+      <div v-if="fundForm.operation === 'RESET_SPENT'">
+        <label for="fund-spent" class="form-label">Spent override ({{ detail?.unit }}, optional)</label>
+        <input id="fund-spent" v-model="fundForm.spent" type="number" min="0" step="1" class="form-input-mono" placeholder="Leave blank to reset to zero" />
+        <p class="muted-sm mt-0.5">Blank = reset spent to 0. Provide a value to set an exact starting spent for the new billing period.</p>
       </div>
       <div>
         <label for="fund-reason" class="form-label">Reason (optional, for audit trail)</label>

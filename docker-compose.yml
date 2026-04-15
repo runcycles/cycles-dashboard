@@ -37,7 +37,7 @@ services:
       - cycles
 
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.16
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.18
     restart: unless-stopped
     ports:
       - "7979:7979"
@@ -46,7 +46,11 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ""
       ADMIN_API_KEY: ${ADMIN_API_KEY:-admin-key}
-      DASHBOARD_CORS_ORIGIN: http://localhost:8080
+      # Allow both the docker dashboard origin (:8080) and the Vite dev origin
+      # (:5173). Spring's CorsFilter rejects mismatches with 403 "Invalid CORS
+      # request" before reaching the AuthInterceptor — so a missing origin
+      # surfaces as a 403 in DevTools with zero admin-server logs.
+      DASHBOARD_CORS_ORIGIN: http://localhost:8080,http://localhost:5173
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:7979/actuator/health"]
       interval: 10s

@@ -1,7 +1,23 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-14 (error-surfacing + SecretReveal + 3 incident-response Playwright flows), 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
-**Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.17+ continues to satisfy the governance plane.
+**Date:** 2026-04-15 (v0.1.25.27 — RESET_SPENT funding operation support, semantics corrected post-test), 2026-04-14 (error-surfacing + SecretReveal + 3 incident-response Playwright flows), 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
+**Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.17+ continues to satisfy the governance plane; **admin server v0.1.25.18+ required** to execute the new `RESET_SPENT` funding operation from BudgetsView (older admin servers will reject the operation enum with 400 INVALID_REQUEST — UI degrades gracefully but the operator sees the server's error toast).
+
+### 2026-04-15 — v0.1.25.27 RESET_SPENT funding operation support
+
+Surfaces the `RESET_SPENT` funding operation added in cycles-server-admin 0.1.25.18 (billing-period rollover — reset the "spent" tally without touching allocated, with an optional `spent` override). Fully additive: existing CREDIT/DEBIT/RESET/REPAY_DEBT flows unchanged; dashboard continues to work against older admin servers for everything except the new operation.
+
+**Changes:**
+- `src/api/client.ts` — `fundBudget()` takes an optional `spent?: number` parameter, emitted in the body as an `Amount` object ONLY when `operation === 'RESET_SPENT'`. For all other operations the field is omitted (server would ignore it anyway; keeping the wire payload clean helps future wire-diff tests).
+- `src/views/BudgetsView.vue` — new `RESET_SPENT` `<option>` in the Fund dialog, hint text, and a conditional "Spent override" numeric input that only appears for RESET_SPENT. Amount field is hidden for RESET_SPENT (allocated is not changing) and `amount` is sent as 0 on the wire. Blank override = server resets spent to zero; providing a value sets the exact starting spent.
+- `src/views/BudgetsView.vue` — success-toast label map extended (`RESET_SPENT: 'Budget spent reset'`).
+- `src/types.ts` — `EVENT_TYPES` extended with `'budget.reset_spent'` so EventTimeline icon/label resolution and TS type-checking stay clean for the new event the server emits on RESET_SPENT.
+- `src/__tests__/client.test.ts` — +3 tests: (a) RESET_SPENT with spent attaches `spent` Amount to body, (b) RESET_SPENT without spent omits the field, (c) CREDIT with an accidental spent arg does NOT send spent (guards against a future refactor that removes the operation check).
+
+**Gates:** typecheck clean, unit tests pass, existing `capabilities-gating.test.ts` + `error-surfacing.test.ts` unaffected. Server-side validation (spec: spent only permitted for RESET_SPENT) remains the authoritative gate.
+
+**Semantics correction (post-test):** Initial implementation hid the amount field for RESET_SPENT and forced `amount=0` on the wire, on the (incorrect) belief that RESET_SPENT preserved allocated. The server's `BudgetRepository.FUND_LUA` for RESET_SPENT actually sets `allocated = amount` AND `spent = override` — so passing `amount=0` was zeroing the allocation, leaving budgets at allocated=0 / spent=N / remaining=−N. Fixed: amount input is shown for RESET_SPENT (re-labeled "Allocated for new period"), pre-filled with current allocated when the operator selects the operation, and sent through unchanged. Allocated=0 is permitted for RESET_SPENT (rare close-into-period case) but not other operations. Hint text rewritten to match server semantics. Unit tests updated to assert non-zero amount on RESET_SPENT body.
+
 
 ### 2026-04-14 — Error-surfacing + SecretReveal + 3 incident-response Playwright flows
 
