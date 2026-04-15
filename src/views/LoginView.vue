@@ -130,7 +130,7 @@ onUnmounted(() => {
         </button>
       </form>
     </div>
-    <footer class="mt-6 flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+    <footer class="mt-3 flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
       <span>v{{ version }}</span>
       <span aria-hidden="true">·</span>
       <a
