@@ -315,24 +315,27 @@ describe('endpoint wrappers — smoke', () => {
   })
 
   // v0.1.25.27: RESET_SPENT operation (cycles-server-admin 0.1.25.18 billing-
-  // period rollover). `spent` field is an optional Amount that should ONLY
-  // appear in the body when operation === 'RESET_SPENT'; server ignores it
-  // for all other ops, so we omit it on the wire for cleanliness.
-  it('fundBudget RESET_SPENT → body includes spent Amount when provided', async () => {
+  // period rollover). Server semantics (BudgetRepository FUND_LUA): sets
+  // allocated = amount AND spent = override (default 0). `amount` is the
+  // new allocated for the new period — typically the same as current
+  // allocated for a "pure rollover", but operators can change it.
+  // `spent` is an optional Amount sent ONLY when operation === 'RESET_SPENT'.
+  it('fundBudget RESET_SPENT → body includes amount (new allocated) and spent Amount', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({})))
-    await api.fundBudget('acme', 'tenant:acme', 'USD', 'RESET_SPENT', 0, 'idem-rs', 'monthly rollover', 42)
+    await api.fundBudget('acme', 'tenant:acme', 'USD', 'RESET_SPENT', 1000, 'idem-rs', 'monthly rollover', 42)
     const body = JSON.parse(lastCall()[1].body)
     expect(body.operation).toBe('RESET_SPENT')
-    expect(body.amount).toEqual({ unit: 'USD', amount: 0 })
+    expect(body.amount).toEqual({ unit: 'USD', amount: 1000 })
     expect(body.spent).toEqual({ unit: 'USD', amount: 42 })
     expect(body.idempotency_key).toBe('idem-rs')
   })
 
   it('fundBudget RESET_SPENT without spent → body omits spent (server resets to zero)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({})))
-    await api.fundBudget('acme', 'tenant:acme', 'USD', 'RESET_SPENT', 0, 'idem-rs2')
+    await api.fundBudget('acme', 'tenant:acme', 'USD', 'RESET_SPENT', 1000, 'idem-rs2')
     const body = JSON.parse(lastCall()[1].body)
     expect(body.operation).toBe('RESET_SPENT')
+    expect(body.amount).toEqual({ unit: 'USD', amount: 1000 })
     expect(body.spent).toBeUndefined()
   })
 

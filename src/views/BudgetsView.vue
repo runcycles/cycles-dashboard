@@ -253,7 +253,7 @@ const fundHints: Record<string, string> = {
   CREDIT: 'Adds funds to allocated and remaining balance.',
   DEBIT: 'Removes funds. Fails if remaining would go negative.',
   RESET: 'Sets allocated to exact amount, recalculates remaining.',
-  RESET_SPENT: 'Billing-period rollover — resets the spent tally without changing allocated. Leave "Spent override" blank to reset to zero, or set an exact value (requires cycles-server-admin 0.1.25.18+).',
+  RESET_SPENT: 'Billing-period rollover — sets allocated for the new period AND resets spent (default 0, override optional). Pre-filled with current allocated; change it to start the new period at a different allocation. Reserved + debt are preserved across the boundary (requires cycles-server-admin 0.1.25.18+).',
   REPAY_DEBT: 'Reduces outstanding debt by this amount.',
 }
 
@@ -263,6 +263,20 @@ function openFund() {
   showFund.value = true
 }
 
+// When the operator switches operation, prefill `amount` with the current
+// allocated for RESET_SPENT (the common "rollover, keep allocation" case).
+// For other operations, clear it back to blank so the prior RESET_SPENT
+// prefill doesn't bleed into a CREDIT/DEBIT submission.
+watch(() => fundForm.value.operation, (op, prevOp) => {
+  if (op === 'RESET_SPENT' && prevOp !== 'RESET_SPENT') {
+    const current = detail.value?.allocated?.amount
+    fundForm.value.amount = typeof current === 'number' ? current : ''
+  } else if (op !== 'RESET_SPENT' && prevOp === 'RESET_SPENT') {
+    fundForm.value.amount = ''
+    fundForm.value.spent = ''
+  }
+})
+
 async function submitFund() {
   if (!detail.value) return
   // Reset error up-front so a stale "Invalid amount" doesn't flash on retry.
@@ -271,16 +285,30 @@ async function submitFund() {
   // Vue 3 v-model on type="number" inputs. Returns null for empty / 0 /
   // negative / NaN / non-numeric. See utils/safe.ts for why this isn't
   // inlined.
-  // RESET_SPENT accepts amount=0 (pure rollover with no allocated change),
-  // so use a non-negative check for that operation instead of the strict
-  // positive check other operations need. For RESET_SPENT we force the
-  // `amount` field to 0 on the wire — allocated is unchanged — and use the
-  // separate `spent` field as the optional override.
+  // RESET_SPENT semantics (cycles-server-admin 0.1.25.18 BudgetRepository
+  // FUND_LUA): server sets allocated = amount AND sets spent = override
+  // (default 0). The dashboard pre-fills `amount` with the budget's
+  // current allocated when opening the Fund dialog for RESET_SPENT, so
+  // a "pure rollover" submit keeps allocated unchanged. Operators wanting
+  // to change the allocation for the new billing period edit the field.
   const isResetSpent = fundForm.value.operation === 'RESET_SPENT'
-  const amount = isResetSpent ? 0 : parsePositiveAmount(fundForm.value.amount)
-  if (amount === null) {
-    fundError.value = 'Amount must be a positive number'
-    return
+  // Allocated = 0 is a legal request for RESET_SPENT (rare but valid —
+  // closes a budget into the new period at zero). Other operations still
+  // require strictly positive.
+  let amount: number | null
+  if (isResetSpent) {
+    const parsedAmt = Number(fundForm.value.amount)
+    if (!Number.isFinite(parsedAmt) || parsedAmt < 0) {
+      fundError.value = 'Allocated must be zero or a positive number'
+      return
+    }
+    amount = parsedAmt
+  } else {
+    amount = parsePositiveAmount(fundForm.value.amount)
+    if (amount === null) {
+      fundError.value = 'Amount must be a positive number'
+      return
+    }
   }
   // Optional spent override — blank means reset-to-zero on the server.
   let spent: number | undefined
@@ -540,9 +568,12 @@ watch(() => route.query, () => {
         </select>
         <p class="muted-sm mt-0.5">{{ fundHints[fundForm.operation] }}</p>
       </div>
-      <div v-if="fundForm.operation !== 'RESET_SPENT'">
-        <label for="fund-amount" class="form-label">Amount ({{ detail?.unit }})</label>
-        <input id="fund-amount" v-model="fundForm.amount" type="number" min="0" step="1" required class="form-input-mono" />
+      <div>
+        <label for="fund-amount" class="form-label">
+          {{ fundForm.operation === 'RESET_SPENT' ? `Allocated for new period (${detail?.unit})` : `Amount (${detail?.unit})` }}
+        </label>
+        <input id="fund-amount" v-model="fundForm.amount" type="number" :min="fundForm.operation === 'RESET_SPENT' ? 0 : 0" step="1" required class="form-input-mono" />
+        <p v-if="fundForm.operation === 'RESET_SPENT'" class="muted-sm mt-0.5">Pre-filled with current allocated. Change to start the new billing period at a different allocation.</p>
       </div>
       <div v-if="fundForm.operation === 'RESET_SPENT'">
         <label for="fund-spent" class="form-label">Spent override ({{ detail?.unit }}, optional)</label>
