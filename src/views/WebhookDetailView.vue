@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
+import { useListExport } from '../composables/useListExport'
 import { getWebhook, listDeliveries, updateWebhook, deleteWebhook, testWebhook, replayWebhookEvents, rotateWebhookSecret } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { WebhookSubscription, WebhookDelivery, WebhookTestResponse } from '../types'
@@ -11,6 +12,8 @@ import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import TenantLink from '../components/TenantLink.vue'
 import EmptyState from '../components/EmptyState.vue'
+import ExportDialog from '../components/ExportDialog.vue'
+import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
@@ -282,6 +285,41 @@ const deliveryGridTemplate = '120px 100px 100px minmax(220px,1fr) 160px'
 // would let the filter miss matches from un-loaded pages). A select
 // change is instant-apply; no debounce needed.
 watch(deliveryStatusFilter, () => { refresh() })
+
+// Export. Server-side status filter means the fetchPage adapter passes
+// the same filter param — cursor pages stay consistent with what's
+// on screen.
+const {
+  showExportConfirm,
+  exporting,
+  exportFetched,
+  exportError,
+  maxRows: EXPORT_MAX_ROWS,
+  confirmExport,
+  cancelExport,
+  executeExport,
+} = useListExport<WebhookDelivery>({
+  itemNoun: 'delivery',
+  filenameStem: 'webhook-deliveries',
+  currentItems: filteredDeliveries,
+  hasMore: deliveriesHasMore,
+  nextCursor: deliveriesNextCursor,
+  fetchPage: async (cursor) => {
+    const res = await listDeliveries(id, { ...buildDeliveryParams(), cursor })
+    return { items: res.deliveries, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
+  },
+  columns: [
+    { header: 'delivery_id',  value: d => d.delivery_id },
+    { header: 'event_id',     value: d => d.event_id },
+    { header: 'status',       value: d => d.status },
+    { header: 'http_status',  value: d => d.http_status ?? '' },
+    { header: 'attempts',     value: d => d.attempts },
+    { header: 'attempted_at', value: d => d.attempted_at ?? '' },
+    { header: 'created_at',   value: d => d.created_at ?? '' },
+  ],
+})
+
+watch(exportError, (v) => { if (v) error.value = v })
 </script>
 
 <template>
@@ -385,6 +423,14 @@ watch(deliveryStatusFilter, () => { refresh() })
               <option>FAILED</option>
               <option>RETRYING</option>
             </select>
+            <button @click="confirmExport('csv')" :disabled="filteredDeliveries.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              CSV
+            </button>
+            <button @click="confirmExport('json')" :disabled="filteredDeliveries.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              JSON
+            </button>
           </div>
         </div>
 
@@ -508,6 +554,21 @@ watch(deliveryStatusFilter, () => { refresh() })
     />
 
     <SecretReveal v-if="rotatedSecret" title="New Signing Secret" :secret="rotatedSecret" label="Signing Secret" @close="rotatedSecret = null" />
+
+    <ExportDialog
+      :format="showExportConfirm"
+      :loaded-count="filteredDeliveries.length"
+      :has-more="deliveriesHasMore"
+      :max-rows="EXPORT_MAX_ROWS"
+      item-noun-plural="deliveries"
+      @confirm="executeExport"
+      @cancel="cancelExport"
+    />
+    <ExportProgressOverlay
+      :open="exporting"
+      :fetched="exportFetched"
+      item-noun-plural="deliveries"
+    />
 
     <!-- Edit webhook dialog -->
     <FormDialog v-if="showEdit" title="Edit Webhook" submit-label="Save Changes" :loading="editLoading" :error="editError" @submit="submitEdit" @cancel="showEdit = false" :wide="true">

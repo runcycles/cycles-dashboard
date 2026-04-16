@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
+import { useListExport } from '../composables/useListExport'
 import { listBudgets, lookupBudget, listTenants, listEvents, fundBudget, freezeBudget, unfreezeBudget, updateBudgetConfig } from '../api/client'
 import { COMMIT_OVERAGE_POLICIES } from '../types'
 import { tenantFromScope, parsePositiveAmount } from '../utils/safe'
@@ -15,6 +16,8 @@ import UtilizationBar from '../components/UtilizationBar.vue'
 import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import ExportDialog from '../components/ExportDialog.vue'
+import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import EventTimeline from '../components/EventTimeline.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
@@ -519,6 +522,55 @@ watch(debouncedFilterScope, () => { if (!isDetail.value) loadList() })
 watch(debouncedFilterUtilMin, () => { if (!isDetail.value) loadList() })
 watch(debouncedFilterUtilMax, () => { if (!isDetail.value) loadList() })
 
+// Export — list-mode only (detail mode is a single scope + event
+// timeline, no list to export). For single-tenant mode the composable
+// follows the server cursor; cross-tenant modes already have hasMore
+// driven by `budgetsFanoutTruncated`, so advancing the export fetchPage
+// doesn't apply cleanly — we just export the currently-loaded subset.
+const budgetExportHasMore = computed(() => !!selectedTenant.value && !isCrossTenantFilter.value && hasMore.value)
+const {
+  showExportConfirm,
+  exporting,
+  exportFetched,
+  exportError,
+  maxRows: EXPORT_MAX_ROWS,
+  confirmExport,
+  cancelExport,
+  executeExport,
+} = useListExport<BudgetLedger>({
+  itemNoun: 'budget',
+  filenameStem: 'budgets',
+  currentItems: sortedBudgets,
+  hasMore: budgetExportHasMore,
+  nextCursor,
+  fetchPage: async (cursor) => {
+    if (!selectedTenant.value) return { items: [], hasMore: false, nextCursor: '' }
+    const params: Record<string, string> = { tenant_id: selectedTenant.value, cursor }
+    if (filterStatus.value) params.status = filterStatus.value
+    if (filterUnit.value) params.unit = filterUnit.value
+    if (filterScope.value) params.scope_prefix = filterScope.value
+    const res = await listBudgets(params)
+    return { items: res.ledgers, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
+  },
+  // Apply the client-side utilization filter to cursor pages too so
+  // the exported set matches what the operator sees.
+  filterFn: (b) => applyClientFilters([b]).length > 0,
+  columns: [
+    { header: 'scope',                 value: b => b.scope },
+    { header: 'unit',                  value: b => b.unit },
+    { header: 'status',                value: b => b.status },
+    { header: 'allocated_amount',      value: b => b.allocated.amount },
+    { header: 'remaining_amount',      value: b => b.remaining.amount },
+    { header: 'spent_amount',          value: b => b.spent?.amount ?? 0 },
+    { header: 'debt_amount',           value: b => b.debt?.amount ?? 0 },
+    { header: 'is_over_limit',         value: b => String(!!b.is_over_limit) },
+    { header: 'commit_overage_policy', value: b => b.commit_overage_policy ?? '' },
+    { header: 'created_at',            value: b => b.created_at ?? '' },
+  ],
+})
+
+watch(exportError, (v) => { if (v) error.value = v })
+
 // V1 virtualization — list mode only (not the detail card, which
 // embeds EventTimeline and is naturally bounded by DETAIL_EVENTS_PAGE_SIZE).
 const scrollEl = ref<HTMLElement | null>(null)
@@ -570,6 +622,16 @@ const gridTemplate = computed(() =>
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
+        </button>
+      </template>
+      <template v-if="!isDetail" #actions>
+        <button @click="confirmExport('csv')" :disabled="sortedBudgets.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export CSV
+        </button>
+        <button @click="confirmExport('json')" :disabled="sortedBudgets.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export JSON
         </button>
       </template>
     </PageHeader>
@@ -845,5 +907,20 @@ const gridTemplate = computed(() =>
         </select>
       </div>
     </FormDialog>
+
+    <ExportDialog
+      :format="showExportConfirm"
+      :loaded-count="sortedBudgets.length"
+      :has-more="budgetExportHasMore"
+      :max-rows="EXPORT_MAX_ROWS"
+      item-noun-plural="budgets"
+      @confirm="executeExport"
+      @cancel="cancelExport"
+    />
+    <ExportProgressOverlay
+      :open="exporting"
+      :fetched="exportFetched"
+      item-noun-plural="budgets"
+    />
   </div>
 </template>

@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
+import { useListExport } from '../composables/useListExport'
 import { listWebhooks, listTenants, createWebhook, updateWebhook, getWebhookSecurityConfig, updateWebhookSecurityConfig } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { WebhookSubscription, WebhookCreateResponse, Tenant, WebhookSecurityConfig } from '../types'
@@ -14,6 +15,8 @@ import TenantLink from '../components/TenantLink.vue'
 import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import ExportDialog from '../components/ExportDialog.vue'
+import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
@@ -298,6 +301,51 @@ async function loadMore() {
   finally { loadingMore.value = false }
 }
 
+// Export. filterFn mirrors the tenant+URL client filters so the
+// exported set matches what the operator sees on screen.
+function webhookMatchesFilter(w: WebhookSubscription): boolean {
+  if (tenantFilter.value && w.tenant_id !== tenantFilter.value) return false
+  if (debouncedUrlFilter.value && !urlMatches(w, debouncedUrlFilter.value)) return false
+  return true
+}
+const {
+  showExportConfirm,
+  exporting,
+  exportFetched,
+  exportError,
+  maxRows: EXPORT_MAX_ROWS,
+  confirmExport,
+  cancelExport,
+  executeExport,
+} = useListExport<WebhookSubscription>({
+  itemNoun: 'subscription',
+  filenameStem: 'webhooks',
+  currentItems: filteredWebhooks,
+  hasMore,
+  nextCursor,
+  fetchPage: async (cursor) => {
+    const res = await listWebhooks({ cursor })
+    return { items: res.subscriptions, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
+  },
+  filterFn: webhookMatchesFilter,
+  columns: [
+    { header: 'subscription_id',     value: w => w.subscription_id },
+    { header: 'tenant_id',           value: w => w.tenant_id },
+    { header: 'url',                 value: w => w.url },
+    { header: 'name',                value: w => w.name ?? '' },
+    { header: 'status',              value: w => w.status },
+    { header: 'event_types',         value: w => (w.event_types ?? []).join('|') },
+    { header: 'event_categories',    value: w => (w.event_categories ?? []).join('|') },
+    { header: 'scope_filter',        value: w => w.scope_filter ?? '' },
+    { header: 'consecutive_failures',value: w => w.consecutive_failures ?? 0 },
+    { header: 'last_success_at',     value: w => w.last_success_at ?? '' },
+    { header: 'last_failure_at',     value: w => w.last_failure_at ?? '' },
+    { header: 'created_at',          value: w => w.created_at },
+  ],
+})
+
+watch(exportError, (v) => { if (v) error.value = v })
+
 // V1 virtualization. See ReservationsView.vue for the pattern.
 const scrollEl = ref<HTMLElement | null>(null)
 const ROW_HEIGHT_ESTIMATE = 52
@@ -335,6 +383,14 @@ const gridTemplate = computed(() =>
       @refresh="refresh"
     >
       <template #actions>
+        <button @click="confirmExport('csv')" :disabled="filteredWebhooks.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export CSV
+        </button>
+        <button @click="confirmExport('json')" :disabled="filteredWebhooks.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export JSON
+        </button>
         <button v-if="canManage" @click="openSecurityConfig" class="btn-pill-secondary">Security Config</button>
         <button v-if="canManage" @click="openCreate" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Webhook</button>
       </template>
@@ -582,5 +638,21 @@ const gridTemplate = computed(() =>
         Allow HTTP (non-HTTPS) webhook URLs
       </label>
     </FormDialog>
+
+    <ExportDialog
+      :format="showExportConfirm"
+      :loaded-count="filteredWebhooks.length"
+      :has-more="hasMore"
+      :max-rows="EXPORT_MAX_ROWS"
+      item-noun-plural="subscriptions"
+      warning="Exported files include tenant IDs and endpoint URLs. Signing secrets are never exported."
+      @confirm="executeExport"
+      @cancel="cancelExport"
+    />
+    <ExportProgressOverlay
+      :open="exporting"
+      :fetched="exportFetched"
+      item-noun-plural="subscriptions"
+    />
   </div>
 </template>

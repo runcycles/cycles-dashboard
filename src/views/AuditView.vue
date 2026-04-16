@@ -4,37 +4,30 @@ import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute } from 'vue-router'
 import { listAuditLogs } from '../api/client'
 import { useSort } from '../composables/useSort'
+import { useListExport } from '../composables/useListExport'
 import type { AuditLogEntry } from '../types'
 import PageHeader from '../components/PageHeader.vue'
 import MaskedValue from '../components/MaskedValue.vue'
 import TenantLink from '../components/TenantLink.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import ExportDialog from '../components/ExportDialog.vue'
+import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import { formatDateTime } from '../utils/format'
 import { toMessage } from '../utils/errors'
-import { csvEscape, safeJsonStringify } from '../utils/safe'
+import { safeJsonStringify } from '../utils/safe'
 
 const entries = ref<AuditLogEntry[]>([])
 const error = ref('')
 const loading = ref(false)
-const showExportConfirm = ref<'csv' | 'json' | null>(null)
 const expanded = ref<string | null>(null)
 const { sortKey, sortDir, toggle, sorted: sortedEntries } = useSort(entries)
 
-// Pagination state. query() loads page 1; hasMore signals that the export
-// flow must paginate through the server's cursor to avoid silently shipping
-// incomplete compliance data (audit item R3).
+// Pagination state. query() loads page 1; hasMore signals that the
+// export flow must paginate through the server's cursor to avoid
+// silently shipping incomplete compliance data (audit item R3).
 const hasMore = ref(false)
 const nextCursor = ref('')
-const exporting = ref(false)
-const exportFetched = ref(0) // rows fetched so far during multi-page export
-
-// Hard cap to prevent accidental "export every log ever" operations.
-// Above this, we abort and surface a toast — operators should narrow
-// the filter or date range before re-running. Chosen to comfortably
-// cover a week of audit activity for most deployments while staying
-// well below browser Blob / spreadsheet-row limits.
-const EXPORT_MAX_ROWS = 50_000
 
 const tenantId = ref('')
 const keyId = ref('')
@@ -60,99 +53,45 @@ function buildFilterParams(): Record<string, string> {
   return params
 }
 
-function doExportCsv(rows: AuditLogEntry[]) {
-  const headers = ['timestamp', 'operation', 'resource_type', 'resource_id', 'tenant_id', 'key_id', 'status', 'error_code', 'request_id', 'source_ip', 'user_agent', 'metadata']
-  const lines = rows.map(e => [
-    e.timestamp, e.operation, e.resource_type, e.resource_id,
-    e.tenant_id, e.key_id, e.status, e.error_code,
-    e.request_id, e.source_ip, e.user_agent,
-    e.metadata ? safeJsonStringify(e.metadata, 0) : '',
-  ])
-  // csvEscape neutralizes Excel/Sheets formula injection (CWE-1236) by
-  // prefixing cells starting with =, +, -, @, TAB, or CR with a single
-  // quote. Server-controlled fields like operation/source_ip would
-  // otherwise be a vector when an admin opens the export in a spreadsheet.
-  const csv = [
-    headers.map(csvEscape).join(','),
-    ...lines.map(r => r.map(csvEscape).join(',')),
-  ].join('\n')
-  triggerDownload(csv, 'text/csv', 'csv')
-}
+// Shared export machinery (useListExport). Column spec + fetchPage
+// adapter + item noun is all that's view-specific.
+const {
+  showExportConfirm,
+  exporting,
+  exportFetched,
+  exportError,
+  maxRows: EXPORT_MAX_ROWS,
+  confirmExport,
+  cancelExport,
+  executeExport,
+} = useListExport<AuditLogEntry>({
+  itemNoun: 'log entry',
+  filenameStem: 'audit-logs',
+  currentItems: entries,
+  hasMore,
+  nextCursor,
+  fetchPage: async (cursor) => {
+    const res = await listAuditLogs({ ...buildFilterParams(), cursor })
+    return { items: res.logs, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
+  },
+  columns: [
+    { header: 'timestamp',     value: e => e.timestamp },
+    { header: 'operation',     value: e => e.operation },
+    { header: 'resource_type', value: e => e.resource_type },
+    { header: 'resource_id',   value: e => e.resource_id },
+    { header: 'tenant_id',     value: e => e.tenant_id },
+    { header: 'key_id',        value: e => e.key_id },
+    { header: 'status',        value: e => e.status },
+    { header: 'error_code',    value: e => e.error_code },
+    { header: 'request_id',    value: e => e.request_id },
+    { header: 'source_ip',     value: e => e.source_ip },
+    { header: 'user_agent',    value: e => e.user_agent },
+    { header: 'metadata',      value: e => e.metadata ? safeJsonStringify(e.metadata, 0) : '' },
+  ],
+})
 
-function doExportJson(rows: AuditLogEntry[]) {
-  triggerDownload(safeJsonStringify(rows, 2), 'application/json', 'json')
-}
-
-function triggerDownload(content: string, mime: string, ext: string) {
-  const blob = new Blob([content], { type: mime })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `audit-logs-${new Date().toISOString().slice(0, 10)}.${ext}`
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
-function confirmExport(format: 'csv' | 'json') {
-  if (entries.value.length === 0) return
-  showExportConfirm.value = format
-}
-
-// Fetches every page the server has for the current filter, up to
-// EXPORT_MAX_ROWS. Pre-R3, the exports dumped only `entries.value` (page 1)
-// and compliance audits silently missed anything beyond the default page
-// size — a genuine correctness bug, not just UX.
-async function fetchAllForExport(): Promise<AuditLogEntry[] | null> {
-  const all: AuditLogEntry[] = [...entries.value]
-  exportFetched.value = all.length
-  let cursor = nextCursor.value
-  let hasMoreLocal = hasMore.value
-  // Safety: cap iterations too, independent of EXPORT_MAX_ROWS, in case
-  // a pathological server returns tiny pages indefinitely.
-  let pagesFetched = 1
-  const MAX_PAGES = 500
-  while (hasMoreLocal && cursor && all.length < EXPORT_MAX_ROWS && pagesFetched < MAX_PAGES) {
-    const params = { ...buildFilterParams(), cursor }
-    const res = await listAuditLogs(params)
-    all.push(...res.logs)
-    exportFetched.value = all.length
-    hasMoreLocal = !!res.has_more
-    cursor = res.next_cursor ?? ''
-    pagesFetched++
-  }
-  if (all.length >= EXPORT_MAX_ROWS && hasMoreLocal) {
-    error.value = `Export aborted: result set exceeds ${EXPORT_MAX_ROWS.toLocaleString()} rows. Narrow the filter or date range before retrying.`
-    return null
-  }
-  return all
-}
-
-async function executeExport() {
-  const format = showExportConfirm.value
-  if (!format) return
-  showExportConfirm.value = null
-  // Fast path: server already told us we have everything on page 1.
-  if (!hasMore.value) {
-    if (format === 'csv') doExportCsv(entries.value)
-    else doExportJson(entries.value)
-    return
-  }
-  // Slow path: paginate through remaining pages. Show a blocking progress
-  // overlay so the operator knows the download is still assembling and
-  // doesn't close the tab.
-  exporting.value = true
-  exportFetched.value = entries.value.length
-  try {
-    const all = await fetchAllForExport()
-    if (!all) return // error already set by fetchAllForExport
-    if (format === 'csv') doExportCsv(all)
-    else doExportJson(all)
-  } catch (e) {
-    error.value = toMessage(e)
-  } finally {
-    exporting.value = false
-  }
-}
+// Surface export-composable errors through the view's existing error banner.
+watch(exportError, (v) => { if (v) error.value = v })
 
 async function query() {
   loading.value = true
@@ -450,31 +389,20 @@ function measureRow(el: Element | { $el?: Element } | null) {
       </button>
     </div>
 
-    <!-- Export confirmation dialog -->
-    <div v-if="showExportConfirm" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50" @click.self="showExportConfirm = null">
-      <div class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 max-w-sm mx-4">
-        <h3 class="text-sm font-semibold text-gray-900 mb-2">Export audit data?</h3>
-        <p v-if="!hasMore" class="text-sm text-gray-600 mb-1">This export contains <strong>{{ entries.length }}</strong> audit log entries including key IDs, IP addresses, and metadata.</p>
-        <p v-else class="text-sm text-gray-600 mb-1">
-          The current filter matches <strong>more than {{ entries.length }}</strong> entries. The export will paginate through all remaining results (up to {{ EXPORT_MAX_ROWS.toLocaleString() }}) before the download starts.
-        </p>
-        <p class="muted-sm mb-4">Exported files contain unmasked sensitive data. Handle with care.</p>
-        <div class="flex justify-end gap-2">
-          <button @click="showExportConfirm = null" class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 rounded hover:bg-gray-100 cursor-pointer">Cancel</button>
-          <button @click="executeExport" class="px-3 py-1.5 text-sm bg-gray-900 text-white rounded hover:bg-gray-800 cursor-pointer">Export {{ showExportConfirm.toUpperCase() }}</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Export progress overlay (multi-page exports only). Blocking to
-         prevent the operator closing the tab mid-download — the browser
-         only flushes the Blob once every page is fetched. -->
-    <div v-if="exporting" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-      <div class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 max-w-sm mx-4">
-        <h3 class="text-sm font-semibold text-gray-900 mb-2">Assembling export…</h3>
-        <p class="text-sm text-gray-600 mb-1">Fetched <strong>{{ exportFetched.toLocaleString() }}</strong> audit entries so far.</p>
-        <p class="muted-sm">Keep this tab open until the download begins.</p>
-      </div>
-    </div>
+    <ExportDialog
+      :format="showExportConfirm"
+      :loaded-count="entries.length"
+      :has-more="hasMore"
+      :max-rows="EXPORT_MAX_ROWS"
+      item-noun-plural="log entries"
+      warning="Exported files contain unmasked sensitive data (key IDs, IP addresses, metadata). Handle with care."
+      @confirm="executeExport"
+      @cancel="cancelExport"
+    />
+    <ExportProgressOverlay
+      :open="exporting"
+      :fetched="exportFetched"
+      item-noun-plural="log entries"
+    />
   </div>
 </template>
