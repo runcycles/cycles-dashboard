@@ -9,6 +9,7 @@ import { useAuthStore } from '../stores/auth'
 import type { WebhookSubscription, WebhookCreateResponse, Tenant, WebhookSecurityConfig } from '../types'
 import { EVENT_TYPES } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
+import TenantLink from '../components/TenantLink.vue'
 import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
@@ -40,12 +41,20 @@ const loadingMore = ref(false)
 // v0.1.25.21 (#5): filter by tenant + bulk pause/enable. The existing
 // view was system-wide with no way to scope to "webhooks for tenant X"
 // — an ops pain when you need to pause a noisy tenant's subscriptions.
+// Server sentinel `__system__` means a subscription was created without
+// a tenant_id (system-wide delivery); we surface it both as a distinct
+// filter option ("System-wide only") and as a labelled badge in the
+// Tenant column rather than a broken TenantLink.
+const SYSTEM_TENANT_ID = '__system__'
 const tenantFilter = ref('')
 const filteredWebhooks = computed(() =>
   tenantFilter.value
     ? webhooks.value.filter(w => w.tenant_id === tenantFilter.value)
     : webhooks.value,
 )
+function isSystemWebhook(w: WebhookSubscription): boolean {
+  return !w.tenant_id || w.tenant_id === SYSTEM_TENANT_ID
+}
 // Clear the selection when the tenant filter changes. Otherwise a user
 // who selects 5 webhooks for tenant A then switches the filter to
 // tenant B would see "0 selected" in the bulk bar (selectedVisibleCount
@@ -274,15 +283,16 @@ const virtualizer = useVirtualizer(computed(() => ({
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
 const totalHeight = computed(() => virtualizer.value.getTotalSize())
 
-// Columns: [checkbox 40] health 90 | URL flex | status 110 | failures 90 | events flex | action 96
+// Columns: [checkbox 40] health 90 | URL flex | tenant flex | status 110 |
+// failures 90 | events flex | action 96
 // No Sort on Health / Events — they're plain <div role="columnheader">.
-// Health: 90px because "Health" label at text-xs uppercase tracking-wider
-// plus px-4 cell padding needs that — a 40px column clipped the header
-// text into the URL column.
+// Tenant column added so operators can see ownership without drilling
+// into each webhook's detail view — system-wide subs render a badge,
+// tenant-scoped subs render a TenantLink.
 const gridTemplate = computed(() =>
   canManage.value
-    ? '40px 90px minmax(240px,2fr) 110px 90px minmax(180px,1.5fr) 96px'
-    : '90px minmax(240px,2fr) 110px 90px minmax(180px,1.5fr)',
+    ? '40px 90px minmax(220px,2fr) minmax(140px,1fr) 110px 90px minmax(160px,1.2fr) 96px'
+    : '90px minmax(220px,2fr) minmax(140px,1fr) 110px 90px minmax(160px,1.2fr)',
 )
 </script>
 
@@ -309,10 +319,16 @@ const gridTemplate = computed(() =>
          dropdown doesn't show tenants with no subscriptions. -->
     <div class="mb-4">
       <select v-model="tenantFilter" aria-label="Filter webhooks by tenant" class="form-select">
-        <option value="">All tenants</option>
-        <option v-for="t in tenants.filter(t => webhooks.some(w => w.tenant_id === t.tenant_id))" :key="t.tenant_id" :value="t.tenant_id">
-          {{ t.name || t.tenant_id }}
-        </option>
+        <option value="">All webhooks</option>
+        <option
+          v-if="webhooks.some(isSystemWebhook)"
+          :value="SYSTEM_TENANT_ID"
+        >System-wide only</option>
+        <option
+          v-for="t in tenants.filter(t => webhooks.some(w => w.tenant_id === t.tenant_id && !isSystemWebhook(w)))"
+          :key="t.tenant_id"
+          :value="t.tenant_id"
+        >{{ t.name || t.tenant_id }}</option>
       </select>
     </div>
 
@@ -363,6 +379,7 @@ const gridTemplate = computed(() =>
           </div>
           <div role="columnheader" class="table-cell text-left">Health</div>
           <SortHeader as="div" label="URL" column="url" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <SortHeader as="div" label="Tenant" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Failures" column="consecutive_failures" :active-column="sortKey" :direction="sortDir" @sort="toggle" align="right" />
           <div role="columnheader" class="table-cell text-left">Events</div>
@@ -393,6 +410,14 @@ const gridTemplate = computed(() =>
             <div role="cell" class="table-cell min-w-0">
               <router-link :to="{ name: 'webhook-detail', params: { id: sortedWebhooks[v.index].subscription_id } }" class="text-blue-600 hover:underline truncate block" :title="sortedWebhooks[v.index].url">{{ sortedWebhooks[v.index].url }}</router-link>
               <span v-if="sortedWebhooks[v.index].name" class="muted-sm truncate block" :title="sortedWebhooks[v.index].name">{{ sortedWebhooks[v.index].name }}</span>
+            </div>
+            <div role="cell" class="table-cell min-w-0">
+              <span
+                v-if="isSystemWebhook(sortedWebhooks[v.index])"
+                class="inline-flex items-center bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded"
+                title="Subscription with no tenant scope — delivers for every tenant"
+              >System-wide</span>
+              <TenantLink v-else :tenant-id="sortedWebhooks[v.index].tenant_id" @click.stop />
             </div>
             <div role="cell" class="table-cell"><StatusBadge :status="sortedWebhooks[v.index].status" /></div>
             <div role="cell" class="table-cell text-right tabular-nums" :class="(sortedWebhooks[v.index].consecutive_failures ?? 0) > 0 ? 'text-red-600 font-medium' : 'muted'">{{ sortedWebhooks[v.index].consecutive_failures ?? 0 }}</div>
