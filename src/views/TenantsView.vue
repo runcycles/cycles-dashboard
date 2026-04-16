@@ -91,7 +91,22 @@ const filteredTenants = computed(() => {
 // Default sort: newest tenants first. created_at is an ISO-8601 string,
 // which sorts lexicographically in chronological order, so 'desc' ==
 // newest first. Click any header to switch to that column's natural order.
-const { sortKey, sortDir, toggle, sorted: sortedTenants } = useSort(filteredTenants, 'created_at', 'desc')
+const { sortKey, sortDir, toggle, sorted: sortedTenants } = useSort(
+  filteredTenants,
+  'created_at',
+  'desc',
+  {
+    // `parent` sorts by parent NAME (what's rendered in the cell)
+    // rather than parent_tenant_id so operators see alphabetical
+    // matching the visible text. Tenants with no parent group at
+    // the end (null sorts last in either direction per useSort).
+    parent: (t) => (t.parent_tenant_id ? (tenantById.value.get(t.parent_tenant_id)?.name ?? t.parent_tenant_id) : null),
+    // `children` sorts numerically by how many child tenants this
+    // tenant has — operators looking for "fat" parents vs leaf
+    // tenants can flip this header to find outliers fast.
+    children: (t) => childCountMap.value[t.tenant_id] ?? 0,
+  },
+)
 
 // Parents available in the filter dropdown — union of tenants that have
 // at least one child, so the filter doesn't list tenants with no kids
@@ -435,8 +450,8 @@ const gridTemplate = computed(() =>
           </div>
           <SortHeader as="div" label="Tenant ID" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Name" column="name" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-          <div role="columnheader" class="table-cell text-left">Parent</div>
-          <div role="columnheader" class="table-cell text-left">Children</div>
+          <SortHeader as="div" label="Parent" column="parent" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <SortHeader as="div" label="Children" column="children" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Created" column="created_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <div v-if="canManage" role="columnheader" class="table-cell" data-column="action"></div>

@@ -349,7 +349,7 @@ const gridTemplate = computed(() =>
           :style="{ gridTemplateColumns: gridTemplate }"
         >
           <SortHeader as="div" label="Reservation ID" column="reservation_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-          <div role="columnheader" class="table-cell text-left">Scope</div>
+          <SortHeader as="div" label="Scope" column="scope_path" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Reserved" column="reserved" :active-column="sortKey" :direction="sortDir" @sort="toggle" align="right" />
           <SortHeader as="div" label="Created" column="created_at_ms" :active-column="sortKey" :direction="sortDir" @sort="toggle" />

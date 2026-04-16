@@ -4,12 +4,14 @@ import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useListExport } from '../composables/useListExport'
+import { useSort } from '../composables/useSort'
 import { getWebhook, listDeliveries, updateWebhook, deleteWebhook, testWebhook, replayWebhookEvents, rotateWebhookSecret } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { WebhookSubscription, WebhookDelivery, WebhookTestResponse } from '../types'
 import { EVENT_TYPES } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
+import SortHeader from '../components/SortHeader.vue'
 import TenantLink from '../components/TenantLink.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ExportDialog from '../components/ExportDialog.vue'
@@ -52,6 +54,17 @@ const filteredDeliveries = computed(() =>
     ? deliveries.value.filter(d => d.status === deliveryStatusFilter.value)
     : deliveries.value,
 )
+// Sort the filtered list. `time` accessor uses `attempted_at || created_at`
+// so the rendered cell's value drives the sort (delivery's final-attempt
+// time, falling back to creation time for never-attempted rows).
+const {
+  sortKey: deliverySortKey,
+  sortDir: deliverySortDir,
+  toggle: deliveryToggle,
+  sorted: sortedDeliveries,
+} = useSort<WebhookDelivery>(filteredDeliveries as import('vue').Ref<WebhookDelivery[]>, 'time', 'desc', {
+  time: (d) => d.attempted_at ?? d.created_at ?? null,
+})
 
 async function executeAction() {
   if (!pendingAction.value) return
@@ -270,11 +283,11 @@ async function loadMoreDeliveries() {
 const deliveryScrollEl = ref<HTMLElement | null>(null)
 const DELIVERY_ROW_HEIGHT = 48
 const deliveryVirt = useVirtualizer(computed(() => ({
-  count: filteredDeliveries.value.length,
+  count: sortedDeliveries.value.length,
   getScrollElement: () => deliveryScrollEl.value,
   estimateSize: () => DELIVERY_ROW_HEIGHT,
   overscan: 8,
-  getItemKey: (i: number) => filteredDeliveries.value[i]?.delivery_id ?? i,
+  getItemKey: (i: number) => sortedDeliveries.value[i]?.delivery_id ?? i,
 })))
 const deliveryVirtualRows = computed(() => deliveryVirt.value.getVirtualItems())
 const deliveryTotalHeight = computed(() => deliveryVirt.value.getTotalSize())
@@ -301,7 +314,7 @@ const {
 } = useListExport<WebhookDelivery>({
   itemNoun: 'delivery',
   filenameStem: 'webhook-deliveries',
-  currentItems: filteredDeliveries,
+  currentItems: sortedDeliveries,
   hasMore: deliveriesHasMore,
   nextCursor: deliveriesNextCursor,
   fetchPage: async (cursor) => {
@@ -436,16 +449,16 @@ watch(exportError, (v) => { if (v) error.value = v })
 
         <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
           <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: deliveryGridTemplate }">
-            <div role="columnheader" class="table-cell text-left">Status</div>
-            <div role="columnheader" class="table-cell text-left">HTTP Code</div>
-            <div role="columnheader" class="table-cell text-right">Attempts</div>
-            <div role="columnheader" class="table-cell text-left">Event ID</div>
-            <div role="columnheader" class="table-cell text-left">Time</div>
+            <SortHeader as="div" label="Status" column="status" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" />
+            <SortHeader as="div" label="HTTP Code" column="http_status" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" />
+            <SortHeader as="div" label="Attempts" column="attempts" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" align="right" />
+            <SortHeader as="div" label="Event ID" column="event_id" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" />
+            <SortHeader as="div" label="Time" column="time" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" />
           </div>
         </div>
 
         <div
-          v-if="filteredDeliveries.length > 0"
+          v-if="sortedDeliveries.length > 0"
           ref="deliveryScrollEl"
           role="rowgroup"
           class="overflow-y-auto"
@@ -454,17 +467,17 @@ watch(exportError, (v) => { if (v) error.value = v })
           <div role="presentation" :style="{ height: deliveryTotalHeight + 'px', position: 'relative' }">
             <div
               v-for="v in deliveryVirtualRows"
-              :key="filteredDeliveries[v.index].delivery_id"
+              :key="sortedDeliveries[v.index].delivery_id"
               role="row"
               :aria-rowindex="v.index + 2"
               class="grid table-row-hover border-b border-gray-100 absolute left-0 right-0 items-center"
               :style="{ gridTemplateColumns: deliveryGridTemplate, transform: `translateY(${v.start}px)`, height: DELIVERY_ROW_HEIGHT + 'px' }"
             >
-              <div role="cell" class="table-cell"><StatusBadge :status="filteredDeliveries[v.index].status" /></div>
-              <div role="cell" class="table-cell font-mono text-xs" :class="filteredDeliveries[v.index].http_status && filteredDeliveries[v.index].http_status! >= 400 ? 'text-red-600' : 'muted'">{{ filteredDeliveries[v.index].http_status || '-' }}</div>
-              <div role="cell" class="table-cell text-right muted tabular-nums">{{ filteredDeliveries[v.index].attempts }}</div>
-              <div role="cell" class="table-cell font-mono muted-sm truncate" :title="filteredDeliveries[v.index].event_id">{{ filteredDeliveries[v.index].event_id }}</div>
-              <div role="cell" class="table-cell muted-sm">{{ filteredDeliveries[v.index].attempted_at ? formatDateTime(filteredDeliveries[v.index].attempted_at!) : filteredDeliveries[v.index].created_at ? formatDateTime(filteredDeliveries[v.index].created_at!) : '-' }}</div>
+              <div role="cell" class="table-cell"><StatusBadge :status="sortedDeliveries[v.index].status" /></div>
+              <div role="cell" class="table-cell font-mono text-xs" :class="sortedDeliveries[v.index].http_status && sortedDeliveries[v.index].http_status! >= 400 ? 'text-red-600' : 'muted'">{{ sortedDeliveries[v.index].http_status || '-' }}</div>
+              <div role="cell" class="table-cell text-right muted tabular-nums">{{ sortedDeliveries[v.index].attempts }}</div>
+              <div role="cell" class="table-cell font-mono muted-sm truncate" :title="sortedDeliveries[v.index].event_id">{{ sortedDeliveries[v.index].event_id }}</div>
+              <div role="cell" class="table-cell muted-sm">{{ sortedDeliveries[v.index].attempted_at ? formatDateTime(sortedDeliveries[v.index].attempted_at!) : sortedDeliveries[v.index].created_at ? formatDateTime(sortedDeliveries[v.index].created_at!) : '-' }}</div>
             </div>
           </div>
         </div>

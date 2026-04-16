@@ -282,7 +282,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
           <SortHeader as="div" label="Operation" column="operation" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Resource" column="resource_type" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Tenant" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-          <div role="columnheader" class="table-cell text-left">Key ID</div>
+          <SortHeader as="div" label="Key ID" column="key_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
         </div>
       </div>
