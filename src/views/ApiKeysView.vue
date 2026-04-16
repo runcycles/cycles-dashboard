@@ -286,13 +286,26 @@ const virtualRows = computed(() => virtualizer.value.getVirtualItems())
 const totalHeight = computed(() => virtualizer.value.getTotalSize())
 
 // 9-column grid when canManage, 8 without. Wide total minimum
-// (~1320px) so horizontal scroll engages on smaller viewports; same
-// behavior as the pre-virt `min-w-[900px]` table.
+// (~1380px) so horizontal scroll engages on smaller viewports; same
+// behavior as the pre-virt `min-w-[900px]` table. Permissions column
+// widened (260px min, 2.5fr) so more chips fit before the +N counter
+// kicks in — common keys have 2-4 perms which now render inline.
 const gridTemplate = computed(() =>
   canManage.value
-    ? '180px minmax(120px,1fr) minmax(120px,1fr) 100px minmax(200px,2fr) minmax(140px,1fr) 160px 140px 160px'
-    : '180px minmax(120px,1fr) minmax(120px,1fr) 100px minmax(200px,2fr) minmax(140px,1fr) 160px 140px',
+    ? '180px minmax(120px,1fr) minmax(120px,1fr) 100px minmax(260px,2.5fr) minmax(140px,1fr) 160px 140px 160px'
+    : '180px minmax(120px,1fr) minmax(120px,1fr) 100px minmax(260px,2.5fr) minmax(140px,1fr) 160px 140px',
 )
+
+// How many permission chips to render inline before collapsing the
+// rest into a "+N" counter. Tuned against common keys (2-4 perms)
+// on a 260px-min column: at text-xs font-mono, a chip like
+// "budgets:read" is ~80px, so 3 chips typically fit comfortably.
+// Keys with more permissions get "+N more" with the full list on
+// the badge's title tooltip + on the row Edit dialog.
+const MAX_VISIBLE_PERMS = 3
+function hiddenPermsCount(perms: readonly string[] | undefined): number {
+  return Math.max(0, (perms?.length ?? 0) - MAX_VISIBLE_PERMS)
+}
 </script>
 
 <template>
@@ -401,8 +414,23 @@ const gridTemplate = computed(() =>
             </div>
             <div role="cell" class="table-cell"><StatusBadge :status="sortedKeys[v.index].status" /></div>
             <div role="cell" class="table-cell muted-sm overflow-hidden">
-              <div class="flex gap-1 overflow-hidden" :title="sortedKeys[v.index].permissions?.join(', ')">
-                <span v-for="p in sortedKeys[v.index].permissions" :key="p" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded whitespace-nowrap">{{ p }}</span>
+              <div class="flex gap-1 flex-nowrap overflow-hidden" :title="sortedKeys[v.index].permissions?.join(', ')">
+                <!-- Show first MAX_VISIBLE_PERMS chips inline; collapse
+                     the rest into a "+N" counter. Title attr on both
+                     the wrapper (all perms) and the counter (just the
+                     hidden ones) so operators can hover either to see
+                     the full list. Full permission editing remains in
+                     the Edit dialog. -->
+                <span
+                  v-for="p in (sortedKeys[v.index].permissions ?? []).slice(0, MAX_VISIBLE_PERMS)"
+                  :key="p"
+                  class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded whitespace-nowrap"
+                >{{ p }}</span>
+                <span
+                  v-if="hiddenPermsCount(sortedKeys[v.index].permissions) > 0"
+                  class="bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded whitespace-nowrap font-medium"
+                  :title="`Also: ${(sortedKeys[v.index].permissions ?? []).slice(MAX_VISIBLE_PERMS).join(', ')}`"
+                >+{{ hiddenPermsCount(sortedKeys[v.index].permissions) }}</span>
               </div>
             </div>
             <div role="cell" class="table-cell muted-sm font-mono truncate" :title="sortedKeys[v.index].scope_filter?.join(', ')">{{ sortedKeys[v.index].scope_filter?.join(', ') || '-' }}</div>
