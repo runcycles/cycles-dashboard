@@ -4,6 +4,8 @@ import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
+import { useDebouncedRef } from '../composables/useDebouncedRef'
+import { useListExport } from '../composables/useListExport'
 import { listTenants, createTenant, updateTenantStatus } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { Tenant } from '../types'
@@ -11,6 +13,8 @@ import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import ExportDialog from '../components/ExportDialog.vue'
+import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import FormDialog from '../components/FormDialog.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import { formatDate } from '../utils/format'
@@ -27,6 +31,15 @@ const tenants = ref<Tenant[]>([])
 const error = ref('')
 const search = ref('')
 const parentFilter = ref('')
+
+// V5 (Phase 3): debounce the search input so filter re-computation
+// runs 200ms AFTER the last keystroke instead of on every character.
+// Debouncing a client-side filter is subtler than debouncing a fetch —
+// each re-filter is cheap on its own, but the cascade (filter →
+// virtualizer re-index → sort re-run) adds up when a 10k-tenant list
+// is being typed-through. 200ms is enough time for a fast typist
+// to land more keystrokes before the filter runs.
+const debouncedSearch = useDebouncedRef(search, 200)
 
 // R5 (scale-hardening): cursor pagination. Pre-fix, listTenants()'s
 // has_more / next_cursor were discarded and every tenant loaded into
@@ -69,8 +82,8 @@ const filteredTenants = computed(() => {
       out = out.filter(t => t.parent_tenant_id === parentFilter.value)
     }
   }
-  if (search.value) {
-    const q = search.value.toLowerCase()
+  if (debouncedSearch.value) {
+    const q = debouncedSearch.value.toLowerCase()
     out = out.filter(t => t.tenant_id.toLowerCase().includes(q) || t.name.toLowerCase().includes(q))
   }
   return out
@@ -78,7 +91,22 @@ const filteredTenants = computed(() => {
 // Default sort: newest tenants first. created_at is an ISO-8601 string,
 // which sorts lexicographically in chronological order, so 'desc' ==
 // newest first. Click any header to switch to that column's natural order.
-const { sortKey, sortDir, toggle, sorted: sortedTenants } = useSort(filteredTenants, 'created_at', 'desc')
+const { sortKey, sortDir, toggle, sorted: sortedTenants } = useSort(
+  filteredTenants,
+  'created_at',
+  'desc',
+  {
+    // `parent` sorts by parent NAME (what's rendered in the cell)
+    // rather than parent_tenant_id so operators see alphabetical
+    // matching the visible text. Tenants with no parent group at
+    // the end (null sorts last in either direction per useSort).
+    parent: (t) => (t.parent_tenant_id ? (tenantById.value.get(t.parent_tenant_id)?.name ?? t.parent_tenant_id) : null),
+    // `children` sorts numerically by how many child tenants this
+    // tenant has — operators looking for "fat" parents vs leaf
+    // tenants can flip this header to find outliers fast.
+    children: (t) => childCountMap.value[t.tenant_id] ?? 0,
+  },
+)
 
 // Parents available in the filter dropdown — union of tenants that have
 // at least one child, so the filter doesn't list tenants with no kids
@@ -233,6 +261,57 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   } catch (e) { error.value = toMessage(e) }
 }, 60000)
 
+// Export. filterFn mirrors the client-side filteredTenants computed
+// so the exported set matches what the operator sees on screen. The
+// cursor-follow fetches raw server pages; the filter then prunes
+// them down to the search/parentFilter match set.
+function tenantMatchesFilter(t: Tenant): boolean {
+  if (parentFilter.value) {
+    if (parentFilter.value === '__root__') {
+      if (t.parent_tenant_id) return false
+    } else if (t.parent_tenant_id !== parentFilter.value) {
+      return false
+    }
+  }
+  if (debouncedSearch.value) {
+    const q = debouncedSearch.value.toLowerCase()
+    if (!t.tenant_id.toLowerCase().includes(q) && !t.name.toLowerCase().includes(q)) {
+      return false
+    }
+  }
+  return true
+}
+const {
+  showExportConfirm,
+  exporting,
+  exportFetched,
+  exportError,
+  maxRows: EXPORT_MAX_ROWS,
+  confirmExport,
+  cancelExport,
+  executeExport,
+} = useListExport<Tenant>({
+  itemNoun: 'tenant',
+  filenameStem: 'tenants',
+  currentItems: filteredTenants,
+  hasMore,
+  nextCursor,
+  fetchPage: async (cursor) => {
+    const res = await listTenants({ cursor })
+    return { items: res.tenants, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
+  },
+  filterFn: tenantMatchesFilter,
+  columns: [
+    { header: 'tenant_id',        value: t => t.tenant_id },
+    { header: 'name',             value: t => t.name },
+    { header: 'parent_tenant_id', value: t => t.parent_tenant_id ?? '' },
+    { header: 'status',           value: t => t.status },
+    { header: 'created_at',       value: t => t.created_at },
+  ],
+})
+
+watch(exportError, (v) => { if (v) error.value = v })
+
 async function loadMore() {
   if (!nextCursor.value || loadingMore.value) return
   loadingMore.value = true
@@ -284,8 +363,24 @@ const gridTemplate = computed(() =>
 
 <template>
   <div>
-    <PageHeader title="Tenants" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
+    <PageHeader
+      title="Tenants"
+      item-noun="tenant"
+      :loaded="filteredTenants.length"
+      :has-more="hasMore"
+      :loading="isLoading"
+      :last-updated="lastUpdated"
+      @refresh="refresh"
+    >
       <template #actions>
+        <button @click="confirmExport('csv')" :disabled="filteredTenants.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export CSV
+        </button>
+        <button @click="confirmExport('json')" :disabled="filteredTenants.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export JSON
+        </button>
         <button v-if="canManage" @click="openCreate" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Tenant</button>
       </template>
     </PageHeader>
@@ -355,8 +450,8 @@ const gridTemplate = computed(() =>
           </div>
           <SortHeader as="div" label="Tenant ID" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Name" column="name" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-          <div role="columnheader" class="table-cell text-left">Parent</div>
-          <div role="columnheader" class="table-cell text-left">Children</div>
+          <SortHeader as="div" label="Parent" column="parent" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <SortHeader as="div" label="Children" column="children" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Created" column="created_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <div v-if="canManage" role="columnheader" class="table-cell" data-column="action"></div>
@@ -412,7 +507,11 @@ const gridTemplate = computed(() =>
       </div>
 
       <div v-else>
-        <EmptyState :message="search || parentFilter ? 'No tenants match your filters' : 'No tenants found'" :hint="search || parentFilter ? undefined : 'Tenants will appear here once created'" />
+        <EmptyState
+          item-noun="tenant"
+          :has-active-filter="!!(search || parentFilter)"
+          :hint="search || parentFilter ? undefined : 'Tenants will appear here once created'"
+        />
       </div>
     </div>
 
@@ -487,5 +586,20 @@ const gridTemplate = computed(() =>
         </select>
       </div>
     </FormDialog>
+
+    <ExportDialog
+      :format="showExportConfirm"
+      :loaded-count="filteredTenants.length"
+      :has-more="hasMore"
+      :max-rows="EXPORT_MAX_ROWS"
+      item-noun-plural="tenants"
+      @confirm="executeExport"
+      @cancel="cancelExport"
+    />
+    <ExportProgressOverlay
+      :open="exporting"
+      :fetched="exportFetched"
+      item-noun-plural="tenants"
+    />
   </div>
 </template>

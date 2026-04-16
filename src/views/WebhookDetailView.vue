@@ -1,15 +1,21 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
+import { useListExport } from '../composables/useListExport'
+import { useSort } from '../composables/useSort'
 import { getWebhook, listDeliveries, updateWebhook, deleteWebhook, testWebhook, replayWebhookEvents, rotateWebhookSecret } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { WebhookSubscription, WebhookDelivery, WebhookTestResponse } from '../types'
 import { EVENT_TYPES } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
+import SortHeader from '../components/SortHeader.vue'
 import TenantLink from '../components/TenantLink.vue'
 import EmptyState from '../components/EmptyState.vue'
+import ExportDialog from '../components/ExportDialog.vue'
+import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
@@ -29,6 +35,36 @@ const webhook = ref<WebhookSubscription | null>(null)
 const deliveries = ref<WebhookDelivery[]>([])
 const error = ref('')
 const pendingAction = ref<'ACTIVE' | 'PAUSED' | 'reset' | null>(null)
+
+// Delivery-history pagination + filter (scale hardening). A busy
+// webhook can have thousands of delivery records; pre-fix the view
+// fetched them all and rendered each as a real DOM row. Now:
+//   - cursor pagination via Load more (append)
+//   - status filter (DELIVERED / FAILED / PENDING)
+//   - virtualized rows so DOM stays bounded
+// Polling still refreshes page 1 every 30s — operators who Load-
+// more'd will see the tail reset, same trade-off documented on
+// the other list views (ReservationsView / TenantsView).
+const deliveriesHasMore = ref(false)
+const deliveriesNextCursor = ref('')
+const deliveriesLoadingMore = ref(false)
+const deliveryStatusFilter = ref('')
+const filteredDeliveries = computed(() =>
+  deliveryStatusFilter.value
+    ? deliveries.value.filter(d => d.status === deliveryStatusFilter.value)
+    : deliveries.value,
+)
+// Sort the filtered list. `time` accessor uses `attempted_at || created_at`
+// so the rendered cell's value drives the sort (delivery's final-attempt
+// time, falling back to creation time for never-attempted rows).
+const {
+  sortKey: deliverySortKey,
+  sortDir: deliverySortDir,
+  toggle: deliveryToggle,
+  sorted: sortedDeliveries,
+} = useSort<WebhookDelivery>(filteredDeliveries as import('vue').Ref<WebhookDelivery[]>, 'time', 'desc', {
+  time: (d) => d.attempted_at ?? d.created_at ?? null,
+})
 
 async function executeAction() {
   if (!pendingAction.value) return
@@ -210,14 +246,93 @@ async function submitReplay() {
   finally { replayLoading.value = false }
 }
 
+function buildDeliveryParams(): Record<string, string> {
+  const p: Record<string, string> = {}
+  if (deliveryStatusFilter.value) p.status = deliveryStatusFilter.value
+  return p
+}
+
 const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
     webhook.value = await getWebhook(id)
-    const res = await listDeliveries(id)
+    const res = await listDeliveries(id, buildDeliveryParams())
     deliveries.value = res.deliveries
+    deliveriesHasMore.value = !!res.has_more
+    deliveriesNextCursor.value = res.next_cursor ?? ''
     error.value = ''
   } catch (e) { error.value = toMessage(e) }
 }, 30000)
+
+async function loadMoreDeliveries() {
+  if (!deliveriesNextCursor.value || deliveriesLoadingMore.value) return
+  deliveriesLoadingMore.value = true
+  try {
+    const params = { ...buildDeliveryParams(), cursor: deliveriesNextCursor.value }
+    const res = await listDeliveries(id, params)
+    deliveries.value = [...deliveries.value, ...res.deliveries]
+    deliveriesHasMore.value = !!res.has_more
+    deliveriesNextCursor.value = res.next_cursor ?? ''
+  } catch (e) { error.value = toMessage(e) }
+  finally { deliveriesLoadingMore.value = false }
+}
+
+// V1 virtualization on the delivery list. Simple fixed-height rows —
+// no expandable details so the pattern from ReservationsView applies
+// directly. 48px per row accommodates StatusBadge + mono event_id at
+// text-sm.
+const deliveryScrollEl = ref<HTMLElement | null>(null)
+const DELIVERY_ROW_HEIGHT = 48
+const deliveryVirt = useVirtualizer(computed(() => ({
+  count: sortedDeliveries.value.length,
+  getScrollElement: () => deliveryScrollEl.value,
+  estimateSize: () => DELIVERY_ROW_HEIGHT,
+  overscan: 8,
+  getItemKey: (i: number) => sortedDeliveries.value[i]?.delivery_id ?? i,
+})))
+const deliveryVirtualRows = computed(() => deliveryVirt.value.getVirtualItems())
+const deliveryTotalHeight = computed(() => deliveryVirt.value.getTotalSize())
+const deliveryGridTemplate = '120px 100px 100px minmax(220px,1fr) 160px'
+
+// Status filter refetches page 1 so the filter is server-enforced
+// (not just client-side filtering of already-loaded data — that
+// would let the filter miss matches from un-loaded pages). A select
+// change is instant-apply; no debounce needed.
+watch(deliveryStatusFilter, () => { refresh() })
+
+// Export. Server-side status filter means the fetchPage adapter passes
+// the same filter param — cursor pages stay consistent with what's
+// on screen.
+const {
+  showExportConfirm,
+  exporting,
+  exportFetched,
+  exportError,
+  maxRows: EXPORT_MAX_ROWS,
+  confirmExport,
+  cancelExport,
+  executeExport,
+} = useListExport<WebhookDelivery>({
+  itemNoun: 'delivery',
+  filenameStem: 'webhook-deliveries',
+  currentItems: sortedDeliveries,
+  hasMore: deliveriesHasMore,
+  nextCursor: deliveriesNextCursor,
+  fetchPage: async (cursor) => {
+    const res = await listDeliveries(id, { ...buildDeliveryParams(), cursor })
+    return { items: res.deliveries, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
+  },
+  columns: [
+    { header: 'delivery_id',  value: d => d.delivery_id },
+    { header: 'event_id',     value: d => d.event_id },
+    { header: 'status',       value: d => d.status },
+    { header: 'http_status',  value: d => d.http_status ?? '' },
+    { header: 'attempts',     value: d => d.attempts },
+    { header: 'attempted_at', value: d => d.attempted_at ?? '' },
+    { header: 'created_at',   value: d => d.created_at ?? '' },
+  ],
+})
+
+watch(exportError, (v) => { if (v) error.value = v })
 </script>
 
 <template>
@@ -303,34 +418,83 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         <button type="button" @click="replayResult = null" aria-label="Dismiss replay notification" class="text-blue-500 hover:text-blue-800 cursor-pointer shrink-0">✕</button>
       </div>
 
-      <div class="card-table">
-        <div class="table-cell border-b border-gray-100 flex justify-between items-center">
+      <!-- V1 virtualized delivery history. Same pattern as the
+           top-level list views. Status filter applied server-side
+           so pagination stays consistent; Load-more appends. -->
+      <div class="bg-white rounded-lg shadow overflow-hidden text-sm" role="table" :aria-rowcount="filteredDeliveries.length + 1" :aria-colcount="5">
+        <div class="table-cell border-b border-gray-100 flex justify-between items-center gap-3 flex-wrap">
           <h3 class="text-sm font-medium text-gray-700">Delivery History</h3>
-          <span class="muted-sm">{{ deliveries.length }} deliveries</span>
+          <div class="flex items-center gap-3 ml-auto">
+            <span class="muted-sm tabular-nums">
+              {{ filteredDeliveries.length.toLocaleString() }} loaded
+              <span v-if="deliveriesHasMore" class="text-amber-600 ml-1">(more available)</span>
+            </span>
+            <select v-model="deliveryStatusFilter" aria-label="Filter deliveries by status" class="form-select">
+              <option value="">All statuses</option>
+              <option>PENDING</option>
+              <option>DELIVERED</option>
+              <option>FAILED</option>
+              <option>RETRYING</option>
+            </select>
+            <button @click="confirmExport('csv')" :disabled="filteredDeliveries.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              CSV
+            </button>
+            <button @click="confirmExport('json')" :disabled="filteredDeliveries.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              JSON
+            </button>
+          </div>
         </div>
-        <table class="w-full text-sm min-w-[600px]">
-          <thead class="table-header">
-            <tr>
-              <th class="table-cell text-left">Status</th>
-              <th class="table-cell text-left">HTTP Code</th>
-              <th class="table-cell text-right">Attempts</th>
-              <th class="table-cell text-left">Event ID</th>
-              <th class="table-cell text-left">Time</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-gray-100">
-            <tr v-for="d in deliveries" :key="d.delivery_id" class="table-row-hover">
-              <td class="table-cell"><StatusBadge :status="d.status" /></td>
-              <td class="table-cell font-mono text-xs" :class="d.http_status && d.http_status >= 400 ? 'text-red-600' : 'muted'">{{ d.http_status || '-' }}</td>
-              <td class="table-cell text-right muted tabular-nums">{{ d.attempts }}</td>
-              <td class="table-cell font-mono muted-sm">{{ d.event_id }}</td>
-              <td class="table-cell muted-sm">{{ d.attempted_at ? formatDateTime(d.attempted_at) : d.created_at ? formatDateTime(d.created_at) : '-' }}</td>
-            </tr>
-            <tr v-if="deliveries.length === 0">
-              <td colspan="5"><EmptyState message="No deliveries yet" hint="Deliveries will appear here once events are dispatched" /></td>
-            </tr>
-          </tbody>
-        </table>
+
+        <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
+          <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: deliveryGridTemplate }">
+            <SortHeader as="div" label="Status" column="status" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" />
+            <SortHeader as="div" label="HTTP Code" column="http_status" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" />
+            <SortHeader as="div" label="Attempts" column="attempts" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" align="right" />
+            <SortHeader as="div" label="Event ID" column="event_id" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" />
+            <SortHeader as="div" label="Time" column="time" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" />
+          </div>
+        </div>
+
+        <div
+          v-if="sortedDeliveries.length > 0"
+          ref="deliveryScrollEl"
+          role="rowgroup"
+          class="overflow-y-auto"
+          style="max-height: calc(100vh - 520px); min-height: 200px;"
+        >
+          <div role="presentation" :style="{ height: deliveryTotalHeight + 'px', position: 'relative' }">
+            <div
+              v-for="v in deliveryVirtualRows"
+              :key="sortedDeliveries[v.index].delivery_id"
+              role="row"
+              :aria-rowindex="v.index + 2"
+              class="grid table-row-hover border-b border-gray-100 absolute left-0 right-0 items-center"
+              :style="{ gridTemplateColumns: deliveryGridTemplate, transform: `translateY(${v.start}px)`, height: DELIVERY_ROW_HEIGHT + 'px' }"
+            >
+              <div role="cell" class="table-cell"><StatusBadge :status="sortedDeliveries[v.index].status" /></div>
+              <div role="cell" class="table-cell font-mono text-xs" :class="sortedDeliveries[v.index].http_status && sortedDeliveries[v.index].http_status! >= 400 ? 'text-red-600' : 'muted'">{{ sortedDeliveries[v.index].http_status || '-' }}</div>
+              <div role="cell" class="table-cell text-right muted tabular-nums">{{ sortedDeliveries[v.index].attempts }}</div>
+              <div role="cell" class="table-cell font-mono muted-sm truncate" :title="sortedDeliveries[v.index].event_id">{{ sortedDeliveries[v.index].event_id }}</div>
+              <div role="cell" class="table-cell muted-sm">{{ sortedDeliveries[v.index].attempted_at ? formatDateTime(sortedDeliveries[v.index].attempted_at!) : sortedDeliveries[v.index].created_at ? formatDateTime(sortedDeliveries[v.index].created_at!) : '-' }}</div>
+            </div>
+          </div>
+        </div>
+
+        <div v-else>
+          <EmptyState
+            item-noun="delivery"
+            :has-active-filter="!!deliveryStatusFilter"
+            :hint="deliveryStatusFilter ? undefined : 'Deliveries will appear here once events are dispatched.'"
+          />
+        </div>
+      </div>
+
+      <div v-if="deliveriesHasMore || deliveriesLoadingMore" class="mt-3 flex justify-end">
+        <button @click="loadMoreDeliveries" :disabled="deliveriesLoadingMore" class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50 cursor-pointer">
+          {{ deliveriesLoadingMore ? 'Loading…' : 'Load more deliveries' }}
+        </button>
       </div>
     </template>
 
@@ -403,6 +567,21 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     />
 
     <SecretReveal v-if="rotatedSecret" title="New Signing Secret" :secret="rotatedSecret" label="Signing Secret" @close="rotatedSecret = null" />
+
+    <ExportDialog
+      :format="showExportConfirm"
+      :loaded-count="filteredDeliveries.length"
+      :has-more="deliveriesHasMore"
+      :max-rows="EXPORT_MAX_ROWS"
+      item-noun-plural="deliveries"
+      @confirm="executeExport"
+      @cancel="cancelExport"
+    />
+    <ExportProgressOverlay
+      :open="exporting"
+      :fetched="exportFetched"
+      item-noun-plural="deliveries"
+    />
 
     <!-- Edit webhook dialog -->
     <FormDialog v-if="showEdit" title="Edit Webhook" submit-label="Save Changes" :loading="editLoading" :error="editError" @submit="submitEdit" @cancel="showEdit = false" :wide="true">

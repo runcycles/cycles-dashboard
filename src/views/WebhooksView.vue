@@ -4,14 +4,19 @@ import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
+import { useDebouncedRef } from '../composables/useDebouncedRef'
+import { useListExport } from '../composables/useListExport'
 import { listWebhooks, listTenants, createWebhook, updateWebhook, getWebhookSecurityConfig, updateWebhookSecurityConfig } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { WebhookSubscription, WebhookCreateResponse, Tenant, WebhookSecurityConfig } from '../types'
 import { EVENT_TYPES } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
+import TenantLink from '../components/TenantLink.vue'
 import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import ExportDialog from '../components/ExportDialog.vue'
+import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
@@ -40,19 +45,53 @@ const loadingMore = ref(false)
 // v0.1.25.21 (#5): filter by tenant + bulk pause/enable. The existing
 // view was system-wide with no way to scope to "webhooks for tenant X"
 // — an ops pain when you need to pause a noisy tenant's subscriptions.
+// Server sentinel `__system__` means a subscription was created without
+// a tenant_id (system-wide delivery); we surface it both as a distinct
+// filter option ("System-wide only") and as a labelled badge in the
+// Tenant column rather than a broken TenantLink.
+const SYSTEM_TENANT_ID = '__system__'
 const tenantFilter = ref('')
-const filteredWebhooks = computed(() =>
-  tenantFilter.value
-    ? webhooks.value.filter(w => w.tenant_id === tenantFilter.value)
-    : webhooks.value,
-)
+// URL filter: substring match on the URL (or the optional `name`)
+// with case-insensitive compare. Supports "example.com", "api",
+// or a glob-ish "*.internal" (asterisks collapse to `.*` so
+// operators who prefer wildcard notation get it for free).
+// Debounced 200ms via useDebouncedRef so a 20-char URL fragment
+// doesn't fire 20 filter re-computations.
+const urlFilter = ref('')
+const debouncedUrlFilter = useDebouncedRef(urlFilter, 200)
+
+function urlMatches(w: WebhookSubscription, needle: string): boolean {
+  const q = needle.trim().toLowerCase()
+  if (!q) return true
+  const haystack = `${w.url} ${w.name ?? ''}`.toLowerCase()
+  // Treat `*` as a wildcard. Escape the rest of the regex specials
+  // so operators can paste URLs with dots / slashes literally without
+  // them acting as regex metacharacters.
+  if (q.includes('*')) {
+    const escaped = q.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')
+    try {
+      return new RegExp(escaped).test(haystack)
+    } catch { return haystack.includes(q) }
+  }
+  return haystack.includes(q)
+}
+
+const filteredWebhooks = computed(() => {
+  let out = webhooks.value
+  if (tenantFilter.value) out = out.filter(w => w.tenant_id === tenantFilter.value)
+  if (debouncedUrlFilter.value) out = out.filter(w => urlMatches(w, debouncedUrlFilter.value))
+  return out
+})
+function isSystemWebhook(w: WebhookSubscription): boolean {
+  return !w.tenant_id || w.tenant_id === SYSTEM_TENANT_ID
+}
 // Clear the selection when the tenant filter changes. Otherwise a user
 // who selects 5 webhooks for tenant A then switches the filter to
 // tenant B would see "0 selected" in the bulk bar (selectedVisibleCount
 // reads filtered state) but `selected.value` still holds the 5 hidden
 // ids — clicking "Pause selected" would silently affect tenant A's
 // webhooks even though tenant B is what's on screen.
-watch(tenantFilter, () => { selected.value = new Set() })
+watch([tenantFilter, urlFilter], () => { selected.value = new Set() })
 const { sortKey, sortDir, toggle, sorted: sortedWebhooks } = useSort(filteredWebhooks)
 
 const selected = ref<Set<string>>(new Set())
@@ -262,6 +301,51 @@ async function loadMore() {
   finally { loadingMore.value = false }
 }
 
+// Export. filterFn mirrors the tenant+URL client filters so the
+// exported set matches what the operator sees on screen.
+function webhookMatchesFilter(w: WebhookSubscription): boolean {
+  if (tenantFilter.value && w.tenant_id !== tenantFilter.value) return false
+  if (debouncedUrlFilter.value && !urlMatches(w, debouncedUrlFilter.value)) return false
+  return true
+}
+const {
+  showExportConfirm,
+  exporting,
+  exportFetched,
+  exportError,
+  maxRows: EXPORT_MAX_ROWS,
+  confirmExport,
+  cancelExport,
+  executeExport,
+} = useListExport<WebhookSubscription>({
+  itemNoun: 'subscription',
+  filenameStem: 'webhooks',
+  currentItems: filteredWebhooks,
+  hasMore,
+  nextCursor,
+  fetchPage: async (cursor) => {
+    const res = await listWebhooks({ cursor })
+    return { items: res.subscriptions, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
+  },
+  filterFn: webhookMatchesFilter,
+  columns: [
+    { header: 'subscription_id',     value: w => w.subscription_id },
+    { header: 'tenant_id',           value: w => w.tenant_id },
+    { header: 'url',                 value: w => w.url },
+    { header: 'name',                value: w => w.name ?? '' },
+    { header: 'status',              value: w => w.status },
+    { header: 'event_types',         value: w => (w.event_types ?? []).join('|') },
+    { header: 'event_categories',    value: w => (w.event_categories ?? []).join('|') },
+    { header: 'scope_filter',        value: w => w.scope_filter ?? '' },
+    { header: 'consecutive_failures',value: w => w.consecutive_failures ?? 0 },
+    { header: 'last_success_at',     value: w => w.last_success_at ?? '' },
+    { header: 'last_failure_at',     value: w => w.last_failure_at ?? '' },
+    { header: 'created_at',          value: w => w.created_at },
+  ],
+})
+
+watch(exportError, (v) => { if (v) error.value = v })
+
 // V1 virtualization. See ReservationsView.vue for the pattern.
 const scrollEl = ref<HTMLElement | null>(null)
 const ROW_HEIGHT_ESTIMATE = 52
@@ -274,38 +358,70 @@ const virtualizer = useVirtualizer(computed(() => ({
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
 const totalHeight = computed(() => virtualizer.value.getTotalSize())
 
-// Columns: [checkbox 40] health 90 | URL flex | status 110 | failures 90 | events flex | action 96
+// Columns: [checkbox 40] health 90 | URL flex | tenant flex | status 110 |
+// failures 90 | events flex | action 96
 // No Sort on Health / Events — they're plain <div role="columnheader">.
-// Health: 90px because "Health" label at text-xs uppercase tracking-wider
-// plus px-4 cell padding needs that — a 40px column clipped the header
-// text into the URL column.
+// Tenant column added so operators can see ownership without drilling
+// into each webhook's detail view — system-wide subs render a badge,
+// tenant-scoped subs render a TenantLink.
 const gridTemplate = computed(() =>
   canManage.value
-    ? '40px 90px minmax(240px,2fr) 110px 90px minmax(180px,1.5fr) 96px'
-    : '90px minmax(240px,2fr) 110px 90px minmax(180px,1.5fr)',
+    ? '40px 90px minmax(220px,2fr) minmax(140px,1fr) 110px 90px minmax(160px,1.2fr) 96px'
+    : '90px minmax(220px,2fr) minmax(140px,1fr) 110px 90px minmax(160px,1.2fr)',
 )
 </script>
 
 <template>
   <div>
-    <PageHeader title="Webhooks" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
+    <PageHeader
+      title="Webhooks"
+      item-noun="subscription"
+      :loaded="filteredWebhooks.length"
+      :has-more="hasMore"
+      :loading="isLoading"
+      :last-updated="lastUpdated"
+      @refresh="refresh"
+    >
       <template #actions>
+        <button @click="confirmExport('csv')" :disabled="filteredWebhooks.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export CSV
+        </button>
+        <button @click="confirmExport('json')" :disabled="filteredWebhooks.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export JSON
+        </button>
         <button v-if="canManage" @click="openSecurityConfig" class="btn-pill-secondary">Security Config</button>
         <button v-if="canManage" @click="openCreate" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Webhook</button>
       </template>
     </PageHeader>
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
-    <!-- Tenant filter (#5). Options sourced from the tenants the webhooks
-         actually belong to rather than the full tenant list, so the
-         dropdown doesn't show tenants with no subscriptions. -->
-    <div class="mb-4">
+    <!-- Tenant + URL filters. Tenant options sourced from the loaded
+         subscription set so the dropdown only lists tenants that
+         actually have subscriptions. URL filter supports substring
+         ("example.com", "api") or glob wildcards ("*.internal").
+         Debounced 200ms — feels responsive but coalesces fast typing. -->
+    <div class="mb-4 flex gap-3 flex-wrap items-center">
       <select v-model="tenantFilter" aria-label="Filter webhooks by tenant" class="form-select">
-        <option value="">All tenants</option>
-        <option v-for="t in tenants.filter(t => webhooks.some(w => w.tenant_id === t.tenant_id))" :key="t.tenant_id" :value="t.tenant_id">
-          {{ t.name || t.tenant_id }}
-        </option>
+        <option value="">All webhooks</option>
+        <option
+          v-if="webhooks.some(isSystemWebhook)"
+          :value="SYSTEM_TENANT_ID"
+        >System-wide only</option>
+        <option
+          v-for="t in tenants.filter(t => webhooks.some(w => w.tenant_id === t.tenant_id && !isSystemWebhook(w)))"
+          :key="t.tenant_id"
+          :value="t.tenant_id"
+        >{{ t.name || t.tenant_id }}</option>
       </select>
+      <input
+        v-model="urlFilter"
+        type="search"
+        placeholder="Filter by URL or name (supports * wildcards)"
+        aria-label="Filter webhooks by URL"
+        class="border border-gray-300 rounded px-3 py-1.5 text-sm w-72"
+      />
     </div>
 
     <!-- Floating bulk action bar — same pattern as TenantsView.
@@ -355,6 +471,7 @@ const gridTemplate = computed(() =>
           </div>
           <div role="columnheader" class="table-cell text-left">Health</div>
           <SortHeader as="div" label="URL" column="url" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <SortHeader as="div" label="Tenant" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Failures" column="consecutive_failures" :active-column="sortKey" :direction="sortDir" @sort="toggle" align="right" />
           <div role="columnheader" class="table-cell text-left">Events</div>
@@ -385,6 +502,14 @@ const gridTemplate = computed(() =>
             <div role="cell" class="table-cell min-w-0">
               <router-link :to="{ name: 'webhook-detail', params: { id: sortedWebhooks[v.index].subscription_id } }" class="text-blue-600 hover:underline truncate block" :title="sortedWebhooks[v.index].url">{{ sortedWebhooks[v.index].url }}</router-link>
               <span v-if="sortedWebhooks[v.index].name" class="muted-sm truncate block" :title="sortedWebhooks[v.index].name">{{ sortedWebhooks[v.index].name }}</span>
+            </div>
+            <div role="cell" class="table-cell min-w-0">
+              <span
+                v-if="isSystemWebhook(sortedWebhooks[v.index])"
+                class="inline-flex items-center bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded"
+                title="Subscription with no tenant scope — delivers for every tenant"
+              >System-wide</span>
+              <TenantLink v-else :tenant-id="sortedWebhooks[v.index].tenant_id" @click.stop />
             </div>
             <div role="cell" class="table-cell"><StatusBadge :status="sortedWebhooks[v.index].status" /></div>
             <div role="cell" class="table-cell text-right tabular-nums" :class="(sortedWebhooks[v.index].consecutive_failures ?? 0) > 0 ? 'text-red-600 font-medium' : 'muted'">{{ sortedWebhooks[v.index].consecutive_failures ?? 0 }}</div>
@@ -513,5 +638,21 @@ const gridTemplate = computed(() =>
         Allow HTTP (non-HTTPS) webhook URLs
       </label>
     </FormDialog>
+
+    <ExportDialog
+      :format="showExportConfirm"
+      :loaded-count="filteredWebhooks.length"
+      :has-more="hasMore"
+      :max-rows="EXPORT_MAX_ROWS"
+      item-noun-plural="subscriptions"
+      warning="Exported files include tenant IDs and endpoint URLs. Signing secrets are never exported."
+      @confirm="executeExport"
+      @cancel="cancelExport"
+    />
+    <ExportProgressOverlay
+      :open="exporting"
+      :fetched="exportFetched"
+      item-noun-plural="subscriptions"
+    />
   </div>
 </template>

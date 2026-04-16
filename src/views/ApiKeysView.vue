@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
+import { useListExport } from '../composables/useListExport'
 import { listTenants, listApiKeys, revokeApiKey, createApiKey, updateApiKey } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { Tenant, ApiKey, ApiKeyCreateResponse } from '../types'
@@ -17,6 +18,8 @@ import EmptyState from '../components/EmptyState.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
+import ExportDialog from '../components/ExportDialog.vue'
+import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import { formatDateTime } from '../utils/format'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
@@ -269,6 +272,45 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
 // has keys. Refresh on filter change so the fast-path above picks it up.
 watch(filterTenant, () => { refresh() })
 
+// Export. ApiKeysView is a cross-tenant aggregation (no cursor
+// endpoint) so the export mirrors the CURRENT loaded set — whatever
+// the operator sees on screen, capped at TENANT_FANOUT_CAP tenants.
+// `hasMore` is forced to false so the composable takes the fast path
+// and doesn't try to cursor-paginate an endpoint that doesn't support
+// it cross-tenant. The R1 banner already flags the cap to operators.
+const keysHasMore = computed(() => false)
+const keysNextCursor = computed(() => '')
+const {
+  showExportConfirm,
+  exporting,
+  exportFetched,
+  exportError,
+  maxRows: EXPORT_MAX_ROWS,
+  confirmExport,
+  cancelExport,
+  executeExport,
+} = useListExport<KeyWithTenant>({
+  itemNoun: 'api key',
+  filenameStem: 'api-keys',
+  currentItems: filteredKeys,
+  hasMore: keysHasMore,
+  nextCursor: keysNextCursor,
+  fetchPage: async () => ({ items: [], hasMore: false, nextCursor: '' }),
+  columns: [
+    { header: 'key_id',       value: k => k.key_id },
+    { header: 'name',         value: k => k.name ?? '' },
+    { header: 'tenant_id',    value: k => k.tenant_id },
+    { header: 'tenant_name',  value: k => k.tenant_name ?? '' },
+    { header: 'status',       value: k => k.status },
+    { header: 'permissions',  value: k => (k.permissions ?? []).join('|') },
+    { header: 'scope_filter', value: k => (k.scope_filter ?? []).join('|') },
+    { header: 'created_at',   value: k => k.created_at },
+    { header: 'expires_at',   value: k => k.expires_at ?? '' },
+  ],
+})
+
+watch(exportError, (v) => { if (v) error.value = v })
+
 // V1 virtualization.
 const scrollEl = ref<HTMLElement | null>(null)
 // 76px accommodates two rows of permission chips (chip ~28px × 2 +
@@ -311,8 +353,23 @@ function closePermsViewer() { viewingPermsFor.value = null }
 
 <template>
   <div>
-    <PageHeader title="API Keys" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
+    <PageHeader
+      title="API Keys"
+      item-noun="key"
+      :loaded="filteredKeys.length"
+      :loading="isLoading"
+      :last-updated="lastUpdated"
+      @refresh="refresh"
+    >
       <template #actions>
+        <button @click="confirmExport('csv')" :disabled="filteredKeys.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export CSV
+        </button>
+        <button @click="confirmExport('json')" :disabled="filteredKeys.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export JSON
+        </button>
         <button v-if="canManage" @click="openCreate" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create API Key</button>
       </template>
     </PageHeader>
@@ -389,7 +446,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
      <div :style="{ minWidth: canManage ? '1380px' : '1220px' }">
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
         <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
-          <div role="columnheader" class="table-cell text-left">Key ID</div>
+          <SortHeader as="div" label="Key ID" column="key_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Name" column="name" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Tenant" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
@@ -478,7 +535,11 @@ function closePermsViewer() { viewingPermsFor.value = null }
       </div>
 
       <div v-else>
-        <EmptyState :message="keys.length === 0 ? 'No API keys found' : 'No keys match filters'" :hint="keys.length === 0 ? 'API keys will appear here once created' : undefined" />
+        <EmptyState
+          item-noun="API key"
+          :has-active-filter="keys.length > 0"
+          :hint="keys.length === 0 ? 'API keys will appear here once created' : undefined"
+        />
       </div>
      </div>
     </div>
@@ -621,5 +682,21 @@ function closePermsViewer() { viewingPermsFor.value = null }
         </div>
       </div>
     </div>
+
+    <ExportDialog
+      :format="showExportConfirm"
+      :loaded-count="filteredKeys.length"
+      :has-more="false"
+      :max-rows="EXPORT_MAX_ROWS"
+      item-noun-plural="API keys"
+      warning="Exported files include permissions and scope filters for each key. Signing secrets are never exported."
+      @confirm="executeExport"
+      @cancel="cancelExport"
+    />
+    <ExportProgressOverlay
+      :open="exporting"
+      :fetched="exportFetched"
+      item-noun-plural="API keys"
+    />
   </div>
 </template>

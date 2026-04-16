@@ -4,15 +4,19 @@ import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
+import { useDebouncedRef } from '../composables/useDebouncedRef'
+import { useListExport } from '../composables/useListExport'
 import { listEvents } from '../api/client'
 import type { Event } from '../types'
 import PageHeader from '../components/PageHeader.vue'
 import TenantLink from '../components/TenantLink.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import ExportDialog from '../components/ExportDialog.vue'
+import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import { formatDateTime } from '../utils/format'
 import { toMessage } from '../utils/errors'
-import { csvEscape, safeJsonStringify } from '../utils/safe'
+import { safeJsonStringify } from '../utils/safe'
 
 const route = useRoute()
 const router = useRouter()
@@ -25,20 +29,6 @@ const error = ref('')
 const expanded = ref<string | null>(null)
 const { sortKey, sortDir, toggle, sorted: sortedEvents } = useSort(events)
 
-// Export state — mirrors AuditView's R3 pattern so compliance /
-// forensics exports ship the complete filter-matching result set
-// (not just page 1). confirmExport → dialog → executeExport →
-// optional multi-page fetch with progress overlay → CSV/JSON blob
-// download.
-const showExportConfirm = ref<'csv' | 'json' | null>(null)
-const exporting = ref(false)
-const exportFetched = ref(0)
-// 50k ceiling: same as AuditView. Above this, abort with an actionable
-// message asking the operator to narrow filters (date range,
-// correlation_id, tenant_id). Picked because typical compliance
-// exports for one operator's workflow fit well under this, while
-// a runaway unbounded export would OOM the browser and waste minutes.
-const EXPORT_MAX_ROWS = 50_000
 
 // Pre-R7: every 15s poll called load() which overwrote events.value,
 // silently dropping any "Load more" pages the operator had accumulated.
@@ -154,131 +144,62 @@ function clearFilters() {
 // Instant-apply on filter change. Best-practice UX (Linear / Notion /
 // Jira filters) — operators shouldn't need to click a separate
 // "Filter" button to see results; the select IS the action. For text
-// inputs we debounce 300ms so we don't thrash the server on every
-// keystroke while the operator types a long correlation_id.
+// inputs we debounce 300ms via useDebouncedRef so a 20-char
+// correlation_id doesn't fire 20 fetches on the way in.
 //
 // Explicit applyFilters() remains wired to form@submit so pressing
-// Enter in a text field still submits immediately — debounce is a
-// nicety, not a hard gate.
+// Enter in a text field still submits immediately.
 const DEBOUNCE_MS = 300
-let debounceTimer: ReturnType<typeof setTimeout> | null = null
-function scheduleApply() {
-  if (debounceTimer) clearTimeout(debounceTimer)
-  debounceTimer = setTimeout(() => {
-    debounceTimer = null
-    applyFilters()
-  }, DEBOUNCE_MS)
-}
+const debouncedTenantId = useDebouncedRef(tenantId, DEBOUNCE_MS)
+const debouncedScope = useDebouncedRef(scope, DEBOUNCE_MS)
+const debouncedCorrelationId = useDebouncedRef(correlationId, DEBOUNCE_MS)
 // Selects: apply instantly (no debounce). A select change is always
 // intentional and finite — debouncing just adds perceived lag.
 watch(category, () => applyFilters())
 watch(eventType, () => applyFilters())
-// Text inputs: debounced. The watcher fires on every keystroke, so
-// without the debounce a 20-character correlation_id would trigger
-// 20 fetches.
-watch(tenantId, () => scheduleApply())
-watch(scope, () => scheduleApply())
-watch(correlationId, () => scheduleApply())
+// Text inputs: applyFilters fires only after the debounced ref updates.
+watch(debouncedTenantId, () => applyFilters())
+watch(debouncedScope, () => applyFilters())
+watch(debouncedCorrelationId, () => applyFilters())
 
-// ─── Export (CSV / JSON) ──────────────────────────────────────────────
-// Mirrors AuditView's flow — including the R3 correctness fix where
-// exports MUST paginate through next_cursor (not just dump page 1).
-// Fields: one column per shallow Event field, `data` serialized via
-// safeJsonStringify so Excel/Sheets handle embedded newlines and the
-// formula-injection guard (csvEscape) sanitizes cells that start with
-// =, +, -, @, TAB, or CR (CWE-1236).
+// Shared export (useListExport). CSV column spec + fetchPage adapter
+// + filename stem is all that's view-specific.
+const {
+  showExportConfirm,
+  exporting,
+  exportFetched,
+  exportError,
+  maxRows: EXPORT_MAX_ROWS,
+  confirmExport,
+  cancelExport,
+  executeExport,
+} = useListExport<Event>({
+  itemNoun: 'event',
+  filenameStem: 'events',
+  currentItems: events,
+  hasMore,
+  nextCursor,
+  fetchPage: async (cursor) => {
+    const res = await listEvents({ ...buildFilterParams(), cursor })
+    return { items: res.events, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
+  },
+  columns: [
+    { header: 'timestamp',      value: e => e.timestamp },
+    { header: 'event_type',     value: e => e.event_type },
+    { header: 'category',       value: e => e.category },
+    { header: 'scope',          value: e => e.scope ?? '' },
+    { header: 'tenant_id',      value: e => e.tenant_id ?? '' },
+    { header: 'event_id',       value: e => e.event_id },
+    { header: 'source',         value: e => e.source },
+    { header: 'request_id',     value: e => e.request_id ?? '' },
+    { header: 'correlation_id', value: e => e.correlation_id ?? '' },
+    { header: 'actor_type',     value: e => e.actor?.type ?? '' },
+    { header: 'actor_key_id',   value: e => e.actor?.key_id ?? '' },
+    { header: 'data',           value: e => e.data ? safeJsonStringify(e.data, 0) : '' },
+  ],
+})
 
-function doExportCsv(rows: Event[]) {
-  const headers = [
-    'timestamp', 'event_type', 'category', 'scope', 'tenant_id',
-    'event_id', 'source', 'request_id', 'correlation_id',
-    'actor_type', 'actor_key_id', 'data',
-  ]
-  const lines = rows.map(e => [
-    e.timestamp, e.event_type, e.category, e.scope ?? '', e.tenant_id ?? '',
-    e.event_id, e.source, e.request_id ?? '', e.correlation_id ?? '',
-    e.actor?.type ?? '', e.actor?.key_id ?? '',
-    e.data ? safeJsonStringify(e.data, 0) : '',
-  ])
-  const csv = [
-    headers.map(csvEscape).join(','),
-    ...lines.map(r => r.map(csvEscape).join(',')),
-  ].join('\n')
-  triggerDownload(csv, 'text/csv', 'csv')
-}
-
-function doExportJson(rows: Event[]) {
-  triggerDownload(safeJsonStringify(rows, 2), 'application/json', 'json')
-}
-
-function triggerDownload(content: string, mime: string, ext: string) {
-  const blob = new Blob([content], { type: mime })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `events-${new Date().toISOString().slice(0, 10)}.${ext}`
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
-function confirmExport(format: 'csv' | 'json') {
-  if (events.value.length === 0) return
-  showExportConfirm.value = format
-}
-
-// Follow next_cursor until has_more=false OR we hit EXPORT_MAX_ROWS.
-// Same safety caps as AuditView: 500-page iteration guard against a
-// pathological tiny-page server, 50k row ceiling. Returns null when
-// the ceiling is hit (sets a user-facing error).
-async function fetchAllForExport(): Promise<Event[] | null> {
-  const all: Event[] = [...events.value]
-  exportFetched.value = all.length
-  let cursor = nextCursor.value
-  let hasMoreLocal = hasMore.value
-  let pagesFetched = 1
-  const MAX_PAGES = 500
-  while (hasMoreLocal && cursor && all.length < EXPORT_MAX_ROWS && pagesFetched < MAX_PAGES) {
-    const params = { ...buildFilterParams(), cursor }
-    const res = await listEvents(params)
-    all.push(...res.events)
-    exportFetched.value = all.length
-    hasMoreLocal = !!res.has_more
-    cursor = res.next_cursor ?? ''
-    pagesFetched++
-  }
-  if (all.length >= EXPORT_MAX_ROWS && hasMoreLocal) {
-    error.value = `Export aborted: result set exceeds ${EXPORT_MAX_ROWS.toLocaleString()} rows. Narrow by date, correlation ID, or tenant before retrying.`
-    return null
-  }
-  return all
-}
-
-async function executeExport() {
-  const format = showExportConfirm.value
-  if (!format) return
-  showExportConfirm.value = null
-  // Fast path — everything's on page 1 already.
-  if (!hasMore.value) {
-    if (format === 'csv') doExportCsv(events.value)
-    else doExportJson(events.value)
-    return
-  }
-  // Slow path — paginate through remaining pages. Blocking overlay so
-  // operators don't close the tab mid-assembly (Blob only flushes once
-  // every page is gathered).
-  exporting.value = true
-  exportFetched.value = events.value.length
-  try {
-    const all = await fetchAllForExport()
-    if (!all) return
-    if (format === 'csv') doExportCsv(all)
-    else doExportJson(all)
-  } catch (e) {
-    error.value = toMessage(e)
-  } finally {
-    exporting.value = false
-  }
-}
+watch(exportError, (v) => { if (v) error.value = v })
 
 const hasActiveFilters = computed(() => !!(category.value || eventType.value || tenantId.value || scope.value || correlationId.value))
 
@@ -325,7 +246,15 @@ function measureRow(el: Element | { $el?: Element } | null) {
 
 <template>
   <div>
-    <PageHeader title="Events" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh" />
+    <PageHeader
+      title="Events"
+      item-noun="event"
+      :loaded="events.length"
+      :has-more="hasMore"
+      :loading="isLoading"
+      :last-updated="lastUpdated"
+      @refresh="refresh"
+    />
 
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
@@ -359,25 +288,20 @@ function measureRow(el: Element | { $el?: Element } | null) {
       </div>
     </form>
 
-    <!-- Results count + export. Mirrors AuditView's toolbar so the
-         two log-style views have a consistent export affordance.
-         `(more available)` marker nudges operators that Export will
-         paginate beyond what's currently on screen. -->
-    <div v-if="events.length > 0" class="flex items-center justify-between mb-2">
-      <p class="muted-sm">
-        {{ events.length }} events
-        <span v-if="hasMore" class="ml-1 text-amber-600" title="More events exist beyond this page — Export will paginate fully.">(more available)</span>
-      </p>
-      <div class="flex gap-2">
-        <button @click="confirmExport('csv')" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100">
-          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-          Export CSV
-        </button>
-        <button @click="confirmExport('json')" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100">
-          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-          Export JSON
-        </button>
-      </div>
+    <!-- Export toolbar. The row count + "(more available)" marker
+         that lived here pre-V6 was moved into PageHeader's count
+         line — the two were displaying the same info; duplicating
+         it read as a bug. Export buttons stay as the only toolbar
+         action. -->
+    <div v-if="events.length > 0" class="flex justify-end gap-2 mb-2">
+      <button @click="confirmExport('csv')" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+        Export CSV
+      </button>
+      <button @click="confirmExport('json')" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+        Export JSON
+      </button>
     </div>
 
     <!-- V1 virtualized grid with measureElement for variable row
@@ -489,7 +413,11 @@ function measureRow(el: Element | { $el?: Element } | null) {
       </div>
 
       <div v-else>
-        <EmptyState :message="hasActiveFilters ? 'No events match your filters' : 'No events found'" :hint="hasActiveFilters ? undefined : 'Events will appear here as they occur'">
+        <EmptyState
+          item-noun="event"
+          :has-active-filter="hasActiveFilters"
+          :hint="hasActiveFilters ? undefined : 'Events will appear here as they occur'"
+        >
           <button v-if="hasActiveFilters" @click="clearFilters" class="mt-2 text-xs text-blue-600 hover:underline cursor-pointer">Clear filters</button>
         </EmptyState>
       </div>
@@ -503,33 +431,20 @@ function measureRow(el: Element | { $el?: Element } | null) {
       </button>
     </div>
 
-    <!-- Export confirmation dialog. Distinct copy for single-page vs
-         multi-page export so operators know when an export will
-         trigger additional network fetches. Backdrop click dismisses. -->
-    <div v-if="showExportConfirm" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50" @click.self="showExportConfirm = null">
-      <div class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 max-w-sm mx-4">
-        <h3 class="text-sm font-semibold text-gray-900 mb-2">Export events?</h3>
-        <p v-if="!hasMore" class="text-sm text-gray-600 mb-1">This export contains <strong>{{ events.length }}</strong> events, including scope, tenant_id, actor, and event data.</p>
-        <p v-else class="text-sm text-gray-600 mb-1">
-          The current filter matches <strong>more than {{ events.length }}</strong> events. The export will paginate through all remaining results (up to {{ EXPORT_MAX_ROWS.toLocaleString() }}) before the download starts.
-        </p>
-        <p class="muted-sm mb-4">Exported files contain unmasked event data. Handle with care.</p>
-        <div class="flex justify-end gap-2">
-          <button @click="showExportConfirm = null" class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 rounded hover:bg-gray-100 cursor-pointer">Cancel</button>
-          <button @click="executeExport" class="px-3 py-1.5 text-sm bg-gray-900 text-white rounded hover:bg-gray-800 cursor-pointer">Export {{ showExportConfirm.toUpperCase() }}</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Export progress overlay for multi-page exports. Blocking so
-         the operator doesn't close the tab mid-assembly — the browser
-         only flushes the Blob once every page is fetched. -->
-    <div v-if="exporting" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-      <div class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 max-w-sm mx-4">
-        <h3 class="text-sm font-semibold text-gray-900 mb-2">Assembling export…</h3>
-        <p class="text-sm text-gray-600 mb-1">Fetched <strong>{{ exportFetched.toLocaleString() }}</strong> events so far.</p>
-        <p class="muted-sm">Keep this tab open until the download begins.</p>
-      </div>
-    </div>
+    <ExportDialog
+      :format="showExportConfirm"
+      :loaded-count="events.length"
+      :has-more="hasMore"
+      :max-rows="EXPORT_MAX_ROWS"
+      item-noun-plural="events"
+      warning="Exported files contain unmasked event data. Handle with care."
+      @confirm="executeExport"
+      @cancel="cancelExport"
+    />
+    <ExportProgressOverlay
+      :open="exporting"
+      :fetched="exportFetched"
+      item-noun-plural="events"
+    />
   </div>
 </template>

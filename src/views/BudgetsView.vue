@@ -4,6 +4,8 @@ import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
+import { useDebouncedRef } from '../composables/useDebouncedRef'
+import { useListExport } from '../composables/useListExport'
 import { listBudgets, lookupBudget, listTenants, listEvents, fundBudget, freezeBudget, unfreezeBudget, updateBudgetConfig } from '../api/client'
 import { COMMIT_OVERAGE_POLICIES } from '../types'
 import { tenantFromScope, parsePositiveAmount } from '../utils/safe'
@@ -14,6 +16,8 @@ import UtilizationBar from '../components/UtilizationBar.vue'
 import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import ExportDialog from '../components/ExportDialog.vue'
+import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import EventTimeline from '../components/EventTimeline.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
@@ -71,6 +75,18 @@ const filterScope = ref('')
 // v-model'd number-input value. We treat both at consumption.
 const filterUtilMin = ref<number | string>('')
 const filterUtilMax = ref<number | string>('')
+
+// V5 (Phase 3): debounced refs so filter auto-applies 300ms after
+// the operator stops typing. Pre-fix, the form relied on @change
+// (fires only on blur) + @keyup.enter — meaning a typo'd filter
+// that the operator then clicks-off-of would fire a stale request,
+// or the list wouldn't update at all until explicit submit. Debounced
+// watchers give the same zero-click-submit behavior for all three
+// text/numeric inputs.
+const DEBOUNCE_MS = 300
+const debouncedFilterScope = useDebouncedRef(filterScope, DEBOUNCE_MS)
+const debouncedFilterUtilMin = useDebouncedRef(filterUtilMin, DEBOUNCE_MS)
+const debouncedFilterUtilMax = useDebouncedRef(filterUtilMax, DEBOUNCE_MS)
 
 const pageTitle = computed(() => {
   if (isDetail.value) return 'Budget Detail'
@@ -144,9 +160,17 @@ function applyClientFilters(items: BudgetLedger[], extra?: (b: BudgetLedger) => 
 const CROSS_TENANT_FANOUT_CAP = 100
 const CROSS_TENANT_CONCURRENCY = 4
 const CROSS_TENANT_PER_TENANT_PAGE_CAP = 10 // safety: don't spin forever on one tenant
+// Tenant-offset pagination for cross-tenant modes (over_limit /
+// has_debt / unselected-tenant). loadAllTenantBudgets slices tenants
+// starting at `budgetsTenantsOffset`. Load more advances the offset
+// by CROSS_TENANT_FANOUT_CAP and APPENDS — without this, the only
+// way to see budgets on tenant #101+ was to narrow by tenant filter,
+// which isn't always what operators want (e.g. "find any over_limit
+// budget across the whole fleet").
+const budgetsTenantsOffset = ref(0)
 const budgetsTenantsExamined = ref(0)
 const budgetsFanoutTruncated = computed(
-  () => tenants.value.length > budgetsTenantsExamined.value,
+  () => tenants.value.length > budgetsTenantsOffset.value + budgetsTenantsExamined.value,
 )
 
 async function fetchAllBudgetsForTenant(tenantId: string): Promise<BudgetLedger[]> {
@@ -164,19 +188,29 @@ async function fetchAllBudgetsForTenant(tenantId: string): Promise<BudgetLedger[
   return all
 }
 
-async function loadAllTenantBudgets(filterFn?: (b: BudgetLedger) => boolean) {
-  const targets = tenants.value.slice(0, CROSS_TENANT_FANOUT_CAP)
-  budgetsTenantsExamined.value = targets.length
-  const allBudgets: BudgetLedger[] = []
+async function loadAllTenantBudgets(
+  filterFn?: (b: BudgetLedger) => boolean,
+  opts: { append?: boolean } = {},
+) {
+  const start = opts.append ? budgetsTenantsOffset.value + budgetsTenantsExamined.value : 0
+  const targets = tenants.value.slice(start, start + CROSS_TENANT_FANOUT_CAP)
+  if (!opts.append) budgetsTenantsOffset.value = 0
+  budgetsTenantsExamined.value = opts.append
+    ? budgetsTenantsExamined.value + targets.length
+    : targets.length
+  const newBudgets: BudgetLedger[] = []
   for (let i = 0; i < targets.length; i += CROSS_TENANT_CONCURRENCY) {
     const batch = targets.slice(i, i + CROSS_TENANT_CONCURRENCY)
     const results = await Promise.all(
       batch.map((t) => fetchAllBudgetsForTenant(t.tenant_id)),
     )
-    for (const chunk of results) allBudgets.push(...chunk)
+    for (const chunk of results) newBudgets.push(...chunk)
   }
-  budgets.value = applyClientFilters(allBudgets, filterFn)
-  hasMore.value = false
+  const filtered = applyClientFilters(newBudgets, filterFn)
+  budgets.value = opts.append ? [...budgets.value, ...filtered] : filtered
+  // hasMore is the "more tenants to scan" flag in cross-tenant modes.
+  // When true, Load-more will advance the offset and append.
+  hasMore.value = budgetsFanoutTruncated.value
   nextCursor.value = ''
 }
 
@@ -249,22 +283,39 @@ async function loadMoreDetailEvents() {
 }
 
 async function loadMore() {
-  if (!nextCursor.value || loadingMore.value) return
+  if (loadingMore.value) return
   loadingMore.value = true
   try {
-    const params: Record<string, string> = { tenant_id: selectedTenant.value, cursor: nextCursor.value }
-    if (filterStatus.value) params.status = filterStatus.value
-    if (filterUnit.value) params.unit = filterUnit.value
-    if (filterScope.value) params.scope_prefix = filterScope.value
-    const res = await listBudgets(params)
-    // v0.1.25.21: apply client-side filters (utilization range #9) to
-    // the newly-appended page too. Without this, "Load more" would
-    // bypass the in-memory filter and dump unfiltered rows into the
-    // visible list — the user would see budgets outside their
-    // utilization range mysteriously appearing on page 2+.
-    budgets.value = [...budgets.value, ...applyClientFilters(res.ledgers)]
-    hasMore.value = res.has_more
-    nextCursor.value = res.next_cursor ?? ''
+    if (isCrossTenantFilter.value || !selectedTenant.value) {
+      // Cross-tenant / all-tenants mode: advance the tenant-offset
+      // pagination axis and append the next CROSS_TENANT_FANOUT_CAP
+      // tenants' worth of budgets. No cursor here — the "more" is
+      // about scanning additional tenants, not additional pages
+      // within a tenant.
+      budgetsTenantsOffset.value += budgetsTenantsExamined.value
+      if (activeFilter.value === 'over_limit') {
+        await loadAllTenantBudgets(b => !!b.is_over_limit, { append: true })
+      } else if (activeFilter.value === 'has_debt') {
+        await loadAllTenantBudgets(b => (b.debt?.amount ?? 0) > 0, { append: true })
+      } else {
+        await loadAllTenantBudgets(undefined, { append: true })
+      }
+    } else {
+      // Single-tenant cursor pagination (original path).
+      if (!nextCursor.value) return
+      const params: Record<string, string> = { tenant_id: selectedTenant.value, cursor: nextCursor.value }
+      if (filterStatus.value) params.status = filterStatus.value
+      if (filterUnit.value) params.unit = filterUnit.value
+      if (filterScope.value) params.scope_prefix = filterScope.value
+      const res = await listBudgets(params)
+      // Apply client-side filters (e.g. utilization range) to the
+      // newly-appended page too. Without this, "Load more" would
+      // bypass the in-memory filter and dump unfiltered rows into
+      // the visible list.
+      budgets.value = [...budgets.value, ...applyClientFilters(res.ledgers)]
+      hasMore.value = res.has_more
+      nextCursor.value = res.next_cursor ?? ''
+    }
   } catch (e) { error.value = toMessage(e) }
   finally { loadingMore.value = false }
 }
@@ -462,6 +513,64 @@ watch(() => route.query, () => {
   else loadList()
 })
 
+// V5 debounce auto-apply on text/numeric filter changes. scope_prefix
+// is server-side (re-fetches via loadList), util min/max are client-
+// side (apply via applyClientFilters on the next render anyway —
+// the watcher still fires loadList so the range constraint takes
+// effect against the full fetched page 1 result).
+watch(debouncedFilterScope, () => { if (!isDetail.value) loadList() })
+watch(debouncedFilterUtilMin, () => { if (!isDetail.value) loadList() })
+watch(debouncedFilterUtilMax, () => { if (!isDetail.value) loadList() })
+
+// Export — list-mode only (detail mode is a single scope + event
+// timeline, no list to export). For single-tenant mode the composable
+// follows the server cursor; cross-tenant modes already have hasMore
+// driven by `budgetsFanoutTruncated`, so advancing the export fetchPage
+// doesn't apply cleanly — we just export the currently-loaded subset.
+const budgetExportHasMore = computed(() => !!selectedTenant.value && !isCrossTenantFilter.value && hasMore.value)
+const {
+  showExportConfirm,
+  exporting,
+  exportFetched,
+  exportError,
+  maxRows: EXPORT_MAX_ROWS,
+  confirmExport,
+  cancelExport,
+  executeExport,
+} = useListExport<BudgetLedger>({
+  itemNoun: 'budget',
+  filenameStem: 'budgets',
+  currentItems: sortedBudgets,
+  hasMore: budgetExportHasMore,
+  nextCursor,
+  fetchPage: async (cursor) => {
+    if (!selectedTenant.value) return { items: [], hasMore: false, nextCursor: '' }
+    const params: Record<string, string> = { tenant_id: selectedTenant.value, cursor }
+    if (filterStatus.value) params.status = filterStatus.value
+    if (filterUnit.value) params.unit = filterUnit.value
+    if (filterScope.value) params.scope_prefix = filterScope.value
+    const res = await listBudgets(params)
+    return { items: res.ledgers, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
+  },
+  // Apply the client-side utilization filter to cursor pages too so
+  // the exported set matches what the operator sees.
+  filterFn: (b) => applyClientFilters([b]).length > 0,
+  columns: [
+    { header: 'scope',                 value: b => b.scope },
+    { header: 'unit',                  value: b => b.unit },
+    { header: 'status',                value: b => b.status },
+    { header: 'allocated_amount',      value: b => b.allocated.amount },
+    { header: 'remaining_amount',      value: b => b.remaining.amount },
+    { header: 'spent_amount',          value: b => b.spent?.amount ?? 0 },
+    { header: 'debt_amount',           value: b => b.debt?.amount ?? 0 },
+    { header: 'is_over_limit',         value: b => String(!!b.is_over_limit) },
+    { header: 'commit_overage_policy', value: b => b.commit_overage_policy ?? '' },
+    { header: 'created_at',            value: b => b.created_at ?? '' },
+  ],
+})
+
+watch(exportError, (v) => { if (v) error.value = v })
+
 // V1 virtualization — list mode only (not the detail card, which
 // embeds EventTimeline and is naturally bounded by DETAIL_EVENTS_PAGE_SIZE).
 const scrollEl = ref<HTMLElement | null>(null)
@@ -498,12 +607,31 @@ const gridTemplate = computed(() =>
 
 <template>
   <div>
-    <PageHeader :title="pageTitle" :subtitle="isDetail && detail ? `${detail.scope} · ${detail.unit}` : undefined" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
+    <PageHeader
+      :title="pageTitle"
+      :subtitle="isDetail && detail ? `${detail.scope} · ${detail.unit}` : undefined"
+      item-noun="budget"
+      :loaded="!isDetail ? sortedBudgets.length : undefined"
+      :has-more="!isDetail ? hasMore : undefined"
+      :loading="isLoading"
+      :last-updated="lastUpdated"
+      @refresh="refresh"
+    >
       <template #back>
         <button v-if="isDetail" @click="router.push('/budgets')" aria-label="Back to budgets" class="muted hover:text-gray-700 cursor-pointer">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
+        </button>
+      </template>
+      <template v-if="!isDetail" #actions>
+        <button @click="confirmExport('csv')" :disabled="sortedBudgets.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export CSV
+        </button>
+        <button @click="confirmExport('json')" :disabled="sortedBudgets.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export JSON
         </button>
       </template>
     </PageHeader>
@@ -619,16 +747,16 @@ const gridTemplate = computed(() =>
           </div>
           <div>
             <label for="budget-scope" class="form-label">Scope prefix</label>
-            <input id="budget-scope" v-model="filterScope" @change="loadList" @keyup.enter="loadList" placeholder="tenant:acme" class="border border-gray-300 rounded px-2 py-1.5 text-sm" />
+            <input id="budget-scope" v-model="filterScope" placeholder="tenant:acme" class="border border-gray-300 rounded px-2 py-1.5 text-sm" />
           </div>
           <!-- v0.1.25.21 (#9): utilization range. Pure client-side
                filter on the loaded result set; doesn't refetch. -->
           <div>
             <label for="budget-util-min" class="form-label">Utilization %</label>
             <div class="flex items-center gap-1">
-              <input id="budget-util-min" v-model="filterUtilMin" @change="loadList" @keyup.enter="loadList" type="number" min="0" max="100" placeholder="min" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-16" aria-label="Minimum utilization percent" />
+              <input id="budget-util-min" v-model="filterUtilMin" type="number" min="0" max="100" placeholder="min" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-16" aria-label="Minimum utilization percent" />
               <span class="muted-sm">to</span>
-              <input id="budget-util-max" v-model="filterUtilMax" @change="loadList" @keyup.enter="loadList" type="number" min="0" max="100" placeholder="max" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-16" aria-label="Maximum utilization percent" />
+              <input id="budget-util-max" v-model="filterUtilMax" type="number" min="0" max="100" placeholder="max" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-16" aria-label="Maximum utilization percent" />
             </div>
           </div>
           <div v-if="isLoading" class="flex items-center">
@@ -656,7 +784,7 @@ const gridTemplate = computed(() =>
             <SortHeader as="div" label="Scope" column="scope" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader as="div" label="Unit" column="unit" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader as="div" label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <div role="columnheader" class="table-cell text-left">Overage</div>
+            <SortHeader as="div" label="Overage" column="commit_overage_policy" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader as="div" label="Utilization" column="utilization" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader as="div" label="Debt" column="debt" :active-column="sortKey" :direction="sortDir" @sort="toggle" align="right" />
             <div v-if="canManage" role="columnheader" class="table-cell" data-column="action"></div>
@@ -779,5 +907,20 @@ const gridTemplate = computed(() =>
         </select>
       </div>
     </FormDialog>
+
+    <ExportDialog
+      :format="showExportConfirm"
+      :loaded-count="sortedBudgets.length"
+      :has-more="budgetExportHasMore"
+      :max-rows="EXPORT_MAX_ROWS"
+      item-noun-plural="budgets"
+      @confirm="executeExport"
+      @cancel="cancelExport"
+    />
+    <ExportProgressOverlay
+      :open="exporting"
+      :fetched="exportFetched"
+      item-noun-plural="budgets"
+    />
   </div>
 </template>

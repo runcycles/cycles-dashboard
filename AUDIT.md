@@ -1,7 +1,38 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-16 (scale-hardening phase 2c — V1 virtualization for EventsView + AuditView with measureElement for expandable rows), 2026-04-16 (scale-hardening phase 2b — row virtualization across 5 list views via @tanstack/vue-virtual), 2026-04-16 (scale-hardening phase 2 — pagination on tenants/webhooks/budget-detail events, lazy tabs, O(1) parent lookup, copy-event-data), 2026-04-16 (scale-hardening phase 1 — pagination, cancellation, N+1 mitigation across 6 views), 2026-04-15 (v0.1.25.27 — RESET_SPENT funding operation support, semantics corrected post-test), 2026-04-14 (error-surfacing + SecretReveal + 3 incident-response Playwright flows), 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
+**Date:** 2026-04-16 (scale-hardening phase 3 — V5 debounce composable, V6 PageHeader result counts, V7 filter-aware EmptyState), 2026-04-16 (scale-hardening phase 2c — V1 virtualization for EventsView + AuditView with measureElement for expandable rows), 2026-04-16 (scale-hardening phase 2b — row virtualization across 5 list views via @tanstack/vue-virtual), 2026-04-16 (scale-hardening phase 2 — pagination on tenants/webhooks/budget-detail events, lazy tabs, O(1) parent lookup, copy-event-data), 2026-04-16 (scale-hardening phase 1 — pagination, cancellation, N+1 mitigation across 6 views), 2026-04-15 (v0.1.25.27 — RESET_SPENT funding operation support, semantics corrected post-test), 2026-04-14 (error-surfacing + SecretReveal + 3 incident-response Playwright flows), 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
 **Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.17+ continues to satisfy the governance plane; **admin server v0.1.25.18+ required** to execute the new `RESET_SPENT` funding operation from BudgetsView (older admin servers will reject the operation enum with 400 INVALID_REQUEST — UI degrades gracefully but the operator sees the server's error toast).
+
+### 2026-04-16 — High-cardinality scale hardening (phase 3 of 5: search/result UX)
+
+Closes **audit items V5 (debounce), V6 (result count), V7 (filter-aware EmptyState)**. Small-diff, high-visibility changes that land in the top-of-view header and empty-state UX every operator sees.
+
+**V5 — `useDebouncedRef` composable + rollout** (`src/composables/useDebouncedRef.ts`, ~25 LoC). Returns a read-only mirror ref that updates `delay` ms after the last source change. `onScopeDispose` cancels pending timers on teardown so post-unmount writes / leaked timers can't happen. Local implementation (not VueUse) to keep composables directory dependency-free and tune the exact semantics.
+
+Applied to:
+- **EventsView**: refactored from the earlier inline-timer pattern into `useDebouncedRef(tenantId|scope|correlationId, 300)`. 10 lines shorter, same behavior.
+- **TenantsView**: client-side search filter now reads `debouncedSearch` (200ms). Selection-clear watcher deliberately stays on the RAW `search` ref so clearing happens immediately — a safety action that shouldn't wait for debounce.
+- **BudgetsView**: replaces `@change + @keyup.enter` markup on scope/util-min/util-max inputs with debounced watchers (300ms). Eliminates the half-applied-filter bug where tabbing between inputs didn't fire the prior filter's apply.
+
+AuditView intentionally keeps its explicit "Run Query" button — audit queries can be expensive on the backend and operators expect explicit submit.
+
++4 Vitest cases for the composable: sync-initial-value, propagation delay, rapid-change coalescing, scope-dispose cancellation.
+
+**V6 — PageHeader result count** (`src/components/PageHeader.vue`). New optional `loaded`, `total`, `hasMore`, `itemNoun` props. When `loaded` is passed the header renders a tabular-num count line beneath the title:
+- `loaded + total` → "Showing X of Y tenants"
+- `loaded + hasMore=true` → "X tenants loaded (more available)"
+- `loaded` alone → "X tenants"
+
+Wired from all 7 list views (Tenants, Webhooks, Events, ApiKeys, Reservations, Budgets, Audit). Matches Linear / GitHub / Jira list-view header conventions.
+
+**V7 — filter-aware EmptyState** (`src/components/EmptyState.vue`). New optional `hasActiveFilter` + `itemNoun` props with canonical default copy: "No tenants match your filters" + "Clearing filters may show more results" when filtered-empty, "No tenants found" when truly empty. Explicit `message` / `hint` still win for bespoke wording. Simplified TenantsView, EventsView, ApiKeysView to use the flag; others keep bespoke copy because their non-filter messaging is view-specific.
+
+**Gates:** 320/320 Vitest pass (316 + 4 new composable tests). Typecheck clean. No test changes for V6/V7 — both additions are backward-compatible (props default to undefined, existing behavior preserved when unset).
+
+**Phase 3 complete. Remaining phases:**
+- **Phase 4:** W4 bulk concurrency + 429 backoff, W5 reveal-timer cleanup.
+- **Phase 5:** W6 a11y row-count live region.
+- **Server-spec blocked** (cycles-server-admin): R1/R2 full fix, V4 server-side sort, W1 bulk-op filter, W2 utilization_min/max params, W3 tenant search.
 
 ### 2026-04-16 — High-cardinality scale hardening (phase 2c of 5: V1 virtualization, part 2)
 

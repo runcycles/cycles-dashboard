@@ -16,6 +16,7 @@ import { ref, computed, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
+import { useListExport } from '../composables/useListExport'
 import { listReservations, releaseReservation, listTenants } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { ReservationSummary, Tenant } from '../types'
@@ -24,6 +25,8 @@ import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import ExportDialog from '../components/ExportDialog.vue'
+import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import FormDialog from '../components/FormDialog.vue'
 import { formatDateTime, formatRelative } from '../utils/format'
 import { useToast } from '../composables/useToast'
@@ -130,6 +133,47 @@ async function loadMore() {
   } catch (e) { error.value = toMessage(e) }
   finally { loadingMore.value = false }
 }
+
+// Export. Server-side filter (tenant + status) — the fetchPage passes
+// the same filter params so cursor pages stay consistent. No filterFn
+// needed since filtering is already server-side.
+const {
+  showExportConfirm,
+  exporting,
+  exportFetched,
+  exportError,
+  maxRows: EXPORT_MAX_ROWS,
+  confirmExport,
+  cancelExport,
+  executeExport,
+} = useListExport<ReservationSummary>({
+  itemNoun: 'reservation',
+  filenameStem: 'reservations',
+  currentItems: reservations,
+  hasMore,
+  nextCursor,
+  fetchPage: async (cursor) => {
+    if (!tenantFilter.value) return { items: [], hasMore: false, nextCursor: '' }
+    const params: { status?: string; limit?: number; cursor?: string } = {
+      limit: PAGE_SIZE,
+      cursor,
+    }
+    if (statusFilter.value) params.status = statusFilter.value
+    const res = await listReservations(tenantFilter.value, params)
+    return { items: res.reservations, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
+  },
+  columns: [
+    { header: 'reservation_id',   value: r => r.reservation_id },
+    { header: 'scope_path',       value: r => r.scope_path },
+    { header: 'status',           value: r => r.status },
+    { header: 'reserved_amount',  value: r => r.reserved.amount },
+    { header: 'reserved_unit',    value: r => r.reserved.unit },
+    { header: 'created_at_ms',    value: r => r.created_at_ms },
+    { header: 'expires_at_ms',    value: r => r.expires_at_ms },
+  ],
+})
+
+watch(exportError, (v) => { if (v) error.value = v })
 
 // Re-query on filter change. Polling keeps the list fresh on a 30s
 // cadence — reservations turn over quickly and a stale list is actively
@@ -242,10 +286,24 @@ const gridTemplate = computed(() =>
     <PageHeader
       title="Reservations"
       subtitle="Force-release hung reservations during incident response"
+      item-noun="reservation"
+      :loaded="reservations.length"
+      :has-more="hasMore"
       :loading="isLoading"
       :last-updated="lastUpdated"
       @refresh="refresh"
-    />
+    >
+      <template #actions>
+        <button @click="confirmExport('csv')" :disabled="reservations.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export CSV
+        </button>
+        <button @click="confirmExport('json')" :disabled="reservations.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export JSON
+        </button>
+      </template>
+    </PageHeader>
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
     <!-- Filters. Tenant is required; the server rejects admin list
@@ -291,7 +349,7 @@ const gridTemplate = computed(() =>
           :style="{ gridTemplateColumns: gridTemplate }"
         >
           <SortHeader as="div" label="Reservation ID" column="reservation_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-          <div role="columnheader" class="table-cell text-left">Scope</div>
+          <SortHeader as="div" label="Scope" column="scope_path" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Reserved" column="reserved" :active-column="sortKey" :direction="sortDir" @sort="toggle" align="right" />
           <SortHeader as="div" label="Created" column="created_at_ms" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
@@ -415,5 +473,20 @@ const gridTemplate = computed(() =>
         </p>
       </div>
     </FormDialog>
+
+    <ExportDialog
+      :format="showExportConfirm"
+      :loaded-count="reservations.length"
+      :has-more="hasMore"
+      :max-rows="EXPORT_MAX_ROWS"
+      item-noun-plural="reservations"
+      @confirm="executeExport"
+      @cancel="cancelExport"
+    />
+    <ExportProgressOverlay
+      :open="exporting"
+      :fetched="exportFetched"
+      item-noun-plural="reservations"
+    />
   </div>
 </template>
