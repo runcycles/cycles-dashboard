@@ -784,7 +784,7 @@ const gridTemplate = computed(() =>
             <SortHeader as="div" label="Scope" column="scope" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader as="div" label="Unit" column="unit" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader as="div" label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <div role="columnheader" class="table-cell text-left">Overage</div>
+            <SortHeader as="div" label="Overage" column="commit_overage_policy" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader as="div" label="Utilization" column="utilization" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader as="div" label="Debt" column="debt" :active-column="sortKey" :direction="sortDir" @sort="toggle" align="right" />
             <div v-if="canManage" role="columnheader" class="table-cell" data-column="action"></div>
