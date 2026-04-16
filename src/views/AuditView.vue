@@ -166,6 +166,25 @@ async function query() {
   finally { loading.value = false }
 }
 
+// Load-more: append the next cursor page to the visible list. Separate
+// from the Export flow (which paginates silently through all pages into
+// a Blob) — operators sometimes want to *scan* past page 1 on screen,
+// not only export. Same append pattern as EventsView / TenantsView.
+const loadingMore = ref(false)
+async function loadMore() {
+  if (!nextCursor.value || loadingMore.value) return
+  loadingMore.value = true
+  try {
+    const params = { ...buildFilterParams(), cursor: nextCursor.value }
+    const res = await listAuditLogs(params)
+    entries.value = [...entries.value, ...res.logs]
+    hasMore.value = !!res.has_more
+    nextCursor.value = res.next_cursor ?? ''
+    error.value = ''
+  } catch (e) { error.value = toMessage(e) }
+  finally { loadingMore.value = false }
+}
+
 function setTimeRange(hours: number) {
   const now = new Date()
   const from = new Date(now.getTime() - hours * 3600_000)
@@ -422,6 +441,16 @@ function measureRow(el: Element | { $el?: Element } | null) {
 
       <div v-else-if="loading" class="px-4 py-12 text-center muted">Loading...</div>
      </div>
+    </div>
+
+    <!-- Load more — outside the virtualized scroll region, mirrors
+         the pattern used across EventsView / TenantsView / Webhooks.
+         Exports still silently paginate through the full result set
+         via fetchAllForExport; Load-more is for on-screen scanning. -->
+    <div v-if="hasMore || loadingMore" class="mt-3 flex justify-end">
+      <button @click="loadMore" :disabled="loadingMore" class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50 cursor-pointer">
+        {{ loadingMore ? 'Loading…' : 'Load more log entries' }}
+      </button>
     </div>
 
     <!-- Export confirmation dialog -->
