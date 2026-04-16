@@ -42,12 +42,16 @@ const CONCURRENCY = 4
 // until the spec exposes an endpoint to enumerate registered units.
 const UNITS = ['TOKENS', 'USD_MICROCENTS']
 const OVERAGE = ['REJECT', 'ALLOW_IF_AVAILABLE', 'ALLOW_WITH_OVERDRAFT']
-// Probed set the server accepts. `reservation.*` types return 400
-// on this server version (not yet wired into the webhook event enum
-// even though they're emitted via other channels) so they're excluded.
-// Dashboard's EVENT_TYPES in types.ts is broader — some of those are
-// admin-server only too. If you see 400 on re-run, probe with
-// `curl ... -d '{"event_types":["x.y"]}'` to find the culprit.
+// Subset of events the server accepts for webhook subscription. By
+// design the webhook-subscribable set is narrower than the full event
+// universe: only aggregate/rate reservation events are exposed
+// (.denied, .denial_rate_spike, .expired, .expiry_rate_spike,
+// .commit_overage), not per-reservation lifecycle events like
+// reservation.created / reservation.committed — those fire too often
+// to be sensibly delivered via webhook and live in the event stream
+// only. The full list (src/types.ts EVENT_TYPES) is authoritative for
+// the dashboard's picker UI. Keep this seed subset minimal — we only
+// need a handful for realistic variety in the WebhooksView list.
 const EVENT_TYPES = ['budget.created', 'budget.updated', 'budget.funded', 'budget.frozen', 'budget.unfrozen', 'budget.closed', 'tenant.created', 'tenant.suspended']
 
 async function adminFetch(path, init = {}) {
