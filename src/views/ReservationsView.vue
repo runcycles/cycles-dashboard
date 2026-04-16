@@ -224,6 +224,17 @@ const virtualizer = useVirtualizer(computed(() => ({
 })))
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
 const totalHeight = computed(() => virtualizer.value.getTotalSize())
+
+// Grid template shared by the sticky header and each virtualized row.
+// Inline style (not a Tailwind arbitrary class) so we're immune to the
+// JIT scanner missing the pattern. Column 7 (actions) is 120px, not
+// 96px (the original <th class="w-24">), because "Force release" at
+// text-xs is ~75px and px-4 takes 32px of the cell — 96 was cutting it.
+const gridTemplate = computed(() =>
+  canManage.value
+    ? 'minmax(180px,1.5fr) minmax(200px,2fr) 110px 140px 140px 140px 120px'
+    : 'minmax(180px,1.5fr) minmax(200px,2fr) 110px 140px 140px 140px',
+)
 </script>
 
 <template>
@@ -277,7 +288,7 @@ const totalHeight = computed(() => virtualizer.value.getTotalSize())
         <div
           role="row"
           class="grid text-xs uppercase tracking-wider"
-          :class="canManage ? 'grid-cols-[minmax(180px,1.5fr)_minmax(200px,2fr)_110px_140px_140px_140px_96px]' : 'grid-cols-[minmax(180px,1.5fr)_minmax(200px,2fr)_110px_140px_140px_140px]'"
+          :style="{ gridTemplateColumns: gridTemplate }"
         >
           <SortHeader as="div" label="Reservation ID" column="reservation_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <div role="columnheader" class="table-cell text-left">Scope</div>
@@ -307,9 +318,8 @@ const totalHeight = computed(() => virtualizer.value.getTotalSize())
             :key="sortedReservations[v.index].reservation_id"
             role="row"
             :aria-rowindex="v.index + 2"
-            class="grid table-row-hover border-b border-gray-100 absolute left-0 right-0"
-            :class="canManage ? 'grid-cols-[minmax(180px,1.5fr)_minmax(200px,2fr)_110px_140px_140px_140px_96px]' : 'grid-cols-[minmax(180px,1.5fr)_minmax(200px,2fr)_110px_140px_140px_140px]'"
-            :style="{ transform: `translateY(${v.start}px)`, height: ROW_HEIGHT_ESTIMATE + 'px' }"
+            class="grid table-row-hover border-b border-gray-100 absolute left-0 right-0 items-center"
+            :style="{ gridTemplateColumns: gridTemplate, transform: `translateY(${v.start}px)`, height: ROW_HEIGHT_ESTIMATE + 'px' }"
           >
             <div role="cell" class="table-cell font-mono text-xs break-all">{{ sortedReservations[v.index].reservation_id }}</div>
             <div role="cell" class="table-cell font-mono text-xs text-gray-600 break-all">{{ sortedReservations[v.index].scope_path }}</div>
