@@ -274,12 +274,15 @@ const virtualizer = useVirtualizer(computed(() => ({
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
 const totalHeight = computed(() => virtualizer.value.getTotalSize())
 
-// Columns: [checkbox 40] health 40 | URL flex | status 110 | failures 90 | events flex | action 96
+// Columns: [checkbox 40] health 90 | URL flex | status 110 | failures 90 | events flex | action 96
 // No Sort on Health / Events — they're plain <div role="columnheader">.
+// Health: 90px because "Health" label at text-xs uppercase tracking-wider
+// plus px-4 cell padding needs that — a 40px column clipped the header
+// text into the URL column.
 const gridTemplate = computed(() =>
   canManage.value
-    ? '40px 40px minmax(240px,2fr) 110px 90px minmax(180px,1.5fr) 96px'
-    : '40px minmax(240px,2fr) 110px 90px minmax(180px,1.5fr)',
+    ? '40px 90px minmax(240px,2fr) 110px 90px minmax(180px,1.5fr) 96px'
+    : '90px minmax(240px,2fr) 110px 90px minmax(180px,1.5fr)',
 )
 </script>
 
@@ -322,7 +325,7 @@ const gridTemplate = computed(() =>
       :aria-colcount="canManage ? 7 : 5"
     >
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
-        <div role="row" class="grid text-xs font-medium uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
+        <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
           <div v-if="canManage" role="columnheader" class="table-cell">
             <input type="checkbox" :checked="selectedVisibleAll" @change="toggleSelectAll" aria-label="Select all visible webhooks" />
           </div>

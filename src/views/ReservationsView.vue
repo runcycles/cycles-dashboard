@@ -287,7 +287,7 @@ const gridTemplate = computed(() =>
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
         <div
           role="row"
-          class="grid text-xs font-medium uppercase tracking-wider"
+          class="grid text-xs font-bold uppercase tracking-wider"
           :style="{ gridTemplateColumns: gridTemplate }"
         >
           <SortHeader as="div" label="Reservation ID" column="reservation_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
