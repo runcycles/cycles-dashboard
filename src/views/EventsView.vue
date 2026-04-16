@@ -245,7 +245,9 @@ function measureRow(el: Element | { $el?: Element } | null) {
 </script>
 
 <template>
-  <div>
+  <!-- Phase 5 (table-layout unification): flex-fill so the table
+       body grows with viewport height. -->
+  <div class="h-full flex flex-col min-h-0">
     <PageHeader
       title="Events"
       item-noun="event"
@@ -312,7 +314,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
          getItemKey) so Vue's reactivity doesn't destroy the measured
          element identity across sort or filter changes. -->
     <div
-      class="bg-white rounded-lg shadow overflow-hidden text-sm"
+      class="bg-white rounded-lg shadow overflow-hidden text-sm flex-1 min-h-0 flex flex-col"
       role="table"
       :aria-rowcount="events.length + 1"
       :aria-colcount="6"
@@ -332,8 +334,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
         v-if="sortedEvents.length > 0"
         ref="scrollEl"
         role="rowgroup"
-        class="overflow-auto"
-        style="max-height: calc(100vh - 380px); min-height: 240px;"
+        class="flex-1 overflow-auto min-h-[240px]"
       >
         <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
           <div
@@ -427,7 +428,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
          doesn't participate in row-height measurement. -->
     <div v-if="hasMore || loadingMore" class="mt-3 flex justify-end">
       <button @click="loadMore" :disabled="loadingMore" class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50 cursor-pointer">
-        {{ loadingMore ? 'Loading…' : 'Load more events' }}
+        {{ loadingMore ? 'Loading…' : 'Load more' }}
       </button>
     </div>
 

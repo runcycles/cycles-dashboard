@@ -282,7 +282,13 @@ const gridTemplate = computed(() =>
 </script>
 
 <template>
-  <div>
+  <!-- Phase 5 (table-layout unification): flex-fill so the table body
+       grows to fill remaining viewport height. No per-view
+       calc(100vh - Npx) math; resize the browser and the table adapts
+       naturally. Header, filter toolbar, and Load-more footer take
+       their natural (shrink-0) height; the virtualized scroll body
+       is flex-1 min-h-0 overflow-auto. -->
+  <div class="h-full flex flex-col min-h-0">
     <PageHeader
       title="Reservations"
       subtitle="Force-release hung reservations during incident response"
@@ -335,9 +341,11 @@ const gridTemplate = computed(() =>
          role="rowgroup" sticky header and a role="rowgroup" scroll
          container. CSS Grid gives each row a consistent column template
          without HTML <table>'s layout algorithm, which can't coexist
-         with the absolute-positioned virtualized rows. -->
+         with the absolute-positioned virtualized rows. Shell is
+         flex-1 min-h-0 flex-col so the scroll body below expands to
+         fill remaining viewport. -->
     <div
-      class="bg-white rounded-lg shadow overflow-hidden text-sm"
+      class="bg-white rounded-lg shadow overflow-hidden text-sm flex-1 min-h-0 flex flex-col"
       role="table"
       :aria-rowcount="reservations.length + 1"
       :aria-colcount="canManage ? 7 : 6"
@@ -358,17 +366,18 @@ const gridTemplate = computed(() =>
         </div>
       </div>
 
-      <!-- Virtualized body. Fixed max-height so the container is
-           scrollable; TanStack's virtualizer needs a finite viewport
-           to compute which rows intersect. The height is generous
-           enough for a typical laptop viewport; operators on smaller
-           screens get a nested scrollbar. -->
+      <!-- Virtualized body. flex-1 min-h-0 overflow-auto lets the
+           body fill whatever space is left in the flex-col shell —
+           the virtualizer reads clientHeight and re-computes which
+           rows intersect, so resize ticks naturally. min-h-[200px]
+           keeps the body usable on tiny viewports where "flex-1"
+           would otherwise collapse to near-zero (e.g. if the filter
+           toolbar wrapped to many rows). -->
       <div
         v-if="sortedReservations.length > 0"
         ref="scrollEl"
         role="rowgroup"
-        class="overflow-auto"
-        style="max-height: calc(100vh - 360px); min-height: 200px;"
+        class="flex-1 overflow-auto min-h-[200px]"
       >
         <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
           <div

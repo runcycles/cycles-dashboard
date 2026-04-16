@@ -352,7 +352,12 @@ function closePermsViewer() { viewingPermsFor.value = null }
 </script>
 
 <template>
-  <div>
+  <!-- Phase 5 (table-layout unification): flex-fill root. ApiKeys
+       also has the outer overflow-x-auto + inner min-width shim
+       pattern; with <main> now overflow-y-auto only, the shell's
+       x-scrollbar is the single horizontal scroll (no more double
+       bar on viewports < 1220/1380px). -->
+  <div class="h-full flex flex-col min-h-0">
     <PageHeader
       title="API Keys"
       item-noun="key"
@@ -438,12 +443,12 @@ function closePermsViewer() { viewingPermsFor.value = null }
          separate horizontal scrollbars that fought each other on
          resize — now there's one. -->
     <div
-      class="bg-white rounded-lg shadow overflow-x-auto text-sm"
+      class="bg-white rounded-lg shadow overflow-x-auto text-sm flex-1 min-h-0 flex flex-col"
       role="table"
       :aria-rowcount="filteredKeys.length + 1"
       :aria-colcount="canManage ? 9 : 8"
     >
-     <div :style="{ minWidth: canManage ? '1380px' : '1220px' }">
+     <div :style="{ minWidth: canManage ? '1380px' : '1220px' }" class="flex flex-col flex-1 min-h-0">
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
         <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
           <SortHeader as="div" label="Key ID" column="key_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
@@ -462,8 +467,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
         v-if="sortedKeys.length > 0"
         ref="scrollEl"
         role="rowgroup"
-        class="overflow-y-auto"
-        style="max-height: calc(100vh - 400px); min-height: 200px;"
+        class="flex-1 overflow-y-auto min-h-[200px]"
       >
         <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
           <div

@@ -192,7 +192,13 @@ function measureRow(el: Element | { $el?: Element } | null) {
 </script>
 
 <template>
-  <div>
+  <!-- Phase 5 (table-layout unification): flex-fill root. Audit was
+       the worst offender pre-fix — the outer shell's overflow-x-auto
+       combined with <main>'s overflow-auto produced a double
+       horizontal scrollbar on viewports < 900px. Now <main> is
+       overflow-y-auto only; horizontal scroll lives on the shell so
+       there's exactly one bar, localized to the table. -->
+  <div class="h-full flex flex-col min-h-0">
     <PageHeader
       title="Audit Logs"
       item-noun="log entry"
@@ -263,18 +269,20 @@ function measureRow(el: Element | { $el?: Element } | null) {
       </button>
     </div>
 
-    <!-- V1 virtualized grid with measureElement (Phase 2c). Same
-         pattern as EventsView — variable row heights let expand/
-         collapse re-layout smoothly without flicker. Horizontal
-         scroll engages on narrow viewports via the outer
-         overflow-x-auto + inner min-width wrapper. -->
+    <!-- V1 virtualized grid with measureElement (Phase 2c). Variable
+         row heights let expand/collapse re-layout smoothly without
+         flicker. Horizontal scroll engages on narrow viewports via
+         the outer overflow-x-auto + inner min-width wrapper — both
+         header and body scroll together because they share the shim
+         parent. Shell is flex-1 min-h-0 flex-col so the scroll body
+         below expands to fill viewport (phase 5). -->
     <div
-      class="bg-white rounded-lg shadow overflow-x-auto text-sm"
+      class="bg-white rounded-lg shadow overflow-x-auto text-sm flex-1 min-h-0 flex flex-col"
       role="table"
       :aria-rowcount="entries.length + 1"
       :aria-colcount="7"
     >
-     <div style="min-width: 900px">
+     <div style="min-width: 900px" class="flex flex-col flex-1 min-h-0">
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
         <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
           <div role="columnheader" class="table-cell"></div>
@@ -291,8 +299,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
         v-if="sortedEntries.length > 0"
         ref="scrollEl"
         role="rowgroup"
-        class="overflow-y-auto"
-        style="max-height: calc(100vh - 480px); min-height: 240px;"
+        class="flex-1 overflow-y-auto min-h-[240px]"
       >
         <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
           <div
@@ -385,7 +392,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
          via fetchAllForExport; Load-more is for on-screen scanning. -->
     <div v-if="hasMore || loadingMore" class="mt-3 flex justify-end">
       <button @click="loadMore" :disabled="loadingMore" class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50 cursor-pointer">
-        {{ loadingMore ? 'Loading…' : 'Load more log entries' }}
+        {{ loadingMore ? 'Loading…' : 'Load more' }}
       </button>
     </div>
 

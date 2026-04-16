@@ -461,8 +461,7 @@ watch(exportError, (v) => { if (v) error.value = v })
           v-if="sortedDeliveries.length > 0"
           ref="deliveryScrollEl"
           role="rowgroup"
-          class="overflow-y-auto"
-          style="max-height: calc(100vh - 520px); min-height: 200px;"
+          class="overflow-y-auto max-h-[60vh] min-h-[200px]"
         >
           <div role="presentation" :style="{ height: deliveryTotalHeight + 'px', position: 'relative' }">
             <div
@@ -493,7 +492,7 @@ watch(exportError, (v) => { if (v) error.value = v })
 
       <div v-if="deliveriesHasMore || deliveriesLoadingMore" class="mt-3 flex justify-end">
         <button @click="loadMoreDeliveries" :disabled="deliveriesLoadingMore" class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50 cursor-pointer">
-          {{ deliveriesLoadingMore ? 'Loading…' : 'Load more deliveries' }}
+          {{ deliveriesLoadingMore ? 'Loading…' : 'Load more' }}
         </button>
       </div>
     </template>

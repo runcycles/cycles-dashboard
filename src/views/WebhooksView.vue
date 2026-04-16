@@ -383,7 +383,9 @@ const gridTemplate = computed(() =>
 </script>
 
 <template>
-  <div>
+  <!-- Phase 5 (table-layout unification): flex-fill so the table
+       body grows with the viewport; no per-view calc(100vh - Npx). -->
+  <div class="h-full flex flex-col min-h-0">
     <PageHeader
       title="Webhooks"
       item-noun="subscription"
@@ -468,9 +470,9 @@ const gridTemplate = computed(() =>
     </Teleport>
 
     <!-- V1 virtualized grid. Same pattern as ReservationsView /
-         TenantsView. -->
+         TenantsView. Shell flex-fills within the page's flex-col. -->
     <div
-      class="bg-white rounded-lg shadow overflow-hidden text-sm"
+      class="bg-white rounded-lg shadow overflow-hidden text-sm flex-1 min-h-0 flex flex-col"
       role="table"
       :aria-rowcount="filteredWebhooks.length + 1"
       :aria-colcount="canManage ? 7 : 5"
@@ -494,8 +496,7 @@ const gridTemplate = computed(() =>
         v-if="sortedWebhooks.length > 0"
         ref="scrollEl"
         role="rowgroup"
-        class="overflow-auto"
-        style="max-height: calc(100vh - 360px); min-height: 200px;"
+        class="flex-1 overflow-auto min-h-[200px]"
       >
         <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
           <div
