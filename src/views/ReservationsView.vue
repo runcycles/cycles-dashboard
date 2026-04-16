@@ -46,6 +46,14 @@ const statusFilter = ref<string>('ACTIVE') // operationally-interesting default
 const reservations = ref<ReservationSummary[]>([])
 const error = ref('')
 const loadingList = ref(false)
+const loadingMore = ref(false)
+// Pagination. Pre-R4, the view hardcoded limit=100 and discarded the
+// server's cursor — tenants with >100 matching reservations silently
+// truncated. Load-more follows next_cursor; polling replays page 1 and
+// drops any loaded tail (documented on the Load more button).
+const PAGE_SIZE = 100
+const hasMore = ref(false)
+const nextCursor = ref('')
 
 // Sort local, not server — the runtime spec doesn't guarantee stable
 // ordering of returned reservations. Default to created_at desc (newest
@@ -81,17 +89,45 @@ async function loadTenants() {
 async function loadReservations() {
   if (!tenantFilter.value) {
     reservations.value = []
+    hasMore.value = false
+    nextCursor.value = ''
     return
   }
   loadingList.value = true
+  // Reset pagination state up-front — same rationale as BudgetsView:
+  // if the user clicks "Load more" between the watcher firing and the
+  // fetch returning, without this reset we'd send a stale cursor
+  // scoped to the previous filter.
+  nextCursor.value = ''
+  hasMore.value = false
   try {
-    const params: { status?: string; limit?: number } = { limit: 100 }
+    const params: { status?: string; limit?: number } = { limit: PAGE_SIZE }
     if (statusFilter.value) params.status = statusFilter.value
     const res = await listReservations(tenantFilter.value, params)
     reservations.value = res.reservations
+    hasMore.value = !!res.has_more
+    nextCursor.value = res.next_cursor ?? ''
     error.value = ''
   } catch (e) { error.value = toMessage(e) }
   finally { loadingList.value = false }
+}
+
+async function loadMore() {
+  if (!nextCursor.value || loadingMore.value || !tenantFilter.value) return
+  loadingMore.value = true
+  try {
+    const params: { status?: string; limit?: number; cursor?: string } = {
+      limit: PAGE_SIZE,
+      cursor: nextCursor.value,
+    }
+    if (statusFilter.value) params.status = statusFilter.value
+    const res = await listReservations(tenantFilter.value, params)
+    reservations.value = [...reservations.value, ...res.reservations]
+    hasMore.value = !!res.has_more
+    nextCursor.value = res.next_cursor ?? ''
+    error.value = ''
+  } catch (e) { error.value = toMessage(e) }
+  finally { loadingMore.value = false }
 }
 
 // Re-query on filter change. Polling keeps the list fresh on a 30s
@@ -251,6 +287,21 @@ function isExpired(r: ReservationSummary): boolean {
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- Load more. Pre-R4 the view hardcoded limit=100 and silently
+         truncated. Polling replays page 1, so the loaded tail is
+         dropped every 30s — operators who want to scan deeper should
+         narrow the filter (status, tenant) rather than paginate. -->
+    <div v-if="hasMore || loadingMore" class="mt-3 flex items-center justify-between">
+      <p class="muted-sm">Showing {{ reservations.length.toLocaleString() }}. Polling refreshes page 1 every 30s, discarding any additional pages loaded below.</p>
+      <button
+        @click="loadMore"
+        :disabled="loadingMore || !nextCursor"
+        class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
+      >
+        {{ loadingMore ? 'Loading…' : 'Load more' }}
+      </button>
     </div>
 
     <!-- Force-release form. FormDialog (not ConfirmAction) because we

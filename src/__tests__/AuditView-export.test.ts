@@ -90,7 +90,6 @@ import { afterEach } from 'vitest'
 async function readBlob(b: Blob): Promise<string> {
   // JSDOM's Blob doesn't support .text() directly in older versions; fall
   // back to FileReader.
-  // @ts-expect-error — .text() exists in jsdom@^29
   if (typeof b.text === 'function') return b.text()
   return new Promise((resolve, reject) => {
     const r = new FileReader()
