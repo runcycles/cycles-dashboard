@@ -1,7 +1,33 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-16 (scale-hardening phase 1 — pagination, cancellation, N+1 mitigation across 6 views), 2026-04-15 (v0.1.25.27 — RESET_SPENT funding operation support, semantics corrected post-test), 2026-04-14 (error-surfacing + SecretReveal + 3 incident-response Playwright flows), 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
+**Date:** 2026-04-16 (scale-hardening phase 2 — pagination on tenants/webhooks/budget-detail events, lazy tabs, O(1) parent lookup, copy-event-data), 2026-04-16 (scale-hardening phase 1 — pagination, cancellation, N+1 mitigation across 6 views), 2026-04-15 (v0.1.25.27 — RESET_SPENT funding operation support, semantics corrected post-test), 2026-04-14 (error-surfacing + SecretReveal + 3 incident-response Playwright flows), 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
 **Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.17+ continues to satisfy the governance plane; **admin server v0.1.25.18+ required** to execute the new `RESET_SPENT` funding operation from BudgetsView (older admin servers will reject the operation enum with 400 INVALID_REQUEST — UI degrades gracefully but the operator sees the server's error toast).
+
+### 2026-04-16 — High-cardinality scale hardening (phase 2 of 5)
+
+Continues the audit. Phase 2 focuses on **request-layer completeness** (more cursor pagination) and **render-layer low-hanging fruit** (O(1) lookup, lazy tabs, Copy JSON). Full virtualization (V1 — the originally-planned Phase 2 centerpiece) moves to phase 2b as its own PR — it touches all 7 list views and breaks semantic `<table>` in favor of ARIA-labeled divs; large enough to deserve its own review window.
+
+**Audit items V3, R5, R6, R8, R9, V2.**
+
+**1. V3 — TenantsView O(1) parent lookup** (`src/views/TenantsView.vue`). Pre-fix, `parentName()` called `tenants.value.find(…)` inside the row template — at render time that's O(n) per row × n rows = O(n²) total. At 10k tenants, ~100M comparisons per repaint. New `tenantById` computed builds a `Map<tenant_id, Tenant>` once per change in `tenants.value`; `parentName()` does a `.get()` — O(1) per row, O(n) for the map build. The parent column now costs what a normal column costs.
+
+**2. R5 — TenantsView cursor pagination** (`src/views/TenantsView.vue`). Pre-fix, `listTenants()`'s `has_more` / `next_cursor` were ignored; deployments with more tenants than the server's default page size silently dropped the tail. New `hasMore` / `nextCursor` refs; `loadMore()` appends. Search and parent-filter run client-side on the loaded subset (V5 debounce + spec-blocked W3 server search ship later). Polling refreshes page 1 and drops the loaded tail — same documented trade-off as ReservationsView.
+
+**3. R6 — WebhooksView cursor pagination** (`src/views/WebhooksView.vue`). Same pattern as R5. Unchanged behavior for small deployments; Load-more footer mirrors TenantsView / ReservationsView exactly so the idiom is consistent dashboard-wide. Tenant filter still client-side on loaded subset.
+
+**4. R8 — BudgetDetail events "Load older events"** (`src/views/BudgetsView.vue`). Pre-fix, the budget-detail event timeline hardcoded `limit: '20'` with no escape hatch — budgets with long activity histories (chatty agents, RESET_SPENT rollovers, long-lived subs) showed only the latest 20 events with no signal more existed. New `DETAIL_EVENTS_PAGE_SIZE=20` constant, cursor refs, and `loadMoreDetailEvents()` follows `next_cursor`. Button labeled "Load older events" because events are returned newest-first — paginating moves backward in time. Budgets with ≤20 events never see the button.
+
+**5. R9 — TenantDetailView lazy tabs** (`src/views/TenantDetailView.vue`). Pre-fix, every 60s poll ran `Promise.all([budgets, keys, policies, tenants])` regardless of which tab was open. A tenant with 10k keys or 10k policies fired two unbounded fetches the operator never asked for. Post-fix: `keysLoaded` / `policiesLoaded` flags; the poll conditionally fetches based on `tab === 'keys' || keysLoaded` etc. Budgets + tenants are always fetched because the header card's spend rollup and children list depend on them unconditionally. `watch(tab)` triggers immediate `refresh()` on first activation of a lazy tab so the first open doesn't wait up to 60s. Net effect for 10k-key tenants when operator only looks at Budgets tab: zero listApiKeys calls.
+
+**6. V2 — EventsView Copy JSON** (`src/views/EventsView.vue`). The audit's exploration agent claimed EventsView had unbounded JSON render; it already had `max-h-40 overflow-auto` on the data block (pre-existing). Outstanding delta was the Copy button, which makes the capped viewport useful for triage rather than merely safe — operators can pull the full blob into their clipboard for grep/diff/jq rather than squinting at a capped viewport. Same pinned-header-plus-scrolling-body pattern as AuditView's metadata block. "Copied!" confirmation flips for 2s via a timer that's cancelled-and-re-created on re-copy.
+
+**Gates:** 314/314 Vitest pass. Typecheck clean. No test regression; no new test files (each item is a refactor or an additive feature on already-tested paths).
+
+**Still outstanding (tracked in Phase 2b, 3, 4, 5):**
+- **Phase 2b:** V1 virtualization via `@tanstack/vue-virtual`. Biggest remaining render-layer item.
+- **Phase 3:** V5 debounce search inputs; V4 server-side sort *(spec-blocked)*.
+- **Phase 4:** W4 bulk op concurrency + 429 backoff; W1/W3 *(spec-blocked)*.
+- **Phase 5:** V6 PageHeader result count; V7 EmptyState filter-aware; W5 reveal-timer cleanup; W6 a11y row-count live region.
 
 ### 2026-04-16 — High-cardinality scale hardening (phase 1 of 5)
 
