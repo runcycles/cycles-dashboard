@@ -18,6 +18,7 @@ import SecretReveal from '../components/SecretReveal.vue'
 import ScopeBuilder from '../components/ScopeBuilder.vue'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
+import { rateLimitedBatch } from '../utils/rateLimitedBatch'
 
 const toast = useToast()
 
@@ -396,8 +397,13 @@ async function submitEditPolicy() {
 const pendingEmergencyFreeze = ref(false)
 const emergencyFreezeRunning = ref(false)
 const emergencyFreezeProgress = ref({ done: 0, total: 0, failed: 0 })
-const emergencyFreezeCancelRequested = ref(false)
 const activeBudgets = computed(() => budgets.value.filter(b => b.status === 'ACTIVE'))
+// W4 (scale-hardening): emergency-freeze reuses the same concurrent
+// bulk runner as TenantsView / WebhooksView — concurrency 4 with 429
+// backoff. During an incident, freezing 200+ budgets sequentially was
+// painfully slow; this keeps the operation responsive while still
+// retrying past rate limits rather than silently failing half the batch.
+let emergencyFreezeAbort: AbortController | null = null
 
 function openEmergencyFreeze() { pendingEmergencyFreeze.value = true }
 async function executeEmergencyFreeze() {
@@ -405,32 +411,39 @@ async function executeEmergencyFreeze() {
   const targets = activeBudgets.value.slice()
   emergencyFreezeProgress.value = { done: 0, total: targets.length, failed: 0 }
   emergencyFreezeRunning.value = true
-  emergencyFreezeCancelRequested.value = false
-  for (const b of targets) {
-    if (emergencyFreezeCancelRequested.value) break
-    // Audit-log reason is structured for grep-ability: the
-    // [EMERGENCY_FREEZE] tag lets ops surface every emergency-freeze
-    // action with a single regex against the audit log. Free-text
-    // suffix preserves human-readable context.
-    try { await freezeBudget(b.scope, b.unit, '[EMERGENCY_FREEZE] Tenant lockdown via admin dashboard') }
-    catch (e) {
-      emergencyFreezeProgress.value.failed++
-      console.warn(`emergency freeze failed on ${b.scope}:${b.unit}:`, toMessage(e))
-    }
-    emergencyFreezeProgress.value.done++
+  emergencyFreezeAbort = new AbortController()
+  // Audit-log reason is structured for grep-ability: the
+  // [EMERGENCY_FREEZE] tag lets ops surface every emergency-freeze
+  // action with a single regex against the audit log. Free-text
+  // suffix preserves human-readable context.
+  const result = await rateLimitedBatch(
+    targets,
+    async (b) => { await freezeBudget(b.scope, b.unit, '[EMERGENCY_FREEZE] Tenant lockdown via admin dashboard') },
+    {
+      signal: emergencyFreezeAbort.signal,
+      onProgress: (done, total, failed) => { emergencyFreezeProgress.value = { done, total, failed } },
+    },
+  )
+  for (const err of result.errors) {
+    const b = targets[err.index]
+    console.warn(`emergency freeze failed on ${b.scope}:${b.unit}:`, toMessage(err.error))
   }
   emergencyFreezeRunning.value = false
-  const p = emergencyFreezeProgress.value
-  const summary = `${p.done - p.failed}/${p.total} budgets frozen`
-  if (p.failed > 0) toast.error(`${summary}, ${p.failed} failed — check console`)
-  else if (emergencyFreezeCancelRequested.value) toast.success(`${summary} (cancelled by user)`)
+  emergencyFreezeAbort = null
+  const succeeded = result.done - result.failed
+  const summary = `${succeeded}/${emergencyFreezeProgress.value.total} budgets frozen`
+  if (result.failed > 0) toast.error(`${summary}, ${result.failed} failed — check console`)
+  else if (result.cancelled) toast.success(`${summary} (cancelled by user)`)
   else toast.success(summary)
   pendingEmergencyFreeze.value = false
   await refresh()
 }
 function cancelEmergencyFreeze() {
-  if (emergencyFreezeRunning.value) emergencyFreezeCancelRequested.value = true
-  else pendingEmergencyFreeze.value = false
+  if (emergencyFreezeRunning.value) {
+    emergencyFreezeAbort?.abort()
+  } else {
+    pendingEmergencyFreeze.value = false
+  }
 }
 
 // Tracks whether the first full fetch has completed. Before it does,

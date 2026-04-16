@@ -51,6 +51,16 @@ const countLabel = computed(() => {
         <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">{{ title }}</h1>
         <p v-if="subtitle" class="muted-sm font-mono mt-0.5">{{ subtitle }}</p>
         <p v-if="countLabel" class="muted-sm mt-0.5 tabular-nums">{{ countLabel }}</p>
+        <!-- W6 (Phase 4): a11y row-count live region. Mirrors the
+             visible count label so screen readers announce pagination
+             state changes ("Load more" appending rows, filter pruning
+             rows, poll updating totals). aria-atomic=true re-reads the
+             entire string on any change, not just the diff — clearer
+             at scale where partial announcements mix with other
+             updates. Visually hidden via sr-only; contents match the
+             tabular-nums visible line above, so the sighted and
+             screen-reader experiences stay in sync. -->
+        <span v-if="countLabel" class="sr-only" aria-live="polite" aria-atomic="true">{{ countLabel }}</span>
       </div>
     </div>
     <div class="flex items-center gap-3">

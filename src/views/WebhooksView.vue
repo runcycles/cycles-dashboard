@@ -7,6 +7,7 @@ import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useListExport } from '../composables/useListExport'
 import { listWebhooks, listTenants, createWebhook, updateWebhook, getWebhookSecurityConfig, updateWebhookSecurityConfig } from '../api/client'
+import { rateLimitedBatch } from '../utils/rateLimitedBatch'
 import { useAuthStore } from '../stores/auth'
 import type { WebhookSubscription, WebhookCreateResponse, Tenant, WebhookSecurityConfig } from '../types'
 import { EVENT_TYPES } from '../types'
@@ -115,13 +116,15 @@ function toggleSelectAll() {
   }
 }
 
-// Bulk pause/enable with the same sequential + cancel + summary pattern
-// as TenantsView bulk. See executeBulk there for the design rationale
-// (sequential to keep progress honest and avoid rate-limit bursts).
+// Bulk pause/enable. W4 (scale-hardening): runs via rateLimitedBatch
+// so a burst of PATCHes against the admin tier doesn't trip 429s
+// without retries — 4 in flight, exponential backoff with jitter on
+// 429 specifically, AbortSignal drives the cancel button. Same wiring
+// as TenantsView.executeBulk; see that file for the deeper rationale.
 const bulkAction = ref<'PAUSED' | 'ACTIVE' | null>(null)
 const bulkProgress = ref({ done: 0, total: 0, failed: 0 })
 const bulkRunning = ref(false)
-const bulkCancelRequested = ref(false)
+let bulkAbort: AbortController | null = null
 
 function openBulk(action: 'PAUSED' | 'ACTIVE') { bulkAction.value = action }
 async function executeBulk() {
@@ -138,22 +141,27 @@ async function executeBulk() {
   )
   bulkProgress.value = { done: 0, total: targets.length, failed: 0 }
   bulkRunning.value = true
-  bulkCancelRequested.value = false
-  for (const w of targets) {
-    if (bulkCancelRequested.value) break
-    try { await updateWebhook(w.subscription_id, { status: action }) }
-    catch (e) {
-      bulkProgress.value.failed++
-      console.warn(`bulk ${action} failed on ${w.subscription_id}:`, toMessage(e))
-    }
-    bulkProgress.value.done++
+  bulkAbort = new AbortController()
+  const result = await rateLimitedBatch(
+    targets,
+    async (w) => { await updateWebhook(w.subscription_id, { status: action }) },
+    {
+      signal: bulkAbort.signal,
+      onProgress: (done, total, failed) => { bulkProgress.value = { done, total, failed } },
+    },
+  )
+  for (const err of result.errors) {
+    const w = targets[err.index]
+    console.warn(`bulk ${action} failed on ${w.subscription_id}:`, toMessage(err.error))
   }
   bulkRunning.value = false
+  bulkAbort = null
   const verb = action === 'PAUSED' ? 'paused' : 'enabled'
-  const summary = `${bulkProgress.value.done - bulkProgress.value.failed}/${bulkProgress.value.total} webhooks ${verb}`
-  if (bulkProgress.value.failed > 0) {
-    toast.error(`${summary}, ${bulkProgress.value.failed} failed — check console for details`)
-  } else if (bulkCancelRequested.value) {
+  const succeeded = result.done - result.failed
+  const summary = `${succeeded}/${bulkProgress.value.total} webhooks ${verb}`
+  if (result.failed > 0) {
+    toast.error(`${summary}, ${result.failed} failed — check console for details`)
+  } else if (result.cancelled) {
     toast.success(`${summary} (cancelled by user)`)
   } else {
     toast.success(summary)
@@ -163,8 +171,11 @@ async function executeBulk() {
   await refresh()
 }
 function cancelBulk() {
-  if (bulkRunning.value) bulkCancelRequested.value = true
-  else bulkAction.value = null
+  if (bulkRunning.value) {
+    bulkAbort?.abort()
+  } else {
+    bulkAction.value = null
+  }
 }
 
 function healthColor(w: WebhookSubscription): string {

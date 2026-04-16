@@ -10,12 +10,18 @@ const emit = defineEmits<{ close: [] }>()
 
 const copied = ref(false)
 const confirmed = ref(false)
+// W5 (scale-hardening): track BOTH the 60s clipboard-clear timer and
+// the 2s "Copied!" badge timer. Rapid re-clicks previously leaked the
+// badge timer; closing the dialog during its window fired setTimeout
+// on a dead instance.
 let clipboardTimer: ReturnType<typeof setTimeout> | null = null
+let copiedBadgeTimer: ReturnType<typeof setTimeout> | null = null
 
 function copy(value: string) {
   navigator.clipboard.writeText(value)
   copied.value = true
-  setTimeout(() => { copied.value = false }, 2000)
+  if (copiedBadgeTimer) clearTimeout(copiedBadgeTimer)
+  copiedBadgeTimer = setTimeout(() => { copied.value = false }, 2000)
   if (clipboardTimer) clearTimeout(clipboardTimer)
   clipboardTimer = setTimeout(() => {
     navigator.clipboard.readText().then(text => {
@@ -32,6 +38,7 @@ onMounted(() => document.addEventListener('keydown', onKeydown))
 onUnmounted(() => {
   document.removeEventListener('keydown', onKeydown)
   if (clipboardTimer) clearTimeout(clipboardTimer)
+  if (copiedBadgeTimer) clearTimeout(copiedBadgeTimer)
 })
 </script>
 

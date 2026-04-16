@@ -7,6 +7,7 @@ import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useListExport } from '../composables/useListExport'
 import { listTenants, createTenant, updateTenantStatus } from '../api/client'
+import { rateLimitedBatch } from '../utils/rateLimitedBatch'
 import { useAuthStore } from '../stores/auth'
 import type { Tenant } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -151,11 +152,16 @@ const selectedVisibleCount = computed(() =>
 const bulkAction = ref<'SUSPENDED' | 'ACTIVE' | null>(null)
 const bulkProgress = ref({ done: 0, total: 0, failed: 0 })
 const bulkRunning = ref(false)
-const bulkCancelRequested = ref(false)
 
 function openBulk(action: 'SUSPENDED' | 'ACTIVE') {
   bulkAction.value = action
 }
+// W4: concurrent bulk runner with 429 backoff. Pre-fix, executeBulk
+// was a plain sequential `for` loop. At 50+ tenants it was painfully
+// slow and any 429 from the admin tier counted as a hard failure —
+// operators would see half the batch fail under load. rateLimitedBatch
+// runs 4 in parallel with exponential-backoff retries on 429 specifically.
+let bulkAbort: AbortController | null = null
 async function executeBulk() {
   if (!bulkAction.value || bulkRunning.value) return
   const action = bulkAction.value
@@ -170,23 +176,26 @@ async function executeBulk() {
   )
   bulkProgress.value = { done: 0, total: targets.length, failed: 0 }
   bulkRunning.value = true
-  bulkCancelRequested.value = false
-  for (const t of targets) {
-    if (bulkCancelRequested.value) break
-    try {
-      await updateTenantStatus(t.tenant_id, action)
-    } catch (e) {
-      bulkProgress.value.failed++
-      // Don't toast per failure — one summary at the end is less noisy.
-      console.warn(`bulk ${action} failed on ${t.tenant_id}:`, toMessage(e))
-    }
-    bulkProgress.value.done++
+  bulkAbort = new AbortController()
+  const result = await rateLimitedBatch(
+    targets,
+    async (t) => { await updateTenantStatus(t.tenant_id, action) },
+    {
+      signal: bulkAbort.signal,
+      onProgress: (done, total, failed) => { bulkProgress.value = { done, total, failed } },
+    },
+  )
+  for (const err of result.errors) {
+    const t = targets[err.index]
+    console.warn(`bulk ${action} failed on ${t.tenant_id}:`, toMessage(err.error))
   }
   bulkRunning.value = false
-  const summary = `${bulkProgress.value.done - bulkProgress.value.failed}/${bulkProgress.value.total} tenants ${action === 'SUSPENDED' ? 'suspended' : 'reactivated'}`
-  if (bulkProgress.value.failed > 0) {
-    toast.error(`${summary}, ${bulkProgress.value.failed} failed — check console for details`)
-  } else if (bulkCancelRequested.value) {
+  bulkAbort = null
+  const succeeded = result.done - result.failed
+  const summary = `${succeeded}/${bulkProgress.value.total} tenants ${action === 'SUSPENDED' ? 'suspended' : 'reactivated'}`
+  if (result.failed > 0) {
+    toast.error(`${summary}, ${result.failed} failed — check console for details`)
+  } else if (result.cancelled) {
     toast.success(`${summary} (cancelled by user)`)
   } else {
     toast.success(summary)
@@ -197,7 +206,7 @@ async function executeBulk() {
 }
 function cancelBulk() {
   if (bulkRunning.value) {
-    bulkCancelRequested.value = true
+    bulkAbort?.abort()
   } else {
     bulkAction.value = null
   }

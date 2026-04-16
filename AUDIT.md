@@ -1,7 +1,43 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-16 (scale-hardening phase 3 — V5 debounce composable, V6 PageHeader result counts, V7 filter-aware EmptyState), 2026-04-16 (scale-hardening phase 2c — V1 virtualization for EventsView + AuditView with measureElement for expandable rows), 2026-04-16 (scale-hardening phase 2b — row virtualization across 5 list views via @tanstack/vue-virtual), 2026-04-16 (scale-hardening phase 2 — pagination on tenants/webhooks/budget-detail events, lazy tabs, O(1) parent lookup, copy-event-data), 2026-04-16 (scale-hardening phase 1 — pagination, cancellation, N+1 mitigation across 6 views), 2026-04-15 (v0.1.25.27 — RESET_SPENT funding operation support, semantics corrected post-test), 2026-04-14 (error-surfacing + SecretReveal + 3 incident-response Playwright flows), 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
+**Date:** 2026-04-16 (scale-hardening phase 4 — W4 bulk-op bounded concurrency + 429 backoff across all three bulk runners, W5 reveal-timer cleanup, W6 a11y row-count live region), 2026-04-16 (scale-hardening phase 3 — V5 debounce composable, V6 PageHeader result counts, V7 filter-aware EmptyState), 2026-04-16 (scale-hardening phase 2c — V1 virtualization for EventsView + AuditView with measureElement for expandable rows), 2026-04-16 (scale-hardening phase 2b — row virtualization across 5 list views via @tanstack/vue-virtual), 2026-04-16 (scale-hardening phase 2 — pagination on tenants/webhooks/budget-detail events, lazy tabs, O(1) parent lookup, copy-event-data), 2026-04-16 (scale-hardening phase 1 — pagination, cancellation, N+1 mitigation across 6 views), 2026-04-15 (v0.1.25.27 — RESET_SPENT funding operation support, semantics corrected post-test), 2026-04-14 (error-surfacing + SecretReveal + 3 incident-response Playwright flows), 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
 **Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.17+ continues to satisfy the governance plane; **admin server v0.1.25.18+ required** to execute the new `RESET_SPENT` funding operation from BudgetsView (older admin servers will reject the operation enum with 400 INVALID_REQUEST — UI degrades gracefully but the operator sees the server's error toast).
+
+### 2026-04-16 — High-cardinality scale hardening (phase 4 of 5: bulk-op concurrency + 429 backoff, reveal-timer cleanup, a11y row-count live region)
+
+Closes **audit item W4**. Pre-fix, every bulk runner in the dashboard (TenantsView suspend/reactivate, WebhooksView pause/enable, TenantDetailView emergency-freeze) was a plain sequential `for` loop: one PATCH, await, next PATCH, await. Two concrete problems at scale:
+
+1. **Slow.** Freezing 200 active budgets during incident response took 200× (round-trip + server work) sequentially. For operators fighting a live incident, this was painful.
+2. **Half-failures on rate limits.** Once the admin tier's per-key rate limit trips, every subsequent PATCH returned 429 and the old loop treated it as a hard failure. A burst of 100 suspends could show "45 succeeded / 55 failed — check console" with no way to retry just the 429'd ones.
+
+**Shared utility — `src/utils/rateLimitedBatch.ts`** (~120 LoC). Worker-pool runner with:
+- **Bounded concurrency** (default 4, under Chrome's per-host 6-connection cap). Pulls the next unclaimed index as each slot settles, so fast items don't sit waiting for the tail of a "batch".
+- **429-aware exponential backoff.** Only retries `ApiError` with status 429 — other errors fail fast, so 500s / 409s / validation errors don't eat a 4× retry budget. Delay is `baseDelayMs * 2^attempt * (0.5…1.5)`; ±50% jitter prevents a cohort of 4 parallel 429'd requests from retrying in lockstep and re-tripping the same limit. Default maxRetries=3 (4 attempts per item).
+- **AbortSignal cancellation.** Signal aborts out of the retry sleep immediately; in-flight workers settle (matches "cancel bulk op" operator expectation that half-finished writes aren't rolled back). Aborted items are NOT counted as done/failed — progress honestly shows "N/M processed" rather than misleading "N/N".
+- **Progress callback** — forwarded into each view's existing `bulkProgress` ref so the bulk dialog's "Working… X/Y processed" line keeps ticking.
+- **Return shape** `{ done, failed, cancelled, errors }` — `errors` is `[{ index, error }]` so the caller can surface per-item context (TenantsView logs tenant_id, WebhooksView logs subscription_id, TenantDetailView logs scope:unit).
+
+**Call sites rewired:**
+- `src/views/TenantsView.vue` `executeBulk()` — suspend/reactivate.
+- `src/views/WebhooksView.vue` `executeBulk()` — pause/enable.
+- `src/views/TenantDetailView.vue` `executeEmergencyFreeze()` — freeze all ACTIVE budgets for a tenant.
+
+Each view keeps its existing `bulkProgress`, `bulkRunning`, `bulkCancelRequested` refs for template bindings; a new `bulkAbort: AbortController | null` drives cancellation. The summary-toast branching now reads `result.failed` / `result.cancelled` from the utility instead of the previously-tracked scalar counters.
+
+**Tests — `src/__tests__/rateLimitedBatch.test.ts`** (+10 Vitest cases). Cover the load-bearing contracts: concurrency is bounded (observed via release-on-demand promises), 429 retries with backoff and eventually succeeds, 429 exhausts at maxRetries + counts as failed, non-429 fails immediately, onProgress fires per item, AbortSignal halts dispatch, errors are surfaced in the result, every item is processed under the happy path, abort mid-backoff-sleep returns immediately (not after the full 5s retry delay), and already-aborted signal short-circuits before any worker runs.
+
+**Compatibility:**
+- Existing `webhooks-bulk-pause.spec.ts` E2E continues to pass — it uses `Promise.all(responses)` to await both PATCHes, which is actually a better match for the new parallel runner than the old sequential one.
+- Behavior change visible to operators: bulk ops finish roughly 4× faster on large selections; 429s no longer show as hard failures.
+
+**Gates:** 330/330 Vitest pass (320 prior + 10 new for rateLimitedBatch). Typecheck clean. Coverage 94.65% lines / 92.22% statements overall; rateLimitedBatch.ts itself at 100% lines / 92% branches (the uncovered branch lines are pre-aborted signal checks inside the retry loop that can't fire in practice once the outer pump's abort check catches first).
+
+**W5 — MaskedValue / SecretReveal timer bookkeeping** (`src/components/MaskedValue.vue`, `src/components/SecretReveal.vue`). The short "Copied!" badge timer (1.5s / 2s) was anonymous — rapid double-click leaked a timer and unmount during the window fired `setTimeout` on a dead Vue instance. Both components now track `copiedBadgeTimer` alongside the existing `clipboardClearTimer` (30s / 60s wipe) and clear both on re-invoke + `onUnmounted`. Behavior unchanged from the user's POV; just no more dangling handles when a detail view with many reveals gets torn down.
+
+**W6 — A11y row-count live region** (`src/components/PageHeader.vue`). Added an `sr-only` `<span>` with `aria-live="polite"` + `aria-atomic="true"` mirroring the existing `countLabel`. Screen readers now announce pagination state changes — "Showing 50 of 12,431 tenants" on first render, "Showing 75 of 12,431 tenants" after Load more, "Showing 3 of 12,431 tenants matching 'prod'" after filter — at the same moment the sighted count updates. Placed inside PageHeader (rather than AppLayout) so the text always matches what's visible. `aria-atomic=true` re-announces the entire string on any change, which is clearer at scale than partial announcements.
+
+**Phase 4 complete. Remaining phases:**
+- **Server-spec blocked** (cycles-server-admin): R1/R2 full fix, V4 server-side sort, W1 bulk-op filter, W2 utilization_min/max params, W3 tenant search.
 
 ### 2026-04-16 — High-cardinality scale hardening (phase 3 of 5: search/result UX)
 

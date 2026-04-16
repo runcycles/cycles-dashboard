@@ -11,12 +11,18 @@ const masked = () => {
   return '•'.repeat(Math.min(8, props.value.length - n)) + props.value.slice(-n)
 }
 
+// W5 (scale-hardening): both the short "Copied!" badge timer and the
+// long clipboard-clear timer are tracked refs. Previously the badge
+// timer was anonymous — rapid re-clicks leaked timers and unmounting
+// during the 1.5s window fired setTimeout on a dead instance.
 let clipboardClearTimer: ReturnType<typeof setTimeout> | null = null
+let copiedBadgeTimer: ReturnType<typeof setTimeout> | null = null
 
 function copy() {
   navigator.clipboard.writeText(props.value)
   copied.value = true
-  setTimeout(() => { copied.value = false }, 1500)
+  if (copiedBadgeTimer) clearTimeout(copiedBadgeTimer)
+  copiedBadgeTimer = setTimeout(() => { copied.value = false }, 1500)
   // Auto-clear clipboard after 30s for security
   if (clipboardClearTimer) clearTimeout(clipboardClearTimer)
   clipboardClearTimer = setTimeout(() => {
@@ -28,6 +34,7 @@ function copy() {
 
 onUnmounted(() => {
   if (clipboardClearTimer) clearTimeout(clipboardClearTimer)
+  if (copiedBadgeTimer) clearTimeout(copiedBadgeTimer)
 })
 </script>
 
