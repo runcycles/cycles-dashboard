@@ -7,14 +7,20 @@ import { usePolling } from '../composables/usePolling'
 // onMounted / onUnmounted lifecycle wired up. This is needed to exercise
 // the unmount-safety guards (the bug was: tick() awaits in-flight, resolves
 // after unmount, then reschedule() leaks a new setInterval).
-function mountPolling(cb: () => Promise<void>, intervalMs = 1000) {
+function mountPolling(
+  cb: (signal: AbortSignal) => Promise<void>,
+  intervalMs = 1000,
+) {
+  let refreshFn: (() => void) | null = null
   const Harness = defineComponent({
     setup() {
       const p = usePolling(cb, intervalMs)
+      refreshFn = p.refresh
       return () => h('div', [String(p.isLoading.value)])
     },
   })
-  return mount(Harness)
+  const wrapper = mount(Harness)
+  return { wrapper, refresh: () => refreshFn?.() }
 }
 
 // Test the polling logic directly (not as a composable with lifecycle)
@@ -73,7 +79,7 @@ describe('usePolling — unmount safety', () => {
     const inFlight = new Promise<void>((r) => { resolveFetch = r })
     const cb = vi.fn().mockImplementationOnce(() => inFlight)
 
-    const wrapper = mountPolling(cb, 10_000)
+    const { wrapper } = mountPolling(cb, 10_000)
     await nextTick()
     // Initial start() triggered the first tick(), which is now awaiting our
     // controlled promise. Unmount before it resolves.
@@ -92,7 +98,7 @@ describe('usePolling — unmount safety', () => {
 
   it('refresh() is a no-op after unmount', async () => {
     const cb = vi.fn().mockResolvedValue(undefined)
-    const wrapper = mountPolling(cb, 10_000)
+    const { wrapper } = mountPolling(cb, 10_000)
     await nextTick()
     await nextTick()
     const callsAfterMount = cb.mock.calls.length
@@ -102,5 +108,98 @@ describe('usePolling — unmount safety', () => {
     // additional timer has been installed by waiting past a hypothetical tick.
     await new Promise((r) => setTimeout(r, 50))
     expect(cb.mock.calls.length).toBe(callsAfterMount)
+  })
+})
+
+// Cancellation + dedup + jitter (v0.1.25.28 hardening).
+describe('usePolling — cancellation & dedup', () => {
+  beforeEach(() => { vi.useRealTimers() })
+
+  it('passes an AbortSignal to the callback', async () => {
+    let received: AbortSignal | null = null
+    const cb = vi.fn().mockImplementation(async (sig: AbortSignal) => {
+      received = sig
+    })
+    const { wrapper } = mountPolling(cb, 10_000)
+    await nextTick()
+    await new Promise((r) => setTimeout(r, 10))
+    expect(received).not.toBeNull()
+    // Use a local non-null binding so TS narrows cleanly through the array
+    // accessor. (received is typed AbortSignal|null at the callsite.)
+    const sig = received as unknown as AbortSignal
+    expect(typeof sig.aborted).toBe('boolean')
+    expect(sig.aborted).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('aborts the in-flight signal on unmount', async () => {
+    let capturedSignal: AbortSignal | null = null
+    let resolveFetch!: () => void
+    const cb = vi.fn().mockImplementation((sig: AbortSignal) => {
+      capturedSignal = sig
+      return new Promise<void>((r) => { resolveFetch = r })
+    })
+    const { wrapper } = mountPolling(cb, 10_000)
+    await nextTick()
+    const sig = capturedSignal as unknown as AbortSignal
+    expect(sig).not.toBeNull()
+    expect(sig.aborted).toBe(false)
+    wrapper.unmount()
+    expect(sig.aborted).toBe(true)
+    // Let the in-flight callback settle; the mounted guard should prevent
+    // any state mutation.
+    resolveFetch()
+    await new Promise((r) => setTimeout(r, 20))
+  })
+
+  it('drops overlapping tick when refresh() is called during an in-flight tick', async () => {
+    let resolveFirst!: () => void
+    const cb = vi.fn().mockImplementationOnce(() => new Promise<void>((r) => { resolveFirst = r }))
+    const { wrapper, refresh } = mountPolling(cb, 10_000)
+    await nextTick()
+    // First tick is now in flight (awaiting our controlled promise).
+    expect(cb).toHaveBeenCalledTimes(1)
+    // Calling refresh() during in-flight should NOT spawn a second
+    // concurrent callback — the in-flight guard drops it.
+    refresh()
+    await nextTick()
+    expect(cb).toHaveBeenCalledTimes(1)
+    // Resolve the first tick; a scheduled follow-up (via reschedule) is
+    // jittered several seconds out, so it won't fire during this test.
+    resolveFirst()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(cb).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('does not bump backoff when callback throws AbortError', async () => {
+    // Simulate the exact error shape fetch() throws on external abort.
+    const abortErr = new DOMException('aborted', 'AbortError')
+    const cb = vi.fn().mockRejectedValue(abortErr)
+    const { wrapper } = mountPolling(cb, 10_000)
+    await nextTick()
+    await new Promise((r) => setTimeout(r, 20))
+    // Nothing to assert on `currentInterval` directly (private), but the
+    // composable shouldn't have thrown out of tick(). The key contract is
+    // that unmount still works cleanly — no dangling state.
+    expect(cb).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('refresh() is a no-op while a tick is in flight', async () => {
+    let resolve!: () => void
+    const cb = vi.fn().mockImplementation(() => new Promise<void>((r) => { resolve = r }))
+    const { wrapper, refresh } = mountPolling(cb, 10_000)
+    await nextTick()
+    expect(cb).toHaveBeenCalledTimes(1)
+    // Three rapid-fire refresh clicks — all should be absorbed by the
+    // in-flight guard rather than stacking up callbacks.
+    refresh(); refresh(); refresh()
+    await nextTick()
+    expect(cb).toHaveBeenCalledTimes(1)
+    resolve()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(cb).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
   })
 })

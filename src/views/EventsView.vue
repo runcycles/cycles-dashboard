@@ -24,24 +24,51 @@ const error = ref('')
 const expanded = ref<string | null>(null)
 const { sortKey, sortDir, toggle, sorted: sortedEvents } = useSort(events)
 
+// Pre-R7: every 15s poll called load() which overwrote events.value,
+// silently dropping any "Load more" pages the operator had accumulated.
+// Post-R7: when extended (loadedMorePages=true), polls fetch page 1 and
+// MERGE new events from the head via event_id dedup, preserving the
+// loaded tail. Filter changes or an explicit Clear reset this flag.
+const loadedMorePages = ref(false)
+
 const category = ref((route.query.category as string) || '')
 const eventType = ref((route.query.type as string) || '')
 const tenantId = ref((route.query.tenant_id as string) || '')
 const scope = ref((route.query.scope as string) || '')
 const correlationId = ref((route.query.correlation_id as string) || '')
 
+function buildFilterParams(): Record<string, string> {
+  const params: Record<string, string> = {}
+  if (category.value) params.category = category.value
+  if (eventType.value) params.event_type = eventType.value
+  if (tenantId.value) params.tenant_id = tenantId.value
+  if (scope.value) params.scope = scope.value
+  if (correlationId.value) params.correlation_id = correlationId.value
+  return params
+}
+
 async function load() {
   try {
-    const params: Record<string, string> = {}
-    if (category.value) params.category = category.value
-    if (eventType.value) params.event_type = eventType.value
-    if (tenantId.value) params.tenant_id = tenantId.value
-    if (scope.value) params.scope = scope.value
-    if (correlationId.value) params.correlation_id = correlationId.value
-    const res = await listEvents(params)
-    events.value = res.events
-    hasMore.value = res.has_more
-    nextCursor.value = res.next_cursor ?? ''
+    const res = await listEvents(buildFilterParams())
+    if (loadedMorePages.value && events.value.length > 0) {
+      // Extended view: merge page-1 results from the head, preserving
+      // the already-loaded tail. Dedup by event_id — events are
+      // immutable, so a repeated id is always a safe skip. Without
+      // this, the poll would drop the tail and the operator's "Load
+      // more" work would vanish every 15s.
+      const known = new Set(events.value.map(e => e.event_id))
+      const freshFromHead = res.events.filter(e => !known.has(e.event_id))
+      if (freshFromHead.length > 0) {
+        events.value = [...freshFromHead, ...events.value]
+      }
+      // Do NOT update hasMore/nextCursor here — they reflect the tail
+      // cursor (from the user's last loadMore), not page 1's. Updating
+      // them would break subsequent Load more clicks.
+    } else {
+      events.value = res.events
+      hasMore.value = res.has_more
+      nextCursor.value = res.next_cursor ?? ''
+    }
     error.value = ''
   } catch (e) { error.value = toMessage(e) }
 }
@@ -54,6 +81,9 @@ function applyFilters() {
     ...(scope.value && { scope: scope.value }),
     ...(correlationId.value && { correlation_id: correlationId.value }),
   }})
+  // Filter change resets the extended state — a new filter means the
+  // previously-loaded tail is stale (events matching the OLD filter).
+  loadedMorePages.value = false
   load()
 }
 
@@ -66,22 +96,21 @@ async function loadMore() {
   if (!nextCursor.value || loadingMore.value) return
   loadingMore.value = true
   try {
-    const params: Record<string, string> = { cursor: nextCursor.value }
-    if (category.value) params.category = category.value
-    if (eventType.value) params.event_type = eventType.value
-    if (tenantId.value) params.tenant_id = tenantId.value
-    if (scope.value) params.scope = scope.value
-    if (correlationId.value) params.correlation_id = correlationId.value
+    const params = { ...buildFilterParams(), cursor: nextCursor.value }
     const res = await listEvents(params)
     events.value = [...events.value, ...res.events]
     hasMore.value = res.has_more
     nextCursor.value = res.next_cursor ?? ''
+    // Flip the flag so subsequent polls merge-from-head rather than
+    // overwriting the tail we just loaded.
+    loadedMorePages.value = true
   } catch (e) { error.value = toMessage(e) }
   finally { loadingMore.value = false }
 }
 
 function clearFilters() {
   category.value = ''; eventType.value = ''; tenantId.value = ''; scope.value = ''; correlationId.value = ''
+  loadedMorePages.value = false
   applyFilters()
 }
 

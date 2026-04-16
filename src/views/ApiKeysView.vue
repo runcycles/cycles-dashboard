@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
 import { listTenants, listApiKeys, revokeApiKey, createApiKey, updateApiKey } from '../api/client'
@@ -34,6 +34,21 @@ const filterStatus = ref('')
 const filterTenant = ref('')
 const tenants = ref<Tenant[]>([])
 const pendingRevoke = ref<KeyWithTenant | null>(null)
+
+// R1 mitigation (scale-hardening). The /admin/api-keys endpoint currently
+// requires a tenant_id filter, so the view iterates all tenants and issues
+// one listApiKeys() per tenant — O(N tenants) per 60s poll. Without this
+// cap, a 1k-tenant deployment fires 1k sequential requests per minute
+// from every open dashboard tab.
+//
+// The real fix is a tenant-agnostic /admin/api-keys (server spec change,
+// tracked separately). Until then we cap the loop + parallelize in small
+// batches + surface a banner so operators know the list may be truncated.
+const TENANT_FANOUT_CAP = 100
+const TENANT_FANOUT_CONCURRENCY = 4
+const tenantsExamined = ref(0)
+const tenantsTotal = ref(0)
+const fanoutTruncated = computed(() => tenantsTotal.value > tenantsExamined.value)
 
 async function executeRevoke() {
   if (!pendingRevoke.value) return
@@ -200,17 +215,58 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
     const tRes = await listTenants()
     tenants.value = tRes.tenants
-    const allKeys: KeyWithTenant[] = []
-    for (const t of tRes.tenants) {
-      const kRes = await listApiKeys({ tenant_id: t.tenant_id })
-      for (const k of kRes.keys) {
-        allKeys.push({ ...k, tenant_name: t.name })
+    tenantsTotal.value = tRes.tenants.length
+
+    // Fast path: tenant filter set. Fetch only that tenant's keys —
+    // avoids the fan-out entirely AND guarantees the view shows the
+    // right tenant even if it's past position TENANT_FANOUT_CAP in
+    // the broader tenant list (correctness, not just performance).
+    if (filterTenant.value) {
+      const t = tRes.tenants.find((x) => x.tenant_id === filterTenant.value)
+      if (t) {
+        const kRes = await listApiKeys({ tenant_id: t.tenant_id })
+        keys.value = kRes.keys.map((k) => ({ ...k, tenant_name: t.name }))
+        tenantsExamined.value = 1
+      } else {
+        keys.value = []
+        tenantsExamined.value = 0
       }
+      error.value = ''
+      return
+    }
+
+    // Cap the per-tenant fan-out. See TENANT_FANOUT_CAP comment for the
+    // full rationale — summary: the API endpoint forces per-tenant
+    // fetches, so we can't paginate the aggregate; best we can do until
+    // the server exposes a tenant-agnostic list is bound the request
+    // count and surface the truncation to operators.
+    const targets = tRes.tenants.slice(0, TENANT_FANOUT_CAP)
+    tenantsExamined.value = targets.length
+    // Bounded-concurrency fan-out. Sequential was 2–3s at 1k tenants
+    // and pegged backend rate-limits; Promise.all on everything would
+    // DDoS the admin tier. 4 is a conservative middle ground —
+    // Chrome's per-host connection limit is 6, and we want headroom
+    // for the user's concurrent nav clicks.
+    const allKeys: KeyWithTenant[] = []
+    for (let i = 0; i < targets.length; i += TENANT_FANOUT_CONCURRENCY) {
+      const batch = targets.slice(i, i + TENANT_FANOUT_CONCURRENCY)
+      const results = await Promise.all(
+        batch.map(async (t) => {
+          const kRes = await listApiKeys({ tenant_id: t.tenant_id })
+          return kRes.keys.map((k) => ({ ...k, tenant_name: t.name }))
+        }),
+      )
+      for (const chunk of results) allKeys.push(...chunk)
     }
     keys.value = allKeys
     error.value = ''
   } catch (e) { error.value = toMessage(e) }
 }, 60000)
+
+// When the tenant filter changes to a tenant outside the fan-out window,
+// we'd otherwise be stuck showing "no keys" for a tenant that genuinely
+// has keys. Refresh on filter change so the fast-path above picks it up.
+watch(filterTenant, () => { refresh() })
 </script>
 
 <template>
@@ -222,6 +278,20 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     </PageHeader>
 
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
+
+    <!-- R1 mitigation: surface the per-tenant fan-out cap. Banner appears
+         only when the truncation is active, so small deployments see
+         nothing. Points operators at the tenant filter as the workaround
+         until the tenant-agnostic server endpoint ships. -->
+    <p
+      v-if="fanoutTruncated"
+      class="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-2 mb-4"
+      role="status"
+    >
+      Showing keys for the first <strong>{{ tenantsExamined.toLocaleString() }}</strong> of
+      <strong>{{ tenantsTotal.toLocaleString() }}</strong> tenants. Use the
+      tenant filter to narrow to a specific tenant beyond this window.
+    </p>
 
     <!-- Summary -->
     <div v-if="keys.length > 0" class="flex gap-3 mb-4">

@@ -20,6 +20,21 @@ const showExportConfirm = ref<'csv' | 'json' | null>(null)
 const expanded = ref<string | null>(null)
 const { sortKey, sortDir, toggle, sorted: sortedEntries } = useSort(entries)
 
+// Pagination state. query() loads page 1; hasMore signals that the export
+// flow must paginate through the server's cursor to avoid silently shipping
+// incomplete compliance data (audit item R3).
+const hasMore = ref(false)
+const nextCursor = ref('')
+const exporting = ref(false)
+const exportFetched = ref(0) // rows fetched so far during multi-page export
+
+// Hard cap to prevent accidental "export every log ever" operations.
+// Above this, we abort and surface a toast — operators should narrow
+// the filter or date range before re-running. Chosen to comfortably
+// cover a week of audit activity for most deployments while staying
+// well below browser Blob / spreadsheet-row limits.
+const EXPORT_MAX_ROWS = 50_000
+
 const tenantId = ref('')
 const keyId = ref('')
 const operation = ref('')
@@ -28,9 +43,25 @@ const resourceId = ref('')
 const fromDate = ref('')
 const toDate = ref('')
 
-function doExportCsv() {
+// Pulls the non-cursor filter params out of the form. Shared between
+// query() and the export loop so both see identical filter semantics —
+// a drift here would produce exports that don't match what the operator
+// sees on screen.
+function buildFilterParams(): Record<string, string> {
+  const params: Record<string, string> = {}
+  if (tenantId.value) params.tenant_id = tenantId.value
+  if (keyId.value) params.key_id = keyId.value
+  if (operation.value) params.operation = operation.value
+  if (resourceType.value) params.resource_type = resourceType.value
+  if (resourceId.value) params.resource_id = resourceId.value
+  if (fromDate.value) params.from = new Date(fromDate.value).toISOString()
+  if (toDate.value) params.to = new Date(toDate.value).toISOString()
+  return params
+}
+
+function doExportCsv(rows: AuditLogEntry[]) {
   const headers = ['timestamp', 'operation', 'resource_type', 'resource_id', 'tenant_id', 'key_id', 'status', 'error_code', 'request_id', 'source_ip', 'user_agent', 'metadata']
-  const rows = entries.value.map(e => [
+  const lines = rows.map(e => [
     e.timestamp, e.operation, e.resource_type, e.resource_id,
     e.tenant_id, e.key_id, e.status, e.error_code,
     e.request_id, e.source_ip, e.user_agent,
@@ -42,23 +73,21 @@ function doExportCsv() {
   // otherwise be a vector when an admin opens the export in a spreadsheet.
   const csv = [
     headers.map(csvEscape).join(','),
-    ...rows.map(r => r.map(csvEscape).join(',')),
+    ...lines.map(r => r.map(csvEscape).join(',')),
   ].join('\n')
-  const blob = new Blob([csv], { type: 'text/csv' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `audit-logs-${new Date().toISOString().slice(0, 10)}.csv`
-  a.click()
-  URL.revokeObjectURL(url)
+  triggerDownload(csv, 'text/csv', 'csv')
 }
 
-function doExportJson() {
-  const blob = new Blob([safeJsonStringify(entries.value, 2)], { type: 'application/json' })
+function doExportJson(rows: AuditLogEntry[]) {
+  triggerDownload(safeJsonStringify(rows, 2), 'application/json', 'json')
+}
+
+function triggerDownload(content: string, mime: string, ext: string) {
+  const blob = new Blob([content], { type: mime })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `audit-logs-${new Date().toISOString().slice(0, 10)}.json`
+  a.download = `audit-logs-${new Date().toISOString().slice(0, 10)}.${ext}`
   a.click()
   URL.revokeObjectURL(url)
 }
@@ -68,25 +97,69 @@ function confirmExport(format: 'csv' | 'json') {
   showExportConfirm.value = format
 }
 
-function executeExport() {
-  if (showExportConfirm.value === 'csv') doExportCsv()
-  else if (showExportConfirm.value === 'json') doExportJson()
+// Fetches every page the server has for the current filter, up to
+// EXPORT_MAX_ROWS. Pre-R3, the exports dumped only `entries.value` (page 1)
+// and compliance audits silently missed anything beyond the default page
+// size — a genuine correctness bug, not just UX.
+async function fetchAllForExport(): Promise<AuditLogEntry[] | null> {
+  const all: AuditLogEntry[] = [...entries.value]
+  exportFetched.value = all.length
+  let cursor = nextCursor.value
+  let hasMoreLocal = hasMore.value
+  // Safety: cap iterations too, independent of EXPORT_MAX_ROWS, in case
+  // a pathological server returns tiny pages indefinitely.
+  let pagesFetched = 1
+  const MAX_PAGES = 500
+  while (hasMoreLocal && cursor && all.length < EXPORT_MAX_ROWS && pagesFetched < MAX_PAGES) {
+    const params = { ...buildFilterParams(), cursor }
+    const res = await listAuditLogs(params)
+    all.push(...res.logs)
+    exportFetched.value = all.length
+    hasMoreLocal = !!res.has_more
+    cursor = res.next_cursor ?? ''
+    pagesFetched++
+  }
+  if (all.length >= EXPORT_MAX_ROWS && hasMoreLocal) {
+    error.value = `Export aborted: result set exceeds ${EXPORT_MAX_ROWS.toLocaleString()} rows. Narrow the filter or date range before retrying.`
+    return null
+  }
+  return all
+}
+
+async function executeExport() {
+  const format = showExportConfirm.value
+  if (!format) return
   showExportConfirm.value = null
+  // Fast path: server already told us we have everything on page 1.
+  if (!hasMore.value) {
+    if (format === 'csv') doExportCsv(entries.value)
+    else doExportJson(entries.value)
+    return
+  }
+  // Slow path: paginate through remaining pages. Show a blocking progress
+  // overlay so the operator knows the download is still assembling and
+  // doesn't close the tab.
+  exporting.value = true
+  exportFetched.value = entries.value.length
+  try {
+    const all = await fetchAllForExport()
+    if (!all) return // error already set by fetchAllForExport
+    if (format === 'csv') doExportCsv(all)
+    else doExportJson(all)
+  } catch (e) {
+    error.value = toMessage(e)
+  } finally {
+    exporting.value = false
+  }
 }
 
 async function query() {
   loading.value = true
   try {
-    const params: Record<string, string> = {}
-    if (tenantId.value) params.tenant_id = tenantId.value
-    if (keyId.value) params.key_id = keyId.value
-    if (operation.value) params.operation = operation.value
-    if (resourceType.value) params.resource_type = resourceType.value
-    if (resourceId.value) params.resource_id = resourceId.value
-    if (fromDate.value) params.from = new Date(fromDate.value).toISOString()
-    if (toDate.value) params.to = new Date(toDate.value).toISOString()
-    const res = await listAuditLogs(params)
+    const res = await listAuditLogs(buildFilterParams())
     entries.value = res.logs
+    hasMore.value = !!res.has_more
+    nextCursor.value = res.next_cursor ?? ''
     error.value = ''
   } catch (e) { error.value = toMessage(e) }
   finally { loading.value = false }
@@ -186,7 +259,10 @@ watch(() => route.query, () => {
     </form>
 
     <div v-if="!loading" class="flex items-center justify-between mb-2">
-      <p class="muted-sm">{{ entries.length }} result{{ entries.length !== 1 ? 's' : '' }}</p>
+      <p class="muted-sm">
+        {{ entries.length }} result{{ entries.length !== 1 ? 's' : '' }}
+        <span v-if="hasMore" class="ml-1 text-amber-600" title="More results exist beyond this page — export will paginate fully.">(more available)</span>
+      </p>
       <div v-if="entries.length > 0" class="flex gap-2">
         <button @click="confirmExport('csv')" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100">
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
@@ -291,12 +367,26 @@ watch(() => route.query, () => {
     <div v-if="showExportConfirm" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50" @click.self="showExportConfirm = null">
       <div class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 max-w-sm mx-4">
         <h3 class="text-sm font-semibold text-gray-900 mb-2">Export audit data?</h3>
-        <p class="text-sm text-gray-600 mb-1">This export contains <strong>{{ entries.length }}</strong> audit log entries including key IDs, IP addresses, and metadata.</p>
+        <p v-if="!hasMore" class="text-sm text-gray-600 mb-1">This export contains <strong>{{ entries.length }}</strong> audit log entries including key IDs, IP addresses, and metadata.</p>
+        <p v-else class="text-sm text-gray-600 mb-1">
+          The current filter matches <strong>more than {{ entries.length }}</strong> entries. The export will paginate through all remaining results (up to {{ EXPORT_MAX_ROWS.toLocaleString() }}) before the download starts.
+        </p>
         <p class="muted-sm mb-4">Exported files contain unmasked sensitive data. Handle with care.</p>
         <div class="flex justify-end gap-2">
           <button @click="showExportConfirm = null" class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 rounded hover:bg-gray-100 cursor-pointer">Cancel</button>
           <button @click="executeExport" class="px-3 py-1.5 text-sm bg-gray-900 text-white rounded hover:bg-gray-800 cursor-pointer">Export {{ showExportConfirm.toUpperCase() }}</button>
         </div>
+      </div>
+    </div>
+
+    <!-- Export progress overlay (multi-page exports only). Blocking to
+         prevent the operator closing the tab mid-download — the browser
+         only flushes the Blob once every page is fetched. -->
+    <div v-if="exporting" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+      <div class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 max-w-sm mx-4">
+        <h3 class="text-sm font-semibold text-gray-900 mb-2">Assembling export…</h3>
+        <p class="text-sm text-gray-600 mb-1">Fetched <strong>{{ exportFetched.toLocaleString() }}</strong> audit entries so far.</p>
+        <p class="muted-sm">Keep this tab open until the download begins.</p>
       </div>
     </div>
   </div>

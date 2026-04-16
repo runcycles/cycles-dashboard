@@ -62,28 +62,57 @@ async function toApiError(res: Response): Promise<ApiError> {
 
 // Wraps `fetch` with an AbortController-backed timeout. A hung backend should
 // fail after `timeoutMs` rather than spin the UI forever. Translates the
-// AbortError into a clear error message so callers don't need to pattern-match
-// on the low-level DOMException.
+// timeout-triggered AbortError into a clear error message so callers don't
+// need to pattern-match on the low-level DOMException.
+//
+// Callers may pass an external `signal` (e.g. from usePolling's per-tick
+// controller) — if that signal is aborted, the fetch is cancelled and the
+// original AbortError is re-thrown unchanged (so callers that specifically
+// handle cancellation via name==='AbortError' still see it). The timeout
+// path wraps the AbortError in a friendly message as before.
 export async function fetchWithTimeout(
   url: string,
   init: RequestInit = {},
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<Response> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const timeoutController = new AbortController()
+  const timer = setTimeout(() => timeoutController.abort(), timeoutMs)
+  // If caller passed a signal, abort when *either* it fires OR the timeout
+  // fires. Use a linked controller to merge the two.
+  const externalSignal = init.signal ?? null
+  const linkedController = new AbortController()
+  const onTimeout = () => linkedController.abort(new Error('timeout'))
+  const onExternal = () => linkedController.abort(externalSignal?.reason)
+  timeoutController.signal.addEventListener('abort', onTimeout)
+  externalSignal?.addEventListener('abort', onExternal)
+  // Propagate an already-aborted external signal immediately.
+  if (externalSignal?.aborted) linkedController.abort(externalSignal.reason)
   try {
-    return await fetch(url, { ...init, signal: controller.signal })
+    return await fetch(url, { ...init, signal: linkedController.signal })
   } catch (e) {
     if (e instanceof DOMException && e.name === 'AbortError') {
-      throw new Error(`Request timed out after ${timeoutMs}ms`)
+      // Distinguish timeout from external abort. Timeout gets a
+      // human-readable message; external abort (e.g. from usePolling on
+      // unmount) rethrows the original so callers can detect it by name.
+      if (timeoutController.signal.aborted && !externalSignal?.aborted) {
+        throw new Error(`Request timed out after ${timeoutMs}ms`)
+      }
+      throw e
     }
     throw e
   } finally {
     clearTimeout(timer)
+    timeoutController.signal.removeEventListener('abort', onTimeout)
+    externalSignal?.removeEventListener('abort', onExternal)
   }
 }
 
-async function request<T>(method: string, path: string, params?: Record<string, string>): Promise<T> {
+async function request<T>(
+  method: string,
+  path: string,
+  params?: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<T> {
   const auth = useAuthStore()
   const url = new URL(path, window.location.origin)
   if (params) {
@@ -94,6 +123,7 @@ async function request<T>(method: string, path: string, params?: Record<string, 
   const res = await fetchWithTimeout(url.toString(), {
     method,
     headers: { 'X-Admin-API-Key': auth.apiKey, 'Content-Type': 'application/json' },
+    signal,
   })
   // 401 = key missing/invalid → end session.
   // 403 = authenticated but not permitted for THIS op → keep session,
@@ -126,8 +156,12 @@ export function handleUnauthorized() {
   router.push({ name: 'login', query: { redirect: current.fullPath } })
 }
 
-function get<T>(path: string, params?: Record<string, string>): Promise<T> {
-  return request<T>('GET', path, params)
+function get<T>(
+  path: string,
+  params?: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<T> {
+  return request<T>('GET', path, params, signal)
 }
 
 async function mutate<T>(method: string, path: string, body?: Record<string, unknown>, params?: Record<string, string>): Promise<T> {
