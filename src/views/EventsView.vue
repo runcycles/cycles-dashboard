@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
@@ -151,6 +151,35 @@ function clearFilters() {
   applyFilters()
 }
 
+// Instant-apply on filter change. Best-practice UX (Linear / Notion /
+// Jira filters) — operators shouldn't need to click a separate
+// "Filter" button to see results; the select IS the action. For text
+// inputs we debounce 300ms so we don't thrash the server on every
+// keystroke while the operator types a long correlation_id.
+//
+// Explicit applyFilters() remains wired to form@submit so pressing
+// Enter in a text field still submits immediately — debounce is a
+// nicety, not a hard gate.
+const DEBOUNCE_MS = 300
+let debounceTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleApply() {
+  if (debounceTimer) clearTimeout(debounceTimer)
+  debounceTimer = setTimeout(() => {
+    debounceTimer = null
+    applyFilters()
+  }, DEBOUNCE_MS)
+}
+// Selects: apply instantly (no debounce). A select change is always
+// intentional and finite — debouncing just adds perceived lag.
+watch(category, () => applyFilters())
+watch(eventType, () => applyFilters())
+// Text inputs: debounced. The watcher fires on every keystroke, so
+// without the debounce a 20-character correlation_id would trigger
+// 20 fetches.
+watch(tenantId, () => scheduleApply())
+watch(scope, () => scheduleApply())
+watch(correlationId, () => scheduleApply())
+
 // ─── Export (CSV / JSON) ──────────────────────────────────────────────
 // Mirrors AuditView's flow — including the R3 correctness fix where
 // exports MUST paginate through next_cursor (not just dump page 1).
@@ -300,7 +329,10 @@ function measureRow(el: Element | { $el?: Element } | null) {
 
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
-    <!-- Filters -->
+    <!-- Filters. Instant-apply on change (selects) or 300ms-debounced
+         (text inputs) — no separate "Filter" button to click. Form
+         still submits on Enter so pressing return in a text field
+         applies immediately without waiting for the debounce. -->
     <form @submit.prevent="applyFilters" class="card p-4 mb-4">
       <div class="flex gap-3 flex-wrap items-end">
         <div>
@@ -323,8 +355,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
           <label for="ev-correlation" class="form-label">Correlation ID</label>
           <input id="ev-correlation" v-model="correlationId" placeholder="correlation_id" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-40" />
         </div>
-        <button type="submit" class="bg-gray-900 text-white px-3 py-1.5 rounded text-sm hover:bg-gray-800 cursor-pointer">Filter</button>
-        <button v-if="hasActiveFilters" type="button" @click="clearFilters" class="text-sm muted hover:text-gray-700 cursor-pointer">Clear</button>
+        <button v-if="hasActiveFilters" type="button" @click="clearFilters" class="text-sm muted hover:text-gray-700 cursor-pointer ml-auto">Clear filters</button>
       </div>
     </form>
 
