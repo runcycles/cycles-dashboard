@@ -1,7 +1,173 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-16 (scale-hardening phase 4 — W4 bulk-op bounded concurrency + 429 backoff across all three bulk runners, W5 reveal-timer cleanup, W6 a11y row-count live region), 2026-04-16 (scale-hardening phase 3 — V5 debounce composable, V6 PageHeader result counts, V7 filter-aware EmptyState), 2026-04-16 (scale-hardening phase 2c — V1 virtualization for EventsView + AuditView with measureElement for expandable rows), 2026-04-16 (scale-hardening phase 2b — row virtualization across 5 list views via @tanstack/vue-virtual), 2026-04-16 (scale-hardening phase 2 — pagination on tenants/webhooks/budget-detail events, lazy tabs, O(1) parent lookup, copy-event-data), 2026-04-16 (scale-hardening phase 1 — pagination, cancellation, N+1 mitigation across 6 views), 2026-04-15 (v0.1.25.27 — RESET_SPENT funding operation support, semantics corrected post-test), 2026-04-14 (error-surfacing + SecretReveal + 3 incident-response Playwright flows), 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
+**Date:** 2026-04-16 (TenantDetailView — Edit API Key in-place, ports the v0.1.25.24 ApiKeysView diff-before-patch flow), 2026-04-16 (phase 5 polish — multi-row expansion on Events / Audit / EventTimeline for triage comparison workflow), 2026-04-16 (phase 5 polish — BudgetDetail EventTimeline virtualization + flex-fill + Load more label parity with list views), 2026-04-16 (phase 5 polish — PageHeader `itemNounPlural` override fixes "log entrys"→"log entries", WebhooksView subscription→webhook noun consistency, filter toolbars wrapped in card across TenantsView/WebhooksView/ReservationsView), 2026-04-16 (scale-hardening phase 5 — unified table-layout: flex-fill viewport on all 7 list views, fix AuditView double horizontal scrollbar, standardize Load more label), 2026-04-16 (scale-hardening phase 4 — W4 bulk-op bounded concurrency + 429 backoff across all three bulk runners, W5 reveal-timer cleanup, W6 a11y row-count live region), 2026-04-16 (scale-hardening phase 3 — V5 debounce composable, V6 PageHeader result counts, V7 filter-aware EmptyState), 2026-04-16 (scale-hardening phase 2c — V1 virtualization for EventsView + AuditView with measureElement for expandable rows), 2026-04-16 (scale-hardening phase 2b — row virtualization across 5 list views via @tanstack/vue-virtual), 2026-04-16 (scale-hardening phase 2 — pagination on tenants/webhooks/budget-detail events, lazy tabs, O(1) parent lookup, copy-event-data), 2026-04-16 (scale-hardening phase 1 — pagination, cancellation, N+1 mitigation across 6 views), 2026-04-15 (v0.1.25.27 — RESET_SPENT funding operation support, semantics corrected post-test), 2026-04-14 (error-surfacing + SecretReveal + 3 incident-response Playwright flows), 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
 **Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.17+ continues to satisfy the governance plane; **admin server v0.1.25.18+ required** to execute the new `RESET_SPENT` funding operation from BudgetsView (older admin servers will reject the operation enum with 400 INVALID_REQUEST — UI degrades gracefully but the operator sees the server's error toast).
+
+### 2026-04-16 — TenantDetailView: Edit API Key in-place
+
+Closes a workflow gap — the Policies tab on tenant-detail has had an
+Edit button since the v0.1.25.20 policies rollout, but the API Keys
+tab was Activity + Revoke only. Operators who wanted to rename a key
+or reshape its permissions had to navigate to the global ApiKeysView,
+filter by tenant, edit there, and navigate back. On a multi-tenant
+day that's painful.
+
+**Fix.** Port the v0.1.25.24 ApiKeysView Edit flow into
+`src/views/TenantDetailView.vue`:
+
+- `openEditKey(k)` — same canonical-permission filter as
+  ApiKeysView.openEdit: any stored permission not in the current
+  `PERMISSIONS` enum is dropped from the form's state and surfaced
+  via toast so the cleanup isn't silent on save.
+- `submitEditKey()` — diff-before-patch: sends only the fields the
+  operator actually changed (`sameKeyStringSet()` helper).
+  Round-tripping unchanged permissions was the original cause of
+  spurious 400s when the stored key carried a legacy enum value.
+- Pending-changes summary (green adds / red removes) on the edit
+  dialog, matching the ApiKeysView UX one-to-one. `aria-live="polite"`
+  so screen readers catch the diff as the operator toggles checkboxes.
+- Row action: `<button v-if="k.status === 'ACTIVE'" ...>Edit</button>`
+  placed between the Activity link and Revoke. Gated the same way as
+  the existing Revoke button — disabled keys don't expose an Edit
+  button since there's nothing coherent to change on a revoked key.
+
+No server-side change — `updateApiKey` and `PERMISSIONS` were already
+exported from `src/api/client.ts` / `src/types.ts`. Refresh after
+save reuses the existing `listApiKeys({ tenant_id: id })` call so the
+Permissions column in the table updates immediately.
+
+**Gates.** 336/336 vitest, `vue-tsc -b --noEmit` clean. No E2E spec
+currently targets this flow; the existing capability-gating test
+(`canManageKeys`) still governs visibility of all three row actions
+including the new Edit button.
+
+### 2026-04-16 — Phase 5 polish (multi-row expansion on Events / Audit / EventTimeline)
+
+Operator feedback on triage flows: the single-row expansion pattern
+used in EventsView, AuditView, and the embedded EventTimeline forced
+users to close one entry before opening the next. That's a bad default
+for the real workflow in these views, which is **comparison** — two
+events with the same correlation_id, before/after state of an audit
+entry pair, payload diff across two nearly identical budget operations.
+
+**Fix.** Switch `expanded` from `ref<string | null>(null)` to
+`ref(new Set<string>())` in all three components. Click toggles the
+row independently; other rows stay as they were. The chevron
+rotation, `aria-expanded`, detail-block `v-if` gates all moved from
+`expanded === id` to `expanded.has(id)`. Click handlers moved from
+inline ternaries to a small `toggleExpanded(id)` helper so the
+intent reads cleanly.
+
+Vue 3's reactivity layer tracks Set `.add` / `.delete` / `.has`
+mutations out of the box — no extra reactivity plumbing needed. The
+virtualizer's `measureElement` still observes row height changes
+correctly, so multiple simultaneously-expanded rows layout smoothly
+without row-height drift.
+
+**Files.** `src/components/EventTimeline.vue`, `src/views/EventsView.vue`,
+`src/views/AuditView.vue`. No test-suite changes required — existing
+tests target behavior (click fires, aria-expanded flips, detail renders)
+which is unchanged from the single-row case; only the constraint that
+opening row B closes row A is removed. 336/336 vitest, vue-tsc clean,
+production build clean.
+
+**Edge note.** Stale IDs linger in the Set after a filter/refresh
+cycle (the events array changes but the Set is preserved). `.has()`
+no-ops for IDs that aren't in the current view, so the behavior is
+correct — and in fact useful: filtering then unfiltering preserves
+the operator's expansion context. Set size stays bounded in practice
+(ID strings are ~24 bytes; even 1000 stale IDs is under 25 KB).
+
+### 2026-04-16 — Phase 5 polish (BudgetDetail EventTimeline large-dataset parity)
+
+Closes a gap left after the initial Phase 5 table-layout pass: the
+Event Timeline rendered on budget-detail pages didn't follow the same
+flex-fill + virtualization pattern the seven list views adopted.
+
+**Problem.** `EventTimeline.vue` was a plain `v-for` over the full
+`events` array. Fine for the default 20-row page, but once an operator
+hit "Load older events" a few times on a long-lived budget (chatty
+agent spending every few seconds, months of history → hundreds of
+events), the flat render grew unbounded. Every expand/collapse forced
+Vue to diff the whole list, and on tall monitors the card was
+natural-height — it kept growing past the fold instead of scrolling
+within a bounded region like the list views. Button label also read
+"Load older events" — inconsistent with the Phase 5 standardization
+that unified every other Load-more button to plain "Load more".
+
+**Fix.**
+- **`src/components/EventTimeline.vue`** — rewritten to match the
+  EventsView virtualization pattern: `@tanstack/vue-virtual`
+  `useVirtualizer` with `measureElement` for variable row heights so
+  expand/collapse re-layouts sibling rows smoothly. Collapsed rows
+  ~36px (estimated for the virtualizer's first paint); expanded rows
+  include the metadata grid + optional JSON block (still capped at
+  `max-h-32` as before). Scroll container gains
+  `flex-1 overflow-auto min-h-[200px]`. The `compact` prop, declared
+  but never passed by any caller, was removed.
+- **`src/views/BudgetsView.vue`** (detail mode) — the Event Timeline
+  card now flex-fills the remaining viewport
+  (`card p-4 flex-1 min-h-0 flex flex-col`). Its children — h3 header,
+  EventTimeline (flex-1), Load-more button — stack vertically with
+  only the timeline flexing, exactly like the list-view shells. The
+  button label changed to "Load more" to match the other six views.
+
+**Net behavior change.** Opening a budget detail now shows an event
+timeline that fills the viewport below the metadata card, scrolls
+within its own bounded region, and renders only the visible rows in
+the DOM regardless of how many "Load more" pages the operator has
+stacked up. Layout identical for budgets with few events; visibly
+better for budgets with hundreds.
+
+**Gates:** 336/336 Vitest pass (no behaviour-altering logic change —
+still the same keyboard/click toggle, same aria-expanded semantics,
+same JSON block cap). `vue-tsc -b --noEmit` clean.
+
+### 2026-04-16 — Phase 5 polish (PageHeader pluralization override, webhook noun, filter-toolbar card wrapping)
+
+Follow-up on the Phase 5 PR review. Three small consistency fixes bundled into the same branch.
+
+**Problem 1 — "log entrys" grammar bug.** `PageHeader`'s count label ("Showing X of Y <noun>") and `EmptyState`'s fallback copy both pluralized naively by appending `s`. AuditView passed `item-noun="log entry"` → rendered "Showing 5 of 100 log entrys" in the header count line. Screen readers re-announced the same malapropism via the V6 live region.
+
+**Problem 2 — WebhooksView noun mismatch.** Page title: "Webhooks". EmptyState hint: "No webhook subscriptions". PageHeader count: "Showing 60 of 120 subscriptions". Operators saw two different nouns for the same objects within one view. The server type is `Webhook` (not `Subscription`) — "webhook" is the correct domain noun for the UI.
+
+**Problem 3 — Filter toolbar inconsistency.** Four of the seven list views (BudgetsView, EventsView, AuditView, ApiKeysView) wrapped their filter row in `<div class="card p-4 mb-4">` — a soft white panel with padding that visually groups the filters and separates them from the table. Three (TenantsView, WebhooksView, ReservationsView) used a bare `<div class="mb-4 flex gap-3 flex-wrap items-center">` — filters floated directly on the page background with no grouping. Inconsistent visual weight across views when switching tabs.
+
+**Fix.**
+- **`PageHeader.vue` + `EmptyState.vue`** — add optional `itemNounPlural?: string` prop. Falls back to `${noun}s` when omitted, so all regular-plural callers (tenant, webhook, event, key, reservation, budget) stay untouched. Used only for irregular plurals.
+- **`AuditView.vue`** — pass `item-noun-plural="log entries"` to `PageHeader`. (The view's `EmptyState` uses an explicit `message=`, so it bypasses the auto-pluralization path — no change needed.) The existing `ExportDialog` and `ExportProgressOverlay` in the same view were already passing the plural correctly; now the header matches.
+- **`WebhooksView.vue`** — `item-noun="subscription"` → `item-noun="webhook"` on PageHeader. `item-noun-plural="subscriptions"` → `"webhooks"` on ExportDialog and ExportProgressOverlay. EmptyState copy: `"No webhook subscriptions"` → `"No webhooks"`, hint: `"Webhook subscriptions will appear here once configured"` → `"Webhooks will appear here once configured"`. Server-side field `subscription_id` unchanged — this is UI copy only.
+- **Filter toolbars** — `TenantsView`, `WebhooksView`, `ReservationsView` filter rows wrapped in `<div class="card p-4 mb-4">` with the existing flex row moved inside. Visual parity with the other four list views; no behavior change, no width/height impact on the flex-fill table shell below.
+
+**Gates:** 336/336 Vitest pass (330 prior + 6 new `PageHeader.test.ts` assertions covering the count label, the singular→plural boundary, the `itemNounPlural` override, and the aria-live sr-only mirror). `vue-tsc -b --noEmit` clean. E2E untouched — no test targets UI text "subscription" (server-side `subscription_id` handler field stays as-is). Visually verified each of the three rewrapped toolbars in dev.
+
+### 2026-04-16 — High-cardinality scale hardening (phase 5 of 5: unified table-layout)
+
+Closes the list-view UX inconsistencies operators reported after Phase 4 shipped. Three concrete problems, one coordinated fix.
+
+**Problem 1 — scattered `max-height: calc(100vh - Npx)` math.** Every list view picked its own magic number (N ranged 360 → 520 across 7 files) trying to account for PageHeader + toolbar + pagination height. Guesses broke whenever a filter wrapped or a banner appeared, and default views only showed 5–9 rows — too few for a data-ops tool. On tall monitors the tables left most of the viewport unused.
+
+**Problem 2 — AuditView double horizontal scrollbar.** `<main>` had `overflow-auto` AND the AuditView outer shell had `overflow-x-auto` with an inner `min-width: 900px` shim. At viewport widths < 900px the page painted two horizontal scrollbars stacked on top of each other. ApiKeysView had the same structural pattern with a 1220/1380px shim — the bug manifested whenever the viewport dropped below the min-width.
+
+**Problem 3 — Load-more label drift.** Six views had four distinct button texts: `Load more`, `Load more events`, `Load more log entries`, `Load more deliveries`, `Load more results`. The noun was redundant — the page title plus V6's "Showing X of Y <noun>" count label already conveyed context.
+
+**Fix — follow the Linear / GitHub / Jira pattern.** No more height math; a flex column from `<main>` down through each list view's root makes the virtualized table body fill whatever space is left after the header, toolbar, and footer take their natural height. Resize the browser and the table grows/shrinks naturally.
+
+- **`src/components/AppLayout.vue`** — `<main>` switched from `overflow-auto` to `overflow-y-auto`. Wide tables scroll horizontally inside their own shell (scoped to the table body), not at the page level. Kills the double-bar at < 900px / < 1220px viewports.
+- **7 list views** (`TenantsView`, `BudgetsView`, `EventsView`, `AuditView`, `WebhooksView`, `ApiKeysView`, `ReservationsView`) — root `<div>` gains `h-full flex flex-col min-h-0`. The bg-white table shell gains `flex-1 min-h-0 flex flex-col`. The virtualized scroll rowgroup loses its `style="max-height: calc(100vh - Npx); min-height: Npx;"` inline and gains `class="flex-1 overflow-auto min-h-[200px|240px]"` — `flex-1` fills the remaining flex space, `min-h-[Npx]` keeps a usable minimum on tiny viewports where the filter toolbar might eat everything.
+- **AuditView + ApiKeysView horizontal-shim views** — the inner `min-width: 900/1220/1380px` wrapper also gains `flex flex-col flex-1 min-h-0` so the flex chain propagates through the shim. Header rowgroup stays natural; scroll rowgroup flex-fills. Both header and body scroll horizontally together because they share the shim parent — the existing column-alignment behavior is preserved.
+- **BudgetsView** dual-mode — the list-mode `<template v-else>` converted to `<div v-else class="flex flex-col flex-1 min-h-0">`. Detail mode (stacked metadata + event-timeline cards) stays natural block flow — flex-col just stacks them, which is visually identical. No behavior change for detail-mode users.
+- **WebhookDetailView** delivery table — kept as a bounded scroll region because it's embedded in a scroll-flow detail page, but replaced `max-height: calc(100vh - 520px)` with `max-h-[60vh]`. Same intent ("generous max, scroll if needed"), no magic number.
+- **Load-more label standardized** — `EventsView`, `AuditView`, `WebhookDetailView` lose their noun suffix. All buttons now read `Load more` (loading state stays `Loading…`). BudgetsView's list-mode button lost `results`; TenantsView/WebhooksView/ReservationsView were already correct.
+
+**Net behavior change operators will feel:**
+1. Default visible row count goes from ~5–9 to ~15–25 on a typical 1080p laptop; taller monitors show proportionally more.
+2. No more double scrollbar in AuditView / ApiKeysView at narrow widths.
+3. Browser resize now smoothly grows/shrinks the table instead of keeping a fixed ~400px block.
+
+**Gates:** 330/330 Vitest pass (zero new tests — this is a layout CSS change with no new logic). `vue-tsc -b --noEmit` clean. Dev server (`npm run dev`) renders every view without console errors. Existing E2E specs (tenants-bulk-suspend, webhooks-bulk-pause, budgets-freeze-unfreeze, reservations-force-release, a11y-audit) target role/label, not layout structure — unaffected.
+
+**Phase 5 complete. All audit items addressable on the dashboard side are now done.** Remaining items are server-spec blocked on `cycles-server-admin`: R1/R2 full fix, V4 server-side sort, W1 bulk-op filter, W2 utilization params, W3 tenant search.
 
 ### 2026-04-16 — High-cardinality scale hardening (phase 4 of 5: bulk-op concurrency + 429 backoff, reveal-timer cleanup, a11y row-count live region)
 

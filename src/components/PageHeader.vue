@@ -25,13 +25,18 @@ const props = defineProps<{
   total?: number
   hasMore?: boolean
   itemNoun?: string // e.g. "tenant", "webhook", "event" — pluralized automatically
+  // Override the naive `${noun}s` pluralization. Pass when the noun
+  // isn't a regular plural: "log entry" → "log entries", "policy" →
+  // "policies". Unused for regular nouns ("tenant", "webhook").
+  itemNounPlural?: string
 }>()
 defineEmits<{ refresh: [] }>()
 
 const countLabel = computed(() => {
   if (props.loaded === undefined) return ''
   const noun = props.itemNoun ?? 'row'
-  const pluralize = (n: number) => (n === 1 ? noun : `${noun}s`)
+  const plural = props.itemNounPlural ?? `${noun}s`
+  const pluralize = (n: number) => (n === 1 ? noun : plural)
   const L = props.loaded.toLocaleString()
   if (props.total !== undefined) {
     return `Showing ${L} of ${props.total.toLocaleString()} ${pluralize(props.total)}`

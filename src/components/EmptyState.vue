@@ -25,15 +25,17 @@ const props = defineProps<{
   /**
    * Used to fill the default copy templates: e.g. itemNoun="tenant" →
    * "No tenants found" or "No tenants match your filters". Pluralized
-   * by appending "s" — good enough for our current nouns (tenant,
-   * webhook, event, key, reservation, log entry, budget).
+   * by appending "s" by default — pass `itemNounPlural` for irregular
+   * plurals ("log entry" → "log entries", "policy" → "policies").
    */
   itemNoun?: string
+  /** Override the naive `${noun}s` plural for irregular nouns. */
+  itemNounPlural?: string
 }>()
 
 const resolvedMessage = computed(() => {
   if (props.message) return props.message
-  const plural = props.itemNoun ? `${props.itemNoun}s` : 'results'
+  const plural = props.itemNounPlural ?? (props.itemNoun ? `${props.itemNoun}s` : 'results')
   return props.hasActiveFilter
     ? `No ${plural} match your filters`
     : `No ${plural} found`

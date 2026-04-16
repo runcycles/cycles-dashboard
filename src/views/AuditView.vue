@@ -20,7 +20,15 @@ import { safeJsonStringify } from '../utils/safe'
 const entries = ref<AuditLogEntry[]>([])
 const error = ref('')
 const loading = ref(false)
-const expanded = ref<string | null>(null)
+// Multi-row expansion — compliance reviewers compare audit entries
+// side-by-side (e.g. before/after of a permission change, two PATCHes
+// on the same key), so keeping multiple rows open at once is the more
+// useful default. Pre-fix, opening row B auto-collapsed row A.
+const expanded = ref(new Set<string>())
+function toggleExpanded(id: string) {
+  if (expanded.value.has(id)) expanded.value.delete(id)
+  else expanded.value.add(id)
+}
 const { sortKey, sortDir, toggle, sorted: sortedEntries } = useSort(entries)
 
 // Pagination state. query() loads page 1; hasMore signals that the
@@ -192,10 +200,17 @@ function measureRow(el: Element | { $el?: Element } | null) {
 </script>
 
 <template>
-  <div>
+  <!-- Phase 5 (table-layout unification): flex-fill root. Audit was
+       the worst offender pre-fix — the outer shell's overflow-x-auto
+       combined with <main>'s overflow-auto produced a double
+       horizontal scrollbar on viewports < 900px. Now <main> is
+       overflow-y-auto only; horizontal scroll lives on the shell so
+       there's exactly one bar, localized to the table. -->
+  <div class="h-full flex flex-col min-h-0">
     <PageHeader
       title="Audit Logs"
       item-noun="log entry"
+      item-noun-plural="log entries"
       :loaded="entries.length"
       :has-more="hasMore"
     />
@@ -263,18 +278,20 @@ function measureRow(el: Element | { $el?: Element } | null) {
       </button>
     </div>
 
-    <!-- V1 virtualized grid with measureElement (Phase 2c). Same
-         pattern as EventsView — variable row heights let expand/
-         collapse re-layout smoothly without flicker. Horizontal
-         scroll engages on narrow viewports via the outer
-         overflow-x-auto + inner min-width wrapper. -->
+    <!-- V1 virtualized grid with measureElement (Phase 2c). Variable
+         row heights let expand/collapse re-layout smoothly without
+         flicker. Horizontal scroll engages on narrow viewports via
+         the outer overflow-x-auto + inner min-width wrapper — both
+         header and body scroll together because they share the shim
+         parent. Shell is flex-1 min-h-0 flex-col so the scroll body
+         below expands to fill viewport (phase 5). -->
     <div
-      class="bg-white rounded-lg shadow overflow-x-auto text-sm"
+      class="bg-white rounded-lg shadow overflow-x-auto text-sm flex-1 min-h-0 flex flex-col"
       role="table"
       :aria-rowcount="entries.length + 1"
       :aria-colcount="7"
     >
-     <div style="min-width: 900px">
+     <div style="min-width: 900px" class="flex flex-col flex-1 min-h-0">
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
         <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
           <div role="columnheader" class="table-cell"></div>
@@ -291,8 +308,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
         v-if="sortedEntries.length > 0"
         ref="scrollEl"
         role="rowgroup"
-        class="overflow-y-auto"
-        style="max-height: calc(100vh - 480px); min-height: 240px;"
+        class="flex-1 overflow-y-auto min-h-[240px]"
       >
         <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
           <div
@@ -313,18 +329,18 @@ function measureRow(el: Element | { $el?: Element } | null) {
               class="grid table-row-hover items-center transition-colors"
               :class="hasDetail(sortedEntries[v.index]) ? 'cursor-pointer' : ''"
               :style="{ gridTemplateColumns: gridTemplate, minHeight: COLLAPSED_ROW_HEIGHT + 'px' }"
-              @click="hasDetail(sortedEntries[v.index]) ? (expanded = expanded === sortedEntries[v.index].log_id ? null : sortedEntries[v.index].log_id) : null"
+              @click="hasDetail(sortedEntries[v.index]) ? toggleExpanded(sortedEntries[v.index].log_id) : null"
             >
               <div role="cell" class="pl-3 muted">
                 <button
                   v-if="hasDetail(sortedEntries[v.index])"
                   type="button"
-                  :aria-expanded="expanded === sortedEntries[v.index].log_id"
-                  :aria-label="expanded === sortedEntries[v.index].log_id ? 'Collapse audit details' : 'Expand audit details'"
+                  :aria-expanded="expanded.has(sortedEntries[v.index].log_id)"
+                  :aria-label="expanded.has(sortedEntries[v.index].log_id) ? 'Collapse audit details' : 'Expand audit details'"
                   class="p-0.5 -ml-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-400"
-                  @click.stop="expanded = expanded === sortedEntries[v.index].log_id ? null : sortedEntries[v.index].log_id"
+                  @click.stop="toggleExpanded(sortedEntries[v.index].log_id)"
                 >
-                  <svg class="w-3.5 h-3.5 transition-transform" :class="expanded === sortedEntries[v.index].log_id ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <svg class="w-3.5 h-3.5 transition-transform" :class="expanded.has(sortedEntries[v.index].log_id) ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
                   </svg>
                 </button>
@@ -350,10 +366,11 @@ function measureRow(el: Element | { $el?: Element } | null) {
               </div>
             </div>
 
-            <!-- Expanded detail — only when this row's log_id is the
-                 current `expanded`. Adds ~160-280px depending on
-                 metadata presence. -->
-            <div v-if="expanded === sortedEntries[v.index].log_id" class="bg-gray-50/70 px-4 py-3 border-t border-gray-100">
+            <!-- Expanded detail — rendered when this row's log_id is
+                 in the `expanded` set. Multi-row open so reviewers can
+                 compare entries (e.g. before/after of a permission
+                 change). Adds ~160-280px depending on metadata. -->
+            <div v-if="expanded.has(sortedEntries[v.index].log_id)" class="bg-gray-50/70 px-4 py-3 border-t border-gray-100">
               <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3">
                 <div v-if="sortedEntries[v.index].request_id"><span class="muted">Request ID:</span> <span class="font-mono">{{ sortedEntries[v.index].request_id }}</span></div>
                 <div v-if="sortedEntries[v.index].source_ip"><span class="muted">Source IP:</span> <span class="font-mono">{{ sortedEntries[v.index].source_ip }}</span></div>
@@ -385,7 +402,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
          via fetchAllForExport; Load-more is for on-screen scanning. -->
     <div v-if="hasMore || loadingMore" class="mt-3 flex justify-end">
       <button @click="loadMore" :disabled="loadingMore" class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50 cursor-pointer">
-        {{ loadingMore ? 'Loading…' : 'Load more log entries' }}
+        {{ loadingMore ? 'Loading…' : 'Load more' }}
       </button>
     </div>
 

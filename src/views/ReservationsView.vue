@@ -282,7 +282,13 @@ const gridTemplate = computed(() =>
 </script>
 
 <template>
-  <div>
+  <!-- Phase 5 (table-layout unification): flex-fill so the table body
+       grows to fill remaining viewport height. No per-view
+       calc(100vh - Npx) math; resize the browser and the table adapts
+       naturally. Header, filter toolbar, and Load-more footer take
+       their natural (shrink-0) height; the virtualized scroll body
+       is flex-1 min-h-0 overflow-auto. -->
+  <div class="h-full flex flex-col min-h-0">
     <PageHeader
       title="Reservations"
       subtitle="Force-release hung reservations during incident response"
@@ -308,36 +314,41 @@ const gridTemplate = computed(() =>
 
     <!-- Filters. Tenant is required; the server rejects admin list
          without it, so we enforce client-side too. Status defaults to
-         ACTIVE because that's the operationally-interesting set. -->
-    <div class="mb-4 flex gap-3 flex-wrap items-end">
-      <div>
-        <label for="res-tenant" class="form-label">Tenant *</label>
-        <select id="res-tenant" v-model="tenantFilter" class="form-select">
-          <option value="" disabled>— pick a tenant —</option>
-          <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
-        </select>
+         ACTIVE because that's the operationally-interesting set.
+         Wrapped in card to match the toolbars in other list views. -->
+    <div class="card p-4 mb-4">
+      <div class="flex gap-3 flex-wrap items-end">
+        <div>
+          <label for="res-tenant" class="form-label">Tenant *</label>
+          <select id="res-tenant" v-model="tenantFilter" class="form-select">
+            <option value="" disabled>— pick a tenant —</option>
+            <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
+          </select>
+        </div>
+        <div>
+          <label for="res-status" class="form-label">Status</label>
+          <select id="res-status" v-model="statusFilter" class="form-select">
+            <option value="">All</option>
+            <option v-for="s in RESERVATION_STATUSES" :key="s" :value="s">{{ s }}</option>
+          </select>
+        </div>
+        <p class="muted-sm flex-1 min-w-[16rem]">
+          Default sort is Created (newest first). Click the Created header to flip
+          to ascending — reservations past their grace window but still ACTIVE rise
+          to the top, which is the fast way to find "hung" ones.
+        </p>
       </div>
-      <div>
-        <label for="res-status" class="form-label">Status</label>
-        <select id="res-status" v-model="statusFilter" class="form-select">
-          <option value="">All</option>
-          <option v-for="s in RESERVATION_STATUSES" :key="s" :value="s">{{ s }}</option>
-        </select>
-      </div>
-      <p class="muted-sm flex-1 min-w-[16rem]">
-        Default sort is Created (newest first). Click the Created header to flip
-        to ascending — reservations past their grace window but still ACTIVE rise
-        to the top, which is the fast way to find "hung" ones.
-      </p>
     </div>
 
     <!-- V1 virtualized grid. Structure: role="table" wrapper with a
          role="rowgroup" sticky header and a role="rowgroup" scroll
          container. CSS Grid gives each row a consistent column template
          without HTML <table>'s layout algorithm, which can't coexist
-         with the absolute-positioned virtualized rows. -->
+         with the absolute-positioned virtualized rows. Shell is
+         flex-1 min-h-0 flex-col so the scroll body below expands to
+         fill remaining viewport. -->
     <div
-      class="bg-white rounded-lg shadow overflow-hidden text-sm"
+      class="bg-white rounded-lg shadow overflow-hidden text-sm flex-1 min-h-0 flex flex-col"
       role="table"
       :aria-rowcount="reservations.length + 1"
       :aria-colcount="canManage ? 7 : 6"
@@ -358,17 +369,18 @@ const gridTemplate = computed(() =>
         </div>
       </div>
 
-      <!-- Virtualized body. Fixed max-height so the container is
-           scrollable; TanStack's virtualizer needs a finite viewport
-           to compute which rows intersect. The height is generous
-           enough for a typical laptop viewport; operators on smaller
-           screens get a nested scrollbar. -->
+      <!-- Virtualized body. flex-1 min-h-0 overflow-auto lets the
+           body fill whatever space is left in the flex-col shell —
+           the virtualizer reads clientHeight and re-computes which
+           rows intersect, so resize ticks naturally. min-h-[200px]
+           keeps the body usable on tiny viewports where "flex-1"
+           would otherwise collapse to near-zero (e.g. if the filter
+           toolbar wrapped to many rows). -->
       <div
         v-if="sortedReservations.length > 0"
         ref="scrollEl"
         role="rowgroup"
-        class="overflow-auto"
-        style="max-height: calc(100vh - 360px); min-height: 200px;"
+        class="flex-1 overflow-auto min-h-[200px]"
       >
         <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
           <div

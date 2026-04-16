@@ -606,7 +606,11 @@ const gridTemplate = computed(() =>
 </script>
 
 <template>
-  <div>
+  <!-- Phase 5 (table-layout unification): flex-fill root. Dual-mode:
+       detail branch lays out as natural block flow (cards stack),
+       list branch uses its own flex-col wrapper to flex-fill the
+       virtualized table. -->
+  <div class="h-full flex flex-col min-h-0">
     <PageHeader
       :title="pageTitle"
       :subtitle="isDetail && detail ? `${detail.scope} · ${detail.unit}` : undefined"
@@ -694,7 +698,12 @@ const gridTemplate = computed(() =>
         </div>
       </div>
 
-      <div class="card p-4">
+      <!-- Event timeline card flex-fills the remaining viewport so
+           the virtualized list inside EventTimeline has a bounded
+           scroll container — parity with the list-view Phase 5
+           pattern. Header (h3) and footer (Load more) take natural
+           height; the timeline itself flexes. -->
+      <div class="card p-4 flex-1 min-h-0 flex flex-col">
         <h3 class="text-sm font-medium text-gray-700 mb-3">Event Timeline</h3>
         <EventTimeline :events="detailEvents" />
         <!-- R8: Load-more for historical event timelines. Pre-fix the
@@ -707,14 +716,16 @@ const gridTemplate = computed(() =>
             :disabled="detailEventsLoadingMore || !detailEventsCursor"
             class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
           >
-            {{ detailEventsLoadingMore ? 'Loading…' : 'Load older events' }}
+            {{ detailEventsLoadingMore ? 'Loading…' : 'Load more' }}
           </button>
         </div>
       </div>
     </template>
 
-    <!-- List mode -->
-    <template v-else>
+    <!-- List mode. Wrap the list-mode subtree in its own flex-col so
+         the virtualized table below can flex-fill without polluting
+         the detail-mode (natural block flow) layout. -->
+    <div v-else class="flex flex-col flex-1 min-h-0">
       <!-- Active filter banner -->
       <div v-if="isCrossTenantFilter" class="flex items-center gap-2 mb-4 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
         <span>Showing {{ activeFilter === 'over_limit' ? 'over-limit' : 'budgets with debt' }} across all tenants</span>
@@ -774,7 +785,7 @@ const gridTemplate = computed(() =>
            fall back to the document default 16px, break their grid
            column width, and overflow into neighbors. -->
       <div
-        class="bg-white rounded-lg shadow overflow-hidden text-sm"
+        class="bg-white rounded-lg shadow overflow-hidden text-sm flex-1 min-h-0 flex flex-col"
         role="table"
         :aria-rowcount="sortedBudgets.length + 1"
         :aria-colcount="canManage ? 7 : 6"
@@ -795,8 +806,7 @@ const gridTemplate = computed(() =>
           v-if="sortedBudgets.length > 0"
           ref="scrollEl"
           role="rowgroup"
-          class="overflow-auto"
-          style="max-height: calc(100vh - 420px); min-height: 240px;"
+          class="flex-1 overflow-auto min-h-[240px]"
         >
           <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
             <div
@@ -840,10 +850,10 @@ const gridTemplate = computed(() =>
            — same pattern as TenantsView / WebhooksView. -->
       <div v-if="hasMore || loadingMore" class="mt-3 flex justify-end">
         <button @click="loadMore" :disabled="loadingMore" class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50 cursor-pointer">
-          {{ loadingMore ? 'Loading...' : 'Load more results' }}
+          {{ loadingMore ? 'Loading...' : 'Load more' }}
         </button>
       </div>
-    </template>
+    </div>
 
     <ConfirmAction
       v-if="pendingAction"

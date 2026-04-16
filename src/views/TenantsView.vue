@@ -371,7 +371,10 @@ const gridTemplate = computed(() =>
 </script>
 
 <template>
-  <div>
+  <!-- Phase 5 (table-layout unification): flex-fill root — the table
+       body grows to fill whatever viewport height remains after the
+       header, filter bar, and footer take their natural height. -->
+  <div class="h-full flex flex-col min-h-0">
     <PageHeader
       title="Tenants"
       item-noun="tenant"
@@ -395,14 +398,18 @@ const gridTemplate = computed(() =>
     </PageHeader>
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
-    <!-- Search + parent filter -->
-    <div class="mb-4 flex gap-3 flex-wrap items-center">
-      <input v-model="search" placeholder="Search by ID or name..." class="border border-gray-300 rounded px-3 py-1.5 text-sm max-w-xs flex-1 min-w-[14rem]" />
-      <select v-model="parentFilter" aria-label="Filter by parent tenant" class="form-select">
-        <option value="">All tenants</option>
-        <option value="__root__">(root-level only)</option>
-        <option v-for="p in parentOptions" :key="p.tenant_id" :value="p.tenant_id">Children of: {{ p.name || p.tenant_id }}</option>
-      </select>
+    <!-- Search + parent filter. Wrapped in card to match the filter
+         toolbars in BudgetsView / EventsView / AuditView / ApiKeysView
+         — consistent visual grouping & separation from the table below. -->
+    <div class="card p-4 mb-4">
+      <div class="flex gap-3 flex-wrap items-center">
+        <input v-model="search" placeholder="Search by ID or name..." class="border border-gray-300 rounded px-3 py-1.5 text-sm max-w-xs flex-1 min-w-[14rem]" />
+        <select v-model="parentFilter" aria-label="Filter by parent tenant" class="form-select">
+          <option value="">All tenants</option>
+          <option value="__root__">(root-level only)</option>
+          <option v-for="p in parentOptions" :key="p.tenant_id" :value="p.tenant_id">Children of: {{ p.name || p.tenant_id }}</option>
+        </select>
+      </div>
     </div>
 
     <!-- Floating bulk action bar — appears only when rows are
@@ -445,9 +452,11 @@ const gridTemplate = computed(() =>
 
     <!-- V1 virtualized grid. Pattern established in ReservationsView:
          role="table" outer, sticky role="rowgroup" header, scroll
-         container with absolute-positioned virtualized rows. -->
+         container with absolute-positioned virtualized rows. Shell is
+         flex-1 min-h-0 flex-col so the scroll body below expands to
+         fill remaining viewport (phase 5 table-layout unification). -->
     <div
-      class="bg-white rounded-lg shadow overflow-hidden text-sm"
+      class="bg-white rounded-lg shadow overflow-hidden text-sm flex-1 min-h-0 flex flex-col"
       role="table"
       :aria-rowcount="filteredTenants.length + 1"
       :aria-colcount="canManage ? 8 : 6"
@@ -471,8 +480,7 @@ const gridTemplate = computed(() =>
         v-if="sortedTenants.length > 0"
         ref="scrollEl"
         role="rowgroup"
-        class="overflow-auto"
-        style="max-height: calc(100vh - 360px); min-height: 200px;"
+        class="flex-1 overflow-auto min-h-[200px]"
       >
         <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
           <div
