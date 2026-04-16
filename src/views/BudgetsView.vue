@@ -119,11 +119,53 @@ function applyClientFilters(items: BudgetLedger[], extra?: (b: BudgetLedger) => 
   return result
 }
 
+// R2 mitigation (scale-hardening). Pre-fix: iterated tenants and
+// issued ONE listBudgets() per tenant, keeping only page 1 — so the
+// over_limit / has_debt filters silently missed matching budgets on
+// pages 2+ within each tenant. That was a correctness bug, not just
+// performance: an over-limit budget ranked past its tenant's first
+// page never surfaced in the cross-tenant filter at all.
+//
+// Post-mitigation: cap the tenant fan-out (bounded request count),
+// parallelize at 4 concurrent, and follow next_cursor within each
+// tenant so over_limit / has_debt see every match. Still O(N) in
+// tenants (hence CROSS_TENANT_FANOUT_CAP); the real fix is a
+// tenant-agnostic /admin/budgets endpoint with server-side
+// over_limit / utilization filters — tracked as a cycles-server-admin
+// spec change.
+const CROSS_TENANT_FANOUT_CAP = 100
+const CROSS_TENANT_CONCURRENCY = 4
+const CROSS_TENANT_PER_TENANT_PAGE_CAP = 10 // safety: don't spin forever on one tenant
+const budgetsTenantsExamined = ref(0)
+const budgetsFanoutTruncated = computed(
+  () => tenants.value.length > budgetsTenantsExamined.value,
+)
+
+async function fetchAllBudgetsForTenant(tenantId: string): Promise<BudgetLedger[]> {
+  const all: BudgetLedger[] = []
+  let cursor: string | undefined = undefined
+  let pages = 0
+  do {
+    const params: Record<string, string> = { tenant_id: tenantId }
+    if (cursor) params.cursor = cursor
+    const res = await listBudgets(params)
+    all.push(...res.ledgers)
+    cursor = res.has_more ? res.next_cursor : undefined
+    pages++
+  } while (cursor && pages < CROSS_TENANT_PER_TENANT_PAGE_CAP)
+  return all
+}
+
 async function loadAllTenantBudgets(filterFn?: (b: BudgetLedger) => boolean) {
+  const targets = tenants.value.slice(0, CROSS_TENANT_FANOUT_CAP)
+  budgetsTenantsExamined.value = targets.length
   const allBudgets: BudgetLedger[] = []
-  for (const t of tenants.value) {
-    const res = await listBudgets({ tenant_id: t.tenant_id })
-    allBudgets.push(...res.ledgers)
+  for (let i = 0; i < targets.length; i += CROSS_TENANT_CONCURRENCY) {
+    const batch = targets.slice(i, i + CROSS_TENANT_CONCURRENCY)
+    const results = await Promise.all(
+      batch.map((t) => fetchAllBudgetsForTenant(t.tenant_id)),
+    )
+    for (const chunk of results) allBudgets.push(...chunk)
   }
   budgets.value = applyClientFilters(allBudgets, filterFn)
   hasMore.value = false
@@ -400,6 +442,21 @@ watch(() => route.query, () => {
     </PageHeader>
 
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
+
+    <!-- R2 mitigation: cross-tenant fan-out cap banner. Shown only
+         when the truncation is active AND the view is in a mode that
+         actually fans out (over_limit / has_debt / all-tenants). The
+         single-tenant view paginates normally so the banner is
+         irrelevant there. -->
+    <p
+      v-if="budgetsFanoutTruncated && (isCrossTenantFilter || (!isDetail && !selectedTenant))"
+      class="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-2 mb-4"
+      role="status"
+    >
+      Scanned the first <strong>{{ budgetsTenantsExamined.toLocaleString() }}</strong> of
+      <strong>{{ tenants.length.toLocaleString() }}</strong> tenants.
+      Budgets on tenants outside this window are not shown. Narrow by tenant to see those.
+    </p>
 
     <!-- Detail mode -->
     <template v-if="isDetail && detail">
