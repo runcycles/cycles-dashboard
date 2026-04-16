@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { getWebhook, listDeliveries, updateWebhook, deleteWebhook, testWebhook, replayWebhookEvents, rotateWebhookSecret } from '../api/client'
@@ -29,6 +30,25 @@ const webhook = ref<WebhookSubscription | null>(null)
 const deliveries = ref<WebhookDelivery[]>([])
 const error = ref('')
 const pendingAction = ref<'ACTIVE' | 'PAUSED' | 'reset' | null>(null)
+
+// Delivery-history pagination + filter (scale hardening). A busy
+// webhook can have thousands of delivery records; pre-fix the view
+// fetched them all and rendered each as a real DOM row. Now:
+//   - cursor pagination via Load more (append)
+//   - status filter (DELIVERED / FAILED / PENDING)
+//   - virtualized rows so DOM stays bounded
+// Polling still refreshes page 1 every 30s — operators who Load-
+// more'd will see the tail reset, same trade-off documented on
+// the other list views (ReservationsView / TenantsView).
+const deliveriesHasMore = ref(false)
+const deliveriesNextCursor = ref('')
+const deliveriesLoadingMore = ref(false)
+const deliveryStatusFilter = ref('')
+const filteredDeliveries = computed(() =>
+  deliveryStatusFilter.value
+    ? deliveries.value.filter(d => d.status === deliveryStatusFilter.value)
+    : deliveries.value,
+)
 
 async function executeAction() {
   if (!pendingAction.value) return
@@ -210,14 +230,58 @@ async function submitReplay() {
   finally { replayLoading.value = false }
 }
 
+function buildDeliveryParams(): Record<string, string> {
+  const p: Record<string, string> = {}
+  if (deliveryStatusFilter.value) p.status = deliveryStatusFilter.value
+  return p
+}
+
 const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
     webhook.value = await getWebhook(id)
-    const res = await listDeliveries(id)
+    const res = await listDeliveries(id, buildDeliveryParams())
     deliveries.value = res.deliveries
+    deliveriesHasMore.value = !!res.has_more
+    deliveriesNextCursor.value = res.next_cursor ?? ''
     error.value = ''
   } catch (e) { error.value = toMessage(e) }
 }, 30000)
+
+async function loadMoreDeliveries() {
+  if (!deliveriesNextCursor.value || deliveriesLoadingMore.value) return
+  deliveriesLoadingMore.value = true
+  try {
+    const params = { ...buildDeliveryParams(), cursor: deliveriesNextCursor.value }
+    const res = await listDeliveries(id, params)
+    deliveries.value = [...deliveries.value, ...res.deliveries]
+    deliveriesHasMore.value = !!res.has_more
+    deliveriesNextCursor.value = res.next_cursor ?? ''
+  } catch (e) { error.value = toMessage(e) }
+  finally { deliveriesLoadingMore.value = false }
+}
+
+// V1 virtualization on the delivery list. Simple fixed-height rows —
+// no expandable details so the pattern from ReservationsView applies
+// directly. 48px per row accommodates StatusBadge + mono event_id at
+// text-sm.
+const deliveryScrollEl = ref<HTMLElement | null>(null)
+const DELIVERY_ROW_HEIGHT = 48
+const deliveryVirt = useVirtualizer(computed(() => ({
+  count: filteredDeliveries.value.length,
+  getScrollElement: () => deliveryScrollEl.value,
+  estimateSize: () => DELIVERY_ROW_HEIGHT,
+  overscan: 8,
+  getItemKey: (i: number) => filteredDeliveries.value[i]?.delivery_id ?? i,
+})))
+const deliveryVirtualRows = computed(() => deliveryVirt.value.getVirtualItems())
+const deliveryTotalHeight = computed(() => deliveryVirt.value.getTotalSize())
+const deliveryGridTemplate = '120px 100px 100px minmax(220px,1fr) 160px'
+
+// Status filter refetches page 1 so the filter is server-enforced
+// (not just client-side filtering of already-loaded data — that
+// would let the filter miss matches from un-loaded pages). A select
+// change is instant-apply; no debounce needed.
+watch(deliveryStatusFilter, () => { refresh() })
 </script>
 
 <template>
@@ -303,34 +367,75 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         <button type="button" @click="replayResult = null" aria-label="Dismiss replay notification" class="text-blue-500 hover:text-blue-800 cursor-pointer shrink-0">✕</button>
       </div>
 
-      <div class="card-table">
-        <div class="table-cell border-b border-gray-100 flex justify-between items-center">
+      <!-- V1 virtualized delivery history. Same pattern as the
+           top-level list views. Status filter applied server-side
+           so pagination stays consistent; Load-more appends. -->
+      <div class="bg-white rounded-lg shadow overflow-hidden text-sm" role="table" :aria-rowcount="filteredDeliveries.length + 1" :aria-colcount="5">
+        <div class="table-cell border-b border-gray-100 flex justify-between items-center gap-3 flex-wrap">
           <h3 class="text-sm font-medium text-gray-700">Delivery History</h3>
-          <span class="muted-sm">{{ deliveries.length }} deliveries</span>
+          <div class="flex items-center gap-3 ml-auto">
+            <span class="muted-sm tabular-nums">
+              {{ filteredDeliveries.length.toLocaleString() }} loaded
+              <span v-if="deliveriesHasMore" class="text-amber-600 ml-1">(more available)</span>
+            </span>
+            <select v-model="deliveryStatusFilter" aria-label="Filter deliveries by status" class="form-select">
+              <option value="">All statuses</option>
+              <option>PENDING</option>
+              <option>DELIVERED</option>
+              <option>FAILED</option>
+              <option>RETRYING</option>
+            </select>
+          </div>
         </div>
-        <table class="w-full text-sm min-w-[600px]">
-          <thead class="table-header">
-            <tr>
-              <th class="table-cell text-left">Status</th>
-              <th class="table-cell text-left">HTTP Code</th>
-              <th class="table-cell text-right">Attempts</th>
-              <th class="table-cell text-left">Event ID</th>
-              <th class="table-cell text-left">Time</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-gray-100">
-            <tr v-for="d in deliveries" :key="d.delivery_id" class="table-row-hover">
-              <td class="table-cell"><StatusBadge :status="d.status" /></td>
-              <td class="table-cell font-mono text-xs" :class="d.http_status && d.http_status >= 400 ? 'text-red-600' : 'muted'">{{ d.http_status || '-' }}</td>
-              <td class="table-cell text-right muted tabular-nums">{{ d.attempts }}</td>
-              <td class="table-cell font-mono muted-sm">{{ d.event_id }}</td>
-              <td class="table-cell muted-sm">{{ d.attempted_at ? formatDateTime(d.attempted_at) : d.created_at ? formatDateTime(d.created_at) : '-' }}</td>
-            </tr>
-            <tr v-if="deliveries.length === 0">
-              <td colspan="5"><EmptyState message="No deliveries yet" hint="Deliveries will appear here once events are dispatched" /></td>
-            </tr>
-          </tbody>
-        </table>
+
+        <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
+          <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: deliveryGridTemplate }">
+            <div role="columnheader" class="table-cell text-left">Status</div>
+            <div role="columnheader" class="table-cell text-left">HTTP Code</div>
+            <div role="columnheader" class="table-cell text-right">Attempts</div>
+            <div role="columnheader" class="table-cell text-left">Event ID</div>
+            <div role="columnheader" class="table-cell text-left">Time</div>
+          </div>
+        </div>
+
+        <div
+          v-if="filteredDeliveries.length > 0"
+          ref="deliveryScrollEl"
+          role="rowgroup"
+          class="overflow-y-auto"
+          style="max-height: calc(100vh - 520px); min-height: 200px;"
+        >
+          <div role="presentation" :style="{ height: deliveryTotalHeight + 'px', position: 'relative' }">
+            <div
+              v-for="v in deliveryVirtualRows"
+              :key="filteredDeliveries[v.index].delivery_id"
+              role="row"
+              :aria-rowindex="v.index + 2"
+              class="grid table-row-hover border-b border-gray-100 absolute left-0 right-0 items-center"
+              :style="{ gridTemplateColumns: deliveryGridTemplate, transform: `translateY(${v.start}px)`, height: DELIVERY_ROW_HEIGHT + 'px' }"
+            >
+              <div role="cell" class="table-cell"><StatusBadge :status="filteredDeliveries[v.index].status" /></div>
+              <div role="cell" class="table-cell font-mono text-xs" :class="filteredDeliveries[v.index].http_status && filteredDeliveries[v.index].http_status! >= 400 ? 'text-red-600' : 'muted'">{{ filteredDeliveries[v.index].http_status || '-' }}</div>
+              <div role="cell" class="table-cell text-right muted tabular-nums">{{ filteredDeliveries[v.index].attempts }}</div>
+              <div role="cell" class="table-cell font-mono muted-sm truncate" :title="filteredDeliveries[v.index].event_id">{{ filteredDeliveries[v.index].event_id }}</div>
+              <div role="cell" class="table-cell muted-sm">{{ filteredDeliveries[v.index].attempted_at ? formatDateTime(filteredDeliveries[v.index].attempted_at!) : filteredDeliveries[v.index].created_at ? formatDateTime(filteredDeliveries[v.index].created_at!) : '-' }}</div>
+            </div>
+          </div>
+        </div>
+
+        <div v-else>
+          <EmptyState
+            item-noun="delivery"
+            :has-active-filter="!!deliveryStatusFilter"
+            :hint="deliveryStatusFilter ? undefined : 'Deliveries will appear here once events are dispatched.'"
+          />
+        </div>
+      </div>
+
+      <div v-if="deliveriesHasMore || deliveriesLoadingMore" class="mt-3 flex justify-end">
+        <button @click="loadMoreDeliveries" :disabled="deliveriesLoadingMore" class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50 cursor-pointer">
+          {{ deliveriesLoadingMore ? 'Loading…' : 'Load more deliveries' }}
+        </button>
       </div>
     </template>
 
