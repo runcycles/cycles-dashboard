@@ -370,14 +370,23 @@ function hiddenPermsCount(perms: readonly string[] | undefined): number {
 
     <!-- V1 virtualized grid. Wide minimum width — horizontal scroll
          engages on narrower viewports, same behavior as pre-virt
-         `min-w-[900px]` <table>. -->
+         `min-w-[900px]` <table>.
+         Structure: OUTER container owns the single horizontal-scroll
+         (overflow-x-auto). An INNER wrapper enforces the min-width
+         so both header and virtualized body share the same column
+         bounds. The scroll container below only handles vertical
+         scroll (overflow-y-auto). Having min-width on both header
+         and body divs AND overflow-x on the outer created two
+         separate horizontal scrollbars that fought each other on
+         resize — now there's one. -->
     <div
-      class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto text-sm"
+      class="bg-white rounded-lg shadow overflow-x-auto text-sm"
       role="table"
       :aria-rowcount="filteredKeys.length + 1"
       :aria-colcount="canManage ? 9 : 8"
     >
-      <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10" :style="{ minWidth: canManage ? '1320px' : '1160px' }">
+     <div :style="{ minWidth: canManage ? '1380px' : '1220px' }">
+      <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
         <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
           <div role="columnheader" class="table-cell text-left">Key ID</div>
           <SortHeader as="div" label="Name" column="name" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
@@ -396,7 +405,7 @@ function hiddenPermsCount(perms: readonly string[] | undefined): number {
         ref="scrollEl"
         role="rowgroup"
         class="overflow-y-auto"
-        :style="{ maxHeight: 'calc(100vh - 400px)', minHeight: '200px', minWidth: canManage ? '1320px' : '1160px' }"
+        style="max-height: calc(100vh - 400px); min-height: 200px;"
       >
         <div :style="{ height: totalHeight + 'px', position: 'relative' }">
           <div
@@ -456,6 +465,7 @@ function hiddenPermsCount(perms: readonly string[] | undefined): number {
       <div v-else role="row">
         <EmptyState :message="keys.length === 0 ? 'No API keys found' : 'No keys match filters'" :hint="keys.length === 0 ? 'API keys will appear here once created' : undefined" />
       </div>
+     </div>
     </div>
 
     <!-- Create API Key dialog -->
