@@ -27,6 +27,15 @@ const webhooks = ref<WebhookSubscription[]>([])
 const tenants = ref<Tenant[]>([])
 const error = ref('')
 
+// R6 (scale-hardening): cursor pagination. Pre-fix, listWebhooks()'s
+// has_more / next_cursor were discarded. Deployments with thousands
+// of webhook subscriptions silently dropped the tail. Load-more
+// appends; polling refreshes page 1 (drops tail). Same pattern
+// established in ReservationsView / TenantsView.
+const hasMore = ref(false)
+const nextCursor = ref('')
+const loadingMore = ref(false)
+
 // v0.1.25.21 (#5): filter by tenant + bulk pause/enable. The existing
 // view was system-wide with no way to scope to "webhooks for tenant X"
 // — an ops pain when you need to pause a noisy tenant's subscriptions.
@@ -233,10 +242,24 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
     const [wRes, tRes] = await Promise.all([listWebhooks(), listTenants()])
     webhooks.value = wRes.subscriptions
+    hasMore.value = !!wRes.has_more
+    nextCursor.value = wRes.next_cursor ?? ''
     tenants.value = tRes.tenants
     error.value = ''
   } catch (e) { error.value = toMessage(e) }
 }, 60000)
+
+async function loadMore() {
+  if (!nextCursor.value || loadingMore.value) return
+  loadingMore.value = true
+  try {
+    const res = await listWebhooks({ cursor: nextCursor.value })
+    webhooks.value = [...webhooks.value, ...res.subscriptions]
+    hasMore.value = !!res.has_more
+    nextCursor.value = res.next_cursor ?? ''
+  } catch (e) { error.value = toMessage(e) }
+  finally { loadingMore.value = false }
+}
 </script>
 
 <template>
@@ -307,6 +330,24 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- R6: server-side cursor pagination. Tenant filter runs
+         client-side on the loaded set — Load more if a specific
+         tenant's subs are on a later page. Polling refreshes page 1
+         every 60s (same trade-off documented in TenantsView / Reservations). -->
+    <div v-if="hasMore || loadingMore" class="mt-3 flex items-center justify-between">
+      <p class="muted-sm">
+        Showing {{ webhooks.length.toLocaleString() }} loaded subscription{{ webhooks.length === 1 ? '' : 's' }}.
+        Polling refreshes page 1 every 60s, discarding additional pages loaded below.
+      </p>
+      <button
+        @click="loadMore"
+        :disabled="loadingMore || !nextCursor"
+        class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
+      >
+        {{ loadingMore ? 'Loading…' : 'Load more' }}
+      </button>
     </div>
 
     <ConfirmAction
