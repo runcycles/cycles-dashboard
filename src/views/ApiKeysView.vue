@@ -271,11 +271,12 @@ watch(filterTenant, () => { refresh() })
 
 // V1 virtualization.
 const scrollEl = ref<HTMLElement | null>(null)
-// 56px (vs 52 on other views) — accommodates the permissions chip row
-// at text-xs line-height without clipping. Permissions still render
-// flex-wrap but overflow-hidden caps at one row visually; operators
-// can see the full list in the Edit dialog.
-const ROW_HEIGHT_ESTIMATE = 56
+// 76px accommodates two rows of permission chips (chip ~28px × 2 +
+// gap + cell padding). Trades a little vertical density for the ability
+// to preview 4 perms (2 per row) instead of 2 inline — the operators
+// asked for this explicitly, scanning 4 perms at a glance beats
+// opening the dialog for every key with > 2 perms.
+const ROW_HEIGHT_ESTIMATE = 76
 const virtualizer = useVirtualizer(computed(() => ({
   count: sortedKeys.value.length,
   getScrollElement: () => scrollEl.value,
@@ -423,22 +424,19 @@ function closePermsViewer() { viewingPermsFor.value = null }
             </div>
             <div role="cell" class="table-cell"><StatusBadge :status="sortedKeys[v.index].status" /></div>
             <div role="cell" class="table-cell muted-sm">
-              <!-- Combined preview + click-to-view. Previously tried
-                   inline "first-N chips + +N counter" alone (counter
-                   got clipped on resize) and pill-only (lost at-a-
-                   glance info). This combines both:
-                   - Up to 2 chips as the preview. Chips sit in a
-                     shrinkable min-w-0 inner container so they
-                     truncate gracefully on narrow viewports.
-                   - "N perms" pill at the end with flex-shrink-0 so
-                     it CAN'T be clipped by the overflow — it's the
-                     stable "click for full list" affordance.
-                   Click pill → full-permissions dialog with scope
-                   filter for context + direct jump to Edit. -->
-              <div v-if="(sortedKeys[v.index].permissions?.length ?? 0) > 0" class="flex gap-1 items-center">
-                <div class="flex gap-1 overflow-hidden min-w-0">
+              <!-- Preview 4 chips (wraps 2-per-line inside the column
+                   width) + always-visible "N perms" pill for the full
+                   list. Row height is 76px to fit two chip rows.
+                   - Chips sit in a flex-wrap min-w-0 container on the
+                     left; at typical column widths this wraps to 2x2.
+                   - Pill on the right, flex-shrink-0, self-start so it
+                     anchors to the top even when chips wrap.
+                   - If a key has > 4 permissions the pill's count (e.g.
+                     "6 perms") signals there's more; click to open. -->
+              <div v-if="(sortedKeys[v.index].permissions?.length ?? 0) > 0" class="flex gap-2 items-start">
+                <div class="flex flex-wrap gap-1 min-w-0 flex-1">
                   <span
-                    v-for="p in (sortedKeys[v.index].permissions ?? []).slice(0, 2)"
+                    v-for="p in (sortedKeys[v.index].permissions ?? []).slice(0, 4)"
                     :key="p"
                     class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded whitespace-nowrap"
                   >{{ p }}</span>
