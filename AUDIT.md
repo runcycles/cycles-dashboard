@@ -1,7 +1,45 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-16 (phase 5 polish — multi-row expansion on Events / Audit / EventTimeline for triage comparison workflow), 2026-04-16 (phase 5 polish — BudgetDetail EventTimeline virtualization + flex-fill + Load more label parity with list views), 2026-04-16 (phase 5 polish — PageHeader `itemNounPlural` override fixes "log entrys"→"log entries", WebhooksView subscription→webhook noun consistency, filter toolbars wrapped in card across TenantsView/WebhooksView/ReservationsView), 2026-04-16 (scale-hardening phase 5 — unified table-layout: flex-fill viewport on all 7 list views, fix AuditView double horizontal scrollbar, standardize Load more label), 2026-04-16 (scale-hardening phase 4 — W4 bulk-op bounded concurrency + 429 backoff across all three bulk runners, W5 reveal-timer cleanup, W6 a11y row-count live region), 2026-04-16 (scale-hardening phase 3 — V5 debounce composable, V6 PageHeader result counts, V7 filter-aware EmptyState), 2026-04-16 (scale-hardening phase 2c — V1 virtualization for EventsView + AuditView with measureElement for expandable rows), 2026-04-16 (scale-hardening phase 2b — row virtualization across 5 list views via @tanstack/vue-virtual), 2026-04-16 (scale-hardening phase 2 — pagination on tenants/webhooks/budget-detail events, lazy tabs, O(1) parent lookup, copy-event-data), 2026-04-16 (scale-hardening phase 1 — pagination, cancellation, N+1 mitigation across 6 views), 2026-04-15 (v0.1.25.27 — RESET_SPENT funding operation support, semantics corrected post-test), 2026-04-14 (error-surfacing + SecretReveal + 3 incident-response Playwright flows), 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
+**Date:** 2026-04-16 (TenantDetailView — Edit API Key in-place, ports the v0.1.25.24 ApiKeysView diff-before-patch flow), 2026-04-16 (phase 5 polish — multi-row expansion on Events / Audit / EventTimeline for triage comparison workflow), 2026-04-16 (phase 5 polish — BudgetDetail EventTimeline virtualization + flex-fill + Load more label parity with list views), 2026-04-16 (phase 5 polish — PageHeader `itemNounPlural` override fixes "log entrys"→"log entries", WebhooksView subscription→webhook noun consistency, filter toolbars wrapped in card across TenantsView/WebhooksView/ReservationsView), 2026-04-16 (scale-hardening phase 5 — unified table-layout: flex-fill viewport on all 7 list views, fix AuditView double horizontal scrollbar, standardize Load more label), 2026-04-16 (scale-hardening phase 4 — W4 bulk-op bounded concurrency + 429 backoff across all three bulk runners, W5 reveal-timer cleanup, W6 a11y row-count live region), 2026-04-16 (scale-hardening phase 3 — V5 debounce composable, V6 PageHeader result counts, V7 filter-aware EmptyState), 2026-04-16 (scale-hardening phase 2c — V1 virtualization for EventsView + AuditView with measureElement for expandable rows), 2026-04-16 (scale-hardening phase 2b — row virtualization across 5 list views via @tanstack/vue-virtual), 2026-04-16 (scale-hardening phase 2 — pagination on tenants/webhooks/budget-detail events, lazy tabs, O(1) parent lookup, copy-event-data), 2026-04-16 (scale-hardening phase 1 — pagination, cancellation, N+1 mitigation across 6 views), 2026-04-15 (v0.1.25.27 — RESET_SPENT funding operation support, semantics corrected post-test), 2026-04-14 (error-surfacing + SecretReveal + 3 incident-response Playwright flows), 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
 **Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.17+ continues to satisfy the governance plane; **admin server v0.1.25.18+ required** to execute the new `RESET_SPENT` funding operation from BudgetsView (older admin servers will reject the operation enum with 400 INVALID_REQUEST — UI degrades gracefully but the operator sees the server's error toast).
+
+### 2026-04-16 — TenantDetailView: Edit API Key in-place
+
+Closes a workflow gap — the Policies tab on tenant-detail has had an
+Edit button since the v0.1.25.20 policies rollout, but the API Keys
+tab was Activity + Revoke only. Operators who wanted to rename a key
+or reshape its permissions had to navigate to the global ApiKeysView,
+filter by tenant, edit there, and navigate back. On a multi-tenant
+day that's painful.
+
+**Fix.** Port the v0.1.25.24 ApiKeysView Edit flow into
+`src/views/TenantDetailView.vue`:
+
+- `openEditKey(k)` — same canonical-permission filter as
+  ApiKeysView.openEdit: any stored permission not in the current
+  `PERMISSIONS` enum is dropped from the form's state and surfaced
+  via toast so the cleanup isn't silent on save.
+- `submitEditKey()` — diff-before-patch: sends only the fields the
+  operator actually changed (`sameKeyStringSet()` helper).
+  Round-tripping unchanged permissions was the original cause of
+  spurious 400s when the stored key carried a legacy enum value.
+- Pending-changes summary (green adds / red removes) on the edit
+  dialog, matching the ApiKeysView UX one-to-one. `aria-live="polite"`
+  so screen readers catch the diff as the operator toggles checkboxes.
+- Row action: `<button v-if="k.status === 'ACTIVE'" ...>Edit</button>`
+  placed between the Activity link and Revoke. Gated the same way as
+  the existing Revoke button — disabled keys don't expose an Edit
+  button since there's nothing coherent to change on a revoked key.
+
+No server-side change — `updateApiKey` and `PERMISSIONS` were already
+exported from `src/api/client.ts` / `src/types.ts`. Refresh after
+save reuses the existing `listApiKeys({ tenant_id: id })` call so the
+Permissions column in the table updates immediately.
+
+**Gates.** 336/336 vitest, `vue-tsc -b --noEmit` clean. No E2E spec
+currently targets this flow; the existing capability-gating test
+(`canManageKeys`) still governs visibility of all three row actions
+including the new Edit button.
 
 ### 2026-04-16 — Phase 5 polish (multi-row expansion on Events / Audit / EventTimeline)
 

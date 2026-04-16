@@ -2,10 +2,10 @@
 import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
-import { getTenant, listTenants, listBudgets, listApiKeys, listPolicies, updateTenantStatus, updateTenant, revokeApiKey, createApiKey, createBudget, createPolicy, updatePolicy, freezeBudget } from '../api/client'
+import { getTenant, listTenants, listBudgets, listApiKeys, listPolicies, updateTenantStatus, updateTenant, revokeApiKey, createApiKey, updateApiKey, createBudget, createPolicy, updatePolicy, freezeBudget } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { Tenant, BudgetLedger, ApiKey, Policy, ApiKeyCreateResponse, BudgetCreateRequest, PolicyCreateRequest, PolicyUpdateRequest } from '../types'
-import { COMMIT_OVERAGE_POLICIES } from '../types'
+import { COMMIT_OVERAGE_POLICIES, PERMISSIONS } from '../types'
 import PermissionPicker from '../components/PermissionPicker.vue'
 import { validateScope } from '../utils/safe'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -183,6 +183,87 @@ async function submitCreateKey() {
     showCreateKey.value = false
   } catch (e) { createKeyError.value = toMessage(e) }
   finally { createKeyLoading.value = false }
+}
+
+// Edit API key — mirrors the ApiKeysView.vue flow (v0.1.25.24
+// diff-before-patch) so operators can rename / reshape permissions
+// without navigating away from the tenant page. Sends only changed
+// fields to dodge the closed-permission-enum 400 on round-tripped
+// legacy values.
+const editingKey = ref<ApiKey | null>(null)
+const editKeyLoading = ref(false)
+const editKeyError = ref('')
+const editKeyForm = ref({ name: '', permissions: [] as string[], scope_filter: '' })
+
+function openEditKey(k: ApiKey) {
+  // Drop any stored permission that isn't in the canonical set — same
+  // legacy-value handling as ApiKeysView.openEdit.
+  const allowed = new Set<string>(PERMISSIONS as readonly string[])
+  const stored = k.permissions || []
+  const dropped = stored.filter(p => !allowed.has(p))
+  const kept = stored.filter(p => allowed.has(p))
+  editKeyForm.value = {
+    name: k.name || '',
+    permissions: kept,
+    scope_filter: k.scope_filter?.join(', ') || '',
+  }
+  editKeyError.value = ''
+  editingKey.value = k
+  if (dropped.length) {
+    toast.error(`Unrecognized permissions will be removed on save: ${dropped.join(', ')}`)
+  }
+}
+
+function sameKeyStringSet(a: string[] | undefined, b: string[] | undefined): boolean {
+  const aa = a || []
+  const bb = b || []
+  if (aa.length !== bb.length) return false
+  const sa = new Set(aa)
+  for (const v of bb) if (!sa.has(v)) return false
+  return true
+}
+
+const pendingKeyPermAdds = computed<string[]>(() => {
+  if (!editingKey.value) return []
+  const orig = new Set(editingKey.value.permissions || [])
+  return editKeyForm.value.permissions.filter(p => !orig.has(p))
+})
+const pendingKeyPermRemoves = computed<string[]>(() => {
+  if (!editingKey.value) return []
+  const curr = new Set(editKeyForm.value.permissions)
+  return (editingKey.value.permissions || []).filter(p => !curr.has(p))
+})
+
+async function submitEditKey() {
+  if (!editingKey.value) return
+  editKeyError.value = ''
+  editKeyLoading.value = true
+  try {
+    const body: Record<string, unknown> = {}
+    const original = editingKey.value
+    if (editKeyForm.value.name !== (original.name || '')) {
+      body.name = editKeyForm.value.name
+    }
+    if (!sameKeyStringSet(editKeyForm.value.permissions, original.permissions)) {
+      body.permissions = editKeyForm.value.permissions
+    }
+    const scopes = editKeyForm.value.scope_filter
+      ? editKeyForm.value.scope_filter.split(',').map(s => s.trim()).filter(Boolean)
+      : []
+    if (!sameKeyStringSet(scopes, original.scope_filter)) {
+      body.scope_filter = scopes
+    }
+    if (Object.keys(body).length === 0) {
+      editingKey.value = null
+      return
+    }
+    await updateApiKey(original.key_id, body as any)
+    toast.success('API key updated')
+    editingKey.value = null
+    const kRes = await listApiKeys({ tenant_id: id })
+    apiKeys.value = kRes.keys
+  } catch (e) { editKeyError.value = toMessage(e) }
+  finally { editKeyLoading.value = false }
 }
 
 // v0.1.25.20: Create Budget — admin-on-behalf-of (server v0.1.25.14, spec
@@ -626,6 +707,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
                 <div class="flex gap-2">
                   <!-- #8: same drill-down as ApiKeysView.vue. -->
                   <router-link :to="{ name: 'audit', query: { key_id: k.key_id } }" class="text-xs text-gray-600 hover:text-gray-800 cursor-pointer hover:underline">Activity</router-link>
+                  <button v-if="k.status === 'ACTIVE'" @click="openEditKey(k)" class="btn-row-primary">Edit</button>
                   <button v-if="k.status === 'ACTIVE'" @click="pendingKeyRevoke = k" class="btn-row-danger">Revoke</button>
                 </div>
               </td>
@@ -744,6 +826,46 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
     </FormDialog>
 
     <SecretReveal v-if="createdKeySecret" title="API Key Created" :secret="createdKeySecret.key_secret" label="API Key Secret" @close="createdKeySecret = null; refresh()" />
+
+    <!-- Edit API Key — mirrors ApiKeysView.vue's edit dialog, including
+         the green/red pending-changes diff so operators see what the
+         PATCH body will actually carry. -->
+    <FormDialog v-if="editingKey" title="Edit API Key" submit-label="Save Changes" :loading="editKeyLoading" :error="editKeyError" @submit="submitEditKey" @cancel="editingKey = null">
+      <div>
+        <label for="ek2-name" class="form-label">Name</label>
+        <input id="ek2-name" v-model="editKeyForm.name" required class="form-input" />
+      </div>
+      <div>
+        <label class="form-label">Permissions</label>
+        <PermissionPicker v-model="editKeyForm.permissions" />
+        <div
+          v-if="pendingKeyPermAdds.length || pendingKeyPermRemoves.length"
+          class="mt-2 text-xs flex flex-wrap gap-1 items-center"
+          aria-live="polite"
+        >
+          <template v-if="pendingKeyPermAdds.length">
+            <span class="text-green-700 font-medium">Adding:</span>
+            <span
+              v-for="p in pendingKeyPermAdds"
+              :key="'add:' + p"
+              class="bg-green-50 text-green-700 border border-green-200 rounded px-1.5 py-0.5 font-mono"
+            >+{{ p }}</span>
+          </template>
+          <template v-if="pendingKeyPermRemoves.length">
+            <span class="text-red-700 font-medium" :class="pendingKeyPermAdds.length ? 'ml-3' : ''">Removing:</span>
+            <span
+              v-for="p in pendingKeyPermRemoves"
+              :key="'rem:' + p"
+              class="bg-red-50 text-red-700 border border-red-200 rounded px-1.5 py-0.5 font-mono"
+            >−{{ p }}</span>
+          </template>
+        </div>
+      </div>
+      <div>
+        <label for="ek2-scope" class="form-label">Scope filter (comma-separated)</label>
+        <input id="ek2-scope" v-model="editKeyForm.scope_filter" class="form-input-mono" />
+      </div>
+    </FormDialog>
 
     <!-- v0.1.25.21 (#7): Emergency Freeze confirm. Intentionally spells
          out the blast radius (N budgets, list of scopes if small) so ops
