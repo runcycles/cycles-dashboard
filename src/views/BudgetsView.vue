@@ -47,6 +47,13 @@ const { sortKey, sortDir, toggle, sorted: sortedBudgets } = useSort(budgets, 'ut
 })
 const detail = ref<BudgetLedger | null>(null)
 const detailEvents = ref<Event[]>([])
+// R8 (scale-hardening): paginate the budget-detail event timeline.
+// Pre-fix hardcoded limit='20' with no Load-more — a budget with more
+// than 20 historical events showed only the latest 20, no signal.
+const DETAIL_EVENTS_PAGE_SIZE = 20
+const detailEventsCursor = ref('')
+const detailEventsHasMore = ref(false)
+const detailEventsLoadingMore = ref(false)
 
 const filterStatus = ref((route.query.status as string) || '')
 const filterUnit = ref('')
@@ -208,10 +215,36 @@ async function loadDetail() {
   const unit = route.query.unit as string
   try {
     detail.value = await lookupBudget(scope, unit)
-    const evRes = await listEvents({ scope, limit: '20' })
+    detailEventsCursor.value = ''
+    detailEventsHasMore.value = false
+    const evRes = await listEvents({ scope, limit: String(DETAIL_EVENTS_PAGE_SIZE) })
+    // Server already filters by scope via the query param but we also
+    // filter client-side because listEvents' scope param is a prefix
+    // match on some server versions; the precise-match belt-and-suspenders
+    // keeps unrelated child-scope events out of the timeline.
     detailEvents.value = evRes.events.filter(e => e.scope === scope)
+    detailEventsHasMore.value = !!evRes.has_more
+    detailEventsCursor.value = evRes.next_cursor ?? ''
     error.value = ''
   } catch (e) { error.value = toMessage(e) }
+}
+
+async function loadMoreDetailEvents() {
+  if (!detailEventsCursor.value || detailEventsLoadingMore.value) return
+  const scope = route.query.scope as string
+  detailEventsLoadingMore.value = true
+  try {
+    const evRes = await listEvents({
+      scope,
+      limit: String(DETAIL_EVENTS_PAGE_SIZE),
+      cursor: detailEventsCursor.value,
+    })
+    const filtered = evRes.events.filter(e => e.scope === scope)
+    detailEvents.value = [...detailEvents.value, ...filtered]
+    detailEventsHasMore.value = !!evRes.has_more
+    detailEventsCursor.value = evRes.next_cursor ?? ''
+  } catch (e) { error.value = toMessage(e) }
+  finally { detailEventsLoadingMore.value = false }
 }
 
 async function loadMore() {
@@ -502,6 +535,19 @@ watch(() => route.query, () => {
       <div class="card p-4">
         <h3 class="text-sm font-medium text-gray-700 mb-3">Event Timeline</h3>
         <EventTimeline :events="detailEvents" />
+        <!-- R8: Load-more for historical event timelines. Pre-fix the
+             view was capped at 20 events with no escape hatch; budgets
+             with long activity histories (chatty agents, long lifetime)
+             showed only the tail of the tail. -->
+        <div v-if="detailEventsHasMore || detailEventsLoadingMore" class="mt-3 flex items-center justify-end">
+          <button
+            @click="loadMoreDetailEvents"
+            :disabled="detailEventsLoadingMore || !detailEventsCursor"
+            class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
+          >
+            {{ detailEventsLoadingMore ? 'Loading…' : 'Load older events' }}
+          </button>
+        </div>
       </div>
     </template>
 
