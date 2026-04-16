@@ -1,7 +1,30 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-16 (scale-hardening phase 2b — row virtualization across 5 list views via @tanstack/vue-virtual), 2026-04-16 (scale-hardening phase 2 — pagination on tenants/webhooks/budget-detail events, lazy tabs, O(1) parent lookup, copy-event-data), 2026-04-16 (scale-hardening phase 1 — pagination, cancellation, N+1 mitigation across 6 views), 2026-04-15 (v0.1.25.27 — RESET_SPENT funding operation support, semantics corrected post-test), 2026-04-14 (error-surfacing + SecretReveal + 3 incident-response Playwright flows), 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
+**Date:** 2026-04-16 (scale-hardening phase 2c — V1 virtualization for EventsView + AuditView with measureElement for expandable rows), 2026-04-16 (scale-hardening phase 2b — row virtualization across 5 list views via @tanstack/vue-virtual), 2026-04-16 (scale-hardening phase 2 — pagination on tenants/webhooks/budget-detail events, lazy tabs, O(1) parent lookup, copy-event-data), 2026-04-16 (scale-hardening phase 1 — pagination, cancellation, N+1 mitigation across 6 views), 2026-04-15 (v0.1.25.27 — RESET_SPENT funding operation support, semantics corrected post-test), 2026-04-14 (error-surfacing + SecretReveal + 3 incident-response Playwright flows), 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
 **Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.17+ continues to satisfy the governance plane; **admin server v0.1.25.18+ required** to execute the new `RESET_SPENT` funding operation from BudgetsView (older admin servers will reject the operation enum with 400 INVALID_REQUEST — UI degrades gracefully but the operator sees the server's error toast).
+
+### 2026-04-16 — High-cardinality scale hardening (phase 2c of 5: V1 virtualization, part 2)
+
+Completes audit item V1 by virtualizing the two remaining list views with expandable detail rows. Pattern is the same `@tanstack/vue-virtual` adoption as phase 2b, with one addition: `virtualizer.measureElement` per-row observation for dynamic heights.
+
+**Why measureElement is needed here:** EventsView and AuditView let operators click a row to unfurl a JSON / metadata detail block. Collapsed rows are ~52px; expanded rows grow by 200–280px. Phase 2b's fixed-height pattern (one `estimateSize` value for every row) would either pin all rows tall enough for the expanded case (wasteful vertical density) or flicker as expanded rows get clipped. `measureElement` observes the real DOM height per index and re-lays out siblings on the next tick — scroll stays smooth during expand/collapse.
+
+**Pattern:**
+- Each virtualized `<div role="row">` wraps BOTH the compact row AND (when `expanded === row_id`) the detail block. One virtualized item = one logical row, regardless of expansion state.
+- `:ref="measureRow"` on every row. `measureRow` narrows Vue's `Element | ComponentPublicInstance | null` ref-callback type to `Element` before calling `virtualizer.measureElement(el)`. Function is top-level / stable so Vue doesn't re-register it per render (which would cause measurement thrashing).
+- `getItemKey: (i) => items[i].event_id` / `log_id` — stable identity survives sort toggles, so measured heights don't reset when the operator flips a column sort.
+- Overscan 8 (same as phase 2b views) — buffer for fast scroll.
+
+**Per-view specifics:**
+- **EventsView** (`src/views/EventsView.vue`): 6-column grid. JSON payload block retains V2's `max-h-40` internal scroll so a single huge `event.data` payload doesn't balloon the row past reasonable bounds. Load-more footer relocated outside the virtualized scroll region.
+- **AuditView** (`src/views/AuditView.vue`): 7-column grid with outer `overflow-x-auto` + inner `min-width: 900px` wrapper — same pattern as ApiKeysView for wide tables on narrow viewports (single horizontal scrollbar, no double-scroll bug). Loading/empty sentinels live outside the virtualized body so the virtualizer only sees real data rows.
+
+**Gates:** 314/314 Vitest pass. Typecheck clean. All AuditView export and EventsView poll-merge tests unaffected — those drive data-layer logic that's independent of the rendering strategy.
+
+**V1 is now complete across all 7 list views.** Remaining phases:
+- **Phase 3:** V5 debounce search inputs; V4 server-side sort *(spec-blocked on cycles-server-admin)*.
+- **Phase 4:** W4 bulk concurrency + 429 backoff; W1/W3 *(spec-blocked)*.
+- **Phase 5:** V6 PageHeader result count; V7 EmptyState filter-aware; W5 reveal-timer cleanup; W6 a11y row-count live region.
 
 ### 2026-04-16 — High-cardinality scale hardening (phase 2b of 5: V1 virtualization, part 1)
 
