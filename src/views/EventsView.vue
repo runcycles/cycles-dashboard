@@ -488,7 +488,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
         </div>
       </div>
 
-      <div v-else role="row">
+      <div v-else>
         <EmptyState :message="hasActiveFilters ? 'No events match your filters' : 'No events found'" :hint="hasActiveFilters ? undefined : 'Events will appear here as they occur'">
           <button v-if="hasActiveFilters" @click="clearFilters" class="mt-2 text-xs text-blue-600 hover:underline cursor-pointer">Clear filters</button>
         </EmptyState>

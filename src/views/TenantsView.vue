@@ -411,7 +411,7 @@ const gridTemplate = computed(() =>
         </div>
       </div>
 
-      <div v-else role="row">
+      <div v-else>
         <EmptyState :message="search || parentFilter ? 'No tenants match your filters' : 'No tenants found'" :hint="search || parentFilter ? undefined : 'Tenants will appear here once created'" />
       </div>
     </div>

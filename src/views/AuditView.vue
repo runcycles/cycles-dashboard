@@ -411,11 +411,11 @@ function measureRow(el: Element | { $el?: Element } | null) {
         </div>
       </div>
 
-      <div v-else-if="!loading" role="row">
+      <div v-else-if="!loading">
         <EmptyState message="No audit logs found" hint="Try a broader time range (e.g. Last 24h) or clear your filters" />
       </div>
 
-      <div v-else-if="loading" role="row" class="px-4 py-12 text-center muted">Loading...</div>
+      <div v-else-if="loading" class="px-4 py-12 text-center muted">Loading...</div>
      </div>
     </div>
 

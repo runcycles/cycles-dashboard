@@ -703,7 +703,7 @@ const gridTemplate = computed(() =>
           </div>
         </div>
 
-        <div v-else role="row">
+        <div v-else>
           <EmptyState message="No budgets found" :hint="!selectedTenant ? 'Select a tenant to view budgets' : undefined" />
         </div>
       </div>

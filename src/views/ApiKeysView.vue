@@ -477,7 +477,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
         </div>
       </div>
 
-      <div v-else role="row">
+      <div v-else>
         <EmptyState :message="keys.length === 0 ? 'No API keys found' : 'No keys match filters'" :hint="keys.length === 0 ? 'API keys will appear here once created' : undefined" />
       </div>
      </div>

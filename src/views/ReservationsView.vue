@@ -351,7 +351,7 @@ const gridTemplate = computed(() =>
 
       <!-- Empty state lives outside the virtualized body — the virtualizer
            only understands row-indexed content. -->
-      <div v-else-if="!loadingList" role="row">
+      <div v-else-if="!loadingList">
         <EmptyState
           :message="tenantFilter
             ? (statusFilter ? `No ${statusFilter} reservations for this tenant` : 'No reservations for this tenant')
