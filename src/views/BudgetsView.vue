@@ -157,9 +157,17 @@ function applyClientFilters(items: BudgetLedger[], extra?: (b: BudgetLedger) => 
 const CROSS_TENANT_FANOUT_CAP = 100
 const CROSS_TENANT_CONCURRENCY = 4
 const CROSS_TENANT_PER_TENANT_PAGE_CAP = 10 // safety: don't spin forever on one tenant
+// Tenant-offset pagination for cross-tenant modes (over_limit /
+// has_debt / unselected-tenant). loadAllTenantBudgets slices tenants
+// starting at `budgetsTenantsOffset`. Load more advances the offset
+// by CROSS_TENANT_FANOUT_CAP and APPENDS — without this, the only
+// way to see budgets on tenant #101+ was to narrow by tenant filter,
+// which isn't always what operators want (e.g. "find any over_limit
+// budget across the whole fleet").
+const budgetsTenantsOffset = ref(0)
 const budgetsTenantsExamined = ref(0)
 const budgetsFanoutTruncated = computed(
-  () => tenants.value.length > budgetsTenantsExamined.value,
+  () => tenants.value.length > budgetsTenantsOffset.value + budgetsTenantsExamined.value,
 )
 
 async function fetchAllBudgetsForTenant(tenantId: string): Promise<BudgetLedger[]> {
@@ -177,19 +185,29 @@ async function fetchAllBudgetsForTenant(tenantId: string): Promise<BudgetLedger[
   return all
 }
 
-async function loadAllTenantBudgets(filterFn?: (b: BudgetLedger) => boolean) {
-  const targets = tenants.value.slice(0, CROSS_TENANT_FANOUT_CAP)
-  budgetsTenantsExamined.value = targets.length
-  const allBudgets: BudgetLedger[] = []
+async function loadAllTenantBudgets(
+  filterFn?: (b: BudgetLedger) => boolean,
+  opts: { append?: boolean } = {},
+) {
+  const start = opts.append ? budgetsTenantsOffset.value + budgetsTenantsExamined.value : 0
+  const targets = tenants.value.slice(start, start + CROSS_TENANT_FANOUT_CAP)
+  if (!opts.append) budgetsTenantsOffset.value = 0
+  budgetsTenantsExamined.value = opts.append
+    ? budgetsTenantsExamined.value + targets.length
+    : targets.length
+  const newBudgets: BudgetLedger[] = []
   for (let i = 0; i < targets.length; i += CROSS_TENANT_CONCURRENCY) {
     const batch = targets.slice(i, i + CROSS_TENANT_CONCURRENCY)
     const results = await Promise.all(
       batch.map((t) => fetchAllBudgetsForTenant(t.tenant_id)),
     )
-    for (const chunk of results) allBudgets.push(...chunk)
+    for (const chunk of results) newBudgets.push(...chunk)
   }
-  budgets.value = applyClientFilters(allBudgets, filterFn)
-  hasMore.value = false
+  const filtered = applyClientFilters(newBudgets, filterFn)
+  budgets.value = opts.append ? [...budgets.value, ...filtered] : filtered
+  // hasMore is the "more tenants to scan" flag in cross-tenant modes.
+  // When true, Load-more will advance the offset and append.
+  hasMore.value = budgetsFanoutTruncated.value
   nextCursor.value = ''
 }
 
@@ -262,22 +280,39 @@ async function loadMoreDetailEvents() {
 }
 
 async function loadMore() {
-  if (!nextCursor.value || loadingMore.value) return
+  if (loadingMore.value) return
   loadingMore.value = true
   try {
-    const params: Record<string, string> = { tenant_id: selectedTenant.value, cursor: nextCursor.value }
-    if (filterStatus.value) params.status = filterStatus.value
-    if (filterUnit.value) params.unit = filterUnit.value
-    if (filterScope.value) params.scope_prefix = filterScope.value
-    const res = await listBudgets(params)
-    // v0.1.25.21: apply client-side filters (utilization range #9) to
-    // the newly-appended page too. Without this, "Load more" would
-    // bypass the in-memory filter and dump unfiltered rows into the
-    // visible list — the user would see budgets outside their
-    // utilization range mysteriously appearing on page 2+.
-    budgets.value = [...budgets.value, ...applyClientFilters(res.ledgers)]
-    hasMore.value = res.has_more
-    nextCursor.value = res.next_cursor ?? ''
+    if (isCrossTenantFilter.value || !selectedTenant.value) {
+      // Cross-tenant / all-tenants mode: advance the tenant-offset
+      // pagination axis and append the next CROSS_TENANT_FANOUT_CAP
+      // tenants' worth of budgets. No cursor here — the "more" is
+      // about scanning additional tenants, not additional pages
+      // within a tenant.
+      budgetsTenantsOffset.value += budgetsTenantsExamined.value
+      if (activeFilter.value === 'over_limit') {
+        await loadAllTenantBudgets(b => !!b.is_over_limit, { append: true })
+      } else if (activeFilter.value === 'has_debt') {
+        await loadAllTenantBudgets(b => (b.debt?.amount ?? 0) > 0, { append: true })
+      } else {
+        await loadAllTenantBudgets(undefined, { append: true })
+      }
+    } else {
+      // Single-tenant cursor pagination (original path).
+      if (!nextCursor.value) return
+      const params: Record<string, string> = { tenant_id: selectedTenant.value, cursor: nextCursor.value }
+      if (filterStatus.value) params.status = filterStatus.value
+      if (filterUnit.value) params.unit = filterUnit.value
+      if (filterScope.value) params.scope_prefix = filterScope.value
+      const res = await listBudgets(params)
+      // Apply client-side filters (e.g. utilization range) to the
+      // newly-appended page too. Without this, "Load more" would
+      // bypass the in-memory filter and dump unfiltered rows into
+      // the visible list.
+      budgets.value = [...budgets.value, ...applyClientFilters(res.ledgers)]
+      hasMore.value = res.has_more
+      nextCursor.value = res.next_cursor ?? ''
+    }
   } catch (e) { error.value = toMessage(e) }
   finally { loadingMore.value = false }
 }

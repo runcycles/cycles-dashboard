@@ -4,6 +4,7 @@ import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
+import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { listWebhooks, listTenants, createWebhook, updateWebhook, getWebhookSecurityConfig, updateWebhookSecurityConfig } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { WebhookSubscription, WebhookCreateResponse, Tenant, WebhookSecurityConfig } from '../types'
@@ -47,11 +48,37 @@ const loadingMore = ref(false)
 // Tenant column rather than a broken TenantLink.
 const SYSTEM_TENANT_ID = '__system__'
 const tenantFilter = ref('')
-const filteredWebhooks = computed(() =>
-  tenantFilter.value
-    ? webhooks.value.filter(w => w.tenant_id === tenantFilter.value)
-    : webhooks.value,
-)
+// URL filter: substring match on the URL (or the optional `name`)
+// with case-insensitive compare. Supports "example.com", "api",
+// or a glob-ish "*.internal" (asterisks collapse to `.*` so
+// operators who prefer wildcard notation get it for free).
+// Debounced 200ms via useDebouncedRef so a 20-char URL fragment
+// doesn't fire 20 filter re-computations.
+const urlFilter = ref('')
+const debouncedUrlFilter = useDebouncedRef(urlFilter, 200)
+
+function urlMatches(w: WebhookSubscription, needle: string): boolean {
+  const q = needle.trim().toLowerCase()
+  if (!q) return true
+  const haystack = `${w.url} ${w.name ?? ''}`.toLowerCase()
+  // Treat `*` as a wildcard. Escape the rest of the regex specials
+  // so operators can paste URLs with dots / slashes literally without
+  // them acting as regex metacharacters.
+  if (q.includes('*')) {
+    const escaped = q.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')
+    try {
+      return new RegExp(escaped).test(haystack)
+    } catch { return haystack.includes(q) }
+  }
+  return haystack.includes(q)
+}
+
+const filteredWebhooks = computed(() => {
+  let out = webhooks.value
+  if (tenantFilter.value) out = out.filter(w => w.tenant_id === tenantFilter.value)
+  if (debouncedUrlFilter.value) out = out.filter(w => urlMatches(w, debouncedUrlFilter.value))
+  return out
+})
 function isSystemWebhook(w: WebhookSubscription): boolean {
   return !w.tenant_id || w.tenant_id === SYSTEM_TENANT_ID
 }
@@ -61,7 +88,7 @@ function isSystemWebhook(w: WebhookSubscription): boolean {
 // reads filtered state) but `selected.value` still holds the 5 hidden
 // ids — clicking "Pause selected" would silently affect tenant A's
 // webhooks even though tenant B is what's on screen.
-watch(tenantFilter, () => { selected.value = new Set() })
+watch([tenantFilter, urlFilter], () => { selected.value = new Set() })
 const { sortKey, sortDir, toggle, sorted: sortedWebhooks } = useSort(filteredWebhooks)
 
 const selected = ref<Set<string>>(new Set())
@@ -314,10 +341,12 @@ const gridTemplate = computed(() =>
     </PageHeader>
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
-    <!-- Tenant filter (#5). Options sourced from the tenants the webhooks
-         actually belong to rather than the full tenant list, so the
-         dropdown doesn't show tenants with no subscriptions. -->
-    <div class="mb-4">
+    <!-- Tenant + URL filters. Tenant options sourced from the loaded
+         subscription set so the dropdown only lists tenants that
+         actually have subscriptions. URL filter supports substring
+         ("example.com", "api") or glob wildcards ("*.internal").
+         Debounced 200ms — feels responsive but coalesces fast typing. -->
+    <div class="mb-4 flex gap-3 flex-wrap items-center">
       <select v-model="tenantFilter" aria-label="Filter webhooks by tenant" class="form-select">
         <option value="">All webhooks</option>
         <option
@@ -330,6 +359,13 @@ const gridTemplate = computed(() =>
           :value="t.tenant_id"
         >{{ t.name || t.tenant_id }}</option>
       </select>
+      <input
+        v-model="urlFilter"
+        type="search"
+        placeholder="Filter by URL or name (supports * wildcards)"
+        aria-label="Filter webhooks by URL"
+        class="border border-gray-300 rounded px-3 py-1.5 text-sm w-72"
+      />
     </div>
 
     <!-- Floating bulk action bar — same pattern as TenantsView.
