@@ -369,7 +369,7 @@ const gridTemplate = computed(() =>
         class="overflow-auto"
         style="max-height: calc(100vh - 360px); min-height: 200px;"
       >
-        <div :style="{ height: totalHeight + 'px', position: 'relative' }">
+        <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
           <div
             v-for="v in virtualRows"
             :key="sortedWebhooks[v.index].subscription_id"
@@ -401,7 +401,7 @@ const gridTemplate = computed(() =>
         </div>
       </div>
 
-      <div v-else role="row">
+      <div v-else>
         <EmptyState :message="tenantFilter ? 'No webhooks for this tenant' : 'No webhook subscriptions'" hint="Webhook subscriptions will appear here once configured" />
       </div>
     </div>

@@ -408,7 +408,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
         class="overflow-y-auto"
         style="max-height: calc(100vh - 400px); min-height: 200px;"
       >
-        <div :style="{ height: totalHeight + 'px', position: 'relative' }">
+        <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
           <div
             v-for="v in virtualRows"
             :key="sortedKeys[v.index].key_id"
@@ -477,7 +477,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
         </div>
       </div>
 
-      <div v-else role="row">
+      <div v-else>
         <EmptyState :message="keys.length === 0 ? 'No API keys found' : 'No keys match filters'" :hint="keys.length === 0 ? 'API keys will appear here once created' : undefined" />
       </div>
      </div>

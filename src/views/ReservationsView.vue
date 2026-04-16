@@ -312,7 +312,7 @@ const gridTemplate = computed(() =>
         class="overflow-auto"
         style="max-height: calc(100vh - 360px); min-height: 200px;"
       >
-        <div :style="{ height: totalHeight + 'px', position: 'relative' }">
+        <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
           <div
             v-for="v in virtualRows"
             :key="sortedReservations[v.index].reservation_id"
@@ -351,7 +351,7 @@ const gridTemplate = computed(() =>
 
       <!-- Empty state lives outside the virtualized body — the virtualizer
            only understands row-indexed content. -->
-      <div v-else-if="!loadingList" role="row">
+      <div v-else-if="!loadingList">
         <EmptyState
           :message="tenantFilter
             ? (statusFilter ? `No ${statusFilter} reservations for this tenant` : 'No reservations for this tenant')

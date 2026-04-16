@@ -92,9 +92,12 @@ test('selecting webhooks and clicking Pause transitions them all to PAUSED', asy
       .check()
   }
 
-  // Fire the bulk pause. The confirm-dialog title includes the count
-  // so scope the match accordingly ("Pause 2 webhooks?").
-  await page.getByRole('button', { name: /pause selected/i }).click()
+  // Fire the bulk pause. Bulk-bar label is just "Pause" (shortened
+  // from "Pause selected" since the floating-toolbar rework; the
+  // "N selected" count to its left conveys scope). Scope the locator
+  // to the toolbar region + strict ^pause$ regex so we don't match
+  // the per-row "Pause" button.
+  await page.getByRole('toolbar', { name: /bulk webhook actions/i }).getByRole('button', { name: /^pause$/i }).click()
   const bulkDialog = page.getByRole('dialog', { name: /pause \d+ webhooks\?/i })
   await expect(bulkDialog).toBeVisible()
 

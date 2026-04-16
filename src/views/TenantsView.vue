@@ -370,7 +370,7 @@ const gridTemplate = computed(() =>
         class="overflow-auto"
         style="max-height: calc(100vh - 360px); min-height: 200px;"
       >
-        <div :style="{ height: totalHeight + 'px', position: 'relative' }">
+        <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
           <div
             v-for="v in virtualRows"
             :key="sortedTenants[v.index].tenant_id"
@@ -411,7 +411,7 @@ const gridTemplate = computed(() =>
         </div>
       </div>
 
-      <div v-else role="row">
+      <div v-else>
         <EmptyState :message="search || parentFilter ? 'No tenants match your filters' : 'No tenants found'" :hint="search || parentFilter ? undefined : 'Tenants will appear here once created'" />
       </div>
     </div>

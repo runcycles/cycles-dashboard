@@ -670,7 +670,7 @@ const gridTemplate = computed(() =>
           class="overflow-auto"
           style="max-height: calc(100vh - 420px); min-height: 240px;"
         >
-          <div :style="{ height: totalHeight + 'px', position: 'relative' }">
+          <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
             <div
               v-for="v in virtualRows"
               :key="sortedBudgets[v.index].ledger_id"
@@ -703,7 +703,7 @@ const gridTemplate = computed(() =>
           </div>
         </div>
 
-        <div v-else role="row">
+        <div v-else>
           <EmptyState message="No budgets found" :hint="!selectedTenant ? 'Select a tenant to view budgets' : undefined" />
         </div>
       </div>
