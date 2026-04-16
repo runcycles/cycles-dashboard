@@ -54,6 +54,13 @@ const tab = ref<'budgets' | 'keys' | 'policies'>('budgets')
 // the next poll.
 const keysLoaded = ref(false)
 const policiesLoaded = ref(false)
+// Tab-badge helpers. Computed rather than inline template ternaries
+// because Vue's auto-unwrap on refs inside nested template expressions
+// inside a v-for has been flaky here — moving the ref reads to a
+// computed guarantees `.value` is read explicitly and reactivity
+// tracks cleanly across HMR reloads.
+const apiKeysBadge = computed<number | string>(() => keysLoaded.value ? apiKeys.value.length : '…')
+const policiesBadge = computed<number | string>(() => policiesLoaded.value ? policies.value.length : '…')
 
 // v0.1.25.21 (#6): spend rollup — aggregate allocated / remaining /
 // spent / debt across the tenant's budgets, grouped by unit. Budgets in
@@ -573,13 +580,7 @@ function activateTab(t: 'budgets' | 'keys' | 'policies') {
           <span
             class="ml-1 muted-sm"
             :title="t === 'keys' && !keysLoaded ? 'Keys not loaded yet — click the tab to load' : t === 'policies' && !policiesLoaded ? 'Policies not loaded yet — click the tab to load' : undefined"
-          >({{
-            t === 'budgets'
-              ? budgets.length
-              : t === 'keys'
-                ? (keysLoaded ? apiKeys.length : '…')
-                : (policiesLoaded ? policies.length : '…')
-          }})</span>
+          >({{ t === 'budgets' ? budgets.length : t === 'keys' ? apiKeysBadge : policiesBadge }})</span>
         </button>
       </div>
 
