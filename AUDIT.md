@@ -1,7 +1,41 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-16 (scale-hardening phase 2 — pagination on tenants/webhooks/budget-detail events, lazy tabs, O(1) parent lookup, copy-event-data), 2026-04-16 (scale-hardening phase 1 — pagination, cancellation, N+1 mitigation across 6 views), 2026-04-15 (v0.1.25.27 — RESET_SPENT funding operation support, semantics corrected post-test), 2026-04-14 (error-surfacing + SecretReveal + 3 incident-response Playwright flows), 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
+**Date:** 2026-04-16 (scale-hardening phase 2b — row virtualization across 5 list views via @tanstack/vue-virtual), 2026-04-16 (scale-hardening phase 2 — pagination on tenants/webhooks/budget-detail events, lazy tabs, O(1) parent lookup, copy-event-data), 2026-04-16 (scale-hardening phase 1 — pagination, cancellation, N+1 mitigation across 6 views), 2026-04-15 (v0.1.25.27 — RESET_SPENT funding operation support, semantics corrected post-test), 2026-04-14 (error-surfacing + SecretReveal + 3 incident-response Playwright flows), 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
 **Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.17+ continues to satisfy the governance plane; **admin server v0.1.25.18+ required** to execute the new `RESET_SPENT` funding operation from BudgetsView (older admin servers will reject the operation enum with 400 INVALID_REQUEST — UI degrades gracefully but the operator sees the server's error toast).
+
+### 2026-04-16 — High-cardinality scale hardening (phase 2b of 5: V1 virtualization, part 1)
+
+Closes **audit item V1** (row virtualization) across the five non-expandable-row list views. Events + Audit have expandable detail rows that require `virtualizer.measureElement` for dynamic row heights; they ship in phase 2c.
+
+**New dependency:** `@tanstack/vue-virtual@3.13.23` (~15KB gzip, headless, actively maintained). Chosen over `vue-virtual-scroller` for its composable-first API and better Vue 3 / TypeScript integration.
+
+**Pattern (ReservationsView is the reference):**
+- Semantic `<table>` becomes an ARIA grid of `<div role="table">` → `<div role="rowgroup">` → `<div role="row">` → `<div role="cell">`. HTML's table layout algorithm can't coexist with absolute-positioned virtualized rows, so CSS Grid handles column sizing.
+- `gridTemplateColumns` is bound via inline `:style` (not a Tailwind arbitrary class) — removes dependency on Tailwind JIT scanner correctly picking up complex `[minmax(…,…)_…]` patterns.
+- Fixed row height per view (52–56px depending on content density) so `estimateSize()` is exact and no post-measure reflow happens.
+- `useVirtualizer(computed(() => ({...})))` wraps the options object in a computed; per-field reactivity doesn't work since vue-virtual reads each option as a raw value.
+- `aria-rowcount` / `aria-rowindex` preserve screen-reader position awareness even when most rows aren't in the DOM.
+- `SortHeader` accepts a new `as: 'th' | 'div'` prop (default `'th'`); virtualized views pass `as="div"` so the header fits the ARIA grid. `role="columnheader"` preserved in both modes.
+
+**Views virtualized:**
+1. **ReservationsView** (pilot). 7 columns when canManage. Inline grid template tuned for reservation ID + scope_path's mono-font widths; 120px action column (was 96px — "Force release" at text-xs needed more room after the 32px cell padding).
+2. **TenantsView**. 8 columns when canManage, includes checkbox + bulk bar + single-row Suspend/Reactivate actions. V3's `tenantById` Map lookup unchanged; parentName() still O(1) per row.
+3. **WebhooksView**. 7 columns when canManage. URL cell uses the grid cell's `min-w-0` so the inner router-link's `truncate` works correctly (was previously pinned to `max-w-[300px]` which fights grid sizing).
+4. **ApiKeysView**. 9 columns when canManage — widest view, horizontal-scroll engages below ~1320px. Permissions chips use `flex gap-1 overflow-hidden` (was `flex-wrap` — wrapping on a fixed-height row would clip below). Full permissions list remains visible in the Edit dialog.
+5. **BudgetsView** (list mode only). Detail mode is unaffected — it's bounded by `DETAIL_EVENTS_PAGE_SIZE=20` and virtualizing its embedded EventTimeline would be strictly worse UX. Row height 56px for UtilizationBar's label + bar + gap.
+
+**Side fixes shipped along the way:**
+- `docker-compose.yml` — `DASHBOARD_CORS_ORIGIN` on both cycles-admin and cycles-server extended to include `http://localhost:5174` as a fallback for when Vite's default :5173 is in TIME_WAIT from a prior run. Spring's CorsFilter runs before AuthInterceptor, so a missing origin surfaces as a 403 in DevTools with zero admin-server logs — the added origin is worth the belt-and-suspenders.
+
+**Test strategy:** jsdom has no layout engine, so a real virtualizer renders zero rows in unit tests. `error-surfacing.test.ts` (which clicks a row-level Revoke button) now mocks `@tanstack/vue-virtual` with a drop-in that returns all items as virtual rows with synthetic offsets. Capability-gating tests migrated from `th.w-24` / `th.w-20` selectors to a stable `data-column="action"` attribute on the gated columnheader div — same behavior assertion, selector is layout-independent.
+
+**Gates:** 314/314 Vitest pass. Typecheck clean. Visual verification performed against the full runtime + admin stack (7878/7979) with a real Vite dev server on :5173.
+
+**Still outstanding (phase 2c + 3-5):**
+- **Phase 2c:** EventsView + AuditView — expandable detail rows need `virtualizer.measureElement` for dynamic heights (simple `estimateSize` works up to the expand click; after that the row grows by a couple hundred pixels).
+- **Phase 3:** V5 debounce search inputs; V4 server-side sort *(spec-blocked)*.
+- **Phase 4:** W4 bulk concurrency + 429 backoff; W1/W3 *(spec-blocked)*.
+- **Phase 5:** V6 PageHeader result count; V7 EmptyState filter-aware; W5 reveal-timer cleanup; W6 a11y row-count live region.
 
 ### 2026-04-16 — High-cardinality scale hardening (phase 2 of 5)
 
