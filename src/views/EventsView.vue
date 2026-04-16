@@ -4,6 +4,7 @@ import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
+import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { listEvents } from '../api/client'
 import type { Event } from '../types'
 import PageHeader from '../components/PageHeader.vue'
@@ -154,31 +155,23 @@ function clearFilters() {
 // Instant-apply on filter change. Best-practice UX (Linear / Notion /
 // Jira filters) — operators shouldn't need to click a separate
 // "Filter" button to see results; the select IS the action. For text
-// inputs we debounce 300ms so we don't thrash the server on every
-// keystroke while the operator types a long correlation_id.
+// inputs we debounce 300ms via useDebouncedRef so a 20-char
+// correlation_id doesn't fire 20 fetches on the way in.
 //
 // Explicit applyFilters() remains wired to form@submit so pressing
-// Enter in a text field still submits immediately — debounce is a
-// nicety, not a hard gate.
+// Enter in a text field still submits immediately.
 const DEBOUNCE_MS = 300
-let debounceTimer: ReturnType<typeof setTimeout> | null = null
-function scheduleApply() {
-  if (debounceTimer) clearTimeout(debounceTimer)
-  debounceTimer = setTimeout(() => {
-    debounceTimer = null
-    applyFilters()
-  }, DEBOUNCE_MS)
-}
+const debouncedTenantId = useDebouncedRef(tenantId, DEBOUNCE_MS)
+const debouncedScope = useDebouncedRef(scope, DEBOUNCE_MS)
+const debouncedCorrelationId = useDebouncedRef(correlationId, DEBOUNCE_MS)
 // Selects: apply instantly (no debounce). A select change is always
 // intentional and finite — debouncing just adds perceived lag.
 watch(category, () => applyFilters())
 watch(eventType, () => applyFilters())
-// Text inputs: debounced. The watcher fires on every keystroke, so
-// without the debounce a 20-character correlation_id would trigger
-// 20 fetches.
-watch(tenantId, () => scheduleApply())
-watch(scope, () => scheduleApply())
-watch(correlationId, () => scheduleApply())
+// Text inputs: applyFilters fires only after the debounced ref updates.
+watch(debouncedTenantId, () => applyFilters())
+watch(debouncedScope, () => applyFilters())
+watch(debouncedCorrelationId, () => applyFilters())
 
 // ─── Export (CSV / JSON) ──────────────────────────────────────────────
 // Mirrors AuditView's flow — including the R3 correctness fix where

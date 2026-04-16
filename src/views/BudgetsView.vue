@@ -4,6 +4,7 @@ import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
+import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { listBudgets, lookupBudget, listTenants, listEvents, fundBudget, freezeBudget, unfreezeBudget, updateBudgetConfig } from '../api/client'
 import { COMMIT_OVERAGE_POLICIES } from '../types'
 import { tenantFromScope, parsePositiveAmount } from '../utils/safe'
@@ -71,6 +72,18 @@ const filterScope = ref('')
 // v-model'd number-input value. We treat both at consumption.
 const filterUtilMin = ref<number | string>('')
 const filterUtilMax = ref<number | string>('')
+
+// V5 (Phase 3): debounced refs so filter auto-applies 300ms after
+// the operator stops typing. Pre-fix, the form relied on @change
+// (fires only on blur) + @keyup.enter — meaning a typo'd filter
+// that the operator then clicks-off-of would fire a stale request,
+// or the list wouldn't update at all until explicit submit. Debounced
+// watchers give the same zero-click-submit behavior for all three
+// text/numeric inputs.
+const DEBOUNCE_MS = 300
+const debouncedFilterScope = useDebouncedRef(filterScope, DEBOUNCE_MS)
+const debouncedFilterUtilMin = useDebouncedRef(filterUtilMin, DEBOUNCE_MS)
+const debouncedFilterUtilMax = useDebouncedRef(filterUtilMax, DEBOUNCE_MS)
 
 const pageTitle = computed(() => {
   if (isDetail.value) return 'Budget Detail'
@@ -462,6 +475,15 @@ watch(() => route.query, () => {
   else loadList()
 })
 
+// V5 debounce auto-apply on text/numeric filter changes. scope_prefix
+// is server-side (re-fetches via loadList), util min/max are client-
+// side (apply via applyClientFilters on the next render anyway —
+// the watcher still fires loadList so the range constraint takes
+// effect against the full fetched page 1 result).
+watch(debouncedFilterScope, () => { if (!isDetail.value) loadList() })
+watch(debouncedFilterUtilMin, () => { if (!isDetail.value) loadList() })
+watch(debouncedFilterUtilMax, () => { if (!isDetail.value) loadList() })
+
 // V1 virtualization — list mode only (not the detail card, which
 // embeds EventTimeline and is naturally bounded by DETAIL_EVENTS_PAGE_SIZE).
 const scrollEl = ref<HTMLElement | null>(null)
@@ -619,16 +641,16 @@ const gridTemplate = computed(() =>
           </div>
           <div>
             <label for="budget-scope" class="form-label">Scope prefix</label>
-            <input id="budget-scope" v-model="filterScope" @change="loadList" @keyup.enter="loadList" placeholder="tenant:acme" class="border border-gray-300 rounded px-2 py-1.5 text-sm" />
+            <input id="budget-scope" v-model="filterScope" placeholder="tenant:acme" class="border border-gray-300 rounded px-2 py-1.5 text-sm" />
           </div>
           <!-- v0.1.25.21 (#9): utilization range. Pure client-side
                filter on the loaded result set; doesn't refetch. -->
           <div>
             <label for="budget-util-min" class="form-label">Utilization %</label>
             <div class="flex items-center gap-1">
-              <input id="budget-util-min" v-model="filterUtilMin" @change="loadList" @keyup.enter="loadList" type="number" min="0" max="100" placeholder="min" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-16" aria-label="Minimum utilization percent" />
+              <input id="budget-util-min" v-model="filterUtilMin" type="number" min="0" max="100" placeholder="min" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-16" aria-label="Minimum utilization percent" />
               <span class="muted-sm">to</span>
-              <input id="budget-util-max" v-model="filterUtilMax" @change="loadList" @keyup.enter="loadList" type="number" min="0" max="100" placeholder="max" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-16" aria-label="Maximum utilization percent" />
+              <input id="budget-util-max" v-model="filterUtilMax" type="number" min="0" max="100" placeholder="max" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-16" aria-label="Maximum utilization percent" />
             </div>
           </div>
           <div v-if="isLoading" class="flex items-center">

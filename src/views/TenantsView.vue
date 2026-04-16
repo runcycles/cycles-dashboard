@@ -4,6 +4,7 @@ import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
+import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { listTenants, createTenant, updateTenantStatus } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { Tenant } from '../types'
@@ -27,6 +28,15 @@ const tenants = ref<Tenant[]>([])
 const error = ref('')
 const search = ref('')
 const parentFilter = ref('')
+
+// V5 (Phase 3): debounce the search input so filter re-computation
+// runs 200ms AFTER the last keystroke instead of on every character.
+// Debouncing a client-side filter is subtler than debouncing a fetch —
+// each re-filter is cheap on its own, but the cascade (filter →
+// virtualizer re-index → sort re-run) adds up when a 10k-tenant list
+// is being typed-through. 200ms is enough time for a fast typist
+// to land more keystrokes before the filter runs.
+const debouncedSearch = useDebouncedRef(search, 200)
 
 // R5 (scale-hardening): cursor pagination. Pre-fix, listTenants()'s
 // has_more / next_cursor were discarded and every tenant loaded into
@@ -69,8 +79,8 @@ const filteredTenants = computed(() => {
       out = out.filter(t => t.parent_tenant_id === parentFilter.value)
     }
   }
-  if (search.value) {
-    const q = search.value.toLowerCase()
+  if (debouncedSearch.value) {
+    const q = debouncedSearch.value.toLowerCase()
     out = out.filter(t => t.tenant_id.toLowerCase().includes(q) || t.name.toLowerCase().includes(q))
   }
   return out
