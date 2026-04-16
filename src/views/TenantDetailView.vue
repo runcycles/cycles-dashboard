@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { getTenant, listTenants, listBudgets, listApiKeys, listPolicies, updateTenantStatus, updateTenant, revokeApiKey, createApiKey, createBudget, createPolicy, updatePolicy, freezeBudget } from '../api/client'
@@ -452,13 +452,16 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   } catch (e) { error.value = toMessage(e) }
 }, 60000)
 
-// First activation of a lazy tab — fetch its data now rather than
-// wait up to 60s for the next poll. Direct fetch (not refresh()) on
-// purpose: usePolling's in-flight dedup guard from R10 would drop
-// this call if the initial-mount tick is still running, and the
-// keysLoaded flag lives inside the poll callback that gets dropped.
-// These one-shots also flip the flag so subsequent polls continue
-// refreshing the tab's data.
+// First activation of a lazy tab — fetch its data directly from the
+// click handler rather than via watch(tab). Reasons:
+// - watch() might not fire reliably during Vue's HMR cycle when a
+//   component is re-compiled with state preserved.
+// - usePolling's in-flight dedup guard (R10) would drop a refresh()
+//   call if the initial mount poll was still running.
+// - Synchronous call from the click is the simplest contract: click
+//   always triggers, always sets the flag, always populates data.
+// The early-return keeps subsequent clicks cheap — only the first
+// activation hits the network.
 async function loadApiKeysOnce() {
   if (keysLoaded.value) return
   try {
@@ -475,10 +478,11 @@ async function loadPoliciesOnce() {
     policiesLoaded.value = true
   } catch (e) { error.value = toMessage(e) }
 }
-watch(tab, (newTab) => {
-  if (newTab === 'keys') loadApiKeysOnce()
-  else if (newTab === 'policies') loadPoliciesOnce()
-})
+function activateTab(t: 'budgets' | 'keys' | 'policies') {
+  tab.value = t
+  if (t === 'keys') loadApiKeysOnce()
+  else if (t === 'policies') loadPoliciesOnce()
+}
 </script>
 
 <template>
@@ -562,7 +566,7 @@ watch(tab, (newTab) => {
            on them) so their count is always accurate. -->
       <div class="flex border-b border-gray-200 mb-4">
         <button v-for="t in (['budgets', 'keys', 'policies'] as const)" :key="t"
-          @click="tab = t"
+          @click="activateTab(t)"
           :class="tab === t ? 'border-gray-900 text-gray-900' : 'border-transparent muted hover:text-gray-700'"
           class="px-4 py-2 text-sm font-medium border-b-2 -mb-px cursor-pointer transition-colors">
           {{ t === 'keys' ? 'API Keys' : t.charAt(0).toUpperCase() + t.slice(1) }}
