@@ -153,44 +153,48 @@ describe('capability-gated UI visibility', () => {
   })
 
   // ─── ReservationsView: manage_reservations → action column header ────
-  // The Force Release button lives inside a table row conditional on
-  // reservation data. With empty data we can't exercise the row — but
-  // the action column <th> is also gated, so its presence is the
-  // proxy signal.
+  // The Force Release button lives inside a reservation row conditional
+  // on data. With empty data we can't exercise the row — but the action
+  // column header is also gated, so its presence is the proxy signal.
+  // Post-V1 virtualization (phase 2b), this view renders as an ARIA grid
+  // of <div>s rather than a <table>; the selector is data-column="action"
+  // on the role="columnheader" div.
   describe('ReservationsView + manage_reservations', () => {
     it('renders action column header when manage_reservations=true', async () => {
       setCaps({ manage_reservations: true })
       const { default: ReservationsView } = await import('../views/ReservationsView.vue')
       const w = await mountView(ReservationsView)
-      // The action column th is the only <th> with w-24 class in this view
-      expect(w.find('th.w-24').exists()).toBe(true)
+      expect(w.find('[data-column="action"]').exists()).toBe(true)
     })
 
     it('hides action column header when manage_reservations=false', async () => {
       setCaps({ manage_reservations: false })
       const { default: ReservationsView } = await import('../views/ReservationsView.vue')
       const w = await mountView(ReservationsView)
-      expect(w.find('th.w-24').exists()).toBe(false)
+      expect(w.find('[data-column="action"]').exists()).toBe(false)
     })
   })
 
   // ─── BudgetsView: manage_budgets → action column header ──────────────
   // Same rationale as ReservationsView — Freeze/Unfreeze/Edit live in
   // the detail panel which only renders after a scope is selected. The
-  // action <th> (w-20) is the clean proxy for the gated UI surface.
+  // action columnheader is the clean proxy for the gated UI surface.
+  // Post-V1 virtualization (phase 2b), BudgetsView renders as an ARIA
+  // grid like ReservationsView; data-column="action" replaces the
+  // old `th.w-20` selector.
   describe('BudgetsView + manage_budgets', () => {
     it('renders action column header when manage_budgets=true', async () => {
       setCaps({ manage_budgets: true })
       const { default: BudgetsView } = await import('../views/BudgetsView.vue')
       const w = await mountView(BudgetsView)
-      expect(w.find('th.w-20').exists()).toBe(true)
+      expect(w.find('[data-column="action"]').exists()).toBe(true)
     })
 
     it('hides action column header when manage_budgets=false', async () => {
       setCaps({ manage_budgets: false })
       const { default: BudgetsView } = await import('../views/BudgetsView.vue')
       const w = await mountView(BudgetsView)
-      expect(w.find('th.w-20').exists()).toBe(false)
+      expect(w.find('[data-column="action"]').exists()).toBe(false)
     })
   })
 

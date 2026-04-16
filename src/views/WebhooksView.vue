@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
@@ -260,6 +261,29 @@ async function loadMore() {
   } catch (e) { error.value = toMessage(e) }
   finally { loadingMore.value = false }
 }
+
+// V1 virtualization. See ReservationsView.vue for the pattern.
+const scrollEl = ref<HTMLElement | null>(null)
+const ROW_HEIGHT_ESTIMATE = 52
+const virtualizer = useVirtualizer(computed(() => ({
+  count: sortedWebhooks.value.length,
+  getScrollElement: () => scrollEl.value,
+  estimateSize: () => ROW_HEIGHT_ESTIMATE,
+  overscan: 8,
+})))
+const virtualRows = computed(() => virtualizer.value.getVirtualItems())
+const totalHeight = computed(() => virtualizer.value.getTotalSize())
+
+// Columns: [checkbox 40] health 90 | URL flex | status 110 | failures 90 | events flex | action 96
+// No Sort on Health / Events — they're plain <div role="columnheader">.
+// Health: 90px because "Health" label at text-xs uppercase tracking-wider
+// plus px-4 cell padding needs that — a 40px column clipped the header
+// text into the URL column.
+const gridTemplate = computed(() =>
+  canManage.value
+    ? '40px 90px minmax(240px,2fr) 110px 90px minmax(180px,1.5fr) 96px'
+    : '90px minmax(240px,2fr) 110px 90px minmax(180px,1.5fr)',
+)
 </script>
 
 <template>
@@ -284,52 +308,102 @@ async function loadMore() {
       </select>
     </div>
 
-    <!-- Bulk bar, visible only on selection. Same design as TenantsView. -->
-    <div v-if="canManage && selectedVisibleCount > 0" class="mb-3 bg-blue-50 border border-blue-200 rounded px-4 py-2 flex items-center gap-3 flex-wrap">
-      <span class="text-sm text-blue-900">{{ selectedVisibleCount }} selected</span>
-      <button @click="openBulk('PAUSED')" class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer">Pause selected</button>
-      <button @click="openBulk('ACTIVE')" class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer">Enable selected</button>
-      <button @click="selected = new Set()" class="muted-sm hover:text-gray-700 ml-auto cursor-pointer">Clear</button>
-    </div>
+    <!-- Floating bulk action bar — same pattern as TenantsView.
+         Top-anchored for F-pattern visibility. -->
+    <Teleport to="body">
+      <Transition
+        enter-active-class="transition duration-200 ease-out"
+        enter-from-class="opacity-0 -translate-y-4"
+        enter-to-class="opacity-100 translate-y-0"
+        leave-active-class="transition duration-150 ease-in"
+        leave-from-class="opacity-100 translate-y-0"
+        leave-to-class="opacity-0 -translate-y-4"
+      >
+        <div
+          v-if="canManage && selectedVisibleCount > 0"
+          role="toolbar"
+          aria-label="Bulk webhook actions"
+          class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-gray-900 dark:border dark:border-gray-700 border-2 border-blue-400 shadow-2xl rounded-lg px-4 py-2.5 flex items-center gap-3 max-w-[90vw]"
+        >
+          <span class="text-sm font-semibold text-blue-900 dark:text-blue-300 tabular-nums">{{ selectedVisibleCount }} selected</span>
+          <div class="w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
+          <button @click="openBulk('PAUSED')" class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer">Pause</button>
+          <button @click="openBulk('ACTIVE')" class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer">Enable</button>
+          <button
+            @click="selected = new Set()"
+            aria-label="Clear selection"
+            class="muted hover:text-gray-700 cursor-pointer p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      </Transition>
+    </Teleport>
 
-    <div class="card-table">
-      <table class="w-full text-sm min-w-[680px]">
-        <thead class="table-header">
-          <tr>
-            <th v-if="canManage" class="table-cell w-10">
-              <input type="checkbox" :checked="selectedVisibleAll" @change="toggleSelectAll" aria-label="Select all visible webhooks" />
-            </th>
-            <th class="table-cell text-left w-10">Health</th>
-            <SortHeader label="URL" column="url" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <SortHeader label="Failures" column="consecutive_failures" :active-column="sortKey" :direction="sortDir" @sort="toggle" align="right" />
-            <th class="table-cell text-left">Events</th>
-            <th v-if="canManage" class="table-cell w-20"></th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-100">
-          <tr v-for="w in sortedWebhooks" :key="w.subscription_id" class="table-row-hover">
-            <td v-if="canManage" class="table-cell">
-              <input type="checkbox" :checked="selected.has(w.subscription_id)" @change="toggleSelect(w.subscription_id)" :aria-label="`Select webhook ${w.name || w.url}`" />
-            </td>
-            <td class="table-cell"><span :class="healthColor(w)" class="inline-block w-2.5 h-2.5 rounded-full" :title="healthLabel(w)" /></td>
-            <td class="table-cell">
-              <router-link :to="{ name: 'webhook-detail', params: { id: w.subscription_id } }" class="text-blue-600 hover:underline truncate block max-w-[300px]">{{ w.url }}</router-link>
-              <span v-if="w.name" class="muted-sm">{{ w.name }}</span>
-            </td>
-            <td class="table-cell"><StatusBadge :status="w.status" /></td>
-            <td class="table-cell text-right tabular-nums" :class="(w.consecutive_failures ?? 0) > 0 ? 'text-red-600 font-medium' : 'muted'">{{ w.consecutive_failures ?? 0 }}</td>
-            <td class="table-cell muted-sm">{{ w.event_types?.join(', ') || w.event_categories?.join(', ') || 'all' }}</td>
-            <td v-if="canManage" class="table-cell">
-              <button v-if="w.status === 'ACTIVE'" @click="pendingStatusAction = { id: w.subscription_id, url: w.url, action: 'PAUSED' }" class="btn-row-danger">Pause</button>
-              <button v-if="w.status === 'PAUSED' || w.status === 'DISABLED'" @click="pendingStatusAction = { id: w.subscription_id, url: w.url, action: 'ACTIVE' }" class="btn-row-success">Enable</button>
-            </td>
-          </tr>
-          <tr v-if="filteredWebhooks.length === 0">
-            <td :colspan="canManage ? 7 : 5"><EmptyState :message="tenantFilter ? 'No webhooks for this tenant' : 'No webhook subscriptions'" hint="Webhook subscriptions will appear here once configured" /></td>
-          </tr>
-        </tbody>
-      </table>
+    <!-- V1 virtualized grid. Same pattern as ReservationsView /
+         TenantsView. -->
+    <div
+      class="bg-white rounded-lg shadow overflow-hidden text-sm"
+      role="table"
+      :aria-rowcount="filteredWebhooks.length + 1"
+      :aria-colcount="canManage ? 7 : 5"
+    >
+      <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
+        <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
+          <div v-if="canManage" role="columnheader" class="table-cell">
+            <input type="checkbox" :checked="selectedVisibleAll" @change="toggleSelectAll" aria-label="Select all visible webhooks" />
+          </div>
+          <div role="columnheader" class="table-cell text-left">Health</div>
+          <SortHeader as="div" label="URL" column="url" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <SortHeader as="div" label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <SortHeader as="div" label="Failures" column="consecutive_failures" :active-column="sortKey" :direction="sortDir" @sort="toggle" align="right" />
+          <div role="columnheader" class="table-cell text-left">Events</div>
+          <div v-if="canManage" role="columnheader" class="table-cell" data-column="action"></div>
+        </div>
+      </div>
+
+      <div
+        v-if="sortedWebhooks.length > 0"
+        ref="scrollEl"
+        role="rowgroup"
+        class="overflow-auto"
+        style="max-height: calc(100vh - 360px); min-height: 200px;"
+      >
+        <div :style="{ height: totalHeight + 'px', position: 'relative' }">
+          <div
+            v-for="v in virtualRows"
+            :key="sortedWebhooks[v.index].subscription_id"
+            role="row"
+            :aria-rowindex="v.index + 2"
+            class="grid table-row-hover border-b border-gray-100 absolute left-0 right-0 items-center"
+            :style="{ gridTemplateColumns: gridTemplate, transform: `translateY(${v.start}px)`, height: ROW_HEIGHT_ESTIMATE + 'px' }"
+          >
+            <div v-if="canManage" role="cell" class="table-cell">
+              <input type="checkbox" :checked="selected.has(sortedWebhooks[v.index].subscription_id)" @change="toggleSelect(sortedWebhooks[v.index].subscription_id)" :aria-label="`Select webhook ${sortedWebhooks[v.index].name || sortedWebhooks[v.index].url}`" />
+            </div>
+            <div role="cell" class="table-cell"><span :class="healthColor(sortedWebhooks[v.index])" class="inline-block w-2.5 h-2.5 rounded-full" :title="healthLabel(sortedWebhooks[v.index])" /></div>
+            <div role="cell" class="table-cell min-w-0">
+              <router-link :to="{ name: 'webhook-detail', params: { id: sortedWebhooks[v.index].subscription_id } }" class="text-blue-600 hover:underline truncate block" :title="sortedWebhooks[v.index].url">{{ sortedWebhooks[v.index].url }}</router-link>
+              <span v-if="sortedWebhooks[v.index].name" class="muted-sm truncate block" :title="sortedWebhooks[v.index].name">{{ sortedWebhooks[v.index].name }}</span>
+            </div>
+            <div role="cell" class="table-cell"><StatusBadge :status="sortedWebhooks[v.index].status" /></div>
+            <div role="cell" class="table-cell text-right tabular-nums" :class="(sortedWebhooks[v.index].consecutive_failures ?? 0) > 0 ? 'text-red-600 font-medium' : 'muted'">{{ sortedWebhooks[v.index].consecutive_failures ?? 0 }}</div>
+            <div
+              role="cell"
+              class="table-cell muted-sm truncate"
+              :title="sortedWebhooks[v.index].event_types?.join(', ') || sortedWebhooks[v.index].event_categories?.join(', ') || 'all events'"
+            >{{ sortedWebhooks[v.index].event_types?.join(', ') || sortedWebhooks[v.index].event_categories?.join(', ') || 'all' }}</div>
+            <div v-if="canManage" role="cell" class="table-cell">
+              <button v-if="sortedWebhooks[v.index].status === 'ACTIVE'" @click="pendingStatusAction = { id: sortedWebhooks[v.index].subscription_id, url: sortedWebhooks[v.index].url, action: 'PAUSED' }" class="btn-row-danger">Pause</button>
+              <button v-if="sortedWebhooks[v.index].status === 'PAUSED' || sortedWebhooks[v.index].status === 'DISABLED'" @click="pendingStatusAction = { id: sortedWebhooks[v.index].subscription_id, url: sortedWebhooks[v.index].url, action: 'ACTIVE' }" class="btn-row-success">Enable</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-else role="row">
+        <EmptyState :message="tenantFilter ? 'No webhooks for this tenant' : 'No webhook subscriptions'" hint="Webhook subscriptions will appear here once configured" />
+      </div>
     </div>
 
     <!-- R6: server-side cursor pagination. Tenant filter runs

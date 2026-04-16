@@ -13,6 +13,7 @@
  * reservation is stuck).
  */
 import { ref, computed, watch } from 'vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
 import { listReservations, releaseReservation, listTenants } from '../api/client'
@@ -194,6 +195,46 @@ function ageLabel(r: ReservationSummary): string {
 function isExpired(r: ReservationSummary): boolean {
   return r.expires_at_ms <= Date.now()
 }
+
+// V1 (scale-hardening phase 2b): virtualized row rendering via
+// @tanstack/vue-virtual. Pre-fix, every loaded reservation rendered as a
+// DOM row; a tenant with 5k+ reservations (rare but possible during a
+// stuck-queue incident) meant a multi-second layout stall. Post-fix,
+// only the rows in the viewport + overscan are in the DOM.
+//
+// Trade-off: the semantic <table> becomes an ARIA grid of <div>s because
+// we absolute-position rows inside a sized container, which HTML's table
+// layout algorithm can't model. SortHeader's `as="div"` prop exists for
+// this use — the role="columnheader" ARIA stays intact.
+const scrollEl = ref<HTMLElement | null>(null)
+// 52px is a reasonable starting point for a single-line reservation row
+// (table-cell padding × 2 + text-sm line-height). We pin the height
+// on each rendered row so the estimate holds exactly — no re-measuring
+// flicker. Variable-height rows would need virtualizer.measureElement.
+const ROW_HEIGHT_ESTIMATE = 52
+// Wrap the entire options object in a computed so the virtualizer
+// re-reads `count` whenever the sorted list length changes. Passing
+// a per-field computed doesn't work — @tanstack/vue-virtual accepts
+// MaybeRef<options> but each option field is read as a raw value.
+const virtualizer = useVirtualizer(computed(() => ({
+  count: sortedReservations.value.length,
+  getScrollElement: () => scrollEl.value,
+  estimateSize: () => ROW_HEIGHT_ESTIMATE,
+  overscan: 8, // render 8 extra rows outside the viewport for smooth scroll
+})))
+const virtualRows = computed(() => virtualizer.value.getVirtualItems())
+const totalHeight = computed(() => virtualizer.value.getTotalSize())
+
+// Grid template shared by the sticky header and each virtualized row.
+// Inline style (not a Tailwind arbitrary class) so we're immune to the
+// JIT scanner missing the pattern. Column 7 (actions) is 120px, not
+// 96px (the original <th class="w-24">), because "Force release" at
+// text-xs is ~75px and px-4 takes 32px of the cell — 96 was cutting it.
+const gridTemplate = computed(() =>
+  canManage.value
+    ? 'minmax(180px,1.5fr) minmax(200px,2fr) 110px 140px 140px 140px 120px'
+    : 'minmax(180px,1.5fr) minmax(200px,2fr) 110px 140px 140px 140px',
+)
 </script>
 
 <template>
@@ -232,61 +273,92 @@ function isExpired(r: ReservationSummary): boolean {
       </p>
     </div>
 
-    <div class="card-table">
-      <table class="w-full text-sm min-w-[720px]">
-        <thead class="table-header">
-          <tr>
-            <SortHeader label="Reservation ID" column="reservation_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <th class="table-cell text-left">Scope</th>
-            <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <SortHeader label="Reserved" column="reserved" :active-column="sortKey" :direction="sortDir" @sort="toggle" align="right" />
-            <SortHeader label="Created" column="created_at_ms" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <SortHeader label="Expires" column="expires_at_ms" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <th v-if="canManage" class="table-cell w-24"></th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-100">
-          <tr v-for="r in sortedReservations" :key="r.reservation_id" class="table-row-hover">
-            <td class="table-cell font-mono text-xs break-all">{{ r.reservation_id }}</td>
-            <td class="table-cell font-mono text-xs text-gray-600 break-all">{{ r.scope_path }}</td>
-            <td class="table-cell"><StatusBadge :status="r.status" /></td>
-            <td class="table-cell text-right tabular-nums">
-              {{ r.reserved.amount.toLocaleString() }}
-              <span class="muted-sm">{{ r.reserved.unit }}</span>
-            </td>
-            <td class="table-cell muted-sm" :title="formatDateTime(new Date(r.created_at_ms).toISOString())">
-              {{ ageLabel(r) }}
-            </td>
-            <td class="table-cell text-xs" :class="isExpired(r) && r.status === 'ACTIVE' ? 'text-red-600 font-medium' : 'muted'">
-              <!-- Overdue indicator: ACTIVE + past expiry is the
-                   definitional "hung" state. Tooltip shows the exact
-                   expiry time for drill-down. -->
-              {{ formatRelative(new Date(r.expires_at_ms).toISOString()) }}
-              <span v-if="isExpired(r) && r.status === 'ACTIVE'" class="ml-1" title="Past expiry — this reservation is overdue for cleanup">⚠</span>
-            </td>
-            <td v-if="canManage" class="table-cell">
+    <!-- V1 virtualized grid. Structure: role="table" wrapper with a
+         role="rowgroup" sticky header and a role="rowgroup" scroll
+         container. CSS Grid gives each row a consistent column template
+         without HTML <table>'s layout algorithm, which can't coexist
+         with the absolute-positioned virtualized rows. -->
+    <div
+      class="bg-white rounded-lg shadow overflow-hidden text-sm"
+      role="table"
+      :aria-rowcount="reservations.length + 1"
+      :aria-colcount="canManage ? 7 : 6"
+    >
+      <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
+        <div
+          role="row"
+          class="grid text-xs font-bold uppercase tracking-wider"
+          :style="{ gridTemplateColumns: gridTemplate }"
+        >
+          <SortHeader as="div" label="Reservation ID" column="reservation_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <div role="columnheader" class="table-cell text-left">Scope</div>
+          <SortHeader as="div" label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <SortHeader as="div" label="Reserved" column="reserved" :active-column="sortKey" :direction="sortDir" @sort="toggle" align="right" />
+          <SortHeader as="div" label="Created" column="created_at_ms" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <SortHeader as="div" label="Expires" column="expires_at_ms" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <div v-if="canManage" role="columnheader" class="table-cell" data-column="action"></div>
+        </div>
+      </div>
+
+      <!-- Virtualized body. Fixed max-height so the container is
+           scrollable; TanStack's virtualizer needs a finite viewport
+           to compute which rows intersect. The height is generous
+           enough for a typical laptop viewport; operators on smaller
+           screens get a nested scrollbar. -->
+      <div
+        v-if="sortedReservations.length > 0"
+        ref="scrollEl"
+        role="rowgroup"
+        class="overflow-auto"
+        style="max-height: calc(100vh - 360px); min-height: 200px;"
+      >
+        <div :style="{ height: totalHeight + 'px', position: 'relative' }">
+          <div
+            v-for="v in virtualRows"
+            :key="sortedReservations[v.index].reservation_id"
+            role="row"
+            :aria-rowindex="v.index + 2"
+            class="grid table-row-hover border-b border-gray-100 absolute left-0 right-0 items-center"
+            :style="{ gridTemplateColumns: gridTemplate, transform: `translateY(${v.start}px)`, height: ROW_HEIGHT_ESTIMATE + 'px' }"
+          >
+            <div role="cell" class="table-cell font-mono text-xs truncate" :title="sortedReservations[v.index].reservation_id">{{ sortedReservations[v.index].reservation_id }}</div>
+            <div role="cell" class="table-cell font-mono text-xs text-gray-600 truncate" :title="sortedReservations[v.index].scope_path">{{ sortedReservations[v.index].scope_path }}</div>
+            <div role="cell" class="table-cell"><StatusBadge :status="sortedReservations[v.index].status" /></div>
+            <div role="cell" class="table-cell text-right tabular-nums">
+              {{ sortedReservations[v.index].reserved.amount.toLocaleString() }}
+              <span class="muted-sm">{{ sortedReservations[v.index].reserved.unit }}</span>
+            </div>
+            <div role="cell" class="table-cell muted-sm" :title="formatDateTime(new Date(sortedReservations[v.index].created_at_ms).toISOString())">
+              {{ ageLabel(sortedReservations[v.index]) }}
+            </div>
+            <div role="cell" class="table-cell text-xs" :class="isExpired(sortedReservations[v.index]) && sortedReservations[v.index].status === 'ACTIVE' ? 'text-red-600 font-medium' : 'muted'">
+              {{ formatRelative(new Date(sortedReservations[v.index].expires_at_ms).toISOString()) }}
+              <span v-if="isExpired(sortedReservations[v.index]) && sortedReservations[v.index].status === 'ACTIVE'" class="ml-1" title="Past expiry — this reservation is overdue for cleanup">⚠</span>
+            </div>
+            <div v-if="canManage" role="cell" class="table-cell">
               <!-- Only ACTIVE reservations can be released. COMMITTED /
                    RELEASED / EXPIRED are terminal states — no release
                    action makes sense. -->
               <button
-                v-if="r.status === 'ACTIVE'"
-                @click="openRelease(r)"
+                v-if="sortedReservations[v.index].status === 'ACTIVE'"
+                @click="openRelease(sortedReservations[v.index])"
                 class="btn-row-danger"
               >Force release</button>
-            </td>
-          </tr>
-          <tr v-if="reservations.length === 0 && !loadingList">
-            <td :colspan="canManage ? 7 : 6">
-              <EmptyState
-                :message="tenantFilter
-                  ? (statusFilter ? `No ${statusFilter} reservations for this tenant` : 'No reservations for this tenant')
-                  : 'Pick a tenant to list reservations'"
-                :hint="tenantFilter ? undefined : 'Reservations are listed per-tenant — the runtime spec requires scoping.'"
-              />
-            </td>
-          </tr>
-        </tbody>
-      </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Empty state lives outside the virtualized body — the virtualizer
+           only understands row-indexed content. -->
+      <div v-else-if="!loadingList" role="row">
+        <EmptyState
+          :message="tenantFilter
+            ? (statusFilter ? `No ${statusFilter} reservations for this tenant` : 'No reservations for this tenant')
+            : 'Pick a tenant to list reservations'"
+          :hint="tenantFilter ? undefined : 'Reservations are listed per-tenant — the runtime spec requires scoping.'"
+        />
+      </div>
     </div>
 
     <!-- Load more. Pre-R4 the view hardcoded limit=100 and silently

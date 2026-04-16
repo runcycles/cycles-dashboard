@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
 import { listTenants, listApiKeys, revokeApiKey, createApiKey, updateApiKey } from '../api/client'
@@ -267,6 +268,45 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
 // we'd otherwise be stuck showing "no keys" for a tenant that genuinely
 // has keys. Refresh on filter change so the fast-path above picks it up.
 watch(filterTenant, () => { refresh() })
+
+// V1 virtualization.
+const scrollEl = ref<HTMLElement | null>(null)
+// 76px accommodates two rows of permission chips (chip ~28px × 2 +
+// gap + cell padding). Trades a little vertical density for the ability
+// to preview 4 perms (2 per row) instead of 2 inline — the operators
+// asked for this explicitly, scanning 4 perms at a glance beats
+// opening the dialog for every key with > 2 perms.
+const ROW_HEIGHT_ESTIMATE = 76
+const virtualizer = useVirtualizer(computed(() => ({
+  count: sortedKeys.value.length,
+  getScrollElement: () => scrollEl.value,
+  estimateSize: () => ROW_HEIGHT_ESTIMATE,
+  overscan: 8,
+})))
+const virtualRows = computed(() => virtualizer.value.getVirtualItems())
+const totalHeight = computed(() => virtualizer.value.getTotalSize())
+
+// 9-column grid when canManage, 8 without. Wide total minimum
+// (~1380px) so horizontal scroll engages on smaller viewports; same
+// behavior as the pre-virt `min-w-[900px]` table. Permissions column
+// widened (260px min, 2.5fr) so more chips fit before the +N counter
+// kicks in — common keys have 2-4 perms which now render inline.
+const gridTemplate = computed(() =>
+  canManage.value
+    ? '180px minmax(120px,1fr) minmax(120px,1fr) 100px minmax(260px,2.5fr) minmax(140px,1fr) 160px 140px 160px'
+    : '180px minmax(120px,1fr) minmax(120px,1fr) 100px minmax(260px,2.5fr) minmax(140px,1fr) 160px 140px',
+)
+
+// Permissions cell compromise: show a single pill "N permissions"
+// that's always-visible and click-expandable. The pre-fix "N inline
+// chips + N hidden" approach fought the overflow-hidden boundary —
+// on narrow viewports the +N counter disappeared into the clipped
+// region and operators had no discoverable escape hatch. Now the
+// pill is fixed-width, doesn't depend on the chip row's measured
+// width, and clicking it opens a full-permissions dialog.
+const viewingPermsFor = ref<KeyWithTenant | null>(null)
+function openPermsViewer(k: KeyWithTenant) { viewingPermsFor.value = k }
+function closePermsViewer() { viewingPermsFor.value = null }
 </script>
 
 <template>
@@ -329,58 +369,118 @@ watch(filterTenant, () => { refresh() })
 
     <p v-if="filteredKeys.length > 0" class="muted-sm mb-2">{{ filteredKeys.length }} key{{ filteredKeys.length !== 1 ? 's' : '' }}</p>
 
-    <div class="card-table">
-      <table class="w-full text-sm min-w-[900px]">
-        <thead class="table-header">
-          <tr>
-            <th class="table-cell text-left">Key ID</th>
-            <SortHeader label="Name" column="name" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <SortHeader label="Tenant" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <th class="table-cell text-left">Permissions</th>
-            <th class="table-cell text-left">Scope Filter</th>
-            <SortHeader label="Created" column="created_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <SortHeader label="Expires" column="expires_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <th v-if="canManage" class="table-cell w-20"></th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-100">
-          <tr v-for="k in sortedKeys" :key="k.key_id" class="table-row-hover">
-            <td class="table-cell"><MaskedValue :value="k.key_id" /></td>
-            <td class="table-cell text-gray-700">{{ k.name || '-' }}</td>
-            <td class="table-cell">
-              <TenantLink :tenant-id="k.tenant_id" />
-            </td>
-            <td class="table-cell"><StatusBadge :status="k.status" /></td>
-            <td class="table-cell muted-sm">
-              <div class="flex flex-wrap gap-1">
-                <span v-for="p in k.permissions" :key="p" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{{ p }}</span>
+    <!-- V1 virtualized grid. Wide minimum width — horizontal scroll
+         engages on narrower viewports, same behavior as pre-virt
+         `min-w-[900px]` <table>.
+         Structure: OUTER container owns the single horizontal-scroll
+         (overflow-x-auto). An INNER wrapper enforces the min-width
+         so both header and virtualized body share the same column
+         bounds. The scroll container below only handles vertical
+         scroll (overflow-y-auto). Having min-width on both header
+         and body divs AND overflow-x on the outer created two
+         separate horizontal scrollbars that fought each other on
+         resize — now there's one. -->
+    <div
+      class="bg-white rounded-lg shadow overflow-x-auto text-sm"
+      role="table"
+      :aria-rowcount="filteredKeys.length + 1"
+      :aria-colcount="canManage ? 9 : 8"
+    >
+     <div :style="{ minWidth: canManage ? '1380px' : '1220px' }">
+      <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
+        <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
+          <div role="columnheader" class="table-cell text-left">Key ID</div>
+          <SortHeader as="div" label="Name" column="name" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <SortHeader as="div" label="Tenant" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <SortHeader as="div" label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <div role="columnheader" class="table-cell text-left">Permissions</div>
+          <div role="columnheader" class="table-cell text-left">Scope Filter</div>
+          <SortHeader as="div" label="Created" column="created_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <SortHeader as="div" label="Expires" column="expires_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <div v-if="canManage" role="columnheader" class="table-cell" data-column="action"></div>
+        </div>
+      </div>
+
+      <div
+        v-if="sortedKeys.length > 0"
+        ref="scrollEl"
+        role="rowgroup"
+        class="overflow-y-auto"
+        style="max-height: calc(100vh - 400px); min-height: 200px;"
+      >
+        <div :style="{ height: totalHeight + 'px', position: 'relative' }">
+          <div
+            v-for="v in virtualRows"
+            :key="sortedKeys[v.index].key_id"
+            role="row"
+            :aria-rowindex="v.index + 2"
+            class="grid table-row-hover border-b border-gray-100 absolute left-0 right-0 items-center"
+            :style="{ gridTemplateColumns: gridTemplate, transform: `translateY(${v.start}px)`, height: ROW_HEIGHT_ESTIMATE + 'px' }"
+          >
+            <div role="cell" class="table-cell"><MaskedValue :value="sortedKeys[v.index].key_id" /></div>
+            <div role="cell" class="table-cell text-gray-700 truncate">{{ sortedKeys[v.index].name || '-' }}</div>
+            <div role="cell" class="table-cell">
+              <TenantLink :tenant-id="sortedKeys[v.index].tenant_id" />
+            </div>
+            <div role="cell" class="table-cell"><StatusBadge :status="sortedKeys[v.index].status" /></div>
+            <div role="cell" class="table-cell muted-sm">
+              <!-- Preview 4 chips (wraps 2-per-line inside the column
+                   width) + always-visible "N perms" pill for the full
+                   list. Row height is 76px to fit two chip rows.
+                   - Chips sit in a flex-wrap min-w-0 container on the
+                     left; at typical column widths this wraps to 2x2.
+                   - Pill on the right, flex-shrink-0, self-start so it
+                     anchors to the top even when chips wrap.
+                   - If a key has > 4 permissions the pill's count (e.g.
+                     "6 perms") signals there's more; click to open. -->
+              <div v-if="(sortedKeys[v.index].permissions?.length ?? 0) > 0" class="flex gap-2 items-start">
+                <div class="flex flex-wrap gap-1 min-w-0 flex-1">
+                  <span
+                    v-for="p in (sortedKeys[v.index].permissions ?? []).slice(0, 4)"
+                    :key="p"
+                    class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded whitespace-nowrap"
+                  >{{ p }}</span>
+                </div>
+                <button
+                  type="button"
+                  @click.prevent="openPermsViewer(sortedKeys[v.index])"
+                  class="inline-flex items-center gap-1 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded px-2 py-0.5 cursor-pointer transition-colors flex-shrink-0"
+                  :aria-label="`View all ${sortedKeys[v.index].permissions!.length} permissions for ${sortedKeys[v.index].name || sortedKeys[v.index].key_id}`"
+                  :title="`View all ${sortedKeys[v.index].permissions!.length} permissions`"
+                >
+                  <span class="tabular-nums font-medium">{{ sortedKeys[v.index].permissions!.length }}</span>
+                  <span class="text-xs">perm{{ sortedKeys[v.index].permissions!.length === 1 ? '' : 's' }}</span>
+                  <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                  </svg>
+                </button>
               </div>
-            </td>
-            <td class="table-cell muted-sm font-mono">{{ k.scope_filter?.join(', ') || '-' }}</td>
-            <td class="table-cell muted-sm whitespace-nowrap">{{ formatDateTime(k.created_at) }}</td>
-            <td class="table-cell text-xs whitespace-nowrap" :class="k.expires_at ? 'muted' : 'muted'">
-              {{ k.expires_at ? formatDateTime(k.expires_at) : 'Never' }}
-            </td>
-            <td v-if="canManage" class="table-cell">
+              <span v-else class="text-gray-400">—</span>
+            </div>
+            <div role="cell" class="table-cell muted-sm font-mono truncate" :title="sortedKeys[v.index].scope_filter?.join(', ')">{{ sortedKeys[v.index].scope_filter?.join(', ') || '-' }}</div>
+            <div role="cell" class="table-cell muted-sm whitespace-nowrap">{{ formatDateTime(sortedKeys[v.index].created_at) }}</div>
+            <div role="cell" class="table-cell text-xs muted whitespace-nowrap">
+              {{ sortedKeys[v.index].expires_at ? formatDateTime(sortedKeys[v.index].expires_at) : 'Never' }}
+            </div>
+            <div v-if="canManage" role="cell" class="table-cell">
               <div class="flex gap-2">
-                <!-- v0.1.25.21 (#8): one-click drill into audit log
-                     pre-filtered by this key. Available regardless of
-                     status — investigating revoked keys is the most
-                     common reason to want their history. -->
-                <router-link :to="{ name: 'audit', query: { key_id: k.key_id } }" class="text-xs text-gray-600 hover:text-gray-800 cursor-pointer hover:underline">Activity</router-link>
-                <button v-if="k.status === 'ACTIVE'" @click="openEdit(k)" class="btn-row-primary">Edit</button>
-                <button v-if="k.status === 'ACTIVE'" @click="pendingRevoke = k" class="btn-row-danger">Revoke</button>
+                <!-- One-click drill into audit log pre-filtered by this
+                     key. Available regardless of status — investigating
+                     revoked keys is the most common reason to want
+                     their history. -->
+                <router-link :to="{ name: 'audit', query: { key_id: sortedKeys[v.index].key_id } }" class="text-xs text-gray-600 hover:text-gray-800 cursor-pointer hover:underline">Activity</router-link>
+                <button v-if="sortedKeys[v.index].status === 'ACTIVE'" @click="openEdit(sortedKeys[v.index])" class="btn-row-primary">Edit</button>
+                <button v-if="sortedKeys[v.index].status === 'ACTIVE'" @click="pendingRevoke = sortedKeys[v.index]" class="btn-row-danger">Revoke</button>
               </div>
-            </td>
-          </tr>
-          <tr v-if="filteredKeys.length === 0">
-            <td :colspan="canManage ? 9 : 8">
-              <EmptyState :message="keys.length === 0 ? 'No API keys found' : 'No keys match filters'" :hint="keys.length === 0 ? 'API keys will appear here once created' : undefined" />
-            </td>
-          </tr>
-        </tbody>
-      </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-else role="row">
+        <EmptyState :message="keys.length === 0 ? 'No API keys found' : 'No keys match filters'" :hint="keys.length === 0 ? 'API keys will appear here once created' : undefined" />
+      </div>
+     </div>
     </div>
 
     <!-- Create API Key dialog -->
@@ -466,5 +566,60 @@ watch(filterTenant, () => { refresh() })
       @confirm="executeRevoke"
       @cancel="pendingRevoke = null"
     />
+
+    <!-- Permissions viewer. Lightweight read-only modal — full
+         permissions list with scope_filter for context. Opens when
+         operators click the compact pill in the permissions column.
+         Intentionally distinct from the Edit dialog (this is a
+         view-only affordance; Edit is a separate click-through). -->
+    <div
+      v-if="viewingPermsFor"
+      class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
+      @click.self="closePermsViewer"
+      @keyup.esc="closePermsViewer"
+    >
+      <div class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-5 max-w-md w-full mx-4 max-h-[80vh] flex flex-col">
+        <div class="flex items-start justify-between mb-3">
+          <div>
+            <h3 class="text-sm font-semibold text-gray-900">Permissions</h3>
+            <p class="muted-sm font-mono break-all">{{ viewingPermsFor.name || viewingPermsFor.key_id }}</p>
+          </div>
+          <button @click="closePermsViewer" aria-label="Close" class="muted hover:text-gray-700 cursor-pointer p-1 -mt-1 -mr-1 rounded hover:bg-gray-100">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto">
+          <p class="muted-sm mb-2">{{ viewingPermsFor.permissions?.length ?? 0 }} permission{{ (viewingPermsFor.permissions?.length ?? 0) === 1 ? '' : 's' }}</p>
+          <div class="flex flex-wrap gap-1 mb-4">
+            <span
+              v-for="p in viewingPermsFor.permissions ?? []"
+              :key="p"
+              class="bg-gray-100 text-gray-700 font-mono text-xs px-2 py-1 rounded"
+            >{{ p }}</span>
+          </div>
+
+          <template v-if="viewingPermsFor.scope_filter && viewingPermsFor.scope_filter.length > 0">
+            <p class="muted-sm mb-2">Scope filter ({{ viewingPermsFor.scope_filter.length }})</p>
+            <div class="flex flex-wrap gap-1">
+              <span
+                v-for="s in viewingPermsFor.scope_filter"
+                :key="s"
+                class="bg-blue-50 text-blue-800 font-mono text-xs px-2 py-1 rounded"
+              >{{ s }}</span>
+            </div>
+          </template>
+        </div>
+
+        <div class="flex justify-end gap-2 mt-4 pt-3 border-t border-gray-100">
+          <button @click="closePermsViewer" class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 rounded hover:bg-gray-100 cursor-pointer">Close</button>
+          <button
+            v-if="canManage && viewingPermsFor.status === 'ACTIVE'"
+            @click="() => { const k = viewingPermsFor; closePermsViewer(); if (k) openEdit(k) }"
+            class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer"
+          >Edit permissions</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>

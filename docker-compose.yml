@@ -23,7 +23,10 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ""
       ADMIN_API_KEY: ${ADMIN_API_KEY:-admin-key}
-      DASHBOARD_CORS_ORIGIN: http://localhost:8080
+      # Runtime-plane CORS: same rationale as cycles-admin (below) — accept
+      # both docker (:8080) and Vite dev (:5173/:5174) origins so
+      # ReservationsView's /v1/reservations calls don't 403 during dev.
+      DASHBOARD_CORS_ORIGIN: http://localhost:8080,http://localhost:5173,http://localhost:5174
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:7878/actuator/health"]
       interval: 10s
@@ -46,11 +49,12 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ""
       ADMIN_API_KEY: ${ADMIN_API_KEY:-admin-key}
-      # Allow both the docker dashboard origin (:8080) and the Vite dev origin
-      # (:5173). Spring's CorsFilter rejects mismatches with 403 "Invalid CORS
+      # Allow the docker dashboard origin (:8080) plus Vite's dev origins
+      # (:5173 and :5174 fallback when :5173 is in TIME_WAIT from a prior
+      # run). Spring's CorsFilter rejects mismatches with 403 "Invalid CORS
       # request" before reaching the AuthInterceptor — so a missing origin
       # surfaces as a 403 in DevTools with zero admin-server logs.
-      DASHBOARD_CORS_ORIGIN: http://localhost:8080,http://localhost:5173
+      DASHBOARD_CORS_ORIGIN: http://localhost:8080,http://localhost:5173,http://localhost:5174
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:7979/actuator/health"]
       interval: 10s
