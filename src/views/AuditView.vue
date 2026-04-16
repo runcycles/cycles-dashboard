@@ -20,7 +20,15 @@ import { safeJsonStringify } from '../utils/safe'
 const entries = ref<AuditLogEntry[]>([])
 const error = ref('')
 const loading = ref(false)
-const expanded = ref<string | null>(null)
+// Multi-row expansion — compliance reviewers compare audit entries
+// side-by-side (e.g. before/after of a permission change, two PATCHes
+// on the same key), so keeping multiple rows open at once is the more
+// useful default. Pre-fix, opening row B auto-collapsed row A.
+const expanded = ref(new Set<string>())
+function toggleExpanded(id: string) {
+  if (expanded.value.has(id)) expanded.value.delete(id)
+  else expanded.value.add(id)
+}
 const { sortKey, sortDir, toggle, sorted: sortedEntries } = useSort(entries)
 
 // Pagination state. query() loads page 1; hasMore signals that the
@@ -321,18 +329,18 @@ function measureRow(el: Element | { $el?: Element } | null) {
               class="grid table-row-hover items-center transition-colors"
               :class="hasDetail(sortedEntries[v.index]) ? 'cursor-pointer' : ''"
               :style="{ gridTemplateColumns: gridTemplate, minHeight: COLLAPSED_ROW_HEIGHT + 'px' }"
-              @click="hasDetail(sortedEntries[v.index]) ? (expanded = expanded === sortedEntries[v.index].log_id ? null : sortedEntries[v.index].log_id) : null"
+              @click="hasDetail(sortedEntries[v.index]) ? toggleExpanded(sortedEntries[v.index].log_id) : null"
             >
               <div role="cell" class="pl-3 muted">
                 <button
                   v-if="hasDetail(sortedEntries[v.index])"
                   type="button"
-                  :aria-expanded="expanded === sortedEntries[v.index].log_id"
-                  :aria-label="expanded === sortedEntries[v.index].log_id ? 'Collapse audit details' : 'Expand audit details'"
+                  :aria-expanded="expanded.has(sortedEntries[v.index].log_id)"
+                  :aria-label="expanded.has(sortedEntries[v.index].log_id) ? 'Collapse audit details' : 'Expand audit details'"
                   class="p-0.5 -ml-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-400"
-                  @click.stop="expanded = expanded === sortedEntries[v.index].log_id ? null : sortedEntries[v.index].log_id"
+                  @click.stop="toggleExpanded(sortedEntries[v.index].log_id)"
                 >
-                  <svg class="w-3.5 h-3.5 transition-transform" :class="expanded === sortedEntries[v.index].log_id ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <svg class="w-3.5 h-3.5 transition-transform" :class="expanded.has(sortedEntries[v.index].log_id) ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
                   </svg>
                 </button>
@@ -358,10 +366,11 @@ function measureRow(el: Element | { $el?: Element } | null) {
               </div>
             </div>
 
-            <!-- Expanded detail — only when this row's log_id is the
-                 current `expanded`. Adds ~160-280px depending on
-                 metadata presence. -->
-            <div v-if="expanded === sortedEntries[v.index].log_id" class="bg-gray-50/70 px-4 py-3 border-t border-gray-100">
+            <!-- Expanded detail — rendered when this row's log_id is
+                 in the `expanded` set. Multi-row open so reviewers can
+                 compare entries (e.g. before/after of a permission
+                 change). Adds ~160-280px depending on metadata. -->
+            <div v-if="expanded.has(sortedEntries[v.index].log_id)" class="bg-gray-50/70 px-4 py-3 border-t border-gray-100">
               <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3">
                 <div v-if="sortedEntries[v.index].request_id"><span class="muted">Request ID:</span> <span class="font-mono">{{ sortedEntries[v.index].request_id }}</span></div>
                 <div v-if="sortedEntries[v.index].source_ip"><span class="muted">Source IP:</span> <span class="font-mono">{{ sortedEntries[v.index].source_ip }}</span></div>

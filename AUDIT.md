@@ -1,7 +1,44 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-16 (phase 5 polish — BudgetDetail EventTimeline virtualization + flex-fill + Load more label parity with list views), 2026-04-16 (phase 5 polish — PageHeader `itemNounPlural` override fixes "log entrys"→"log entries", WebhooksView subscription→webhook noun consistency, filter toolbars wrapped in card across TenantsView/WebhooksView/ReservationsView), 2026-04-16 (scale-hardening phase 5 — unified table-layout: flex-fill viewport on all 7 list views, fix AuditView double horizontal scrollbar, standardize Load more label), 2026-04-16 (scale-hardening phase 4 — W4 bulk-op bounded concurrency + 429 backoff across all three bulk runners, W5 reveal-timer cleanup, W6 a11y row-count live region), 2026-04-16 (scale-hardening phase 3 — V5 debounce composable, V6 PageHeader result counts, V7 filter-aware EmptyState), 2026-04-16 (scale-hardening phase 2c — V1 virtualization for EventsView + AuditView with measureElement for expandable rows), 2026-04-16 (scale-hardening phase 2b — row virtualization across 5 list views via @tanstack/vue-virtual), 2026-04-16 (scale-hardening phase 2 — pagination on tenants/webhooks/budget-detail events, lazy tabs, O(1) parent lookup, copy-event-data), 2026-04-16 (scale-hardening phase 1 — pagination, cancellation, N+1 mitigation across 6 views), 2026-04-15 (v0.1.25.27 — RESET_SPENT funding operation support, semantics corrected post-test), 2026-04-14 (error-surfacing + SecretReveal + 3 incident-response Playwright flows), 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
+**Date:** 2026-04-16 (phase 5 polish — multi-row expansion on Events / Audit / EventTimeline for triage comparison workflow), 2026-04-16 (phase 5 polish — BudgetDetail EventTimeline virtualization + flex-fill + Load more label parity with list views), 2026-04-16 (phase 5 polish — PageHeader `itemNounPlural` override fixes "log entrys"→"log entries", WebhooksView subscription→webhook noun consistency, filter toolbars wrapped in card across TenantsView/WebhooksView/ReservationsView), 2026-04-16 (scale-hardening phase 5 — unified table-layout: flex-fill viewport on all 7 list views, fix AuditView double horizontal scrollbar, standardize Load more label), 2026-04-16 (scale-hardening phase 4 — W4 bulk-op bounded concurrency + 429 backoff across all three bulk runners, W5 reveal-timer cleanup, W6 a11y row-count live region), 2026-04-16 (scale-hardening phase 3 — V5 debounce composable, V6 PageHeader result counts, V7 filter-aware EmptyState), 2026-04-16 (scale-hardening phase 2c — V1 virtualization for EventsView + AuditView with measureElement for expandable rows), 2026-04-16 (scale-hardening phase 2b — row virtualization across 5 list views via @tanstack/vue-virtual), 2026-04-16 (scale-hardening phase 2 — pagination on tenants/webhooks/budget-detail events, lazy tabs, O(1) parent lookup, copy-event-data), 2026-04-16 (scale-hardening phase 1 — pagination, cancellation, N+1 mitigation across 6 views), 2026-04-15 (v0.1.25.27 — RESET_SPENT funding operation support, semantics corrected post-test), 2026-04-14 (error-surfacing + SecretReveal + 3 incident-response Playwright flows), 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
 **Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.17+ continues to satisfy the governance plane; **admin server v0.1.25.18+ required** to execute the new `RESET_SPENT` funding operation from BudgetsView (older admin servers will reject the operation enum with 400 INVALID_REQUEST — UI degrades gracefully but the operator sees the server's error toast).
+
+### 2026-04-16 — Phase 5 polish (multi-row expansion on Events / Audit / EventTimeline)
+
+Operator feedback on triage flows: the single-row expansion pattern
+used in EventsView, AuditView, and the embedded EventTimeline forced
+users to close one entry before opening the next. That's a bad default
+for the real workflow in these views, which is **comparison** — two
+events with the same correlation_id, before/after state of an audit
+entry pair, payload diff across two nearly identical budget operations.
+
+**Fix.** Switch `expanded` from `ref<string | null>(null)` to
+`ref(new Set<string>())` in all three components. Click toggles the
+row independently; other rows stay as they were. The chevron
+rotation, `aria-expanded`, detail-block `v-if` gates all moved from
+`expanded === id` to `expanded.has(id)`. Click handlers moved from
+inline ternaries to a small `toggleExpanded(id)` helper so the
+intent reads cleanly.
+
+Vue 3's reactivity layer tracks Set `.add` / `.delete` / `.has`
+mutations out of the box — no extra reactivity plumbing needed. The
+virtualizer's `measureElement` still observes row height changes
+correctly, so multiple simultaneously-expanded rows layout smoothly
+without row-height drift.
+
+**Files.** `src/components/EventTimeline.vue`, `src/views/EventsView.vue`,
+`src/views/AuditView.vue`. No test-suite changes required — existing
+tests target behavior (click fires, aria-expanded flips, detail renders)
+which is unchanged from the single-row case; only the constraint that
+opening row B closes row A is removed. 336/336 vitest, vue-tsc clean,
+production build clean.
+
+**Edge note.** Stale IDs linger in the Set after a filter/refresh
+cycle (the events array changes but the Set is preserved). `.has()`
+no-ops for IDs that aren't in the current view, so the behavior is
+correct — and in fact useful: filtering then unfiltering preserves
+the operator's expansion context. Set size stays bounded in practice
+(ID strings are ~24 bytes; even 1000 stale IDs is under 25 KB).
 
 ### 2026-04-16 — Phase 5 polish (BudgetDetail EventTimeline large-dataset parity)
 

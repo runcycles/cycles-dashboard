@@ -16,10 +16,15 @@ import { formatDateTime } from '../utils/format'
 // observed via measureElement, only visible rows in the DOM.
 const props = defineProps<{ events: Event[] }>()
 
-const expanded = ref<string | null>(null)
+// Multi-row expansion — operators compare events side-by-side during
+// triage (correlation_id match, payload diff), so keeping multiple
+// rows open at once is the more useful default. Pre-fix, opening row
+// B auto-collapsed row A; now each row toggles independently.
+const expanded = ref(new Set<string>())
 
 function toggle(id: string) {
-  expanded.value = expanded.value === id ? null : id
+  if (expanded.value.has(id)) expanded.value.delete(id)
+  else expanded.value.add(id)
 }
 
 // Virtualization. Collapsed rows are ~36px; expanded grow with the
@@ -67,16 +72,16 @@ function measureRow(el: Element | { $el?: Element } | null) {
           @click="toggle(events[v.index].event_id)"
           @keydown.enter.prevent="toggle(events[v.index].event_id)"
           @keydown.space.prevent="toggle(events[v.index].event_id)"
-          :aria-expanded="expanded === events[v.index].event_id"
+          :aria-expanded="expanded.has(events[v.index].event_id)"
         >
-          <svg class="w-3 h-3 muted shrink-0 transition-transform" :class="expanded === events[v.index].event_id ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <svg class="w-3 h-3 muted shrink-0 transition-transform" :class="expanded.has(events[v.index].event_id) ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
           </svg>
           <span class="font-mono text-xs text-gray-700 flex-1 truncate" :title="events[v.index].event_type">{{ events[v.index].event_type }}</span>
           <span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs shrink-0">{{ events[v.index].category }}</span>
           <span class="muted-sm shrink-0 whitespace-nowrap" :title="new Date(events[v.index].timestamp).toISOString()">{{ formatDateTime(events[v.index].timestamp) }}</span>
         </div>
-        <div v-if="expanded === events[v.index].event_id" class="pl-6 pb-2 text-xs">
+        <div v-if="expanded.has(events[v.index].event_id)" class="pl-6 pb-2 text-xs">
           <div class="grid grid-cols-2 gap-x-6 gap-y-1 mb-2">
             <div><span class="muted">Event ID:</span> <span class="font-mono">{{ events[v.index].event_id }}</span></div>
             <div><span class="muted">Source:</span> {{ events[v.index].source }}</div>

@@ -26,7 +26,14 @@ const hasMore = ref(false)
 const nextCursor = ref('')
 const loadingMore = ref(false)
 const error = ref('')
-const expanded = ref<string | null>(null)
+// Multi-row expansion — operators compare events side-by-side during
+// triage (correlation_id walk, payload diff across two requests), so
+// keeping multiple rows open at once is the more useful default.
+const expanded = ref(new Set<string>())
+function toggleExpanded(id: string) {
+  if (expanded.value.has(id)) expanded.value.delete(id)
+  else expanded.value.add(id)
+}
 const { sortKey, sortDir, toggle, sorted: sortedEvents } = useSort(events)
 
 
@@ -354,17 +361,17 @@ function measureRow(el: Element | { $el?: Element } | null) {
             <div
               class="grid table-row-hover items-center cursor-pointer transition-colors"
               :style="{ gridTemplateColumns: gridTemplate, minHeight: COLLAPSED_ROW_HEIGHT + 'px' }"
-              @click="expanded = expanded === sortedEvents[v.index].event_id ? null : sortedEvents[v.index].event_id"
+              @click="toggleExpanded(sortedEvents[v.index].event_id)"
             >
               <div role="cell" class="pl-3 muted">
                 <button
                   type="button"
-                  :aria-expanded="expanded === sortedEvents[v.index].event_id"
-                  :aria-label="expanded === sortedEvents[v.index].event_id ? 'Collapse event details' : 'Expand event details'"
+                  :aria-expanded="expanded.has(sortedEvents[v.index].event_id)"
+                  :aria-label="expanded.has(sortedEvents[v.index].event_id) ? 'Collapse event details' : 'Expand event details'"
                   class="p-0.5 -ml-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-400"
-                  @click.stop="expanded = expanded === sortedEvents[v.index].event_id ? null : sortedEvents[v.index].event_id"
+                  @click.stop="toggleExpanded(sortedEvents[v.index].event_id)"
                 >
-                  <svg class="w-3.5 h-3.5 transition-transform" :class="expanded === sortedEvents[v.index].event_id ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <svg class="w-3.5 h-3.5 transition-transform" :class="expanded.has(sortedEvents[v.index].event_id) ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
                   </svg>
                 </button>
@@ -378,12 +385,14 @@ function measureRow(el: Element | { $el?: Element } | null) {
               <div role="cell" class="table-cell muted whitespace-nowrap text-xs" :title="new Date(sortedEvents[v.index].timestamp).toISOString()">{{ formatDateTime(sortedEvents[v.index].timestamp) }}</div>
             </div>
 
-            <!-- Expanded detail. Only rendered when event_id matches
-                 `expanded`. When present, it adds ~200-280px to the
-                 row's total height — measureElement reports the new
-                 height and the virtualizer re-lays out sibling rows
-                 below on the next tick. -->
-            <div v-if="expanded === sortedEvents[v.index].event_id" class="bg-gray-50/70 px-4 py-3 border-t border-gray-100">
+            <!-- Expanded detail. Rendered when the row's event_id is
+                 in the `expanded` set — multi-row open so operators
+                 can compare events side-by-side during triage. When
+                 present, it adds ~200-280px to the row's total
+                 height; measureElement reports the new height and
+                 the virtualizer re-lays out sibling rows below on
+                 the next tick. -->
+            <div v-if="expanded.has(sortedEvents[v.index].event_id)" class="bg-gray-50/70 px-4 py-3 border-t border-gray-100">
               <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3">
                 <div><span class="muted">Event ID:</span> <span class="font-mono">{{ sortedEvents[v.index].event_id }}</span></div>
                 <div><span class="muted">Source:</span> {{ sortedEvents[v.index].source }}</div>
