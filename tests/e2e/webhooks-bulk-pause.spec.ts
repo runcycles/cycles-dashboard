@@ -72,8 +72,11 @@ test('selecting webhooks and clicking Pause transitions them all to PAUSED', asy
 
   // Filter to the seeded tenant so only our two seeded subs are
   // visible. Without the filter, other tenants' subs could be in the
-  // table and "select all visible" would scope too broadly.
-  const tenantSelect = page.locator('select').filter({ hasText: /all tenants/i }).first()
+  // table and "select all visible" would scope too broadly. Locator
+  // uses the select's aria-label instead of its option text so the
+  // "All webhooks" / "All tenants" rename (#68) doesn't break this
+  // spec.
+  const tenantSelect = page.getByRole('combobox', { name: /filter webhooks by tenant/i })
   await tenantSelect.selectOption(fx.tenantId)
 
   // Wait for the filtered list to render our specific subs. The row
