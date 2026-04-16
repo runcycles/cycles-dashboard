@@ -178,20 +178,23 @@ describe('capability-gated UI visibility', () => {
   // ─── BudgetsView: manage_budgets → action column header ──────────────
   // Same rationale as ReservationsView — Freeze/Unfreeze/Edit live in
   // the detail panel which only renders after a scope is selected. The
-  // action <th> (w-20) is the clean proxy for the gated UI surface.
+  // action columnheader is the clean proxy for the gated UI surface.
+  // Post-V1 virtualization (phase 2b), BudgetsView renders as an ARIA
+  // grid like ReservationsView; data-column="action" replaces the
+  // old `th.w-20` selector.
   describe('BudgetsView + manage_budgets', () => {
     it('renders action column header when manage_budgets=true', async () => {
       setCaps({ manage_budgets: true })
       const { default: BudgetsView } = await import('../views/BudgetsView.vue')
       const w = await mountView(BudgetsView)
-      expect(w.find('th.w-20').exists()).toBe(true)
+      expect(w.find('[data-column="action"]').exists()).toBe(true)
     })
 
     it('hides action column header when manage_budgets=false', async () => {
       setCaps({ manage_budgets: false })
       const { default: BudgetsView } = await import('../views/BudgetsView.vue')
       const w = await mountView(BudgetsView)
-      expect(w.find('th.w-20').exists()).toBe(false)
+      expect(w.find('[data-column="action"]').exists()).toBe(false)
     })
   })
 

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
@@ -460,6 +461,31 @@ watch(() => route.query, () => {
   if (isDetail.value) loadDetail()
   else loadList()
 })
+
+// V1 virtualization — list mode only (not the detail card, which
+// embeds EventTimeline and is naturally bounded by DETAIL_EVENTS_PAGE_SIZE).
+const scrollEl = ref<HTMLElement | null>(null)
+// 56px — UtilizationBar is ~32px tall (label + bar + gap); with
+// table-cell py-3 padding a single row fits comfortably. Too much
+// lower and the bar clips at zoom levels above 100%.
+const ROW_HEIGHT_ESTIMATE = 56
+const virtualizer = useVirtualizer(computed(() => ({
+  count: sortedBudgets.value.length,
+  getScrollElement: () => scrollEl.value,
+  estimateSize: () => ROW_HEIGHT_ESTIMATE,
+  overscan: 8,
+})))
+const virtualRows = computed(() => virtualizer.value.getVirtualItems())
+const totalHeight = computed(() => virtualizer.value.getTotalSize())
+
+// 7 columns when canManage, 6 without. Utilization gets a big share
+// (UtilizationBar needs width to be readable); scope takes the
+// remaining fractional.
+const gridTemplate = computed(() =>
+  canManage.value
+    ? 'minmax(220px,2fr) 80px 110px 130px minmax(200px,2fr) 140px 96px'
+    : 'minmax(220px,2fr) 80px 110px 130px minmax(200px,2fr) 140px',
+)
 </script>
 
 <template>
@@ -603,53 +629,78 @@ watch(() => route.query, () => {
         </div>
       </div>
 
-      <div class="card-table">
-        <table class="w-full text-sm min-w-[600px]">
-          <thead class="table-header">
-            <tr>
-              <SortHeader label="Scope" column="scope" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-              <SortHeader label="Unit" column="unit" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-              <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-              <th class="table-cell text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Overage</th>
-              <SortHeader label="Utilization" column="utilization" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-              <SortHeader label="Debt" column="debt" :active-column="sortKey" :direction="sortDir" @sort="toggle" align="right" />
-              <th v-if="canManage" class="table-cell w-20"></th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-gray-100">
-            <tr v-for="b in sortedBudgets" :key="b.ledger_id" class="table-row-hover">
-              <td class="table-cell">
-                <router-link :to="{ name: 'budgets', query: { scope: b.scope, unit: b.unit } }" class="text-blue-600 hover:underline font-mono text-xs">{{ b.scope }}</router-link>
-                <span v-if="b.is_over_limit" class="ml-1.5 bg-red-100 text-red-700 px-1 py-0.5 rounded text-xs font-medium">OVER</span>
-              </td>
-              <td class="table-cell muted">{{ b.unit }}</td>
-              <td class="table-cell"><StatusBadge :status="b.status" /></td>
-              <td
-                class="table-cell font-mono text-xs"
-                :class="b.commit_overage_policy ? 'text-gray-700' : 'text-gray-500 italic'"
-                :title="b.commit_overage_policy ? 'Budget-level override' : 'Inherited from tenant'"
-              >{{ b.commit_overage_policy || 'Inherit' }}</td>
-              <td class="table-cell">
-                <UtilizationBar :remaining="b.remaining.amount" :allocated="b.allocated.amount" />
-              </td>
-              <td class="table-cell text-right tabular-nums" :class="(b.debt?.amount ?? 0) > 0 ? 'text-red-600 font-medium' : 'muted'">{{ (b.debt?.amount ?? 0).toLocaleString() }}</td>
-              <td v-if="canManage" class="table-cell">
-                <button v-if="b.status === 'ACTIVE'" @click.prevent="requestFreeze(b.scope, b.unit, 'freeze')" class="btn-row-danger">Freeze</button>
-                <button v-if="b.status === 'FROZEN'" @click.prevent="requestFreeze(b.scope, b.unit, 'unfreeze')" class="btn-row-success">Unfreeze</button>
-              </td>
-            </tr>
-            <tr v-if="budgets.length === 0">
-              <td :colspan="canManage ? 7 : 6">
-                <EmptyState message="No budgets found" :hint="!selectedTenant ? 'Select a tenant to view budgets' : undefined" />
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <div v-if="hasMore" class="table-cell border-t border-gray-100 text-center">
-          <button @click="loadMore" :disabled="loadingMore" class="text-xs text-blue-600 hover:text-blue-800 cursor-pointer disabled:opacity-50">
-            {{ loadingMore ? 'Loading...' : 'Load more results' }}
-          </button>
+      <!-- V1 virtualized list-mode grid. Detail mode is above inside
+           the v-if="isDetail" branch and stays as-is (bounded by
+           DETAIL_EVENTS_PAGE_SIZE, no scale concern). -->
+      <div
+        class="bg-white rounded-lg shadow overflow-hidden"
+        role="table"
+        :aria-rowcount="sortedBudgets.length + 1"
+        :aria-colcount="canManage ? 7 : 6"
+      >
+        <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
+          <div role="row" class="grid text-xs uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
+            <SortHeader as="div" label="Scope" column="scope" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+            <SortHeader as="div" label="Unit" column="unit" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+            <SortHeader as="div" label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+            <div role="columnheader" class="table-cell text-left">Overage</div>
+            <SortHeader as="div" label="Utilization" column="utilization" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+            <SortHeader as="div" label="Debt" column="debt" :active-column="sortKey" :direction="sortDir" @sort="toggle" align="right" />
+            <div v-if="canManage" role="columnheader" class="table-cell" data-column="action"></div>
+          </div>
         </div>
+
+        <div
+          v-if="sortedBudgets.length > 0"
+          ref="scrollEl"
+          role="rowgroup"
+          class="overflow-auto"
+          style="max-height: calc(100vh - 420px); min-height: 240px;"
+        >
+          <div :style="{ height: totalHeight + 'px', position: 'relative' }">
+            <div
+              v-for="v in virtualRows"
+              :key="sortedBudgets[v.index].ledger_id"
+              role="row"
+              :aria-rowindex="v.index + 2"
+              class="grid table-row-hover border-b border-gray-100 absolute left-0 right-0 items-center"
+              :style="{ gridTemplateColumns: gridTemplate, transform: `translateY(${v.start}px)`, height: ROW_HEIGHT_ESTIMATE + 'px' }"
+            >
+              <div role="cell" class="table-cell min-w-0">
+                <router-link :to="{ name: 'budgets', query: { scope: sortedBudgets[v.index].scope, unit: sortedBudgets[v.index].unit } }" class="text-blue-600 hover:underline font-mono text-xs truncate inline-block max-w-full align-middle">{{ sortedBudgets[v.index].scope }}</router-link>
+                <span v-if="sortedBudgets[v.index].is_over_limit" class="ml-1.5 bg-red-100 text-red-700 px-1 py-0.5 rounded text-xs font-medium">OVER</span>
+              </div>
+              <div role="cell" class="table-cell muted">{{ sortedBudgets[v.index].unit }}</div>
+              <div role="cell" class="table-cell"><StatusBadge :status="sortedBudgets[v.index].status" /></div>
+              <div
+                role="cell"
+                class="table-cell font-mono text-xs"
+                :class="sortedBudgets[v.index].commit_overage_policy ? 'text-gray-700' : 'text-gray-500 italic'"
+                :title="sortedBudgets[v.index].commit_overage_policy ? 'Budget-level override' : 'Inherited from tenant'"
+              >{{ sortedBudgets[v.index].commit_overage_policy || 'Inherit' }}</div>
+              <div role="cell" class="table-cell">
+                <UtilizationBar :remaining="sortedBudgets[v.index].remaining.amount" :allocated="sortedBudgets[v.index].allocated.amount" />
+              </div>
+              <div role="cell" class="table-cell text-right tabular-nums" :class="(sortedBudgets[v.index].debt?.amount ?? 0) > 0 ? 'text-red-600 font-medium' : 'muted'">{{ (sortedBudgets[v.index].debt?.amount ?? 0).toLocaleString() }}</div>
+              <div v-if="canManage" role="cell" class="table-cell">
+                <button v-if="sortedBudgets[v.index].status === 'ACTIVE'" @click.prevent="requestFreeze(sortedBudgets[v.index].scope, sortedBudgets[v.index].unit, 'freeze')" class="btn-row-danger">Freeze</button>
+                <button v-if="sortedBudgets[v.index].status === 'FROZEN'" @click.prevent="requestFreeze(sortedBudgets[v.index].scope, sortedBudgets[v.index].unit, 'unfreeze')" class="btn-row-success">Unfreeze</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-else role="row">
+          <EmptyState message="No budgets found" :hint="!selectedTenant ? 'Select a tenant to view budgets' : undefined" />
+        </div>
+      </div>
+
+      <!-- Load-more footer lives outside the virtualized scroll container
+           — same pattern as TenantsView / WebhooksView. -->
+      <div v-if="hasMore || loadingMore" class="mt-3 flex justify-end">
+        <button @click="loadMore" :disabled="loadingMore" class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50 cursor-pointer">
+          {{ loadingMore ? 'Loading...' : 'Load more results' }}
+        </button>
       </div>
     </template>
 
