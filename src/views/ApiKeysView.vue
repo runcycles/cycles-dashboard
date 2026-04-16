@@ -423,26 +423,40 @@ function closePermsViewer() { viewingPermsFor.value = null }
             </div>
             <div role="cell" class="table-cell"><StatusBadge :status="sortedKeys[v.index].status" /></div>
             <div role="cell" class="table-cell muted-sm">
-              <!-- Click-to-view pill. Single fixed-width button that's
-                   stable across viewport resizes (previous "first-N
-                   chips + +N counter" approach let the counter slide
-                   under the overflow-hidden boundary on narrow
-                   widths). Click opens a dialog listing every
-                   permission so operators can fully audit the key
-                   without opening the Edit modal. -->
-              <button
-                v-if="(sortedKeys[v.index].permissions?.length ?? 0) > 0"
-                type="button"
-                @click.prevent="openPermsViewer(sortedKeys[v.index])"
-                class="inline-flex items-center gap-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded px-2 py-0.5 cursor-pointer transition-colors"
-                :aria-label="`View all ${sortedKeys[v.index].permissions!.length} permissions for ${sortedKeys[v.index].name || sortedKeys[v.index].key_id}`"
-              >
-                <span class="tabular-nums font-medium">{{ sortedKeys[v.index].permissions!.length }}</span>
-                <span class="text-xs">perm{{ sortedKeys[v.index].permissions!.length === 1 ? '' : 's' }}</span>
-                <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                </svg>
-              </button>
+              <!-- Combined preview + click-to-view. Previously tried
+                   inline "first-N chips + +N counter" alone (counter
+                   got clipped on resize) and pill-only (lost at-a-
+                   glance info). This combines both:
+                   - Up to 2 chips as the preview. Chips sit in a
+                     shrinkable min-w-0 inner container so they
+                     truncate gracefully on narrow viewports.
+                   - "N perms" pill at the end with flex-shrink-0 so
+                     it CAN'T be clipped by the overflow — it's the
+                     stable "click for full list" affordance.
+                   Click pill → full-permissions dialog with scope
+                   filter for context + direct jump to Edit. -->
+              <div v-if="(sortedKeys[v.index].permissions?.length ?? 0) > 0" class="flex gap-1 items-center">
+                <div class="flex gap-1 overflow-hidden min-w-0">
+                  <span
+                    v-for="p in (sortedKeys[v.index].permissions ?? []).slice(0, 2)"
+                    :key="p"
+                    class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded whitespace-nowrap"
+                  >{{ p }}</span>
+                </div>
+                <button
+                  type="button"
+                  @click.prevent="openPermsViewer(sortedKeys[v.index])"
+                  class="inline-flex items-center gap-1 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded px-2 py-0.5 cursor-pointer transition-colors flex-shrink-0"
+                  :aria-label="`View all ${sortedKeys[v.index].permissions!.length} permissions for ${sortedKeys[v.index].name || sortedKeys[v.index].key_id}`"
+                  :title="`View all ${sortedKeys[v.index].permissions!.length} permissions`"
+                >
+                  <span class="tabular-nums font-medium">{{ sortedKeys[v.index].permissions!.length }}</span>
+                  <span class="text-xs">perm{{ sortedKeys[v.index].permissions!.length === 1 ? '' : 's' }}</span>
+                  <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                  </svg>
+                </button>
+              </div>
               <span v-else class="text-gray-400">—</span>
             </div>
             <div role="cell" class="table-cell muted-sm font-mono truncate" :title="sortedKeys[v.index].scope_filter?.join(', ')">{{ sortedKeys[v.index].scope_filter?.join(', ') || '-' }}</div>
