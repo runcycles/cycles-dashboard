@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
@@ -250,6 +251,35 @@ function parentName(id: string | undefined): string {
   const p = tenantById.value.get(id)
   return p?.name || id
 }
+
+// V1 virtualization. See ReservationsView.vue for the pattern rationale —
+// semantic <table> becomes an ARIA grid of <div>s with fixed row
+// heights; `gridTemplate` is inline (not a Tailwind arbitrary class)
+// so Vue bindings can't be missed by the JIT scanner.
+const scrollEl = ref<HTMLElement | null>(null)
+// 52px fits a single-line row at text-sm with table-cell's py-3 padding.
+// Status badges and sort icons are smaller than the line-height so no
+// re-measurement needed.
+const ROW_HEIGHT_ESTIMATE = 52
+const virtualizer = useVirtualizer(computed(() => ({
+  count: sortedTenants.value.length,
+  getScrollElement: () => scrollEl.value,
+  estimateSize: () => ROW_HEIGHT_ESTIMATE,
+  overscan: 8,
+})))
+const virtualRows = computed(() => virtualizer.value.getVirtualItems())
+const totalHeight = computed(() => virtualizer.value.getTotalSize())
+
+// Column layout shared by sticky header + every virtualized row.
+// Checkbox + action columns only present when canManage. Widths tuned
+// against a 1440px viewport with a 200px sidebar — shrinks gracefully
+// via minmax fractional units, overflow-x handled by the outer scroll
+// container.
+const gridTemplate = computed(() =>
+  canManage.value
+    ? '40px minmax(180px,1.5fr) minmax(160px,2fr) minmax(140px,1fr) 110px 110px 120px 120px'
+    : 'minmax(180px,1.5fr) minmax(160px,2fr) minmax(140px,1fr) 110px 110px 120px',
+)
 </script>
 
 <template>
@@ -281,58 +311,81 @@ function parentName(id: string | undefined): string {
       <button @click="selected = new Set()" class="muted-sm hover:text-gray-700 ml-auto cursor-pointer">Clear</button>
     </div>
 
-    <div class="card-table">
-      <table class="w-full text-sm min-w-[640px]">
-        <thead class="table-header">
-          <tr>
-            <th v-if="canManage" class="table-cell w-10">
-              <input type="checkbox" :checked="selectedVisibleAll" @change="toggleSelectAll" aria-label="Select all visible tenants" />
-            </th>
-            <SortHeader label="Tenant ID" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <SortHeader label="Name" column="name" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <th class="table-cell text-left text-xs uppercase tracking-wider">Parent</th>
-            <th class="table-cell text-left text-xs uppercase tracking-wider">Children</th>
-            <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <SortHeader label="Created" column="created_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <th v-if="canManage" class="table-cell w-24"></th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-100">
-          <tr v-for="t in sortedTenants" :key="t.tenant_id" class="table-row-hover">
-            <td v-if="canManage" class="table-cell">
-              <input type="checkbox" :checked="selected.has(t.tenant_id)" @change="toggleSelect(t.tenant_id)" :aria-label="`Select ${t.name || t.tenant_id}`" />
-            </td>
-            <td class="table-cell">
-              <router-link :to="{ name: 'tenant-detail', params: { id: t.tenant_id } }" class="text-blue-600 hover:underline font-mono text-xs">{{ t.tenant_id }}</router-link>
-            </td>
-            <td class="table-cell text-gray-700">{{ t.name }}</td>
-            <td class="table-cell text-xs">
-              <router-link v-if="t.parent_tenant_id" :to="{ name: 'tenant-detail', params: { id: t.parent_tenant_id } }" class="text-blue-600 hover:underline font-mono">
-                {{ parentName(t.parent_tenant_id) }}
+    <!-- V1 virtualized grid. Pattern established in ReservationsView:
+         role="table" outer, sticky role="rowgroup" header, scroll
+         container with absolute-positioned virtualized rows. -->
+    <div
+      class="bg-white rounded-lg shadow overflow-hidden"
+      role="table"
+      :aria-rowcount="filteredTenants.length + 1"
+      :aria-colcount="canManage ? 8 : 6"
+    >
+      <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
+        <div role="row" class="grid text-xs uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
+          <div v-if="canManage" role="columnheader" class="table-cell">
+            <input type="checkbox" :checked="selectedVisibleAll" @change="toggleSelectAll" aria-label="Select all visible tenants" />
+          </div>
+          <SortHeader as="div" label="Tenant ID" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <SortHeader as="div" label="Name" column="name" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <div role="columnheader" class="table-cell text-left">Parent</div>
+          <div role="columnheader" class="table-cell text-left">Children</div>
+          <SortHeader as="div" label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <SortHeader as="div" label="Created" column="created_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <div v-if="canManage" role="columnheader" class="table-cell" data-column="action"></div>
+        </div>
+      </div>
+
+      <div
+        v-if="sortedTenants.length > 0"
+        ref="scrollEl"
+        role="rowgroup"
+        class="overflow-auto"
+        style="max-height: calc(100vh - 360px); min-height: 200px;"
+      >
+        <div :style="{ height: totalHeight + 'px', position: 'relative' }">
+          <div
+            v-for="v in virtualRows"
+            :key="sortedTenants[v.index].tenant_id"
+            role="row"
+            :aria-rowindex="v.index + 2"
+            class="grid table-row-hover border-b border-gray-100 absolute left-0 right-0 items-center"
+            :style="{ gridTemplateColumns: gridTemplate, transform: `translateY(${v.start}px)`, height: ROW_HEIGHT_ESTIMATE + 'px' }"
+          >
+            <div v-if="canManage" role="cell" class="table-cell">
+              <input type="checkbox" :checked="selected.has(sortedTenants[v.index].tenant_id)" @change="toggleSelect(sortedTenants[v.index].tenant_id)" :aria-label="`Select ${sortedTenants[v.index].name || sortedTenants[v.index].tenant_id}`" />
+            </div>
+            <div role="cell" class="table-cell">
+              <router-link :to="{ name: 'tenant-detail', params: { id: sortedTenants[v.index].tenant_id } }" class="text-blue-600 hover:underline font-mono text-xs">{{ sortedTenants[v.index].tenant_id }}</router-link>
+            </div>
+            <div role="cell" class="table-cell text-gray-700">{{ sortedTenants[v.index].name }}</div>
+            <div role="cell" class="table-cell text-xs">
+              <router-link v-if="sortedTenants[v.index].parent_tenant_id" :to="{ name: 'tenant-detail', params: { id: sortedTenants[v.index].parent_tenant_id } }" class="text-blue-600 hover:underline font-mono">
+                {{ parentName(sortedTenants[v.index].parent_tenant_id) }}
               </router-link>
               <span v-else class="text-gray-500" aria-hidden="true">—</span>
-            </td>
-            <td class="table-cell text-xs">
+            </div>
+            <div role="cell" class="table-cell text-xs">
               <button
-                v-if="childCountMap[t.tenant_id]"
-                @click="parentFilter = t.tenant_id"
+                v-if="childCountMap[sortedTenants[v.index].tenant_id]"
+                @click="parentFilter = sortedTenants[v.index].tenant_id"
                 class="text-blue-600 hover:underline cursor-pointer"
-                :aria-label="`Filter list to ${childCountMap[t.tenant_id]} children of ${t.name}`"
-              >{{ childCountMap[t.tenant_id] }} child{{ childCountMap[t.tenant_id] === 1 ? '' : 'ren' }}</button>
+                :aria-label="`Filter list to ${childCountMap[sortedTenants[v.index].tenant_id]} children of ${sortedTenants[v.index].name}`"
+              >{{ childCountMap[sortedTenants[v.index].tenant_id] }} child{{ childCountMap[sortedTenants[v.index].tenant_id] === 1 ? '' : 'ren' }}</button>
               <span v-else class="text-gray-500" aria-hidden="true">—</span>
-            </td>
-            <td class="table-cell"><StatusBadge :status="t.status" /></td>
-            <td class="table-cell muted-sm">{{ formatDate(t.created_at) }}</td>
-            <td v-if="canManage" class="table-cell">
-              <button v-if="t.status === 'ACTIVE'" @click="pendingStatusAction = { tenantId: t.tenant_id, name: t.name, action: 'SUSPENDED' }" class="btn-row-danger">Suspend</button>
-              <button v-if="t.status === 'SUSPENDED'" @click="pendingStatusAction = { tenantId: t.tenant_id, name: t.name, action: 'ACTIVE' }" class="btn-row-success">Reactivate</button>
-            </td>
-          </tr>
-          <tr v-if="filteredTenants.length === 0">
-            <td :colspan="canManage ? 8 : 6"><EmptyState :message="search || parentFilter ? 'No tenants match your filters' : 'No tenants found'" :hint="search || parentFilter ? undefined : 'Tenants will appear here once created'" /></td>
-          </tr>
-        </tbody>
-      </table>
+            </div>
+            <div role="cell" class="table-cell"><StatusBadge :status="sortedTenants[v.index].status" /></div>
+            <div role="cell" class="table-cell muted-sm">{{ formatDate(sortedTenants[v.index].created_at) }}</div>
+            <div v-if="canManage" role="cell" class="table-cell">
+              <button v-if="sortedTenants[v.index].status === 'ACTIVE'" @click="pendingStatusAction = { tenantId: sortedTenants[v.index].tenant_id, name: sortedTenants[v.index].name, action: 'SUSPENDED' }" class="btn-row-danger">Suspend</button>
+              <button v-if="sortedTenants[v.index].status === 'SUSPENDED'" @click="pendingStatusAction = { tenantId: sortedTenants[v.index].tenant_id, name: sortedTenants[v.index].name, action: 'ACTIVE' }" class="btn-row-success">Reactivate</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-else role="row">
+        <EmptyState :message="search || parentFilter ? 'No tenants match your filters' : 'No tenants found'" :hint="search || parentFilter ? undefined : 'Tenants will appear here once created'" />
+      </div>
     </div>
 
     <!-- R5: server-side cursor pagination. Search and parent-filter
