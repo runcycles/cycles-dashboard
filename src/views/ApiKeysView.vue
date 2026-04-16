@@ -296,16 +296,16 @@ const gridTemplate = computed(() =>
     : '180px minmax(120px,1fr) minmax(120px,1fr) 100px minmax(260px,2.5fr) minmax(140px,1fr) 160px 140px',
 )
 
-// How many permission chips to render inline before collapsing the
-// rest into a "+N" counter. Tuned against common keys (2-4 perms)
-// on a 260px-min column: at text-xs font-mono, a chip like
-// "budgets:read" is ~80px, so 3 chips typically fit comfortably.
-// Keys with more permissions get "+N more" with the full list on
-// the badge's title tooltip + on the row Edit dialog.
-const MAX_VISIBLE_PERMS = 3
-function hiddenPermsCount(perms: readonly string[] | undefined): number {
-  return Math.max(0, (perms?.length ?? 0) - MAX_VISIBLE_PERMS)
-}
+// Permissions cell compromise: show a single pill "N permissions"
+// that's always-visible and click-expandable. The pre-fix "N inline
+// chips + N hidden" approach fought the overflow-hidden boundary —
+// on narrow viewports the +N counter disappeared into the clipped
+// region and operators had no discoverable escape hatch. Now the
+// pill is fixed-width, doesn't depend on the chip row's measured
+// width, and clicking it opens a full-permissions dialog.
+const viewingPermsFor = ref<KeyWithTenant | null>(null)
+function openPermsViewer(k: KeyWithTenant) { viewingPermsFor.value = k }
+function closePermsViewer() { viewingPermsFor.value = null }
 </script>
 
 <template>
@@ -422,25 +422,28 @@ function hiddenPermsCount(perms: readonly string[] | undefined): number {
               <TenantLink :tenant-id="sortedKeys[v.index].tenant_id" />
             </div>
             <div role="cell" class="table-cell"><StatusBadge :status="sortedKeys[v.index].status" /></div>
-            <div role="cell" class="table-cell muted-sm overflow-hidden">
-              <div class="flex gap-1 flex-nowrap overflow-hidden" :title="sortedKeys[v.index].permissions?.join(', ')">
-                <!-- Show first MAX_VISIBLE_PERMS chips inline; collapse
-                     the rest into a "+N" counter. Title attr on both
-                     the wrapper (all perms) and the counter (just the
-                     hidden ones) so operators can hover either to see
-                     the full list. Full permission editing remains in
-                     the Edit dialog. -->
-                <span
-                  v-for="p in (sortedKeys[v.index].permissions ?? []).slice(0, MAX_VISIBLE_PERMS)"
-                  :key="p"
-                  class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded whitespace-nowrap"
-                >{{ p }}</span>
-                <span
-                  v-if="hiddenPermsCount(sortedKeys[v.index].permissions) > 0"
-                  class="bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded whitespace-nowrap font-medium"
-                  :title="`Also: ${(sortedKeys[v.index].permissions ?? []).slice(MAX_VISIBLE_PERMS).join(', ')}`"
-                >+{{ hiddenPermsCount(sortedKeys[v.index].permissions) }}</span>
-              </div>
+            <div role="cell" class="table-cell muted-sm">
+              <!-- Click-to-view pill. Single fixed-width button that's
+                   stable across viewport resizes (previous "first-N
+                   chips + +N counter" approach let the counter slide
+                   under the overflow-hidden boundary on narrow
+                   widths). Click opens a dialog listing every
+                   permission so operators can fully audit the key
+                   without opening the Edit modal. -->
+              <button
+                v-if="(sortedKeys[v.index].permissions?.length ?? 0) > 0"
+                type="button"
+                @click.prevent="openPermsViewer(sortedKeys[v.index])"
+                class="inline-flex items-center gap-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded px-2 py-0.5 cursor-pointer transition-colors"
+                :aria-label="`View all ${sortedKeys[v.index].permissions!.length} permissions for ${sortedKeys[v.index].name || sortedKeys[v.index].key_id}`"
+              >
+                <span class="tabular-nums font-medium">{{ sortedKeys[v.index].permissions!.length }}</span>
+                <span class="text-xs">perm{{ sortedKeys[v.index].permissions!.length === 1 ? '' : 's' }}</span>
+                <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                </svg>
+              </button>
+              <span v-else class="text-gray-400">—</span>
             </div>
             <div role="cell" class="table-cell muted-sm font-mono truncate" :title="sortedKeys[v.index].scope_filter?.join(', ')">{{ sortedKeys[v.index].scope_filter?.join(', ') || '-' }}</div>
             <div role="cell" class="table-cell muted-sm whitespace-nowrap">{{ formatDateTime(sortedKeys[v.index].created_at) }}</div>
@@ -551,5 +554,60 @@ function hiddenPermsCount(perms: readonly string[] | undefined): number {
       @confirm="executeRevoke"
       @cancel="pendingRevoke = null"
     />
+
+    <!-- Permissions viewer. Lightweight read-only modal — full
+         permissions list with scope_filter for context. Opens when
+         operators click the compact pill in the permissions column.
+         Intentionally distinct from the Edit dialog (this is a
+         view-only affordance; Edit is a separate click-through). -->
+    <div
+      v-if="viewingPermsFor"
+      class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
+      @click.self="closePermsViewer"
+      @keyup.esc="closePermsViewer"
+    >
+      <div class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-5 max-w-md w-full mx-4 max-h-[80vh] flex flex-col">
+        <div class="flex items-start justify-between mb-3">
+          <div>
+            <h3 class="text-sm font-semibold text-gray-900">Permissions</h3>
+            <p class="muted-sm font-mono break-all">{{ viewingPermsFor.name || viewingPermsFor.key_id }}</p>
+          </div>
+          <button @click="closePermsViewer" aria-label="Close" class="muted hover:text-gray-700 cursor-pointer p-1 -mt-1 -mr-1 rounded hover:bg-gray-100">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto">
+          <p class="muted-sm mb-2">{{ viewingPermsFor.permissions?.length ?? 0 }} permission{{ (viewingPermsFor.permissions?.length ?? 0) === 1 ? '' : 's' }}</p>
+          <div class="flex flex-wrap gap-1 mb-4">
+            <span
+              v-for="p in viewingPermsFor.permissions ?? []"
+              :key="p"
+              class="bg-gray-100 text-gray-700 font-mono text-xs px-2 py-1 rounded"
+            >{{ p }}</span>
+          </div>
+
+          <template v-if="viewingPermsFor.scope_filter && viewingPermsFor.scope_filter.length > 0">
+            <p class="muted-sm mb-2">Scope filter ({{ viewingPermsFor.scope_filter.length }})</p>
+            <div class="flex flex-wrap gap-1">
+              <span
+                v-for="s in viewingPermsFor.scope_filter"
+                :key="s"
+                class="bg-blue-50 text-blue-800 font-mono text-xs px-2 py-1 rounded"
+              >{{ s }}</span>
+            </div>
+          </template>
+        </div>
+
+        <div class="flex justify-end gap-2 mt-4 pt-3 border-t border-gray-100">
+          <button @click="closePermsViewer" class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 rounded hover:bg-gray-100 cursor-pointer">Close</button>
+          <button
+            v-if="canManage && viewingPermsFor.status === 'ACTIVE'"
+            @click="() => { const k = viewingPermsFor; closePermsViewer(); if (k) openEdit(k) }"
+            class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer"
+          >Edit permissions</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
