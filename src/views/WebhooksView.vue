@@ -308,21 +308,39 @@ const gridTemplate = computed(() =>
       </select>
     </div>
 
-    <!-- Bulk bar. Same reserve-the-space pattern as TenantsView — the
-         wrapper always renders at min-height 2.5rem so selecting a
-         row doesn't shove the table down by 40px and leave the user's
-         click-target misaligned. -->
-    <div v-if="canManage" class="mb-3 min-h-[2.5rem]">
-      <div
-        v-if="selectedVisibleCount > 0"
-        class="bg-blue-50 border border-blue-200 rounded px-4 py-2 flex items-center gap-3 flex-wrap"
+    <!-- Floating bulk action bar — same pattern as TenantsView.
+         Teleported to <body>, fixed at the bottom of the viewport
+         when selections exist, slides in/out with a short transition.
+         Doesn't affect the table's layout flow at all. -->
+    <Teleport to="body">
+      <Transition
+        enter-active-class="transition duration-150 ease-out"
+        enter-from-class="opacity-0 translate-y-4"
+        enter-to-class="opacity-100 translate-y-0"
+        leave-active-class="transition duration-100 ease-in"
+        leave-from-class="opacity-100 translate-y-0"
+        leave-to-class="opacity-0 translate-y-4"
       >
-        <span class="text-sm text-blue-900">{{ selectedVisibleCount }} selected</span>
-        <button @click="openBulk('PAUSED')" class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer">Pause selected</button>
-        <button @click="openBulk('ACTIVE')" class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer">Enable selected</button>
-        <button @click="selected = new Set()" class="muted-sm hover:text-gray-700 ml-auto cursor-pointer">Clear</button>
-      </div>
-    </div>
+        <div
+          v-if="canManage && selectedVisibleCount > 0"
+          role="toolbar"
+          aria-label="Bulk webhook actions"
+          class="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-white dark:bg-gray-900 dark:border dark:border-gray-700 border border-blue-300 shadow-xl rounded-lg px-4 py-2.5 flex items-center gap-3 max-w-[90vw]"
+        >
+          <span class="text-sm font-medium text-blue-900 dark:text-blue-300">{{ selectedVisibleCount }} selected</span>
+          <div class="w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
+          <button @click="openBulk('PAUSED')" class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer">Pause</button>
+          <button @click="openBulk('ACTIVE')" class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer">Enable</button>
+          <button
+            @click="selected = new Set()"
+            aria-label="Clear selection"
+            class="muted hover:text-gray-700 cursor-pointer p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      </Transition>
+    </Teleport>
 
     <!-- V1 virtualized grid. Same pattern as ReservationsView /
          TenantsView. -->

@@ -301,25 +301,42 @@ const gridTemplate = computed(() =>
       </select>
     </div>
 
-    <!-- Bulk action bar. Pre-virtualization this used v-if gated on
-         selectedVisibleCount > 0, which caused the table to jump down
-         by ~40px the moment the operator checked the first row — the
-         very row they'd clicked would then be one slot below their
-         cursor, confusing the click-target. Now we always render the
-         container (reserving its height) and toggle visibility via a
-         v-if on the CONTENTS, not the wrapper. Wrapper is hidden with
-         `invisible` (keeps layout) rather than display:none. -->
-    <div v-if="canManage" class="mb-3 min-h-[2.5rem]">
-      <div
-        v-if="selectedVisibleCount > 0"
-        class="bg-blue-50 border border-blue-200 rounded px-4 py-2 flex items-center gap-3 flex-wrap"
+    <!-- Floating bulk action bar — appears only when rows are
+         selected. Teleported to <body> so it escapes the view's
+         stacking context and layout flow entirely; the table's
+         position doesn't shift at all when selections change, so
+         the operator's click-target stays anchored to their cursor.
+         Pattern matches Gmail / Linear / GitHub bulk-action bars.
+         Transitions in/out with a subtle slide-up for discoverability. -->
+    <Teleport to="body">
+      <Transition
+        enter-active-class="transition duration-150 ease-out"
+        enter-from-class="opacity-0 translate-y-4"
+        enter-to-class="opacity-100 translate-y-0"
+        leave-active-class="transition duration-100 ease-in"
+        leave-from-class="opacity-100 translate-y-0"
+        leave-to-class="opacity-0 translate-y-4"
       >
-        <span class="text-sm text-blue-900">{{ selectedVisibleCount }} selected</span>
-        <button @click="openBulk('SUSPENDED')" class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer">Suspend selected</button>
-        <button @click="openBulk('ACTIVE')" class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer">Reactivate selected</button>
-        <button @click="selected = new Set()" class="muted-sm hover:text-gray-700 ml-auto cursor-pointer">Clear</button>
-      </div>
-    </div>
+        <div
+          v-if="canManage && selectedVisibleCount > 0"
+          role="toolbar"
+          aria-label="Bulk tenant actions"
+          class="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-white dark:bg-gray-900 dark:border dark:border-gray-700 border border-blue-300 shadow-xl rounded-lg px-4 py-2.5 flex items-center gap-3 max-w-[90vw]"
+        >
+          <span class="text-sm font-medium text-blue-900 dark:text-blue-300">{{ selectedVisibleCount }} selected</span>
+          <div class="w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
+          <button @click="openBulk('SUSPENDED')" class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer">Suspend</button>
+          <button @click="openBulk('ACTIVE')" class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer">Reactivate</button>
+          <button
+            @click="selected = new Set()"
+            aria-label="Clear selection"
+            class="muted hover:text-gray-700 cursor-pointer p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      </Transition>
+    </Teleport>
 
     <!-- V1 virtualized grid. Pattern established in ReservationsView:
          role="table" outer, sticky role="rowgroup" header, scroll
