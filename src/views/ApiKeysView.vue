@@ -311,7 +311,14 @@ function closePermsViewer() { viewingPermsFor.value = null }
 
 <template>
   <div>
-    <PageHeader title="API Keys" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
+    <PageHeader
+      title="API Keys"
+      item-noun="key"
+      :loaded="filteredKeys.length"
+      :loading="isLoading"
+      :last-updated="lastUpdated"
+      @refresh="refresh"
+    >
       <template #actions>
         <button v-if="canManage" @click="openCreate" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create API Key</button>
       </template>
@@ -478,7 +485,11 @@ function closePermsViewer() { viewingPermsFor.value = null }
       </div>
 
       <div v-else>
-        <EmptyState :message="keys.length === 0 ? 'No API keys found' : 'No keys match filters'" :hint="keys.length === 0 ? 'API keys will appear here once created' : undefined" />
+        <EmptyState
+          item-noun="API key"
+          :has-active-filter="keys.length > 0"
+          :hint="keys.length === 0 ? 'API keys will appear here once created' : undefined"
+        />
       </div>
      </div>
     </div>

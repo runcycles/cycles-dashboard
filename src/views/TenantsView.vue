@@ -294,7 +294,15 @@ const gridTemplate = computed(() =>
 
 <template>
   <div>
-    <PageHeader title="Tenants" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
+    <PageHeader
+      title="Tenants"
+      item-noun="tenant"
+      :loaded="filteredTenants.length"
+      :has-more="hasMore"
+      :loading="isLoading"
+      :last-updated="lastUpdated"
+      @refresh="refresh"
+    >
       <template #actions>
         <button v-if="canManage" @click="openCreate" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Tenant</button>
       </template>
@@ -422,7 +430,11 @@ const gridTemplate = computed(() =>
       </div>
 
       <div v-else>
-        <EmptyState :message="search || parentFilter ? 'No tenants match your filters' : 'No tenants found'" :hint="search || parentFilter ? undefined : 'Tenants will appear here once created'" />
+        <EmptyState
+          item-noun="tenant"
+          :has-active-filter="!!(search || parentFilter)"
+          :hint="search || parentFilter ? undefined : 'Tenants will appear here once created'"
+        />
       </div>
     </div>
 

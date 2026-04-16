@@ -235,7 +235,12 @@ function measureRow(el: Element | { $el?: Element } | null) {
 
 <template>
   <div>
-    <PageHeader title="Audit Logs" />
+    <PageHeader
+      title="Audit Logs"
+      item-noun="log entry"
+      :loaded="entries.length"
+      :has-more="hasMore"
+    />
 
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 

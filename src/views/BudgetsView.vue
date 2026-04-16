@@ -520,7 +520,16 @@ const gridTemplate = computed(() =>
 
 <template>
   <div>
-    <PageHeader :title="pageTitle" :subtitle="isDetail && detail ? `${detail.scope} · ${detail.unit}` : undefined" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
+    <PageHeader
+      :title="pageTitle"
+      :subtitle="isDetail && detail ? `${detail.scope} · ${detail.unit}` : undefined"
+      item-noun="budget"
+      :loaded="!isDetail ? sortedBudgets.length : undefined"
+      :has-more="!isDetail ? hasMore : undefined"
+      :loading="isLoading"
+      :last-updated="lastUpdated"
+      @refresh="refresh"
+    >
       <template #back>
         <button v-if="isDetail" @click="router.push('/budgets')" aria-label="Back to budgets" class="muted hover:text-gray-700 cursor-pointer">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

@@ -318,7 +318,15 @@ function measureRow(el: Element | { $el?: Element } | null) {
 
 <template>
   <div>
-    <PageHeader title="Events" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh" />
+    <PageHeader
+      title="Events"
+      item-noun="event"
+      :loaded="events.length"
+      :has-more="hasMore"
+      :loading="isLoading"
+      :last-updated="lastUpdated"
+      @refresh="refresh"
+    />
 
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
@@ -482,7 +490,11 @@ function measureRow(el: Element | { $el?: Element } | null) {
       </div>
 
       <div v-else>
-        <EmptyState :message="hasActiveFilters ? 'No events match your filters' : 'No events found'" :hint="hasActiveFilters ? undefined : 'Events will appear here as they occur'">
+        <EmptyState
+          item-noun="event"
+          :has-active-filter="hasActiveFilters"
+          :hint="hasActiveFilters ? undefined : 'Events will appear here as they occur'"
+        >
           <button v-if="hasActiveFilters" @click="clearFilters" class="mt-2 text-xs text-blue-600 hover:underline cursor-pointer">Clear filters</button>
         </EmptyState>
       </div>

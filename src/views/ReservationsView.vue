@@ -242,6 +242,9 @@ const gridTemplate = computed(() =>
     <PageHeader
       title="Reservations"
       subtitle="Force-release hung reservations during incident response"
+      item-noun="reservation"
+      :loaded="reservations.length"
+      :has-more="hasMore"
       :loading="isLoading"
       :last-updated="lastUpdated"
       @refresh="refresh"

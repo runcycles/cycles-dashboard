@@ -288,7 +288,15 @@ const gridTemplate = computed(() =>
 
 <template>
   <div>
-    <PageHeader title="Webhooks" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
+    <PageHeader
+      title="Webhooks"
+      item-noun="subscription"
+      :loaded="filteredWebhooks.length"
+      :has-more="hasMore"
+      :loading="isLoading"
+      :last-updated="lastUpdated"
+      @refresh="refresh"
+    >
       <template #actions>
         <button v-if="canManage" @click="openSecurityConfig" class="btn-pill-secondary">Security Config</button>
         <button v-if="canManage" @click="openCreate" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Webhook</button>
