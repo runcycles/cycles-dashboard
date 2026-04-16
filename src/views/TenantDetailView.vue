@@ -533,14 +533,29 @@ watch(tab, (newTab) => {
         </div>
       </div>
 
-      <!-- Tabs -->
+      <!-- Tabs. R9 lazy-load means keys / policies data isn't fetched
+           until the operator opens that tab, so the pre-load count
+           would always read 0 and lie about "no keys exist." Show
+           "…" for unloaded tabs and the real count once loaded so
+           the badge is honest about what we know. Budgets are
+           always fetched (the header card's spend rollup depends
+           on them) so their count is always accurate. -->
       <div class="flex border-b border-gray-200 mb-4">
         <button v-for="t in (['budgets', 'keys', 'policies'] as const)" :key="t"
           @click="tab = t"
           :class="tab === t ? 'border-gray-900 text-gray-900' : 'border-transparent muted hover:text-gray-700'"
           class="px-4 py-2 text-sm font-medium border-b-2 -mb-px cursor-pointer transition-colors">
           {{ t === 'keys' ? 'API Keys' : t.charAt(0).toUpperCase() + t.slice(1) }}
-          <span class="ml-1 muted-sm">({{ t === 'budgets' ? budgets.length : t === 'keys' ? apiKeys.length : policies.length }})</span>
+          <span
+            class="ml-1 muted-sm"
+            :title="t === 'keys' && !keysLoaded ? 'Keys not loaded yet — click the tab to load' : t === 'policies' && !policiesLoaded ? 'Policies not loaded yet — click the tab to load' : undefined"
+          >({{
+            t === 'budgets'
+              ? budgets.length
+              : t === 'keys'
+                ? (keysLoaded ? apiKeys.length : '…')
+                : (policiesLoaded ? policies.length : '…')
+          }})</span>
         </button>
       </div>
 
