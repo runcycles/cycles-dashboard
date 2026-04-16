@@ -301,14 +301,24 @@ const gridTemplate = computed(() =>
       </select>
     </div>
 
-    <!-- Bulk action bar — appears only when rows are selected and the
-         user has write capability. Shows a summary + action buttons +
-         per-action confirmation dialog. -->
-    <div v-if="canManage && selectedVisibleCount > 0" class="mb-3 bg-blue-50 border border-blue-200 rounded px-4 py-2 flex items-center gap-3 flex-wrap">
-      <span class="text-sm text-blue-900">{{ selectedVisibleCount }} selected</span>
-      <button @click="openBulk('SUSPENDED')" class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer">Suspend selected</button>
-      <button @click="openBulk('ACTIVE')" class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer">Reactivate selected</button>
-      <button @click="selected = new Set()" class="muted-sm hover:text-gray-700 ml-auto cursor-pointer">Clear</button>
+    <!-- Bulk action bar. Pre-virtualization this used v-if gated on
+         selectedVisibleCount > 0, which caused the table to jump down
+         by ~40px the moment the operator checked the first row — the
+         very row they'd clicked would then be one slot below their
+         cursor, confusing the click-target. Now we always render the
+         container (reserving its height) and toggle visibility via a
+         v-if on the CONTENTS, not the wrapper. Wrapper is hidden with
+         `invisible` (keeps layout) rather than display:none. -->
+    <div v-if="canManage" class="mb-3 min-h-[2.5rem]">
+      <div
+        v-if="selectedVisibleCount > 0"
+        class="bg-blue-50 border border-blue-200 rounded px-4 py-2 flex items-center gap-3 flex-wrap"
+      >
+        <span class="text-sm text-blue-900">{{ selectedVisibleCount }} selected</span>
+        <button @click="openBulk('SUSPENDED')" class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer">Suspend selected</button>
+        <button @click="openBulk('ACTIVE')" class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer">Reactivate selected</button>
+        <button @click="selected = new Set()" class="muted-sm hover:text-gray-700 ml-auto cursor-pointer">Clear</button>
+      </div>
     </div>
 
     <!-- V1 virtualized grid. Pattern established in ReservationsView:

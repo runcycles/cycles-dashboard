@@ -308,12 +308,20 @@ const gridTemplate = computed(() =>
       </select>
     </div>
 
-    <!-- Bulk bar, visible only on selection. Same design as TenantsView. -->
-    <div v-if="canManage && selectedVisibleCount > 0" class="mb-3 bg-blue-50 border border-blue-200 rounded px-4 py-2 flex items-center gap-3 flex-wrap">
-      <span class="text-sm text-blue-900">{{ selectedVisibleCount }} selected</span>
-      <button @click="openBulk('PAUSED')" class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer">Pause selected</button>
-      <button @click="openBulk('ACTIVE')" class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer">Enable selected</button>
-      <button @click="selected = new Set()" class="muted-sm hover:text-gray-700 ml-auto cursor-pointer">Clear</button>
+    <!-- Bulk bar. Same reserve-the-space pattern as TenantsView — the
+         wrapper always renders at min-height 2.5rem so selecting a
+         row doesn't shove the table down by 40px and leave the user's
+         click-target misaligned. -->
+    <div v-if="canManage" class="mb-3 min-h-[2.5rem]">
+      <div
+        v-if="selectedVisibleCount > 0"
+        class="bg-blue-50 border border-blue-200 rounded px-4 py-2 flex items-center gap-3 flex-wrap"
+      >
+        <span class="text-sm text-blue-900">{{ selectedVisibleCount }} selected</span>
+        <button @click="openBulk('PAUSED')" class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer">Pause selected</button>
+        <button @click="openBulk('ACTIVE')" class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer">Enable selected</button>
+        <button @click="selected = new Set()" class="muted-sm hover:text-gray-700 ml-auto cursor-pointer">Clear</button>
+      </div>
     </div>
 
     <!-- V1 virtualized grid. Same pattern as ReservationsView /
