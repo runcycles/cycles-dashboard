@@ -453,11 +453,31 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
 }, 60000)
 
 // First activation of a lazy tab — fetch its data now rather than
-// wait up to 60s for the next poll. The flag flip inside the poll
-// callback ensures subsequent polls continue refreshing that tab.
+// wait up to 60s for the next poll. Direct fetch (not refresh()) on
+// purpose: usePolling's in-flight dedup guard from R10 would drop
+// this call if the initial-mount tick is still running, and the
+// keysLoaded flag lives inside the poll callback that gets dropped.
+// These one-shots also flip the flag so subsequent polls continue
+// refreshing the tab's data.
+async function loadApiKeysOnce() {
+  if (keysLoaded.value) return
+  try {
+    const kRes = await listApiKeys({ tenant_id: id })
+    apiKeys.value = kRes.keys
+    keysLoaded.value = true
+  } catch (e) { error.value = toMessage(e) }
+}
+async function loadPoliciesOnce() {
+  if (policiesLoaded.value) return
+  try {
+    const pRes = await listPolicies({ tenant_id: id })
+    policies.value = pRes.policies
+    policiesLoaded.value = true
+  } catch (e) { error.value = toMessage(e) }
+}
 watch(tab, (newTab) => {
-  if (newTab === 'keys' && !keysLoaded.value) refresh()
-  else if (newTab === 'policies' && !policiesLoaded.value) refresh()
+  if (newTab === 'keys') loadApiKeysOnce()
+  else if (newTab === 'policies') loadPoliciesOnce()
 })
 </script>
 
