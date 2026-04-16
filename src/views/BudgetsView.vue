@@ -698,7 +698,12 @@ const gridTemplate = computed(() =>
         </div>
       </div>
 
-      <div class="card p-4">
+      <!-- Event timeline card flex-fills the remaining viewport so
+           the virtualized list inside EventTimeline has a bounded
+           scroll container — parity with the list-view Phase 5
+           pattern. Header (h3) and footer (Load more) take natural
+           height; the timeline itself flexes. -->
+      <div class="card p-4 flex-1 min-h-0 flex flex-col">
         <h3 class="text-sm font-medium text-gray-700 mb-3">Event Timeline</h3>
         <EventTimeline :events="detailEvents" />
         <!-- R8: Load-more for historical event timelines. Pre-fix the
@@ -711,7 +716,7 @@ const gridTemplate = computed(() =>
             :disabled="detailEventsLoadingMore || !detailEventsCursor"
             class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
           >
-            {{ detailEventsLoadingMore ? 'Loading…' : 'Load older events' }}
+            {{ detailEventsLoadingMore ? 'Loading…' : 'Load more' }}
           </button>
         </div>
       </div>

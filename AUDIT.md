@@ -1,7 +1,52 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-16 (phase 5 polish — PageHeader `itemNounPlural` override fixes "log entrys"→"log entries", WebhooksView subscription→webhook noun consistency, filter toolbars wrapped in card across TenantsView/WebhooksView/ReservationsView), 2026-04-16 (scale-hardening phase 5 — unified table-layout: flex-fill viewport on all 7 list views, fix AuditView double horizontal scrollbar, standardize Load more label), 2026-04-16 (scale-hardening phase 4 — W4 bulk-op bounded concurrency + 429 backoff across all three bulk runners, W5 reveal-timer cleanup, W6 a11y row-count live region), 2026-04-16 (scale-hardening phase 3 — V5 debounce composable, V6 PageHeader result counts, V7 filter-aware EmptyState), 2026-04-16 (scale-hardening phase 2c — V1 virtualization for EventsView + AuditView with measureElement for expandable rows), 2026-04-16 (scale-hardening phase 2b — row virtualization across 5 list views via @tanstack/vue-virtual), 2026-04-16 (scale-hardening phase 2 — pagination on tenants/webhooks/budget-detail events, lazy tabs, O(1) parent lookup, copy-event-data), 2026-04-16 (scale-hardening phase 1 — pagination, cancellation, N+1 mitigation across 6 views), 2026-04-15 (v0.1.25.27 — RESET_SPENT funding operation support, semantics corrected post-test), 2026-04-14 (error-surfacing + SecretReveal + 3 incident-response Playwright flows), 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
+**Date:** 2026-04-16 (phase 5 polish — BudgetDetail EventTimeline virtualization + flex-fill + Load more label parity with list views), 2026-04-16 (phase 5 polish — PageHeader `itemNounPlural` override fixes "log entrys"→"log entries", WebhooksView subscription→webhook noun consistency, filter toolbars wrapped in card across TenantsView/WebhooksView/ReservationsView), 2026-04-16 (scale-hardening phase 5 — unified table-layout: flex-fill viewport on all 7 list views, fix AuditView double horizontal scrollbar, standardize Load more label), 2026-04-16 (scale-hardening phase 4 — W4 bulk-op bounded concurrency + 429 backoff across all three bulk runners, W5 reveal-timer cleanup, W6 a11y row-count live region), 2026-04-16 (scale-hardening phase 3 — V5 debounce composable, V6 PageHeader result counts, V7 filter-aware EmptyState), 2026-04-16 (scale-hardening phase 2c — V1 virtualization for EventsView + AuditView with measureElement for expandable rows), 2026-04-16 (scale-hardening phase 2b — row virtualization across 5 list views via @tanstack/vue-virtual), 2026-04-16 (scale-hardening phase 2 — pagination on tenants/webhooks/budget-detail events, lazy tabs, O(1) parent lookup, copy-event-data), 2026-04-16 (scale-hardening phase 1 — pagination, cancellation, N+1 mitigation across 6 views), 2026-04-15 (v0.1.25.27 — RESET_SPENT funding operation support, semantics corrected post-test), 2026-04-14 (error-surfacing + SecretReveal + 3 incident-response Playwright flows), 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
 **Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.17+ continues to satisfy the governance plane; **admin server v0.1.25.18+ required** to execute the new `RESET_SPENT` funding operation from BudgetsView (older admin servers will reject the operation enum with 400 INVALID_REQUEST — UI degrades gracefully but the operator sees the server's error toast).
+
+### 2026-04-16 — Phase 5 polish (BudgetDetail EventTimeline large-dataset parity)
+
+Closes a gap left after the initial Phase 5 table-layout pass: the
+Event Timeline rendered on budget-detail pages didn't follow the same
+flex-fill + virtualization pattern the seven list views adopted.
+
+**Problem.** `EventTimeline.vue` was a plain `v-for` over the full
+`events` array. Fine for the default 20-row page, but once an operator
+hit "Load older events" a few times on a long-lived budget (chatty
+agent spending every few seconds, months of history → hundreds of
+events), the flat render grew unbounded. Every expand/collapse forced
+Vue to diff the whole list, and on tall monitors the card was
+natural-height — it kept growing past the fold instead of scrolling
+within a bounded region like the list views. Button label also read
+"Load older events" — inconsistent with the Phase 5 standardization
+that unified every other Load-more button to plain "Load more".
+
+**Fix.**
+- **`src/components/EventTimeline.vue`** — rewritten to match the
+  EventsView virtualization pattern: `@tanstack/vue-virtual`
+  `useVirtualizer` with `measureElement` for variable row heights so
+  expand/collapse re-layouts sibling rows smoothly. Collapsed rows
+  ~36px (estimated for the virtualizer's first paint); expanded rows
+  include the metadata grid + optional JSON block (still capped at
+  `max-h-32` as before). Scroll container gains
+  `flex-1 overflow-auto min-h-[200px]`. The `compact` prop, declared
+  but never passed by any caller, was removed.
+- **`src/views/BudgetsView.vue`** (detail mode) — the Event Timeline
+  card now flex-fills the remaining viewport
+  (`card p-4 flex-1 min-h-0 flex flex-col`). Its children — h3 header,
+  EventTimeline (flex-1), Load-more button — stack vertically with
+  only the timeline flexing, exactly like the list-view shells. The
+  button label changed to "Load more" to match the other six views.
+
+**Net behavior change.** Opening a budget detail now shows an event
+timeline that fills the viewport below the metadata card, scrolls
+within its own bounded region, and renders only the visible rows in
+the DOM regardless of how many "Load more" pages the operator has
+stacked up. Layout identical for budgets with few events; visibly
+better for budgets with hundreds.
+
+**Gates:** 336/336 Vitest pass (no behaviour-altering logic change —
+still the same keyboard/click toggle, same aria-expanded semantics,
+same JSON block cap). `vue-tsc -b --noEmit` clean.
 
 ### 2026-04-16 — Phase 5 polish (PageHeader pluralization override, webhook noun, filter-toolbar card wrapping)
 

@@ -1,49 +1,94 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 import type { Event } from '../types'
 import TenantLink from './TenantLink.vue'
 import { formatDateTime } from '../utils/format'
 
-defineProps<{ events: Event[]; compact?: boolean }>()
+// Phase 5 polish — virtualization parity with EventsView.
+//
+// Pre-fix this component rendered `v-for` over the full events array.
+// Fine for the default 20-event page, but once an operator hits
+// "Load older events" several times on a long-lived budget (chatty
+// agents, months of history), the flat render grew unbounded —
+// hundreds of DOM nodes per expand/collapse cycle and visible jank
+// on scroll. Now matches the EventsView rendering pattern: row heights
+// observed via measureElement, only visible rows in the DOM.
+const props = defineProps<{ events: Event[] }>()
 
 const expanded = ref<string | null>(null)
 
 function toggle(id: string) {
   expanded.value = expanded.value === id ? null : id
 }
+
+// Virtualization. Collapsed rows are ~36px; expanded grow with the
+// metadata grid + optional JSON block. measureElement observes real
+// DOM height per row so expand/collapse re-lays out siblings smoothly.
+const scrollEl = ref<HTMLElement | null>(null)
+const COLLAPSED_ROW_HEIGHT = 36
+const virtualizer = useVirtualizer(computed(() => ({
+  count: props.events.length,
+  getScrollElement: () => scrollEl.value,
+  estimateSize: () => COLLAPSED_ROW_HEIGHT,
+  overscan: 6,
+  getItemKey: (index: number) => props.events[index]?.event_id ?? index,
+})))
+const virtualRows = computed(() => virtualizer.value.getVirtualItems())
+const totalHeight = computed(() => virtualizer.value.getTotalSize())
+
+function measureRow(el: Element | { $el?: Element } | null) {
+  const node = (el as { $el?: Element })?.$el ?? (el as Element | null)
+  if (node instanceof Element && virtualizer.value) {
+    virtualizer.value.measureElement(node)
+  }
+}
 </script>
 
 <template>
   <div v-if="events.length === 0" class="text-sm muted py-6 text-center">No events</div>
-  <div v-else class="divide-y divide-gray-100">
-    <div v-for="e in events" :key="e.event_id">
+  <div
+    v-else
+    ref="scrollEl"
+    class="flex-1 overflow-auto min-h-[200px]"
+  >
+    <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
       <div
-        class="flex items-center gap-3 py-2 cursor-pointer table-row-hover -mx-1 px-1 rounded"
-        role="button" tabindex="0"
-        @click="toggle(e.event_id)"
-        @keydown.enter.prevent="toggle(e.event_id)"
-        @keydown.space.prevent="toggle(e.event_id)"
-        :aria-expanded="expanded === e.event_id"
+        v-for="v in virtualRows"
+        :key="events[v.index].event_id"
+        :ref="measureRow"
+        :data-index="v.index"
+        class="absolute left-0 right-0 border-b border-gray-100 last:border-b-0"
+        :style="{ transform: `translateY(${v.start}px)` }"
       >
-        <svg class="w-3 h-3 muted shrink-0 transition-transform" :class="expanded === e.event_id ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-        </svg>
-        <span class="font-mono text-xs text-gray-700 flex-1">{{ e.event_type }}</span>
-        <span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs shrink-0">{{ e.category }}</span>
-        <span class="muted-sm shrink-0 whitespace-nowrap" :title="new Date(e.timestamp).toISOString()">{{ formatDateTime(e.timestamp) }}</span>
-      </div>
-      <div v-if="expanded === e.event_id" class="pl-6 pb-2 text-xs">
-        <div class="grid grid-cols-2 gap-x-6 gap-y-1 mb-2">
-          <div><span class="muted">Event ID:</span> <span class="font-mono">{{ e.event_id }}</span></div>
-          <div><span class="muted">Source:</span> {{ e.source }}</div>
-          <div v-if="e.scope"><span class="muted">Scope:</span> <span class="font-mono">{{ e.scope }}</span></div>
-          <div v-if="e.tenant_id"><span class="muted">Tenant:</span> <TenantLink :tenant-id="e.tenant_id" /></div>
-          <div v-if="e.request_id"><span class="muted">Request ID:</span> <span class="font-mono">{{ e.request_id }}</span></div>
-          <div v-if="e.correlation_id"><span class="muted">Correlation ID:</span> <span class="font-mono">{{ e.correlation_id }}</span></div>
-          <div v-if="e.actor"><span class="muted">Actor:</span> {{ e.actor.type }}<span v-if="e.actor.key_id" class="font-mono"> {{ e.actor.key_id }}</span></div>
+        <div
+          class="flex items-center gap-3 py-2 cursor-pointer table-row-hover -mx-1 px-1 rounded"
+          role="button" tabindex="0"
+          @click="toggle(events[v.index].event_id)"
+          @keydown.enter.prevent="toggle(events[v.index].event_id)"
+          @keydown.space.prevent="toggle(events[v.index].event_id)"
+          :aria-expanded="expanded === events[v.index].event_id"
+        >
+          <svg class="w-3 h-3 muted shrink-0 transition-transform" :class="expanded === events[v.index].event_id ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+          <span class="font-mono text-xs text-gray-700 flex-1 truncate" :title="events[v.index].event_type">{{ events[v.index].event_type }}</span>
+          <span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs shrink-0">{{ events[v.index].category }}</span>
+          <span class="muted-sm shrink-0 whitespace-nowrap" :title="new Date(events[v.index].timestamp).toISOString()">{{ formatDateTime(events[v.index].timestamp) }}</span>
         </div>
-        <div v-if="e.data" class="bg-white border border-gray-200 rounded p-2 font-mono overflow-auto max-h-32">
-          <pre class="whitespace-pre-wrap">{{ JSON.stringify(e.data, null, 2) }}</pre>
+        <div v-if="expanded === events[v.index].event_id" class="pl-6 pb-2 text-xs">
+          <div class="grid grid-cols-2 gap-x-6 gap-y-1 mb-2">
+            <div><span class="muted">Event ID:</span> <span class="font-mono">{{ events[v.index].event_id }}</span></div>
+            <div><span class="muted">Source:</span> {{ events[v.index].source }}</div>
+            <div v-if="events[v.index].scope"><span class="muted">Scope:</span> <span class="font-mono">{{ events[v.index].scope }}</span></div>
+            <div v-if="events[v.index].tenant_id"><span class="muted">Tenant:</span> <TenantLink :tenant-id="events[v.index].tenant_id!" /></div>
+            <div v-if="events[v.index].request_id"><span class="muted">Request ID:</span> <span class="font-mono">{{ events[v.index].request_id }}</span></div>
+            <div v-if="events[v.index].correlation_id"><span class="muted">Correlation ID:</span> <span class="font-mono">{{ events[v.index].correlation_id }}</span></div>
+            <div v-if="events[v.index].actor"><span class="muted">Actor:</span> {{ events[v.index].actor!.type }}<span v-if="events[v.index].actor!.key_id" class="font-mono"> {{ events[v.index].actor!.key_id }}</span></div>
+          </div>
+          <div v-if="events[v.index].data" class="bg-white border border-gray-200 rounded p-2 font-mono overflow-auto max-h-32">
+            <pre class="whitespace-pre-wrap">{{ JSON.stringify(events[v.index].data, null, 2) }}</pre>
+          </div>
         </div>
       </div>
     </div>
