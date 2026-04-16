@@ -411,7 +411,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
         class="overflow-auto"
         style="max-height: calc(100vh - 380px); min-height: 240px;"
       >
-        <div :style="{ height: totalHeight + 'px', position: 'relative' }">
+        <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
           <div
             v-for="v in virtualRows"
             :key="sortedEvents[v.index].event_id"

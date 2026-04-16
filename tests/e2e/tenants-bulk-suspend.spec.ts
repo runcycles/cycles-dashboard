@@ -56,8 +56,9 @@ test('selecting two tenants and Suspend selected flips them to SUSPENDED; Reacti
   await row1.locator('input[type="checkbox"]').check()
   await row2.locator('input[type="checkbox"]').check()
 
-  // Suspend. Confirm dialog title includes count.
-  await page.getByRole('button', { name: /suspend selected/i }).click()
+  // Suspend. Bulk bar uses the short label "Suspend" (the "N selected"
+  // count to its left conveys scope) since the floating-toolbar rework.
+  await page.getByRole('toolbar', { name: /bulk tenant actions/i }).getByRole('button', { name: /^suspend$/i }).click()
   const suspendDialog = page.getByRole('dialog', { name: /suspend \d+ tenants\?/i })
   await expect(suspendDialog).toBeVisible()
 
@@ -84,7 +85,7 @@ test('selecting two tenants and Suspend selected flips them to SUSPENDED; Reacti
   // been cleared after bulk; re-check defensively).
   await row1.locator('input[type="checkbox"]').check()
   await row2.locator('input[type="checkbox"]').check()
-  await page.getByRole('button', { name: /reactivate selected/i }).click()
+  await page.getByRole('toolbar', { name: /bulk tenant actions/i }).getByRole('button', { name: /^reactivate$/i }).click()
   const reactivateDialog = page.getByRole('dialog', { name: /reactivate \d+ tenants\?/i })
   await expect(reactivateDialog).toBeVisible()
 

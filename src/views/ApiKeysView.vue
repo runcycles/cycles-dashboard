@@ -408,7 +408,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
         class="overflow-y-auto"
         style="max-height: calc(100vh - 400px); min-height: 200px;"
       >
-        <div :style="{ height: totalHeight + 'px', position: 'relative' }">
+        <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
           <div
             v-for="v in virtualRows"
             :key="sortedKeys[v.index].key_id"
