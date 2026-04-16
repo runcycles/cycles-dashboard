@@ -153,24 +153,25 @@ describe('capability-gated UI visibility', () => {
   })
 
   // ─── ReservationsView: manage_reservations → action column header ────
-  // The Force Release button lives inside a table row conditional on
-  // reservation data. With empty data we can't exercise the row — but
-  // the action column <th> is also gated, so its presence is the
-  // proxy signal.
+  // The Force Release button lives inside a reservation row conditional
+  // on data. With empty data we can't exercise the row — but the action
+  // column header is also gated, so its presence is the proxy signal.
+  // Post-V1 virtualization (phase 2b), this view renders as an ARIA grid
+  // of <div>s rather than a <table>; the selector is data-column="action"
+  // on the role="columnheader" div.
   describe('ReservationsView + manage_reservations', () => {
     it('renders action column header when manage_reservations=true', async () => {
       setCaps({ manage_reservations: true })
       const { default: ReservationsView } = await import('../views/ReservationsView.vue')
       const w = await mountView(ReservationsView)
-      // The action column th is the only <th> with w-24 class in this view
-      expect(w.find('th.w-24').exists()).toBe(true)
+      expect(w.find('[data-column="action"]').exists()).toBe(true)
     })
 
     it('hides action column header when manage_reservations=false', async () => {
       setCaps({ manage_reservations: false })
       const { default: ReservationsView } = await import('../views/ReservationsView.vue')
       const w = await mountView(ReservationsView)
-      expect(w.find('th.w-24').exists()).toBe(false)
+      expect(w.find('[data-column="action"]').exists()).toBe(false)
     })
   })
 
