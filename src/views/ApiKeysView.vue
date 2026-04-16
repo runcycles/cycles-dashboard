@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
 import { listTenants, listApiKeys, revokeApiKey, createApiKey, updateApiKey } from '../api/client'
@@ -267,6 +268,31 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
 // we'd otherwise be stuck showing "no keys" for a tenant that genuinely
 // has keys. Refresh on filter change so the fast-path above picks it up.
 watch(filterTenant, () => { refresh() })
+
+// V1 virtualization.
+const scrollEl = ref<HTMLElement | null>(null)
+// 56px (vs 52 on other views) — accommodates the permissions chip row
+// at text-xs line-height without clipping. Permissions still render
+// flex-wrap but overflow-hidden caps at one row visually; operators
+// can see the full list in the Edit dialog.
+const ROW_HEIGHT_ESTIMATE = 56
+const virtualizer = useVirtualizer(computed(() => ({
+  count: sortedKeys.value.length,
+  getScrollElement: () => scrollEl.value,
+  estimateSize: () => ROW_HEIGHT_ESTIMATE,
+  overscan: 8,
+})))
+const virtualRows = computed(() => virtualizer.value.getVirtualItems())
+const totalHeight = computed(() => virtualizer.value.getTotalSize())
+
+// 9-column grid when canManage, 8 without. Wide total minimum
+// (~1320px) so horizontal scroll engages on smaller viewports; same
+// behavior as the pre-virt `min-w-[900px]` table.
+const gridTemplate = computed(() =>
+  canManage.value
+    ? '180px minmax(120px,1fr) minmax(120px,1fr) 100px minmax(200px,2fr) minmax(140px,1fr) 160px 140px 160px'
+    : '180px minmax(120px,1fr) minmax(120px,1fr) 100px minmax(200px,2fr) minmax(140px,1fr) 160px 140px',
+)
 </script>
 
 <template>
@@ -329,58 +355,79 @@ watch(filterTenant, () => { refresh() })
 
     <p v-if="filteredKeys.length > 0" class="muted-sm mb-2">{{ filteredKeys.length }} key{{ filteredKeys.length !== 1 ? 's' : '' }}</p>
 
-    <div class="card-table">
-      <table class="w-full text-sm min-w-[900px]">
-        <thead class="table-header">
-          <tr>
-            <th class="table-cell text-left">Key ID</th>
-            <SortHeader label="Name" column="name" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <SortHeader label="Tenant" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <th class="table-cell text-left">Permissions</th>
-            <th class="table-cell text-left">Scope Filter</th>
-            <SortHeader label="Created" column="created_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <SortHeader label="Expires" column="expires_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <th v-if="canManage" class="table-cell w-20"></th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-100">
-          <tr v-for="k in sortedKeys" :key="k.key_id" class="table-row-hover">
-            <td class="table-cell"><MaskedValue :value="k.key_id" /></td>
-            <td class="table-cell text-gray-700">{{ k.name || '-' }}</td>
-            <td class="table-cell">
-              <TenantLink :tenant-id="k.tenant_id" />
-            </td>
-            <td class="table-cell"><StatusBadge :status="k.status" /></td>
-            <td class="table-cell muted-sm">
-              <div class="flex flex-wrap gap-1">
-                <span v-for="p in k.permissions" :key="p" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{{ p }}</span>
+    <!-- V1 virtualized grid. Wide minimum width — horizontal scroll
+         engages on narrower viewports, same behavior as pre-virt
+         `min-w-[900px]` <table>. -->
+    <div
+      class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto"
+      role="table"
+      :aria-rowcount="filteredKeys.length + 1"
+      :aria-colcount="canManage ? 9 : 8"
+    >
+      <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10" :style="{ minWidth: canManage ? '1320px' : '1160px' }">
+        <div role="row" class="grid text-xs uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
+          <div role="columnheader" class="table-cell text-left">Key ID</div>
+          <SortHeader as="div" label="Name" column="name" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <SortHeader as="div" label="Tenant" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <SortHeader as="div" label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <div role="columnheader" class="table-cell text-left">Permissions</div>
+          <div role="columnheader" class="table-cell text-left">Scope Filter</div>
+          <SortHeader as="div" label="Created" column="created_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <SortHeader as="div" label="Expires" column="expires_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <div v-if="canManage" role="columnheader" class="table-cell" data-column="action"></div>
+        </div>
+      </div>
+
+      <div
+        v-if="sortedKeys.length > 0"
+        ref="scrollEl"
+        role="rowgroup"
+        class="overflow-y-auto"
+        :style="{ maxHeight: 'calc(100vh - 400px)', minHeight: '200px', minWidth: canManage ? '1320px' : '1160px' }"
+      >
+        <div :style="{ height: totalHeight + 'px', position: 'relative' }">
+          <div
+            v-for="v in virtualRows"
+            :key="sortedKeys[v.index].key_id"
+            role="row"
+            :aria-rowindex="v.index + 2"
+            class="grid table-row-hover border-b border-gray-100 absolute left-0 right-0 items-center"
+            :style="{ gridTemplateColumns: gridTemplate, transform: `translateY(${v.start}px)`, height: ROW_HEIGHT_ESTIMATE + 'px' }"
+          >
+            <div role="cell" class="table-cell"><MaskedValue :value="sortedKeys[v.index].key_id" /></div>
+            <div role="cell" class="table-cell text-gray-700 truncate">{{ sortedKeys[v.index].name || '-' }}</div>
+            <div role="cell" class="table-cell">
+              <TenantLink :tenant-id="sortedKeys[v.index].tenant_id" />
+            </div>
+            <div role="cell" class="table-cell"><StatusBadge :status="sortedKeys[v.index].status" /></div>
+            <div role="cell" class="table-cell muted-sm overflow-hidden">
+              <div class="flex gap-1 overflow-hidden" :title="sortedKeys[v.index].permissions?.join(', ')">
+                <span v-for="p in sortedKeys[v.index].permissions" :key="p" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded whitespace-nowrap">{{ p }}</span>
               </div>
-            </td>
-            <td class="table-cell muted-sm font-mono">{{ k.scope_filter?.join(', ') || '-' }}</td>
-            <td class="table-cell muted-sm whitespace-nowrap">{{ formatDateTime(k.created_at) }}</td>
-            <td class="table-cell text-xs whitespace-nowrap" :class="k.expires_at ? 'muted' : 'muted'">
-              {{ k.expires_at ? formatDateTime(k.expires_at) : 'Never' }}
-            </td>
-            <td v-if="canManage" class="table-cell">
+            </div>
+            <div role="cell" class="table-cell muted-sm font-mono truncate" :title="sortedKeys[v.index].scope_filter?.join(', ')">{{ sortedKeys[v.index].scope_filter?.join(', ') || '-' }}</div>
+            <div role="cell" class="table-cell muted-sm whitespace-nowrap">{{ formatDateTime(sortedKeys[v.index].created_at) }}</div>
+            <div role="cell" class="table-cell text-xs muted whitespace-nowrap">
+              {{ sortedKeys[v.index].expires_at ? formatDateTime(sortedKeys[v.index].expires_at) : 'Never' }}
+            </div>
+            <div v-if="canManage" role="cell" class="table-cell">
               <div class="flex gap-2">
-                <!-- v0.1.25.21 (#8): one-click drill into audit log
-                     pre-filtered by this key. Available regardless of
-                     status — investigating revoked keys is the most
-                     common reason to want their history. -->
-                <router-link :to="{ name: 'audit', query: { key_id: k.key_id } }" class="text-xs text-gray-600 hover:text-gray-800 cursor-pointer hover:underline">Activity</router-link>
-                <button v-if="k.status === 'ACTIVE'" @click="openEdit(k)" class="btn-row-primary">Edit</button>
-                <button v-if="k.status === 'ACTIVE'" @click="pendingRevoke = k" class="btn-row-danger">Revoke</button>
+                <!-- One-click drill into audit log pre-filtered by this
+                     key. Available regardless of status — investigating
+                     revoked keys is the most common reason to want
+                     their history. -->
+                <router-link :to="{ name: 'audit', query: { key_id: sortedKeys[v.index].key_id } }" class="text-xs text-gray-600 hover:text-gray-800 cursor-pointer hover:underline">Activity</router-link>
+                <button v-if="sortedKeys[v.index].status === 'ACTIVE'" @click="openEdit(sortedKeys[v.index])" class="btn-row-primary">Edit</button>
+                <button v-if="sortedKeys[v.index].status === 'ACTIVE'" @click="pendingRevoke = sortedKeys[v.index]" class="btn-row-danger">Revoke</button>
               </div>
-            </td>
-          </tr>
-          <tr v-if="filteredKeys.length === 0">
-            <td :colspan="canManage ? 9 : 8">
-              <EmptyState :message="keys.length === 0 ? 'No API keys found' : 'No keys match filters'" :hint="keys.length === 0 ? 'API keys will appear here once created' : undefined" />
-            </td>
-          </tr>
-        </tbody>
-      </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-else role="row">
+        <EmptyState :message="keys.length === 0 ? 'No API keys found' : 'No keys match filters'" :hint="keys.length === 0 ? 'API keys will appear here once created' : undefined" />
+      </div>
     </div>
 
     <!-- Create API Key dialog -->

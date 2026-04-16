@@ -92,6 +92,40 @@ vi.mock('vue-router', async (importOriginal) => {
   }
 })
 
+// V1 virtualization (phase 2b) — jsdom has no layout, so a virtualized
+// tbody would render zero rows in tests. Mock useVirtualizer to return
+// all items as virtual rows with synthetic offsets so row-level tests
+// (e.g. finding and clicking the Revoke button) keep working without
+// needing a real browser.
+vi.mock('@tanstack/vue-virtual', async () => {
+  const { computed, isRef } = await import('vue')
+  return {
+    useVirtualizer: (optsRef: unknown) => {
+      const read = () => (isRef(optsRef) ? optsRef.value : optsRef) as {
+        count: number
+        estimateSize: () => number
+      }
+      const api = computed(() => {
+        const opts = read()
+        const size = opts.estimateSize?.() ?? 52
+        const items = Array.from({ length: opts.count }, (_, index) => ({
+          index,
+          key: index,
+          start: index * size,
+          size,
+          end: (index + 1) * size,
+          lane: 0,
+        }))
+        return {
+          getVirtualItems: () => items,
+          getTotalSize: () => opts.count * size,
+        }
+      })
+      return api
+    },
+  }
+})
+
 vi.mock('../composables/usePolling', () => ({
   usePolling: (fn: () => Promise<void> | void) => {
     void fn()
