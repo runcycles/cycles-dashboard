@@ -52,15 +52,13 @@ const tab = ref<'budgets' | 'keys' | 'policies'>('budgets')
 // fetched — the header rollup card depends on them. Tab activation
 // triggers a refresh so the first open doesn't wait up to 60s for
 // the next poll.
-const keysLoaded = ref(false)
-const policiesLoaded = ref(false)
-// Tab-badge helpers. Computed rather than inline template ternaries
-// because Vue's auto-unwrap on refs inside nested template expressions
-// inside a v-for has been flaky here — moving the ref reads to a
-// computed guarantees `.value` is read explicitly and reactivity
-// tracks cleanly across HMR reloads.
-const apiKeysBadge = computed<number | string>(() => keysLoaded.value ? apiKeys.value.length : '…')
-const policiesBadge = computed<number | string>(() => policiesLoaded.value ? policies.value.length : '…')
+// R9 scale-hardening: lazy refresh on POLL — the periodic 60s tick
+// refreshes only the active tab's data to avoid fetching unbounded
+// key/policy lists every minute for tenants that have many. The
+// INITIAL mount, however, loads everything so tab-count badges are
+// accurate from first paint. Previous "lazy even on mount" approach
+// with keysLoaded / policiesLoaded flags had a reactivity bug that
+// left badges stuck on "…" — replaced with this simpler flow.
 
 // v0.1.25.21 (#6): spend rollup — aggregate allocated / remaining /
 // spent / debt across the tenant's budgets, grouped by unit. Budgets in
@@ -435,61 +433,57 @@ function cancelEmergencyFreeze() {
   else pendingEmergencyFreeze.value = false
 }
 
+// Tracks whether the first full fetch has completed. Before it does,
+// all four lists (tenant, budgets, keys, policies) are fetched in
+// parallel so tab counts are accurate from first paint. After, the
+// poll tick switches to lazy mode: only refreshes the active tab.
+let initialLoadDone = false
+
 const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
+    if (!initialLoadDone) {
+      // Mount-time eager load: fetch everything so badge counts are
+      // accurate immediately. One-time per component instance; the
+      // cost for a 10k-key tenant is capped at this single fetch
+      // rather than recurring every 60s.
+      const [tRes, bRes, ttRes, kRes, pRes] = await Promise.all([
+        getTenant(id),
+        listBudgets({ tenant_id: id }),
+        listTenants(),
+        listApiKeys({ tenant_id: id }),
+        listPolicies({ tenant_id: id }),
+      ])
+      tenant.value = tRes
+      budgets.value = bRes.ledgers
+      allTenants.value = ttRes.tenants
+      apiKeys.value = kRes.keys
+      policies.value = pRes.policies
+      initialLoadDone = true
+      error.value = ''
+      return
+    }
+
+    // Poll tick (steady state): always refresh tenant + budgets +
+    // tenant list (header card), but only refresh the active tab's
+    // sub-list to keep per-poll cost bounded on tenants with many
+    // keys/policies.
     tenant.value = await getTenant(id)
-    // Budgets and tenant list are always fetched — the header card's
-    // spend rollup and children list depend on them unconditionally.
-    // Keys and policies are gated on their tab having been opened.
-    // Using Promise.resolve(null) as a placeholder keeps the parallel
-    // Promise.all shape without branching the destructure.
-    const wantKeys = tab.value === 'keys' || keysLoaded.value
-    const wantPolicies = tab.value === 'policies' || policiesLoaded.value
-    const [bRes, tRes, kRes, pRes] = await Promise.all([
+    const [bRes, ttRes] = await Promise.all([
       listBudgets({ tenant_id: id }),
       listTenants(),
-      wantKeys ? listApiKeys({ tenant_id: id }) : Promise.resolve(null),
-      wantPolicies ? listPolicies({ tenant_id: id }) : Promise.resolve(null),
     ])
     budgets.value = bRes.ledgers
-    allTenants.value = tRes.tenants
-    if (kRes) { apiKeys.value = kRes.keys; keysLoaded.value = true }
-    if (pRes) { policies.value = pRes.policies; policiesLoaded.value = true }
+    allTenants.value = ttRes.tenants
+    if (tab.value === 'keys') {
+      const kRes = await listApiKeys({ tenant_id: id })
+      apiKeys.value = kRes.keys
+    } else if (tab.value === 'policies') {
+      const pRes = await listPolicies({ tenant_id: id })
+      policies.value = pRes.policies
+    }
     error.value = ''
   } catch (e) { error.value = toMessage(e) }
 }, 60000)
-
-// First activation of a lazy tab — fetch its data directly from the
-// click handler rather than via watch(tab). Reasons:
-// - watch() might not fire reliably during Vue's HMR cycle when a
-//   component is re-compiled with state preserved.
-// - usePolling's in-flight dedup guard (R10) would drop a refresh()
-//   call if the initial mount poll was still running.
-// - Synchronous call from the click is the simplest contract: click
-//   always triggers, always sets the flag, always populates data.
-// The early-return keeps subsequent clicks cheap — only the first
-// activation hits the network.
-async function loadApiKeysOnce() {
-  if (keysLoaded.value) return
-  try {
-    const kRes = await listApiKeys({ tenant_id: id })
-    apiKeys.value = kRes.keys
-    keysLoaded.value = true
-  } catch (e) { error.value = toMessage(e) }
-}
-async function loadPoliciesOnce() {
-  if (policiesLoaded.value) return
-  try {
-    const pRes = await listPolicies({ tenant_id: id })
-    policies.value = pRes.policies
-    policiesLoaded.value = true
-  } catch (e) { error.value = toMessage(e) }
-}
-function activateTab(t: 'budgets' | 'keys' | 'policies') {
-  tab.value = t
-  if (t === 'keys') loadApiKeysOnce()
-  else if (t === 'policies') loadPoliciesOnce()
-}
 </script>
 
 <template>
@@ -564,23 +558,18 @@ function activateTab(t: 'budgets' | 'keys' | 'policies') {
         </div>
       </div>
 
-      <!-- Tabs. R9 lazy-load means keys / policies data isn't fetched
-           until the operator opens that tab, so the pre-load count
-           would always read 0 and lie about "no keys exist." Show
-           "…" for unloaded tabs and the real count once loaded so
-           the badge is honest about what we know. Budgets are
-           always fetched (the header card's spend rollup depends
-           on them) so their count is always accurate. -->
+      <!-- Tabs. R9 scale-hardening: initial mount fetches all four
+           lists in parallel so badge counts are accurate from first
+           paint; subsequent 60s polls only refresh the active tab's
+           data to avoid unbounded per-tenant key/policy fetches
+           recurring every minute. -->
       <div class="flex border-b border-gray-200 mb-4">
         <button v-for="t in (['budgets', 'keys', 'policies'] as const)" :key="t"
-          @click="activateTab(t)"
+          @click="tab = t"
           :class="tab === t ? 'border-gray-900 text-gray-900' : 'border-transparent muted hover:text-gray-700'"
           class="px-4 py-2 text-sm font-medium border-b-2 -mb-px cursor-pointer transition-colors">
           {{ t === 'keys' ? 'API Keys' : t.charAt(0).toUpperCase() + t.slice(1) }}
-          <span
-            class="ml-1 muted-sm"
-            :title="t === 'keys' && !keysLoaded ? 'Keys not loaded yet — click the tab to load' : t === 'policies' && !policiesLoaded ? 'Policies not loaded yet — click the tab to load' : undefined"
-          >({{ t === 'budgets' ? budgets.length : t === 'keys' ? apiKeysBadge : policiesBadge }})</span>
+          <span class="ml-1 muted-sm">({{ t === 'budgets' ? budgets.length : t === 'keys' ? apiKeys.length : policies.length }})</span>
         </button>
       </div>
 
