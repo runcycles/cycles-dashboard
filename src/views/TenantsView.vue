@@ -302,28 +302,29 @@ const gridTemplate = computed(() =>
     </div>
 
     <!-- Floating bulk action bar — appears only when rows are
-         selected. Teleported to <body> so it escapes the view's
-         stacking context and layout flow entirely; the table's
-         position doesn't shift at all when selections change, so
-         the operator's click-target stays anchored to their cursor.
-         Pattern matches Gmail / Linear / GitHub bulk-action bars.
-         Transitions in/out with a subtle slide-up for discoverability. -->
+         selected. Teleported to <body>; fixed at top-center of the
+         viewport so it anchors to the F-pattern reading start point
+         (above where users are scanning table rows/headers). Bottom
+         placement tested poorly — operators missed it on large
+         monitors because their gaze was still on the table. Top
+         placement matches Gmail / Linear / Jira / GitHub. Slides
+         DOWN from above on appear. -->
     <Teleport to="body">
       <Transition
-        enter-active-class="transition duration-150 ease-out"
-        enter-from-class="opacity-0 translate-y-4"
+        enter-active-class="transition duration-200 ease-out"
+        enter-from-class="opacity-0 -translate-y-4"
         enter-to-class="opacity-100 translate-y-0"
-        leave-active-class="transition duration-100 ease-in"
+        leave-active-class="transition duration-150 ease-in"
         leave-from-class="opacity-100 translate-y-0"
-        leave-to-class="opacity-0 translate-y-4"
+        leave-to-class="opacity-0 -translate-y-4"
       >
         <div
           v-if="canManage && selectedVisibleCount > 0"
           role="toolbar"
           aria-label="Bulk tenant actions"
-          class="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-white dark:bg-gray-900 dark:border dark:border-gray-700 border border-blue-300 shadow-xl rounded-lg px-4 py-2.5 flex items-center gap-3 max-w-[90vw]"
+          class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-gray-900 dark:border dark:border-gray-700 border-2 border-blue-400 shadow-2xl rounded-lg px-4 py-2.5 flex items-center gap-3 max-w-[90vw]"
         >
-          <span class="text-sm font-medium text-blue-900 dark:text-blue-300">{{ selectedVisibleCount }} selected</span>
+          <span class="text-sm font-semibold text-blue-900 dark:text-blue-300 tabular-nums">{{ selectedVisibleCount }} selected</span>
           <div class="w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
           <button @click="openBulk('SUSPENDED')" class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer">Suspend</button>
           <button @click="openBulk('ACTIVE')" class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer">Reactivate</button>
