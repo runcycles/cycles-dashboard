@@ -683,7 +683,7 @@ const gridTemplate = computed(() =>
                 <router-link :to="{ name: 'budgets', query: { scope: sortedBudgets[v.index].scope, unit: sortedBudgets[v.index].unit } }" class="text-blue-600 hover:underline font-mono text-xs truncate inline-block max-w-full align-middle">{{ sortedBudgets[v.index].scope }}</router-link>
                 <span v-if="sortedBudgets[v.index].is_over_limit" class="ml-1.5 bg-red-100 text-red-700 px-1 py-0.5 rounded text-xs font-medium">OVER</span>
               </div>
-              <div role="cell" class="table-cell muted">{{ sortedBudgets[v.index].unit }}</div>
+              <div role="cell" class="table-cell font-mono text-xs muted">{{ sortedBudgets[v.index].unit }}</div>
               <div role="cell" class="table-cell"><StatusBadge :status="sortedBudgets[v.index].status" /></div>
               <div
                 role="cell"

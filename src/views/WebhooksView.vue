@@ -359,12 +359,16 @@ const gridTemplate = computed(() =>
             </div>
             <div role="cell" class="table-cell"><span :class="healthColor(sortedWebhooks[v.index])" class="inline-block w-2.5 h-2.5 rounded-full" :title="healthLabel(sortedWebhooks[v.index])" /></div>
             <div role="cell" class="table-cell min-w-0">
-              <router-link :to="{ name: 'webhook-detail', params: { id: sortedWebhooks[v.index].subscription_id } }" class="text-blue-600 hover:underline truncate block">{{ sortedWebhooks[v.index].url }}</router-link>
-              <span v-if="sortedWebhooks[v.index].name" class="muted-sm">{{ sortedWebhooks[v.index].name }}</span>
+              <router-link :to="{ name: 'webhook-detail', params: { id: sortedWebhooks[v.index].subscription_id } }" class="text-blue-600 hover:underline truncate block" :title="sortedWebhooks[v.index].url">{{ sortedWebhooks[v.index].url }}</router-link>
+              <span v-if="sortedWebhooks[v.index].name" class="muted-sm truncate block" :title="sortedWebhooks[v.index].name">{{ sortedWebhooks[v.index].name }}</span>
             </div>
             <div role="cell" class="table-cell"><StatusBadge :status="sortedWebhooks[v.index].status" /></div>
             <div role="cell" class="table-cell text-right tabular-nums" :class="(sortedWebhooks[v.index].consecutive_failures ?? 0) > 0 ? 'text-red-600 font-medium' : 'muted'">{{ sortedWebhooks[v.index].consecutive_failures ?? 0 }}</div>
-            <div role="cell" class="table-cell muted-sm truncate">{{ sortedWebhooks[v.index].event_types?.join(', ') || sortedWebhooks[v.index].event_categories?.join(', ') || 'all' }}</div>
+            <div
+              role="cell"
+              class="table-cell muted-sm truncate"
+              :title="sortedWebhooks[v.index].event_types?.join(', ') || sortedWebhooks[v.index].event_categories?.join(', ') || 'all events'"
+            >{{ sortedWebhooks[v.index].event_types?.join(', ') || sortedWebhooks[v.index].event_categories?.join(', ') || 'all' }}</div>
             <div v-if="canManage" role="cell" class="table-cell">
               <button v-if="sortedWebhooks[v.index].status === 'ACTIVE'" @click="pendingStatusAction = { id: sortedWebhooks[v.index].subscription_id, url: sortedWebhooks[v.index].url, action: 'PAUSED' }" class="btn-row-danger">Pause</button>
               <button v-if="sortedWebhooks[v.index].status === 'PAUSED' || sortedWebhooks[v.index].status === 'DISABLED'" @click="pendingStatusAction = { id: sortedWebhooks[v.index].subscription_id, url: sortedWebhooks[v.index].url, action: 'ACTIVE' }" class="btn-row-success">Enable</button>

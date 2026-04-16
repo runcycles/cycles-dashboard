@@ -321,8 +321,8 @@ const gridTemplate = computed(() =>
             class="grid table-row-hover border-b border-gray-100 absolute left-0 right-0 items-center"
             :style="{ gridTemplateColumns: gridTemplate, transform: `translateY(${v.start}px)`, height: ROW_HEIGHT_ESTIMATE + 'px' }"
           >
-            <div role="cell" class="table-cell font-mono text-xs break-all">{{ sortedReservations[v.index].reservation_id }}</div>
-            <div role="cell" class="table-cell font-mono text-xs text-gray-600 break-all">{{ sortedReservations[v.index].scope_path }}</div>
+            <div role="cell" class="table-cell font-mono text-xs truncate" :title="sortedReservations[v.index].reservation_id">{{ sortedReservations[v.index].reservation_id }}</div>
+            <div role="cell" class="table-cell font-mono text-xs text-gray-600 truncate" :title="sortedReservations[v.index].scope_path">{{ sortedReservations[v.index].scope_path }}</div>
             <div role="cell" class="table-cell"><StatusBadge :status="sortedReservations[v.index].status" /></div>
             <div role="cell" class="table-cell text-right tabular-nums">
               {{ sortedReservations[v.index].reserved.amount.toLocaleString() }}
