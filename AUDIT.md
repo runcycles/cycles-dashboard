@@ -1,7 +1,61 @@
 # Cycles Admin Dashboard — Audit
 
-**Date:** 2026-04-16 (TenantDetailView — Edit API Key in-place, ports the v0.1.25.24 ApiKeysView diff-before-patch flow), 2026-04-16 (phase 5 polish — multi-row expansion on Events / Audit / EventTimeline for triage comparison workflow), 2026-04-16 (phase 5 polish — BudgetDetail EventTimeline virtualization + flex-fill + Load more label parity with list views), 2026-04-16 (phase 5 polish — PageHeader `itemNounPlural` override fixes "log entrys"→"log entries", WebhooksView subscription→webhook noun consistency, filter toolbars wrapped in card across TenantsView/WebhooksView/ReservationsView), 2026-04-16 (scale-hardening phase 5 — unified table-layout: flex-fill viewport on all 7 list views, fix AuditView double horizontal scrollbar, standardize Load more label), 2026-04-16 (scale-hardening phase 4 — W4 bulk-op bounded concurrency + 429 backoff across all three bulk runners, W5 reveal-timer cleanup, W6 a11y row-count live region), 2026-04-16 (scale-hardening phase 3 — V5 debounce composable, V6 PageHeader result counts, V7 filter-aware EmptyState), 2026-04-16 (scale-hardening phase 2c — V1 virtualization for EventsView + AuditView with measureElement for expandable rows), 2026-04-16 (scale-hardening phase 2b — row virtualization across 5 list views via @tanstack/vue-virtual), 2026-04-16 (scale-hardening phase 2 — pagination on tenants/webhooks/budget-detail events, lazy tabs, O(1) parent lookup, copy-event-data), 2026-04-16 (scale-hardening phase 1 — pagination, cancellation, N+1 mitigation across 6 views), 2026-04-15 (v0.1.25.27 — RESET_SPENT funding operation support, semantics corrected post-test), 2026-04-14 (error-surfacing + SecretReveal + 3 incident-response Playwright flows), 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
+**Date:** 2026-04-16 (scale phase 1 wire-up — ApiKeysView + BudgetsView consume the cross-tenant `/v1/admin/api-keys` and `/v1/admin/budgets` endpoints from cycles-server-admin v0.1.25.22, push all filters server-side, render `BudgetLedger.tenant_id` as a first-class column per cycles-governance-admin v0.1.25.19 / cycles-server-admin v0.1.25.23), 2026-04-16 (TenantDetailView — Edit API Key in-place, ports the v0.1.25.24 ApiKeysView diff-before-patch flow), 2026-04-16 (phase 5 polish — multi-row expansion on Events / Audit / EventTimeline for triage comparison workflow), 2026-04-16 (phase 5 polish — BudgetDetail EventTimeline virtualization + flex-fill + Load more label parity with list views), 2026-04-16 (phase 5 polish — PageHeader `itemNounPlural` override fixes "log entrys"→"log entries", WebhooksView subscription→webhook noun consistency, filter toolbars wrapped in card across TenantsView/WebhooksView/ReservationsView), 2026-04-16 (scale-hardening phase 5 — unified table-layout: flex-fill viewport on all 7 list views, fix AuditView double horizontal scrollbar, standardize Load more label), 2026-04-16 (scale-hardening phase 4 — W4 bulk-op bounded concurrency + 429 backoff across all three bulk runners, W5 reveal-timer cleanup, W6 a11y row-count live region), 2026-04-16 (scale-hardening phase 3 — V5 debounce composable, V6 PageHeader result counts, V7 filter-aware EmptyState), 2026-04-16 (scale-hardening phase 2c — V1 virtualization for EventsView + AuditView with measureElement for expandable rows), 2026-04-16 (scale-hardening phase 2b — row virtualization across 5 list views via @tanstack/vue-virtual), 2026-04-16 (scale-hardening phase 2 — pagination on tenants/webhooks/budget-detail events, lazy tabs, O(1) parent lookup, copy-event-data), 2026-04-16 (scale-hardening phase 1 — pagination, cancellation, N+1 mitigation across 6 views), 2026-04-15 (v0.1.25.27 — RESET_SPENT funding operation support, semantics corrected post-test), 2026-04-14 (error-surfacing + SecretReveal + 3 incident-response Playwright flows), 2026-04-14 (capability-gated UI visibility test layer), 2026-04-14 (v0.1.25.26 style consolidation + dark-mode restore), 2026-04-14 (a11y ratchet to WCAG AA all-levels — TERMINAL), 2026-04-14 (a11y ratchet to WCAG AA moderate+), 2026-04-14 (a11y ratchet to WCAG AA serious+critical), 2026-04-14 (v0.1.25.25 complete PERMISSIONS + unknown-filter on edit), 2026-04-14 (v0.1.25.24 API-key edit diff-before-patch), 2026-04-14 (Playwright E2E layer), 2026-04-13 (v0.1.25.23 nginx hotfix), 2026-04-13 (v0.1.25.22)
 **Requires:** cycles-server v0.1.25.8+ (runtime plane, reservations dual-auth). Admin server v0.1.25.17+ continues to satisfy the governance plane; **admin server v0.1.25.18+ required** to execute the new `RESET_SPENT` funding operation from BudgetsView (older admin servers will reject the operation enum with 400 INVALID_REQUEST — UI degrades gracefully but the operator sees the server's error toast).
+
+### 2026-04-16 — Scale phase 1 wire-up: cross-tenant list endpoints + server-side filters
+
+Closes the last remaining P0 from the scale-hardening audit: the two
+N+1 tenant fan-out loops that, at ≥100 tenants, caused a burst of
+sequential `listApiKeys(tenant_id)` and `listBudgets(tenant_id)`
+requests per poll and silently truncated any match past the per-tenant
+first page. With cycles-server-admin **v0.1.25.22** landing tenant-
+agnostic list endpoints and **v0.1.25.23** flipping `@JsonIgnore` off
+`BudgetLedger.tenant_id` (per cycles-governance-admin spec
+**v0.1.25.19**), the dashboard can now collapse both loops to a single
+cross-tenant paginated call and push every filter the UI exposes down
+to the server.
+
+**Fix.**
+
+1. **`src/views/ApiKeysView.vue`** — replaced the tenant fan-out with
+   a single `listApiKeys()` call driven by a composite
+   `{tenantId}|{keyId}` cursor. Removed the `MAX_TENANTS_FOR_KEYS`
+   cap + banner. The in-view "Tenant" filter select now forwards
+   `tenant_id` when set and omits it when not. Export path walks the
+   real server cursor instead of the fanout snapshot.
+2. **`src/views/BudgetsView.vue`** — introduced `buildListParams()`
+   as the single wire-boundary builder: forwards `status`, `unit`,
+   `scope_prefix`, `over_limit`, `has_debt`, `utilization_min`,
+   `utilization_max`, `tenant_id` (optional), `cursor`, `limit`.
+   Utilization is converted from UI percent (0–100) to server ratio
+   (0–1) at this boundary and clamped. The previous client-side
+   `applyClientFilters()` / `utilizationPercent()` helpers were
+   deleted — they silently dropped page-2+ matches.
+   Added a "Tenant" column as the leftmost sort target; `rowTenantId()`
+   prefers the wire field and falls back to `tenantFromScope(b.scope)`
+   so pre-v0.1.25.23 servers and legacy stored ledgers keep rendering.
+   Export columns now include `tenant_id`.
+3. **`src/types.ts`** — `BudgetLedger.tenant_id?: string` (optional to
+   keep older servers compatible).
+4. **`src/__tests__/capabilities-gating.test.ts`** — corrected the
+   `listBudgets` mock envelope from `{ budgets: [] }` to
+   `{ ledgers: [], has_more: false }`. The old mock worked only because
+   the fanout path short-circuited on an empty tenant list; the new
+   direct-assign path would have thrown `items.value is not iterable`.
+
+**Tests pinning the contract.**
+
+- `src/__tests__/ApiKeysView-cross-tenant.test.ts` (3 tests) — one
+  call on mount with no `tenant_id`, `tenant_id` forwarded when the
+  select changes, `cursor` forwarded on Load more.
+- `src/__tests__/BudgetsView-cross-tenant.test.ts` (6 tests) — one
+  call on mount, `filter=over_limit` / `filter=has_debt` route query
+  pushed to server, UI 75 → `utilization_min=0.75`, composite cursor
+  forwarded, `tenant_id` from the wire rendered via `TenantLink`
+  (prefers wire over scope-parsing).
+
+**Gates.** 349/349 vitest, `vue-tsc -b --noEmit` clean.
 
 ### 2026-04-16 — TenantDetailView: Edit API Key in-place
 

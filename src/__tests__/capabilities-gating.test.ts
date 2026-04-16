@@ -28,7 +28,7 @@ vi.mock('../api/client', () => ({
   listTenants: vi.fn().mockResolvedValue({ tenants: [] }),
   listApiKeys: vi.fn().mockResolvedValue({ keys: [] }),
   listWebhooks: vi.fn().mockResolvedValue({ subscriptions: [] }),
-  listBudgets: vi.fn().mockResolvedValue({ budgets: [] }),
+  listBudgets: vi.fn().mockResolvedValue({ ledgers: [], has_more: false }),
   listReservations: vi.fn().mockResolvedValue({ reservations: [] }),
   getWebhookSecurityConfig: vi.fn().mockResolvedValue({}),
   ApiError: class ApiError extends Error {},

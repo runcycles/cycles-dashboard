@@ -85,6 +85,11 @@ export interface Amount {
 
 export interface BudgetLedger {
   ledger_id: string
+  // Populated by servers implementing cycles-governance-admin v0.1.25.19+
+  // (cycles-server-admin v0.1.25.23+). Optional so pre-upgrade servers
+  // and legacy stored ledgers without a tenant_id render without breaking
+  // — callers that depend on it must degrade gracefully.
+  tenant_id?: string
   scope: string
   unit: string
   allocated: Amount

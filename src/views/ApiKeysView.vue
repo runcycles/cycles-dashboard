@@ -39,20 +39,23 @@ const filterTenant = ref('')
 const tenants = ref<Tenant[]>([])
 const pendingRevoke = ref<KeyWithTenant | null>(null)
 
-// R1 mitigation (scale-hardening). The /admin/api-keys endpoint currently
-// requires a tenant_id filter, so the view iterates all tenants and issues
-// one listApiKeys() per tenant — O(N tenants) per 60s poll. Without this
-// cap, a 1k-tenant deployment fires 1k sequential requests per minute
-// from every open dashboard tab.
-//
-// The real fix is a tenant-agnostic /admin/api-keys (server spec change,
-// tracked separately). Until then we cap the loop + parallelize in small
-// batches + surface a banner so operators know the list may be truncated.
-const TENANT_FANOUT_CAP = 100
-const TENANT_FANOUT_CONCURRENCY = 4
-const tenantsExamined = ref(0)
-const tenantsTotal = ref(0)
-const fanoutTruncated = computed(() => tenantsTotal.value > tenantsExamined.value)
+// R1 wire-up (cycles-server-admin v0.1.25.22+). The /admin/api-keys
+// endpoint now accepts admin-key auth without a tenant_id filter and
+// returns rows across every tenant with a composite cursor
+// `{tenantId}|{keyId}`. One request per page replaces the old
+// per-tenant fan-out; filterTenant === '' takes the cross-tenant path,
+// filterTenant === '<id>' still scopes to that tenant server-side.
+const PAGE_SIZE = 100
+const hasMore = ref(false)
+const nextCursor = ref('')
+const loadingMore = ref(false)
+// Tenant lookup map — O(1) resolution of tenant_name per row instead
+// of Array.find scanning N tenants on every render pass.
+const tenantsById = computed(() => {
+  const m = new Map<string, Tenant>()
+  for (const t of tenants.value) m.set(t.tenant_id, t)
+  return m
+})
 
 async function executeRevoke() {
   if (!pendingRevoke.value) return
@@ -215,71 +218,62 @@ const statusCounts = computed(() => {
 const hasActiveFilters = computed(() => !!(filterStatus.value || filterTenant.value))
 function clearFilters() { filterStatus.value = ''; filterTenant.value = '' }
 
+function decorate(list: ApiKey[]): KeyWithTenant[] {
+  return list.map((k) => ({ ...k, tenant_name: tenantsById.value.get(k.tenant_id)?.name }))
+}
+
+async function fetchKeysPage(cursor?: string): Promise<{
+  keys: KeyWithTenant[]
+  hasMore: boolean
+  nextCursor: string
+}> {
+  const params: Record<string, string> = { limit: String(PAGE_SIZE) }
+  if (filterTenant.value) params.tenant_id = filterTenant.value
+  if (cursor) params.cursor = cursor
+  const res = await listApiKeys(params)
+  return {
+    keys: decorate(res.keys),
+    hasMore: !!res.has_more,
+    nextCursor: res.next_cursor ?? '',
+  }
+}
+
 const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
     const tRes = await listTenants()
     tenants.value = tRes.tenants
-    tenantsTotal.value = tRes.tenants.length
-
-    // Fast path: tenant filter set. Fetch only that tenant's keys —
-    // avoids the fan-out entirely AND guarantees the view shows the
-    // right tenant even if it's past position TENANT_FANOUT_CAP in
-    // the broader tenant list (correctness, not just performance).
-    if (filterTenant.value) {
-      const t = tRes.tenants.find((x) => x.tenant_id === filterTenant.value)
-      if (t) {
-        const kRes = await listApiKeys({ tenant_id: t.tenant_id })
-        keys.value = kRes.keys.map((k) => ({ ...k, tenant_name: t.name }))
-        tenantsExamined.value = 1
-      } else {
-        keys.value = []
-        tenantsExamined.value = 0
-      }
-      error.value = ''
-      return
-    }
-
-    // Cap the per-tenant fan-out. See TENANT_FANOUT_CAP comment for the
-    // full rationale — summary: the API endpoint forces per-tenant
-    // fetches, so we can't paginate the aggregate; best we can do until
-    // the server exposes a tenant-agnostic list is bound the request
-    // count and surface the truncation to operators.
-    const targets = tRes.tenants.slice(0, TENANT_FANOUT_CAP)
-    tenantsExamined.value = targets.length
-    // Bounded-concurrency fan-out. Sequential was 2–3s at 1k tenants
-    // and pegged backend rate-limits; Promise.all on everything would
-    // DDoS the admin tier. 4 is a conservative middle ground —
-    // Chrome's per-host connection limit is 6, and we want headroom
-    // for the user's concurrent nav clicks.
-    const allKeys: KeyWithTenant[] = []
-    for (let i = 0; i < targets.length; i += TENANT_FANOUT_CONCURRENCY) {
-      const batch = targets.slice(i, i + TENANT_FANOUT_CONCURRENCY)
-      const results = await Promise.all(
-        batch.map(async (t) => {
-          const kRes = await listApiKeys({ tenant_id: t.tenant_id })
-          return kRes.keys.map((k) => ({ ...k, tenant_name: t.name }))
-        }),
-      )
-      for (const chunk of results) allKeys.push(...chunk)
-    }
-    keys.value = allKeys
+    // Single cross-tenant listApiKeys — no per-tenant fan-out. Polling
+    // always refetches page 1 and drops any accumulated "Load more"
+    // pages; tenants' key sets change infrequently enough that this
+    // is the right trade-off (fresh data > accumulated scroll state).
+    const first = await fetchKeysPage()
+    keys.value = first.keys
+    hasMore.value = first.hasMore
+    nextCursor.value = first.nextCursor
     error.value = ''
   } catch (e) { error.value = toMessage(e) }
 }, 60000)
 
-// When the tenant filter changes to a tenant outside the fan-out window,
-// we'd otherwise be stuck showing "no keys" for a tenant that genuinely
-// has keys. Refresh on filter change so the fast-path above picks it up.
+async function loadMore() {
+  if (loadingMore.value || !nextCursor.value) return
+  loadingMore.value = true
+  try {
+    const res = await fetchKeysPage(nextCursor.value)
+    keys.value = [...keys.value, ...res.keys]
+    hasMore.value = res.hasMore
+    nextCursor.value = res.nextCursor
+  } catch (e) { error.value = toMessage(e) }
+  finally { loadingMore.value = false }
+}
+
+// Refresh on filter change so we restart page-1 scoped to the new tenant.
 watch(filterTenant, () => { refresh() })
 
 // Export. ApiKeysView is a cross-tenant aggregation (no cursor
-// endpoint) so the export mirrors the CURRENT loaded set — whatever
-// the operator sees on screen, capped at TENANT_FANOUT_CAP tenants.
-// `hasMore` is forced to false so the composable takes the fast path
-// and doesn't try to cursor-paginate an endpoint that doesn't support
-// it cross-tenant. The R1 banner already flags the cap to operators.
-const keysHasMore = computed(() => false)
-const keysNextCursor = computed(() => '')
+// endpoint) — since the server now exposes cursor-paginated cross-tenant
+// listApiKeys, the export can walk the full result set honestly. The
+// composable drives pages via fetchPage(cursor); each page is appended
+// up to the EXPORT_MAX_ROWS guardrail inside useListExport.
 const {
   showExportConfirm,
   exporting,
@@ -293,9 +287,12 @@ const {
   itemNoun: 'api key',
   filenameStem: 'api-keys',
   currentItems: filteredKeys,
-  hasMore: keysHasMore,
-  nextCursor: keysNextCursor,
-  fetchPage: async () => ({ items: [], hasMore: false, nextCursor: '' }),
+  hasMore,
+  nextCursor,
+  fetchPage: async (cursor) => {
+    const r = await fetchKeysPage(cursor)
+    return { items: r.keys, hasMore: r.hasMore, nextCursor: r.nextCursor }
+  },
   columns: [
     { header: 'key_id',       value: k => k.key_id },
     { header: 'name',         value: k => k.name ?? '' },
@@ -380,20 +377,6 @@ function closePermsViewer() { viewingPermsFor.value = null }
     </PageHeader>
 
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
-
-    <!-- R1 mitigation: surface the per-tenant fan-out cap. Banner appears
-         only when the truncation is active, so small deployments see
-         nothing. Points operators at the tenant filter as the workaround
-         until the tenant-agnostic server endpoint ships. -->
-    <p
-      v-if="fanoutTruncated"
-      class="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-2 mb-4"
-      role="status"
-    >
-      Showing keys for the first <strong>{{ tenantsExamined.toLocaleString() }}</strong> of
-      <strong>{{ tenantsTotal.toLocaleString() }}</strong> tenants. Use the
-      tenant filter to narrow to a specific tenant beyond this window.
-    </p>
 
     <!-- Summary -->
     <div v-if="keys.length > 0" class="flex gap-3 mb-4">
@@ -548,6 +531,13 @@ function closePermsViewer() { viewingPermsFor.value = null }
      </div>
     </div>
 
+    <!-- Load-more footer — mirrors BudgetsView / TenantsView pattern. -->
+    <div v-if="hasMore || loadingMore" class="mt-3 flex justify-end">
+      <button @click="loadMore" :disabled="loadingMore" class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50 cursor-pointer">
+        {{ loadingMore ? 'Loading...' : 'Load more' }}
+      </button>
+    </div>
+
     <!-- Create API Key dialog -->
     <FormDialog v-if="showCreate" title="Create API Key" submit-label="Create Key" :loading="createLoading" :error="createError" @submit="submitCreate" @cancel="showCreate = false">
       <div>
@@ -690,7 +680,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
     <ExportDialog
       :format="showExportConfirm"
       :loaded-count="filteredKeys.length"
-      :has-more="false"
+      :has-more="hasMore"
       :max-rows="EXPORT_MAX_ROWS"
       item-noun-plural="API keys"
       warning="Exported files include permissions and scope filters for each key. Signing secrets are never exported."
