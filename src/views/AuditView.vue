@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute } from 'vue-router'
 import { listAuditLogs } from '../api/client'
 import { useSort } from '../composables/useSort'
@@ -203,6 +204,33 @@ watch(() => route.query, () => {
   applyQueryParams()
   query()
 })
+
+// V1 virtualization (Phase 2c) — variable row heights via measureElement.
+// Same pattern as EventsView: each virtualized item wraps the compact
+// row plus (when expanded) the metadata + JSON detail block.
+const scrollEl = ref<HTMLElement | null>(null)
+const COLLAPSED_ROW_HEIGHT = 52
+const virtualizer = useVirtualizer(computed(() => ({
+  count: sortedEntries.value.length,
+  getScrollElement: () => scrollEl.value,
+  estimateSize: () => COLLAPSED_ROW_HEIGHT,
+  overscan: 8,
+  getItemKey: (index: number) => sortedEntries.value[index]?.log_id ?? index,
+})))
+const virtualRows = computed(() => virtualizer.value.getVirtualItems())
+const totalHeight = computed(() => virtualizer.value.getTotalSize())
+
+// 7 columns: chevron (32) | time (160) | operation (flex) | resource (flex)
+// | tenant (130) | key_id (150) | status (110). Horizontal scroll engages
+// below ~900px, matching pre-virt `min-w-[900px]` <table>.
+const gridTemplate = 'minmax(32px,32px) 160px minmax(140px,1.5fr) minmax(180px,2fr) minmax(130px,1fr) 150px 110px'
+
+function measureRow(el: Element | { $el?: Element } | null) {
+  const node = (el as { $el?: Element })?.$el ?? (el as Element | null)
+  if (node instanceof Element && virtualizer.value) {
+    virtualizer.value.measureElement(node)
+  }
+}
 </script>
 
 <template>
@@ -275,92 +303,120 @@ watch(() => route.query, () => {
       </div>
     </div>
 
-    <div class="card-table">
-      <table class="w-full text-sm min-w-[900px]">
-        <thead class="table-header">
-          <tr>
-            <th class="w-8"></th>
-            <SortHeader label="Time" column="timestamp" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <SortHeader label="Operation" column="operation" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <SortHeader label="Resource" column="resource_type" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <SortHeader label="Tenant" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <th class="table-cell text-left">Key ID</th>
-            <SortHeader label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-100">
-          <template v-for="e in sortedEntries" :key="e.log_id">
-            <!-- Row is mouse-clickable (when details exist) but NOT a
-                 role=button — the chevron <button> provides keyboard +
-                 screen-reader access. Row as a button would nest the
-                 inner TenantLink/MaskedValue/Copy buttons inside
-                 another interactive element (axe: nested-interactive,
-                 WCAG 4.1.2). -->
-            <tr
-              class="table-row-hover"
-              :class="hasDetail(e) ? 'cursor-pointer' : ''"
-              @click="hasDetail(e) ? (expanded = expanded === e.log_id ? null : e.log_id) : null"
+    <!-- V1 virtualized grid with measureElement (Phase 2c). Same
+         pattern as EventsView — variable row heights let expand/
+         collapse re-layout smoothly without flicker. Horizontal
+         scroll engages on narrow viewports via the outer
+         overflow-x-auto + inner min-width wrapper. -->
+    <div
+      class="bg-white rounded-lg shadow overflow-x-auto text-sm"
+      role="table"
+      :aria-rowcount="entries.length + 1"
+      :aria-colcount="7"
+    >
+     <div style="min-width: 900px">
+      <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
+        <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
+          <div role="columnheader" class="table-cell"></div>
+          <SortHeader as="div" label="Time" column="timestamp" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <SortHeader as="div" label="Operation" column="operation" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <SortHeader as="div" label="Resource" column="resource_type" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <SortHeader as="div" label="Tenant" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <div role="columnheader" class="table-cell text-left">Key ID</div>
+          <SortHeader as="div" label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+        </div>
+      </div>
+
+      <div
+        v-if="sortedEntries.length > 0"
+        ref="scrollEl"
+        role="rowgroup"
+        class="overflow-y-auto"
+        style="max-height: calc(100vh - 480px); min-height: 240px;"
+      >
+        <div :style="{ height: totalHeight + 'px', position: 'relative' }">
+          <div
+            v-for="v in virtualRows"
+            :key="sortedEntries[v.index].log_id"
+            :ref="measureRow"
+            :data-index="v.index"
+            role="row"
+            :aria-rowindex="v.index + 2"
+            class="absolute left-0 right-0 border-b border-gray-100"
+            :style="{ transform: `translateY(${v.start}px)` }"
+          >
+            <!-- Compact row. Click anywhere on the row toggles the
+                 detail expansion when it has detail data (hasDetail).
+                 Rows without detail aren't clickable — their chevron
+                 cell renders empty. -->
+            <div
+              class="grid table-row-hover items-center transition-colors"
+              :class="hasDetail(sortedEntries[v.index]) ? 'cursor-pointer' : ''"
+              :style="{ gridTemplateColumns: gridTemplate, minHeight: COLLAPSED_ROW_HEIGHT + 'px' }"
+              @click="hasDetail(sortedEntries[v.index]) ? (expanded = expanded === sortedEntries[v.index].log_id ? null : sortedEntries[v.index].log_id) : null"
             >
-              <td class="pl-3 py-3 muted">
+              <div role="cell" class="pl-3 muted">
                 <button
-                  v-if="hasDetail(e)"
+                  v-if="hasDetail(sortedEntries[v.index])"
                   type="button"
-                  :aria-expanded="expanded === e.log_id"
-                  :aria-label="expanded === e.log_id ? 'Collapse audit details' : 'Expand audit details'"
+                  :aria-expanded="expanded === sortedEntries[v.index].log_id"
+                  :aria-label="expanded === sortedEntries[v.index].log_id ? 'Collapse audit details' : 'Expand audit details'"
                   class="p-0.5 -ml-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-400"
-                  @click.stop="expanded = expanded === e.log_id ? null : e.log_id"
+                  @click.stop="expanded = expanded === sortedEntries[v.index].log_id ? null : sortedEntries[v.index].log_id"
                 >
-                  <svg class="w-3.5 h-3.5 transition-transform" :class="expanded === e.log_id ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <svg class="w-3.5 h-3.5 transition-transform" :class="expanded === sortedEntries[v.index].log_id ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
                   </svg>
                 </button>
-              </td>
-              <td class="table-cell muted whitespace-nowrap text-xs" :title="new Date(e.timestamp).toISOString()">{{ formatDateTime(e.timestamp) }}</td>
-              <td class="table-cell font-mono text-xs">{{ e.operation }}</td>
-              <td class="table-cell text-xs">
-                <span v-if="e.resource_type" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{{ e.resource_type }}</span>
-                <span v-if="e.resource_id" class="ml-1 font-mono muted">{{ e.resource_id }}</span>
-                <span v-if="!e.resource_type && !e.resource_id" class="muted">-</span>
-              </td>
-              <td class="table-cell muted-sm">
-                <TenantLink v-if="e.tenant_id" :tenant-id="e.tenant_id" />
+              </div>
+              <div role="cell" class="table-cell muted whitespace-nowrap text-xs" :title="new Date(sortedEntries[v.index].timestamp).toISOString()">{{ formatDateTime(sortedEntries[v.index].timestamp) }}</div>
+              <div role="cell" class="table-cell font-mono text-xs truncate" :title="sortedEntries[v.index].operation">{{ sortedEntries[v.index].operation }}</div>
+              <div role="cell" class="table-cell text-xs truncate">
+                <span v-if="sortedEntries[v.index].resource_type" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{{ sortedEntries[v.index].resource_type }}</span>
+                <span v-if="sortedEntries[v.index].resource_id" class="ml-1 font-mono muted" :title="sortedEntries[v.index].resource_id">{{ sortedEntries[v.index].resource_id }}</span>
+                <span v-if="!sortedEntries[v.index].resource_type && !sortedEntries[v.index].resource_id" class="muted">-</span>
+              </div>
+              <div role="cell" class="table-cell muted-sm">
+                <TenantLink v-if="sortedEntries[v.index].tenant_id" :tenant-id="sortedEntries[v.index].tenant_id!" />
                 <span v-else class="muted-sm">-</span>
-              </td>
-              <td class="table-cell">
-                <MaskedValue v-if="e.key_id" :value="e.key_id" />
+              </div>
+              <div role="cell" class="table-cell">
+                <MaskedValue v-if="sortedEntries[v.index].key_id" :value="sortedEntries[v.index].key_id!" />
                 <span v-else class="muted-sm">-</span>
-              </td>
-              <td class="table-cell">
-                <span class="px-1.5 py-0.5 rounded text-xs font-medium" :class="e.status >= 400 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'">{{ e.status }}</span>
-                <span v-if="e.error_code" class="ml-1 text-xs text-red-500 font-mono">{{ e.error_code }}</span>
-              </td>
-            </tr>
-            <!-- Expanded detail row -->
-            <tr v-if="expanded === e.log_id" class="bg-gray-50/70">
-              <td :colspan="7" class="table-cell pl-11">
-                <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3">
-                  <div v-if="e.request_id"><span class="muted">Request ID:</span> <span class="font-mono">{{ e.request_id }}</span></div>
-                  <div v-if="e.source_ip"><span class="muted">Source IP:</span> <span class="font-mono">{{ e.source_ip }}</span></div>
-                  <div v-if="e.user_agent"><span class="muted">User Agent:</span> {{ e.user_agent }}</div>
-                  <div v-if="e.error_code"><span class="muted">Error Code:</span> <span class="font-mono text-red-500">{{ e.error_code }}</span></div>
-                  <div v-if="e.resource_type"><span class="muted">Resource Type:</span> {{ e.resource_type }}</div>
-                  <div v-if="e.resource_id"><span class="muted">Resource ID:</span> <span class="font-mono">{{ e.resource_id }}</span></div>
-                </div>
-                <div v-if="e.metadata && Object.keys(e.metadata).length > 0" class="bg-white border border-gray-200 rounded p-3 text-xs font-mono overflow-auto max-h-48">
-                  <div class="muted mb-1 font-sans text-xs">Metadata</div>
-                  <pre class="whitespace-pre-wrap">{{ safeJsonStringify(e.metadata) }}</pre>
-                </div>
-              </td>
-            </tr>
-          </template>
-          <tr v-if="entries.length === 0 && !loading">
-            <td colspan="7"><EmptyState message="No audit logs found" hint="Try a broader time range (e.g. Last 24h) or clear your filters" /></td>
-          </tr>
-          <tr v-if="loading">
-            <td colspan="7" class="px-4 py-12 text-center muted">Loading...</td>
-          </tr>
-        </tbody>
-      </table>
+              </div>
+              <div role="cell" class="table-cell">
+                <span class="px-1.5 py-0.5 rounded text-xs font-medium" :class="sortedEntries[v.index].status >= 400 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'">{{ sortedEntries[v.index].status }}</span>
+                <span v-if="sortedEntries[v.index].error_code" class="ml-1 text-xs text-red-500 font-mono">{{ sortedEntries[v.index].error_code }}</span>
+              </div>
+            </div>
+
+            <!-- Expanded detail — only when this row's log_id is the
+                 current `expanded`. Adds ~160-280px depending on
+                 metadata presence. -->
+            <div v-if="expanded === sortedEntries[v.index].log_id" class="bg-gray-50/70 px-4 py-3 border-t border-gray-100">
+              <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3">
+                <div v-if="sortedEntries[v.index].request_id"><span class="muted">Request ID:</span> <span class="font-mono">{{ sortedEntries[v.index].request_id }}</span></div>
+                <div v-if="sortedEntries[v.index].source_ip"><span class="muted">Source IP:</span> <span class="font-mono">{{ sortedEntries[v.index].source_ip }}</span></div>
+                <div v-if="sortedEntries[v.index].user_agent"><span class="muted">User Agent:</span> {{ sortedEntries[v.index].user_agent }}</div>
+                <div v-if="sortedEntries[v.index].error_code"><span class="muted">Error Code:</span> <span class="font-mono text-red-500">{{ sortedEntries[v.index].error_code }}</span></div>
+                <div v-if="sortedEntries[v.index].resource_type"><span class="muted">Resource Type:</span> {{ sortedEntries[v.index].resource_type }}</div>
+                <div v-if="sortedEntries[v.index].resource_id"><span class="muted">Resource ID:</span> <span class="font-mono">{{ sortedEntries[v.index].resource_id }}</span></div>
+              </div>
+              <div v-if="sortedEntries[v.index].metadata && Object.keys(sortedEntries[v.index].metadata!).length > 0" class="bg-white border border-gray-200 rounded p-3 text-xs font-mono overflow-auto max-h-48">
+                <div class="muted mb-1 font-sans text-xs">Metadata</div>
+                <pre class="whitespace-pre-wrap">{{ safeJsonStringify(sortedEntries[v.index].metadata) }}</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-else-if="!loading" role="row">
+        <EmptyState message="No audit logs found" hint="Try a broader time range (e.g. Last 24h) or clear your filters" />
+      </div>
+
+      <div v-else-if="loading" role="row" class="px-4 py-12 text-center muted">Loading...</div>
+     </div>
     </div>
 
     <!-- Export confirmation dialog -->

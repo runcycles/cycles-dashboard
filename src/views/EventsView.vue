@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
@@ -138,6 +139,44 @@ function clearFilters() {
 const hasActiveFilters = computed(() => !!(category.value || eventType.value || tenantId.value || scope.value || correlationId.value))
 
 const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
+
+// V1 virtualization (Phase 2c) — variable row heights via measureElement.
+// Collapsed rows are ~52px; expanded rows grow with metadata grid + JSON
+// block (up to ~280px). Each virtualized item wraps BOTH the compact
+// row and (when expanded) the detail block; measureElement observes the
+// actual DOM height per index so the virtualizer can re-layout on
+// expand/collapse smoothly.
+const scrollEl = ref<HTMLElement | null>(null)
+const COLLAPSED_ROW_HEIGHT = 52
+const virtualizer = useVirtualizer(computed(() => ({
+  count: sortedEvents.value.length,
+  getScrollElement: () => scrollEl.value,
+  estimateSize: () => COLLAPSED_ROW_HEIGHT,
+  overscan: 8,
+  // Stable key per index so reactivity across expand/collapse and
+  // sort changes doesn't re-generate virtual item identities.
+  getItemKey: (index: number) => sortedEvents.value[index]?.event_id ?? index,
+})))
+const virtualRows = computed(() => virtualizer.value.getVirtualItems())
+const totalHeight = computed(() => virtualizer.value.getTotalSize())
+
+// Row template. Shared by header and body rows so column alignment is
+// guaranteed. Chevron column fixed 32px; content columns sized to the
+// longest realistic content (event_type: ~200px at mono text-xs;
+// scope: flexible; timestamp: 160px for "MMM D, HH:mm:ss").
+const gridTemplate = 'minmax(32px,32px) minmax(180px,1.5fr) 110px minmax(180px,2fr) minmax(130px,1fr) 160px'
+
+// measureElement wrapper. TanStack's measureElement expects an Element
+// reference — our `:ref` callback can receive Element | ComponentPublicInstance
+// | null per Vue's typings. Narrow to Element before calling. Function is
+// top-level (stable) so Vue doesn't re-register the ref callback every
+// render (which would cause measure thrashing).
+function measureRow(el: Element | { $el?: Element } | null) {
+  const node = (el as { $el?: Element })?.$el ?? (el as Element | null)
+  if (node instanceof Element && virtualizer.value) {
+    virtualizer.value.measureElement(node)
+  }
+}
 </script>
 
 <template>
@@ -177,92 +216,127 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
     <!-- Results count -->
     <p v-if="events.length > 0" class="muted-sm mb-2">{{ events.length }} events</p>
 
-    <!-- Event table -->
-    <div class="card-table">
-      <table class="w-full text-sm min-w-[640px]">
-        <thead class="table-header">
-          <tr>
-            <th class="w-8"></th>
-            <SortHeader label="Type" column="event_type" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <SortHeader label="Category" column="category" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <SortHeader label="Scope" column="scope" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <SortHeader label="Tenant" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-            <SortHeader label="Time" column="timestamp" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-100">
-          <template v-for="e in sortedEvents" :key="e.event_id">
-            <!-- Row is mouse-clickable for convenience but NOT a role=button
-                 element — the chevron <button> in the first cell provides
-                 keyboard + screen-reader access to the expand behavior.
-                 Making the whole row a role=button would nest the inner
-                 TenantLink/action buttons inside another interactive
-                 element (axe rule: nested-interactive, WCAG 4.1.2). -->
-            <tr class="hover:bg-gray-50 cursor-pointer transition-colors" @click="expanded = expanded === e.event_id ? null : e.event_id">
-              <td class="pl-3 py-3 muted">
+    <!-- V1 virtualized grid with measureElement for variable row
+         heights. Each virtualized item wraps compact-row + optional
+         expanded-detail; TanStack's measureElement observes the
+         real DOM height per index so expand/collapse re-layouts
+         smoothly without flicker. Rows are keyed by event_id (via
+         getItemKey) so Vue's reactivity doesn't destroy the measured
+         element identity across sort or filter changes. -->
+    <div
+      class="bg-white rounded-lg shadow overflow-hidden text-sm"
+      role="table"
+      :aria-rowcount="events.length + 1"
+      :aria-colcount="6"
+    >
+      <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
+        <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
+          <div role="columnheader" class="table-cell"></div>
+          <SortHeader as="div" label="Type" column="event_type" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <SortHeader as="div" label="Category" column="category" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <SortHeader as="div" label="Scope" column="scope" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <SortHeader as="div" label="Tenant" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <SortHeader as="div" label="Time" column="timestamp" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+        </div>
+      </div>
+
+      <div
+        v-if="sortedEvents.length > 0"
+        ref="scrollEl"
+        role="rowgroup"
+        class="overflow-auto"
+        style="max-height: calc(100vh - 380px); min-height: 240px;"
+      >
+        <div :style="{ height: totalHeight + 'px', position: 'relative' }">
+          <div
+            v-for="v in virtualRows"
+            :key="sortedEvents[v.index].event_id"
+            :ref="measureRow"
+            :data-index="v.index"
+            role="row"
+            :aria-rowindex="v.index + 2"
+            class="absolute left-0 right-0 border-b border-gray-100"
+            :style="{ transform: `translateY(${v.start}px)` }"
+          >
+            <!-- Compact row — always rendered. The whole row is
+                 mouse-clickable (consistent with pre-virt); the
+                 chevron button provides keyboard access with its
+                 own aria-expanded. -->
+            <div
+              class="grid table-row-hover items-center cursor-pointer transition-colors"
+              :style="{ gridTemplateColumns: gridTemplate, minHeight: COLLAPSED_ROW_HEIGHT + 'px' }"
+              @click="expanded = expanded === sortedEvents[v.index].event_id ? null : sortedEvents[v.index].event_id"
+            >
+              <div role="cell" class="pl-3 muted">
                 <button
                   type="button"
-                  :aria-expanded="expanded === e.event_id"
-                  :aria-label="expanded === e.event_id ? `Collapse event details` : `Expand event details`"
+                  :aria-expanded="expanded === sortedEvents[v.index].event_id"
+                  :aria-label="expanded === sortedEvents[v.index].event_id ? 'Collapse event details' : 'Expand event details'"
                   class="p-0.5 -ml-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-400"
-                  @click.stop="expanded = expanded === e.event_id ? null : e.event_id"
+                  @click.stop="expanded = expanded === sortedEvents[v.index].event_id ? null : sortedEvents[v.index].event_id"
                 >
-                  <svg class="w-3.5 h-3.5 transition-transform" :class="expanded === e.event_id ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <svg class="w-3.5 h-3.5 transition-transform" :class="expanded === sortedEvents[v.index].event_id ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
                   </svg>
                 </button>
-              </td>
-              <td class="table-cell font-mono text-xs">{{ e.event_type }}</td>
-              <td class="table-cell"><span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs">{{ e.category }}</span></td>
-              <td class="table-cell text-gray-700 truncate max-w-[200px] font-mono text-xs">{{ e.scope || '-' }}</td>
-              <td class="table-cell">
-                <TenantLink v-if="e.tenant_id" :tenant-id="e.tenant_id" @click.stop />
-              </td>
-              <td class="table-cell muted whitespace-nowrap text-xs" :title="new Date(e.timestamp).toISOString()">{{ formatDateTime(e.timestamp) }}</td>
-            </tr>
-            <tr v-if="expanded === e.event_id" class="bg-gray-50/70">
-              <td colspan="6" class="table-cell pl-11">
-                <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3">
-                  <div><span class="muted">Event ID:</span> <span class="font-mono">{{ e.event_id }}</span></div>
-                  <div><span class="muted">Source:</span> {{ e.source }}</div>
-                  <div v-if="e.request_id"><span class="muted">Request ID:</span> <span class="font-mono">{{ e.request_id }}</span></div>
-                  <div v-if="e.correlation_id">
-                    <span class="muted">Correlation ID:</span>
-                    <button @click.stop="viewCorrelated(e.correlation_id!)" class="text-blue-600 hover:underline ml-1 font-mono cursor-pointer">{{ e.correlation_id }}</button>
-                  </div>
-                  <div v-if="e.actor"><span class="muted">Actor:</span> {{ e.actor.type }}<span v-if="e.actor.key_id" class="font-mono"> {{ e.actor.key_id }}</span></div>
+              </div>
+              <div role="cell" class="table-cell font-mono text-xs truncate" :title="sortedEvents[v.index].event_type">{{ sortedEvents[v.index].event_type }}</div>
+              <div role="cell" class="table-cell"><span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs">{{ sortedEvents[v.index].category }}</span></div>
+              <div role="cell" class="table-cell text-gray-700 font-mono text-xs truncate" :title="sortedEvents[v.index].scope">{{ sortedEvents[v.index].scope || '-' }}</div>
+              <div role="cell" class="table-cell">
+                <TenantLink v-if="sortedEvents[v.index].tenant_id" :tenant-id="sortedEvents[v.index].tenant_id" @click.stop />
+              </div>
+              <div role="cell" class="table-cell muted whitespace-nowrap text-xs" :title="new Date(sortedEvents[v.index].timestamp).toISOString()">{{ formatDateTime(sortedEvents[v.index].timestamp) }}</div>
+            </div>
+
+            <!-- Expanded detail. Only rendered when event_id matches
+                 `expanded`. When present, it adds ~200-280px to the
+                 row's total height — measureElement reports the new
+                 height and the virtualizer re-lays out sibling rows
+                 below on the next tick. -->
+            <div v-if="expanded === sortedEvents[v.index].event_id" class="bg-gray-50/70 px-4 py-3 border-t border-gray-100">
+              <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3">
+                <div><span class="muted">Event ID:</span> <span class="font-mono">{{ sortedEvents[v.index].event_id }}</span></div>
+                <div><span class="muted">Source:</span> {{ sortedEvents[v.index].source }}</div>
+                <div v-if="sortedEvents[v.index].request_id"><span class="muted">Request ID:</span> <span class="font-mono">{{ sortedEvents[v.index].request_id }}</span></div>
+                <div v-if="sortedEvents[v.index].correlation_id">
+                  <span class="muted">Correlation ID:</span>
+                  <button @click.stop="viewCorrelated(sortedEvents[v.index].correlation_id!)" class="text-blue-600 hover:underline ml-1 font-mono cursor-pointer">{{ sortedEvents[v.index].correlation_id }}</button>
                 </div>
-                <div v-if="e.data" class="bg-white border border-gray-200 rounded text-xs font-mono">
-                  <div class="flex items-center justify-between px-3 py-1.5 border-b border-gray-100">
-                    <span class="muted text-xs font-sans">Data</span>
-                    <button
-                      type="button"
-                      @click.stop="copyEventData(e)"
-                      class="muted-sm hover:text-gray-700 cursor-pointer px-2 py-0.5 rounded hover:bg-gray-100"
-                      :aria-label="`Copy data for event ${e.event_id}`"
-                    >
-                      {{ copiedEventId === e.event_id ? 'Copied!' : 'Copy' }}
-                    </button>
-                  </div>
-                  <pre class="whitespace-pre-wrap p-3 overflow-auto max-h-40">{{ safeJsonStringify(e.data) }}</pre>
+                <div v-if="sortedEvents[v.index].actor"><span class="muted">Actor:</span> {{ sortedEvents[v.index].actor!.type }}<span v-if="sortedEvents[v.index].actor!.key_id" class="font-mono"> {{ sortedEvents[v.index].actor!.key_id }}</span></div>
+              </div>
+              <div v-if="sortedEvents[v.index].data" class="bg-white border border-gray-200 rounded text-xs font-mono">
+                <div class="flex items-center justify-between px-3 py-1.5 border-b border-gray-100">
+                  <span class="muted text-xs font-sans">Data</span>
+                  <button
+                    type="button"
+                    @click.stop="copyEventData(sortedEvents[v.index])"
+                    class="muted-sm hover:text-gray-700 cursor-pointer px-2 py-0.5 rounded hover:bg-gray-100"
+                    :aria-label="`Copy data for event ${sortedEvents[v.index].event_id}`"
+                  >
+                    {{ copiedEventId === sortedEvents[v.index].event_id ? 'Copied!' : 'Copy' }}
+                  </button>
                 </div>
-              </td>
-            </tr>
-          </template>
-          <tr v-if="events.length === 0">
-            <td colspan="6">
-              <EmptyState :message="hasActiveFilters ? 'No events match your filters' : 'No events found'" :hint="hasActiveFilters ? undefined : 'Events will appear here as they occur'">
-                <button v-if="hasActiveFilters" @click="clearFilters" class="mt-2 text-xs text-blue-600 hover:underline cursor-pointer">Clear filters</button>
-              </EmptyState>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <div v-if="hasMore" class="table-cell border-t border-gray-100 text-center">
-        <button @click="loadMore" :disabled="loadingMore" class="text-xs text-blue-600 hover:text-blue-800 cursor-pointer disabled:opacity-50">
-          {{ loadingMore ? 'Loading...' : 'Load more events' }}
-        </button>
+                <pre class="whitespace-pre-wrap p-3 overflow-auto max-h-40">{{ safeJsonStringify(sortedEvents[v.index].data) }}</pre>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
+
+      <div v-else role="row">
+        <EmptyState :message="hasActiveFilters ? 'No events match your filters' : 'No events found'" :hint="hasActiveFilters ? undefined : 'Events will appear here as they occur'">
+          <button v-if="hasActiveFilters" @click="clearFilters" class="mt-2 text-xs text-blue-600 hover:underline cursor-pointer">Clear filters</button>
+        </EmptyState>
+      </div>
+    </div>
+
+    <!-- Load more — outside the virtualized scroll region so it
+         doesn't participate in row-height measurement. -->
+    <div v-if="hasMore || loadingMore" class="mt-3 flex justify-end">
+      <button @click="loadMore" :disabled="loadingMore" class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50 cursor-pointer">
+        {{ loadingMore ? 'Loading…' : 'Load more events' }}
+      </button>
     </div>
   </div>
 </template>
