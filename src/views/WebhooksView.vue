@@ -319,7 +319,7 @@ const gridTemplate = computed(() =>
     <!-- V1 virtualized grid. Same pattern as ReservationsView /
          TenantsView. -->
     <div
-      class="bg-white rounded-lg shadow overflow-hidden"
+      class="bg-white rounded-lg shadow overflow-hidden text-sm"
       role="table"
       :aria-rowcount="filteredWebhooks.length + 1"
       :aria-colcount="canManage ? 7 : 5"

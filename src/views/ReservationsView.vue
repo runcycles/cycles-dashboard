@@ -279,7 +279,7 @@ const gridTemplate = computed(() =>
          without HTML <table>'s layout algorithm, which can't coexist
          with the absolute-positioned virtualized rows. -->
     <div
-      class="bg-white rounded-lg shadow overflow-hidden"
+      class="bg-white rounded-lg shadow overflow-hidden text-sm"
       role="table"
       :aria-rowcount="reservations.length + 1"
       :aria-colcount="canManage ? 7 : 6"

@@ -639,9 +639,14 @@ const gridTemplate = computed(() =>
 
       <!-- V1 virtualized list-mode grid. Detail mode is above inside
            the v-if="isDetail" branch and stays as-is (bounded by
-           DETAIL_EVENTS_PAGE_SIZE, no scale concern). -->
+           DETAIL_EVENTS_PAGE_SIZE, no scale concern).
+           text-sm on the container: the original <table class="text-sm">
+           made every cell inherit 14px. Without that on the grid
+           wrapper, cells with no explicit size class (e.g. Unit)
+           fall back to the document default 16px, break their grid
+           column width, and overflow into neighbors. -->
       <div
-        class="bg-white rounded-lg shadow overflow-hidden"
+        class="bg-white rounded-lg shadow overflow-hidden text-sm"
         role="table"
         :aria-rowcount="sortedBudgets.length + 1"
         :aria-colcount="canManage ? 7 : 6"

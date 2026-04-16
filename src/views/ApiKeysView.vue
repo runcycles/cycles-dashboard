@@ -359,7 +359,7 @@ const gridTemplate = computed(() =>
          engages on narrower viewports, same behavior as pre-virt
          `min-w-[900px]` <table>. -->
     <div
-      class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto"
+      class="bg-white rounded-lg shadow overflow-hidden overflow-x-auto text-sm"
       role="table"
       :aria-rowcount="filteredKeys.length + 1"
       :aria-colcount="canManage ? 9 : 8"

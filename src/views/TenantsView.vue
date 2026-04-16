@@ -315,7 +315,7 @@ const gridTemplate = computed(() =>
          role="table" outer, sticky role="rowgroup" header, scroll
          container with absolute-positioned virtualized rows. -->
     <div
-      class="bg-white rounded-lg shadow overflow-hidden"
+      class="bg-white rounded-lg shadow overflow-hidden text-sm"
       role="table"
       :aria-rowcount="filteredTenants.length + 1"
       :aria-colcount="canManage ? 8 : 6"
