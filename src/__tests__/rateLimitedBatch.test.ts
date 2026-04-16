@@ -5,7 +5,7 @@
 //   3. Non-429 errors fail the item immediately (no retry)
 //   4. AbortSignal halts further task dispatch (in-flight completes)
 
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { rateLimitedBatch } from '../utils/rateLimitedBatch'
 import { ApiError } from '../api/client'
 
