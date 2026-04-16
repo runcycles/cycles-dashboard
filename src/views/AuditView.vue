@@ -202,6 +202,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
     <PageHeader
       title="Audit Logs"
       item-noun="log entry"
+      item-noun-plural="log entries"
       :loaded="entries.length"
       :has-more="hasMore"
     />

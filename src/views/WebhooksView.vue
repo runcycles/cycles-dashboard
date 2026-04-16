@@ -388,7 +388,7 @@ const gridTemplate = computed(() =>
   <div class="h-full flex flex-col min-h-0">
     <PageHeader
       title="Webhooks"
-      item-noun="subscription"
+      item-noun="webhook"
       :loaded="filteredWebhooks.length"
       :has-more="hasMore"
       :loading="isLoading"
@@ -411,30 +411,34 @@ const gridTemplate = computed(() =>
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
     <!-- Tenant + URL filters. Tenant options sourced from the loaded
-         subscription set so the dropdown only lists tenants that
-         actually have subscriptions. URL filter supports substring
-         ("example.com", "api") or glob wildcards ("*.internal").
-         Debounced 200ms — feels responsive but coalesces fast typing. -->
-    <div class="mb-4 flex gap-3 flex-wrap items-center">
-      <select v-model="tenantFilter" aria-label="Filter webhooks by tenant" class="form-select">
-        <option value="">All webhooks</option>
-        <option
-          v-if="webhooks.some(isSystemWebhook)"
-          :value="SYSTEM_TENANT_ID"
-        >System-wide only</option>
-        <option
-          v-for="t in tenants.filter(t => webhooks.some(w => w.tenant_id === t.tenant_id && !isSystemWebhook(w)))"
-          :key="t.tenant_id"
-          :value="t.tenant_id"
-        >{{ t.name || t.tenant_id }}</option>
-      </select>
-      <input
-        v-model="urlFilter"
-        type="search"
-        placeholder="Filter by URL or name (supports * wildcards)"
-        aria-label="Filter webhooks by URL"
-        class="border border-gray-300 rounded px-3 py-1.5 text-sm w-72"
-      />
+         webhook set so the dropdown only lists tenants that actually
+         have webhooks. URL filter supports substring ("example.com",
+         "api") or glob wildcards ("*.internal"). Debounced 200ms —
+         feels responsive but coalesces fast typing. Wrapped in card
+         to match the toolbars in BudgetsView / EventsView / AuditView
+         / ApiKeysView / TenantsView / ReservationsView. -->
+    <div class="card p-4 mb-4">
+      <div class="flex gap-3 flex-wrap items-center">
+        <select v-model="tenantFilter" aria-label="Filter webhooks by tenant" class="form-select">
+          <option value="">All webhooks</option>
+          <option
+            v-if="webhooks.some(isSystemWebhook)"
+            :value="SYSTEM_TENANT_ID"
+          >System-wide only</option>
+          <option
+            v-for="t in tenants.filter(t => webhooks.some(w => w.tenant_id === t.tenant_id && !isSystemWebhook(w)))"
+            :key="t.tenant_id"
+            :value="t.tenant_id"
+          >{{ t.name || t.tenant_id }}</option>
+        </select>
+        <input
+          v-model="urlFilter"
+          type="search"
+          placeholder="Filter by URL or name (supports * wildcards)"
+          aria-label="Filter webhooks by URL"
+          class="border border-gray-300 rounded px-3 py-1.5 text-sm w-72"
+        />
+      </div>
     </div>
 
     <!-- Floating bulk action bar — same pattern as TenantsView.
@@ -539,7 +543,7 @@ const gridTemplate = computed(() =>
       </div>
 
       <div v-else>
-        <EmptyState :message="tenantFilter ? 'No webhooks for this tenant' : 'No webhook subscriptions'" hint="Webhook subscriptions will appear here once configured" />
+        <EmptyState :message="tenantFilter ? 'No webhooks for this tenant' : 'No webhooks'" hint="Webhooks will appear here once configured" />
       </div>
     </div>
 
@@ -656,7 +660,7 @@ const gridTemplate = computed(() =>
       :loaded-count="filteredWebhooks.length"
       :has-more="hasMore"
       :max-rows="EXPORT_MAX_ROWS"
-      item-noun-plural="subscriptions"
+      item-noun-plural="webhooks"
       warning="Exported files include tenant IDs and endpoint URLs. Signing secrets are never exported."
       @confirm="executeExport"
       @cancel="cancelExport"
@@ -664,7 +668,7 @@ const gridTemplate = computed(() =>
     <ExportProgressOverlay
       :open="exporting"
       :fetched="exportFetched"
-      item-noun-plural="subscriptions"
+      item-noun-plural="webhooks"
     />
   </div>
 </template>

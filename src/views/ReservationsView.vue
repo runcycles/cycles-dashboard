@@ -314,27 +314,30 @@ const gridTemplate = computed(() =>
 
     <!-- Filters. Tenant is required; the server rejects admin list
          without it, so we enforce client-side too. Status defaults to
-         ACTIVE because that's the operationally-interesting set. -->
-    <div class="mb-4 flex gap-3 flex-wrap items-end">
-      <div>
-        <label for="res-tenant" class="form-label">Tenant *</label>
-        <select id="res-tenant" v-model="tenantFilter" class="form-select">
-          <option value="" disabled>— pick a tenant —</option>
-          <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
-        </select>
+         ACTIVE because that's the operationally-interesting set.
+         Wrapped in card to match the toolbars in other list views. -->
+    <div class="card p-4 mb-4">
+      <div class="flex gap-3 flex-wrap items-end">
+        <div>
+          <label for="res-tenant" class="form-label">Tenant *</label>
+          <select id="res-tenant" v-model="tenantFilter" class="form-select">
+            <option value="" disabled>— pick a tenant —</option>
+            <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
+          </select>
+        </div>
+        <div>
+          <label for="res-status" class="form-label">Status</label>
+          <select id="res-status" v-model="statusFilter" class="form-select">
+            <option value="">All</option>
+            <option v-for="s in RESERVATION_STATUSES" :key="s" :value="s">{{ s }}</option>
+          </select>
+        </div>
+        <p class="muted-sm flex-1 min-w-[16rem]">
+          Default sort is Created (newest first). Click the Created header to flip
+          to ascending — reservations past their grace window but still ACTIVE rise
+          to the top, which is the fast way to find "hung" ones.
+        </p>
       </div>
-      <div>
-        <label for="res-status" class="form-label">Status</label>
-        <select id="res-status" v-model="statusFilter" class="form-select">
-          <option value="">All</option>
-          <option v-for="s in RESERVATION_STATUSES" :key="s" :value="s">{{ s }}</option>
-        </select>
-      </div>
-      <p class="muted-sm flex-1 min-w-[16rem]">
-        Default sort is Created (newest first). Click the Created header to flip
-        to ascending — reservations past their grace window but still ACTIVE rise
-        to the top, which is the fast way to find "hung" ones.
-      </p>
     </div>
 
     <!-- V1 virtualized grid. Structure: role="table" wrapper with a

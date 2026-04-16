@@ -398,14 +398,18 @@ const gridTemplate = computed(() =>
     </PageHeader>
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
-    <!-- Search + parent filter -->
-    <div class="mb-4 flex gap-3 flex-wrap items-center">
-      <input v-model="search" placeholder="Search by ID or name..." class="border border-gray-300 rounded px-3 py-1.5 text-sm max-w-xs flex-1 min-w-[14rem]" />
-      <select v-model="parentFilter" aria-label="Filter by parent tenant" class="form-select">
-        <option value="">All tenants</option>
-        <option value="__root__">(root-level only)</option>
-        <option v-for="p in parentOptions" :key="p.tenant_id" :value="p.tenant_id">Children of: {{ p.name || p.tenant_id }}</option>
-      </select>
+    <!-- Search + parent filter. Wrapped in card to match the filter
+         toolbars in BudgetsView / EventsView / AuditView / ApiKeysView
+         — consistent visual grouping & separation from the table below. -->
+    <div class="card p-4 mb-4">
+      <div class="flex gap-3 flex-wrap items-center">
+        <input v-model="search" placeholder="Search by ID or name..." class="border border-gray-300 rounded px-3 py-1.5 text-sm max-w-xs flex-1 min-w-[14rem]" />
+        <select v-model="parentFilter" aria-label="Filter by parent tenant" class="form-select">
+          <option value="">All tenants</option>
+          <option value="__root__">(root-level only)</option>
+          <option v-for="p in parentOptions" :key="p.tenant_id" :value="p.tenant_id">Children of: {{ p.name || p.tenant_id }}</option>
+        </select>
+      </div>
     </div>
 
     <!-- Floating bulk action bar — appears only when rows are
