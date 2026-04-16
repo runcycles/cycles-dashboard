@@ -478,13 +478,21 @@ const virtualizer = useVirtualizer(computed(() => ({
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
 const totalHeight = computed(() => virtualizer.value.getTotalSize())
 
-// 7 columns when canManage, 6 without. Utilization gets a big share
-// (UtilizationBar needs width to be readable); scope takes the
-// remaining fractional.
+// 7 columns when canManage, 6 without.
+// Column widths tuned against real data:
+// - Scope: 2fr (the most variable width — tenant/...)
+// - Unit: 130px fixed. 80 was overlapping USD_MICROCENTS (12 chars + padding).
+// - Status / Overage: fixed widths large enough for the longest enum
+//   label ("PAYG_NO_CREDIT" for commit_overage_policy).
+// - Utilization: 1fr (not 2fr — on wide viewports 2fr was making
+//   the bar stretch ugly past what's useful).
+// - Debt: right-aligned tabular numbers, 140px fits 6 digits with
+//   thousands separators plus sign.
+// - Action: 96px fits "Freeze" / "Unfreeze" at text-xs.
 const gridTemplate = computed(() =>
   canManage.value
-    ? 'minmax(220px,2fr) 80px 110px 130px minmax(200px,2fr) 140px 96px'
-    : 'minmax(220px,2fr) 80px 110px 130px minmax(200px,2fr) 140px',
+    ? 'minmax(220px,2fr) 130px 110px 150px minmax(180px,1fr) 140px 96px'
+    : 'minmax(220px,2fr) 130px 110px 150px minmax(180px,1fr) 140px',
 )
 </script>
 
@@ -639,7 +647,7 @@ const gridTemplate = computed(() =>
         :aria-colcount="canManage ? 7 : 6"
       >
         <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
-          <div role="row" class="grid text-xs uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
+          <div role="row" class="grid text-xs font-medium uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
             <SortHeader as="div" label="Scope" column="scope" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader as="div" label="Unit" column="unit" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader as="div" label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
@@ -675,7 +683,7 @@ const gridTemplate = computed(() =>
               <div
                 role="cell"
                 class="table-cell font-mono text-xs"
-                :class="sortedBudgets[v.index].commit_overage_policy ? 'text-gray-700' : 'text-gray-500 italic'"
+                :class="sortedBudgets[v.index].commit_overage_policy ? 'text-gray-700' : 'text-gray-500'"
                 :title="sortedBudgets[v.index].commit_overage_policy ? 'Budget-level override' : 'Inherited from tenant'"
               >{{ sortedBudgets[v.index].commit_overage_policy || 'Inherit' }}</div>
               <div role="cell" class="table-cell">

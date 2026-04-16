@@ -322,7 +322,7 @@ const gridTemplate = computed(() =>
       :aria-colcount="canManage ? 7 : 5"
     >
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
-        <div role="row" class="grid text-xs uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
+        <div role="row" class="grid text-xs font-medium uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
           <div v-if="canManage" role="columnheader" class="table-cell">
             <input type="checkbox" :checked="selectedVisibleAll" @change="toggleSelectAll" aria-label="Select all visible webhooks" />
           </div>
