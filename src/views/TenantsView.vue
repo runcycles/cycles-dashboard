@@ -27,6 +27,16 @@ const error = ref('')
 const search = ref('')
 const parentFilter = ref('')
 
+// R5 (scale-hardening): cursor pagination. Pre-fix, listTenants()'s
+// has_more / next_cursor were discarded and every tenant loaded into
+// memory. Deployments with thousands of tenants silently dropped the
+// tail if the server page size was smaller. Load-more appends.
+// Polling refreshes page 1 (and drops the loaded tail) — same
+// documented trade-off as ReservationsView.
+const hasMore = ref(false)
+const nextCursor = ref('')
+const loadingMore = ref(false)
+
 // v0.1.25.21 (#2): show hierarchy. Derive child counts once per poll so
 // the column render doesn't re-filter tenants.value for every row.
 const childCountMap = computed<Record<string, number>>(() => {
@@ -35,6 +45,17 @@ const childCountMap = computed<Record<string, number>>(() => {
     if (t.parent_tenant_id) counts[t.parent_tenant_id] = (counts[t.parent_tenant_id] ?? 0) + 1
   }
   return counts
+})
+
+// V3 (scale-hardening): O(1) tenant lookup by id. Pre-fix, parentName()
+// called tenants.value.find() per-row in the template — that's
+// O(n) per row × n rows = O(n²) render cost. At 10k tenants that's
+// 100M comparisons every time Vue re-ran the parent-name cell.
+// Build a Map once per change in tenants.value and .get() in the row.
+const tenantById = computed<Map<string, Tenant>>(() => {
+  const m = new Map<string, Tenant>()
+  for (const t of tenants.value) m.set(t.tenant_id, t)
+  return m
 })
 
 const filteredTenants = computed(() => {
@@ -205,13 +226,28 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
     const res = await listTenants()
     tenants.value = res.tenants
+    hasMore.value = !!res.has_more
+    nextCursor.value = res.next_cursor ?? ''
     error.value = ''
   } catch (e) { error.value = toMessage(e) }
 }, 60000)
 
+async function loadMore() {
+  if (!nextCursor.value || loadingMore.value) return
+  loadingMore.value = true
+  try {
+    const res = await listTenants({ cursor: nextCursor.value })
+    tenants.value = [...tenants.value, ...res.tenants]
+    hasMore.value = !!res.has_more
+    nextCursor.value = res.next_cursor ?? ''
+  } catch (e) { error.value = toMessage(e) }
+  finally { loadingMore.value = false }
+}
+
 function parentName(id: string | undefined): string {
   if (!id) return ''
-  const p = tenants.value.find(t => t.tenant_id === id)
+  // V3: O(1) Map lookup (was tenants.value.find() per-row — O(n²) total).
+  const p = tenantById.value.get(id)
   return p?.name || id
 }
 </script>
@@ -297,6 +333,25 @@ function parentName(id: string | undefined): string {
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- R5: server-side cursor pagination. Search and parent-filter
+         run client-side on the loaded subset — operators who can't
+         find what they're looking for should Load more. Polling
+         refreshes page 1 every 60s and drops any additional pages
+         below it (same trade-off documented in ReservationsView). -->
+    <div v-if="hasMore || loadingMore" class="mt-3 flex items-center justify-between">
+      <p class="muted-sm">
+        Showing {{ tenants.length.toLocaleString() }} loaded tenant{{ tenants.length === 1 ? '' : 's' }}.
+        Polling refreshes page 1 every 60s, discarding additional pages loaded below.
+      </p>
+      <button
+        @click="loadMore"
+        :disabled="loadingMore || !nextCursor"
+        class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
+      >
+        {{ loadingMore ? 'Loading…' : 'Load more' }}
+      </button>
     </div>
 
     <!-- Single-row confirm (retained) -->

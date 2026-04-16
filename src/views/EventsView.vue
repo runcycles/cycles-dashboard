@@ -31,6 +31,27 @@ const { sortKey, sortDir, toggle, sorted: sortedEvents } = useSort(events)
 // loaded tail. Filter changes or an explicit Clear reset this flag.
 const loadedMorePages = ref(false)
 
+// V2 (scale-hardening): Copy JSON from expanded event detail. Complements
+// the max-h-40 scroll cap by making the truncated view useful for triage
+// — operators can pull the full data blob into their clipboard for
+// grep/diff/pipe through jq rather than squinting at a capped viewport.
+const copiedEventId = ref<string | null>(null)
+let copiedResetTimer: ReturnType<typeof setTimeout> | null = null
+async function copyEventData(e: Event) {
+  try {
+    await navigator.clipboard.writeText(safeJsonStringify(e.data))
+    copiedEventId.value = e.event_id
+    if (copiedResetTimer) clearTimeout(copiedResetTimer)
+    copiedResetTimer = setTimeout(() => {
+      if (copiedEventId.value === e.event_id) copiedEventId.value = null
+    }, 2000)
+  } catch {
+    // Clipboard permission denied or insecure context — silently
+    // fail rather than toast. The operator can still select-and-copy
+    // from the pre element.
+  }
+}
+
 const category = ref((route.query.category as string) || '')
 const eventType = ref((route.query.type as string) || '')
 const tenantId = ref((route.query.tenant_id as string) || '')
@@ -211,8 +232,19 @@ const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
                   </div>
                   <div v-if="e.actor"><span class="muted">Actor:</span> {{ e.actor.type }}<span v-if="e.actor.key_id" class="font-mono"> {{ e.actor.key_id }}</span></div>
                 </div>
-                <div v-if="e.data" class="bg-white border border-gray-200 rounded p-3 text-xs font-mono overflow-auto max-h-40">
-                  <pre class="whitespace-pre-wrap">{{ safeJsonStringify(e.data) }}</pre>
+                <div v-if="e.data" class="bg-white border border-gray-200 rounded text-xs font-mono">
+                  <div class="flex items-center justify-between px-3 py-1.5 border-b border-gray-100">
+                    <span class="muted text-xs font-sans">Data</span>
+                    <button
+                      type="button"
+                      @click.stop="copyEventData(e)"
+                      class="muted-sm hover:text-gray-700 cursor-pointer px-2 py-0.5 rounded hover:bg-gray-100"
+                      :aria-label="`Copy data for event ${e.event_id}`"
+                    >
+                      {{ copiedEventId === e.event_id ? 'Copied!' : 'Copy' }}
+                    </button>
+                  </div>
+                  <pre class="whitespace-pre-wrap p-3 overflow-auto max-h-40">{{ safeJsonStringify(e.data) }}</pre>
                 </div>
               </td>
             </tr>

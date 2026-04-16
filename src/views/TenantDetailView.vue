@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { getTenant, listTenants, listBudgets, listApiKeys, listPolicies, updateTenantStatus, updateTenant, revokeApiKey, createApiKey, createBudget, createPolicy, updatePolicy, freezeBudget } from '../api/client'
@@ -42,6 +42,18 @@ const apiKeys = ref<ApiKey[]>([])
 const policies = ref<Policy[]>([])
 const error = ref('')
 const tab = ref<'budgets' | 'keys' | 'policies'>('budgets')
+
+// R9 (scale-hardening): lazy tabs. Pre-fix, Promise.all([budgets, keys,
+// policies, tenants]) ran on every mount and poll regardless of which
+// tab was open. At 10k+ keys or policies per tenant, that's two
+// unbounded fetches the operator never asked for. Post-fix: keys and
+// policies are only fetched if their tab is currently active or has
+// been opened previously in this session. Budgets are still always
+// fetched — the header rollup card depends on them. Tab activation
+// triggers a refresh so the first open doesn't wait up to 60s for
+// the next poll.
+const keysLoaded = ref(false)
+const policiesLoaded = ref(false)
 
 // v0.1.25.21 (#6): spend rollup — aggregate allocated / remaining /
 // spent / debt across the tenant's budgets, grouped by unit. Budgets in
@@ -419,23 +431,34 @@ function cancelEmergencyFreeze() {
 const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
     tenant.value = await getTenant(id)
-    const [bRes, kRes, pRes, tRes] = await Promise.all([
+    // Budgets and tenant list are always fetched — the header card's
+    // spend rollup and children list depend on them unconditionally.
+    // Keys and policies are gated on their tab having been opened.
+    // Using Promise.resolve(null) as a placeholder keeps the parallel
+    // Promise.all shape without branching the destructure.
+    const wantKeys = tab.value === 'keys' || keysLoaded.value
+    const wantPolicies = tab.value === 'policies' || policiesLoaded.value
+    const [bRes, tRes, kRes, pRes] = await Promise.all([
       listBudgets({ tenant_id: id }),
-      listApiKeys({ tenant_id: id }),
-      listPolicies({ tenant_id: id }),
-      // v0.1.25.21 (#2): fetch full tenant list once per poll to
-      // resolve children for the hierarchy card. Cheap — the list is
-      // already cached on the TenantsView poll and listTenants is a
-      // single request.
       listTenants(),
+      wantKeys ? listApiKeys({ tenant_id: id }) : Promise.resolve(null),
+      wantPolicies ? listPolicies({ tenant_id: id }) : Promise.resolve(null),
     ])
     budgets.value = bRes.ledgers
-    apiKeys.value = kRes.keys
-    policies.value = pRes.policies
     allTenants.value = tRes.tenants
+    if (kRes) { apiKeys.value = kRes.keys; keysLoaded.value = true }
+    if (pRes) { policies.value = pRes.policies; policiesLoaded.value = true }
     error.value = ''
   } catch (e) { error.value = toMessage(e) }
 }, 60000)
+
+// First activation of a lazy tab — fetch its data now rather than
+// wait up to 60s for the next poll. The flag flip inside the poll
+// callback ensures subsequent polls continue refreshing that tab.
+watch(tab, (newTab) => {
+  if (newTab === 'keys' && !keysLoaded.value) refresh()
+  else if (newTab === 'policies' && !policiesLoaded.value) refresh()
+})
 </script>
 
 <template>
