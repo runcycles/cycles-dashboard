@@ -164,15 +164,28 @@ describe('auth store — checkTimeout()', () => {
 
   it('does not log out exactly at the idle boundary (strict >)', async () => {
     vi.stubGlobal('fetch', mockSuccessfulIntrospect())
-    const auth = useAuthStore()
-    await auth.login('test-key')
+    // Freeze time so that the `Date.now()` inside checkTimeout() reads
+    // the identical value we use to compute the boundary below. Without
+    // this, wall-clock advance of even 1ms between setItem and the
+    // store's internal Date.now() tips the strict `>` comparison and
+    // makes the test flake on slower CI runners (observed on Node 20
+    // GHA runners; passed consistently on Node 22 only by luck).
+    vi.useFakeTimers()
+    try {
+      const frozen = new Date('2026-04-16T12:00:00Z')
+      vi.setSystemTime(frozen)
+      const auth = useAuthStore()
+      await auth.login('test-key')
 
-    const now = Date.now()
-    // Exactly at boundary — store uses `>` (strict), so this should NOT time out.
-    sessionStorage.setItem('cycles_last_activity', String(now - (30 * 60 * 1000)))
+      const now = frozen.getTime()
+      // Exactly at boundary — store uses `>` (strict), so this should NOT time out.
+      sessionStorage.setItem('cycles_last_activity', String(now - (30 * 60 * 1000)))
 
-    expect(auth.checkTimeout()).toBe(false)
-    expect(auth.isAuthenticated).toBe(true)
+      expect(auth.checkTimeout()).toBe(false)
+      expect(auth.isAuthenticated).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
