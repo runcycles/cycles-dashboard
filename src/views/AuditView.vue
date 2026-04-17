@@ -313,27 +313,24 @@ function measureRow(el: Element | { $el?: Element } | null) {
 
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
-    <!-- Filter form: three rows on a shared 4-column grid so vertical
-         field edges line up across rows. From + To + Quick chips
-         collapsed into a single TimeRangePicker trigger
-         (Cloudflare/Grafana/Datadog pattern — one control, preset
-         radios + custom range in a popover).
-           Row 1: Search (cols 1-2) | Time range (cols 3-4)
-           Row 2: Tenant | Key | Resource Type | Resource ID
-           Row 3: Operation | Error Code | [Status chips … Run Query]
-         Search + Time share Row 1 as equal halves. The 50/50 split
-         gives the picker room for long custom-range labels
-         ("Apr 10 14:30 → Apr 17 09:00") without truncation while
-         still leaving Search enough width for the widened
-         v0.1.25.24 match-set placeholder. -->
+    <!-- Filter form: two rows on a shared 5-column grid. TimeRangePicker
+         collapses From+To+Quick-chips into a single control, so we can
+         fit 5 primary filters in Row 1 + 3 detail filters + Status
+         chips + Run Query in Row 2 without losing alignment.
+           Row 1: Search | Time | Tenant | Key | Resource Type
+           Row 2: Resource ID | Operation | Error Code | [Status … Run Query]
+         Status + Run Query share Row 2 cols 4-5 via an internal flex
+         (Status left, Run Query right-aligned via ml-auto) so chips
+         have room without wrapping, and Run Query's right edge lines
+         up with Resource Type's right edge from Row 1. -->
     <form @submit.prevent="query" class="card p-4 mb-4 space-y-3">
-      <!-- Row 1: Search + time range picker -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-end">
-        <div class="md:col-span-2">
+      <!-- Row 1: primary filters -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 items-end">
+        <div>
           <label for="audit-search" class="form-label">Search</label>
           <input id="audit-search" v-model="search" type="search" class="form-input" placeholder="resource_id, log_id, error_code, operation" aria-label="Free-text substring search across resource_id, log_id, error_code, and operation" />
         </div>
-        <div class="md:col-span-2">
+        <div>
           <label for="audit-time-range" class="form-label">Time range</label>
           <TimeRangePicker
             id="audit-time-range"
@@ -341,10 +338,6 @@ function measureRow(el: Element | { $el?: Element } | null) {
             aria-label="Audit log time range"
           />
         </div>
-      </div>
-
-      <!-- Row 2: Identity (who/what) -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
         <div>
           <label for="audit-tenant" class="form-label">Tenant ID</label>
           <input id="audit-tenant" v-model="tenantId" class="form-input" placeholder="acme" />
@@ -361,17 +354,14 @@ function measureRow(el: Element | { $el?: Element } | null) {
             <option>policy</option><option>webhook</option><option>config</option>
           </select>
         </div>
+      </div>
+
+      <!-- Row 2: detail filters + Status + submit -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 items-end">
         <div>
           <label for="audit-resource-id" class="form-label">Resource ID</label>
           <input id="audit-resource-id" v-model="resourceId" class="form-input" placeholder="key_abc123..." />
         </div>
-      </div>
-
-      <!-- Row 3: Outcome (what happened) + submit. Status chips +
-           Run Query share cols 3-4 (right half) — Status sits on the
-           Resource Type column edge, Run Query right-aligns to the
-           Resource ID column edge via ml-auto. -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-end">
         <div>
           <label for="audit-operation" class="form-label">Operation</label>
           <input id="audit-operation" v-model="operation" class="form-input" placeholder="createBudget" />
