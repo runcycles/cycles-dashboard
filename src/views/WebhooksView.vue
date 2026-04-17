@@ -559,23 +559,30 @@ const gridTemplate = computed(() =>
         <!-- Filter-apply bulk actions (see TenantsView for rationale).
              Appears when a filter is set AND no row-select is active.
              Disabled for SYSTEM_TENANT_ID (no server equivalent) and
-             for wildcard url-filters (server uses literal substring). -->
-        <template v-if="canManage && (tenantFilter || debouncedUrlFilter.trim()) && selectedVisibleCount === 0">
-          <div class="w-px h-5 bg-gray-200" aria-hidden="true"></div>
-          <span class="muted-sm">Apply to all matching filter:</span>
+             for wildcard url-filters (server uses literal substring).
+             Grouped in inline-flex so label + buttons wrap together
+             on narrow viewports. -->
+        <div
+          v-if="canManage && (tenantFilter || debouncedUrlFilter.trim()) && selectedVisibleCount === 0"
+          role="group"
+          aria-label="Apply action to all webhooks matching the current filter"
+          class="inline-flex items-center gap-2 flex-wrap"
+        >
+          <div class="w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
+          <span class="muted-sm whitespace-nowrap">Apply to all matching filter:</span>
           <button
             @click="openFilterBulk('PAUSE')"
-            :disabled="!canApplyWebhookFilterBulk()"
-            class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="!canApplyWebhookFilterBulk() || filterBulkRunning"
+            class="text-xs text-red-700 dark:text-red-300 hover:text-red-900 dark:hover:text-red-200 border border-red-300 dark:border-red-700 bg-white dark:bg-gray-800 rounded px-2.5 py-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
             :title="canApplyWebhookFilterBulk() ? 'Pause all ACTIVE webhooks matching filter' : 'System-wide or wildcard filter is not supported by server bulk-action'"
           >Pause all</button>
           <button
             @click="openFilterBulk('RESUME')"
-            :disabled="!canApplyWebhookFilterBulk()"
-            class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="!canApplyWebhookFilterBulk() || filterBulkRunning"
+            class="text-xs text-green-700 dark:text-green-300 hover:text-green-900 dark:hover:text-green-200 border border-green-300 dark:border-green-700 bg-white dark:bg-gray-800 rounded px-2.5 py-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
             :title="canApplyWebhookFilterBulk() ? 'Resume all PAUSED webhooks matching filter' : 'System-wide or wildcard filter is not supported by server bulk-action'"
           >Resume all</button>
-        </template>
+        </div>
       </div>
     </div>
 
