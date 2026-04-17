@@ -8,6 +8,7 @@ import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useListExport } from '../composables/useListExport'
 import { listEvents } from '../api/client'
 import type { Event } from '../types'
+import { EVENT_TYPES } from '../types'
 import PageHeader from '../components/PageHeader.vue'
 import TenantLink from '../components/TenantLink.vue'
 import SortHeader from '../components/SortHeader.vue'
@@ -332,9 +333,23 @@ function measureRow(el: Element | { $el?: Element } | null) {
           <!-- Type filter. Surfaces the `?type=` URL param (e.g. set by
                Overview "Recent Denials → View all" deep-link) as a
                visible, clearable input. Without this, the URL param
-               silently filters the list with no operator-visible cue. -->
+               silently filters the list with no operator-visible cue.
+               Datalist typeahead offers all 40 spec enum values per
+               cycles-governance-admin v0.1.25 EventType schema
+               (types.ts:EVENT_TYPES); free-text entry is still
+               accepted so `custom.*` prefixed types (per spec
+               extensibility rule) remain filterable. -->
           <label for="ev-type" class="form-label">Type</label>
-          <input id="ev-type" v-model="eventType" placeholder="reservation.denied" class="form-input w-44" />
+          <input
+            id="ev-type"
+            v-model="eventType"
+            list="ev-type-options"
+            placeholder="reservation.denied"
+            class="form-input w-44"
+          />
+          <datalist id="ev-type-options">
+            <option v-for="t in EVENT_TYPES" :key="t" :value="t" />
+          </datalist>
         </div>
         <div>
           <label for="ev-tenant" class="form-label">Tenant ID</label>
