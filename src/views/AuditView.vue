@@ -14,6 +14,7 @@ import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
+import TimeRangePicker from '../components/TimeRangePicker.vue'
 import { formatDateTime } from '../utils/format'
 import { toMessage } from '../utils/errors'
 import { safeJsonStringify } from '../utils/safe'
@@ -86,6 +87,13 @@ const STATUS_BANDS: { value: typeof statusBand.value; label: string }[] = [
 ]
 const fromDate = ref('')
 const toDate = ref('')
+// TimeRangePicker wants a { from, to } object as v-model. Use a
+// computed passthrough over the existing fromDate / toDate refs so
+// buildFilterParams / applyQueryParams / URL wiring stay untouched.
+const timeRange = computed({
+  get: () => ({ from: fromDate.value, to: toDate.value }),
+  set: (v: { from: string; to: string }) => { fromDate.value = v.from; toDate.value = v.to },
+})
 
 // Pulls the non-cursor filter params out of the form. Shared between
 // query() and the export loop so both see identical filter semantics —
@@ -204,15 +212,6 @@ async function loadMore() {
   finally { loadingMore.value = false }
 }
 
-function setTimeRange(hours: number) {
-  const now = new Date()
-  const from = new Date(now.getTime() - hours * 3600_000)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-  fromDate.value = fmt(from)
-  toDate.value = fmt(now)
-}
-
 // Every audit entry carries a log_id (the compliance-grade identifier
 // that the search filter explicitly covers). Since the expand block
 // surfaces log_id, every row is expandable — no conditional gate.
@@ -315,41 +314,28 @@ function measureRow(el: Element | { $el?: Element } | null) {
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
     <!-- Filter form: three rows on a shared 4-column grid so vertical
-         field edges line up across rows. Section labels (Identity /
-         Outcome) were dropped because they each consumed a row of
-         vertical space without doing more grouping than the row
-         spacing already does — and the field labels self-identify.
-         Quick-range chips live as a thin right-aligned strip under
-         the date pair so they don't break the From/To column edges.
-           Row 1: Search (cols 1-2) | From (col 3) | To (col 4)
+         field edges line up across rows. From + To + Quick chips
+         collapsed into a single TimeRangePicker trigger in col 4
+         (Cloudflare/Grafana/Datadog pattern — one control, preset
+         radios + custom range in a popover).
+           Row 1: Search (cols 1-3) | Time range (col 4)
            Row 2: Tenant | Key | Resource Type | Resource ID
            Row 3: Operation | Error Code | [Status chips … Run Query] -->
     <form @submit.prevent="query" class="card p-4 mb-4 space-y-3">
-      <!-- Row 1: header (Search + time window) -->
+      <!-- Row 1: Search + time range picker -->
       <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-end">
-        <div class="md:col-span-2">
+        <div class="md:col-span-3">
           <label for="audit-search" class="form-label">Search</label>
           <input id="audit-search" v-model="search" type="search" class="form-input" placeholder="resource_id, log_id, error_code, operation" aria-label="Free-text substring search across resource_id, log_id, error_code, and operation" />
         </div>
         <div>
-          <label for="audit-from" class="form-label">From</label>
-          <input id="audit-from" v-model="fromDate" type="datetime-local" class="form-input" />
+          <label for="audit-time-range" class="form-label">Time range</label>
+          <TimeRangePicker
+            id="audit-time-range"
+            v-model="timeRange"
+            aria-label="Audit log time range"
+          />
         </div>
-        <div>
-          <label for="audit-to" class="form-label">To</label>
-          <input id="audit-to" v-model="toDate" type="datetime-local" class="form-input" />
-        </div>
-      </div>
-
-      <!-- Quick range: thin right-aligned strip under the date pair.
-           Lives outside the 4-col grid so the From/To column edges
-           stay aligned with Resource Type / Resource ID below. -->
-      <div class="flex justify-end items-center gap-1 -mt-1 mb-1">
-        <span class="muted-xs mr-1">Quick:</span>
-        <button v-for="h in [1, 6, 24, 168]" :key="h" type="button" @click="setTimeRange(h)"
-          class="muted-xs hover:text-gray-700 dark:hover:text-gray-200 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer">
-          {{ h < 24 ? `${h}h` : `${h / 24}d` }}
-        </button>
       </div>
 
       <!-- Row 2: Identity (who/what) -->

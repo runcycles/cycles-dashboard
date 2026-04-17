@@ -31,6 +31,33 @@
 - `vitest run` — **505 / 505 passing** across 40 files (+58 new across 4 commits in this release: 32 for the I1/I3 rebuild covering alert-banner states / Expiring Keys / Recent Activity / counter-strip DOM order / per-tile chip layout / zero-count omission / graceful degradation; +3 for `recent_denials_by_reason` populated-sorted-desc + absent-field + empty-object; +1 guard that the old expiries card stays removed; +2 for raw-enum operation format matching AuditView; **+17 for the new AuditView filter DSL** covering error_code normalization / IN-list dedupe / whitespace-separated parsing / datalist enum coverage / all five status-band mappings / mutex-sidestep / search field copy / URL-param deep-link including unknown-band defensive fallback; **+3 for the Overview denial-pill router-link drill-down** asserting anchors render with href + route name + query payload + title tooltip).
 - `vite build` — clean, 897ms.
 
+### 2026-04-17 — `TimeRangePicker` component + AuditView collapse From/To/Quick into one control
+
+**Scope.** Dashboard-only, additive + subtractive. New reusable component + AuditView wire-up. No spec or server change.
+
+**Why.** Operator review on the three-row layout flagged that the From / To / Quick-range triad ate three controls worth of horizontal space for what Cloudflare Analytics, Grafana, and Datadog collapse into a single button-and-popover. Three separate fields also create three mental stops during triage — pick From, tab to To, tab to Quick chips — versus the convention operators already have in muscle memory from every observability tool: click the time button, pick a preset or punch in a custom range, done.
+
+**What shipped.**
+
+1. **New `src/components/TimeRangePicker.vue` (reusable).** v-model over `{ from: string; to: string }` (datetime-local strings; empty means unbounded on that side). Props: `modelValue`, optional `presets` override, `allowCustom` toggle for flows where only relative windows make sense, `id` for stable test targeting, `ariaLabel` for screen readers. Emits `update:modelValue` on preset click and on Custom-range Apply. Defaults ship 6 presets (Last hour / Last 6 hours / Last 24 hours / Last 7 days / Last 30 days / All time) tuned for ops triage — hour-scale for incidents, day-scale for reports, All time as the unfiltered baseline.
+2. **Trigger button with self-updating label.** Shows "Last 24 hours" (preset label) after a preset click, "Apr 10 14:30 → Apr 17 09:00" (formatted range) after Custom Apply or URL restore, "Since Apr 10 14:30" / "Until Apr 17 09:00" for one-sided ranges, and "All time" when modelValue is empty. Label derivation is synchronous from props at mount so the first render is already correct (no onMounted-flush flash).
+3. **Popover with preset radios + Custom-range section.** `role="dialog"`, preset list is `role="radiogroup"` with each preset as `role="radio"` + `aria-checked` + `data-preset="<id>"` for stable test targeting. Custom radio below a border separator; selecting it reveals From/To `datetime-local` inputs + an Apply button. Custom uses draft-then-apply semantics (typing doesn't emit until Apply is clicked) so a half-finished From isn't pushed to the query.
+4. **Dismissal.** Escape closes the popover; click-outside closes the popover (document-level listener bounded to component lifetime). Listeners attach once on mount — not per open — so there's no resource churn between open/close cycles.
+5. **External modelValue re-sync.** A deep watch on `modelValue` re-derives the button label when the parent mutates it externally (URL restore, `applyQueryParams` after same-route navigation). The watch is gated: if the popover is open and the user is editing Custom-range inputs, the watch skips to avoid stomping drafts mid-typing.
+6. **AuditView wire-up.** `fromDate` / `toDate` refs stay as the source-of-truth for `buildFilterParams` + `applyQueryParams` — a `computed({ get, set })` exposes them as the `{ from, to }` object the picker wants, so no refactor of the filter-building code. `setTimeRange` helper deleted (picker handles presets internally). Template Row 1 collapses from **Search (cols 1-2) | From (col 3) | To (col 4)** + a separate Quick-chip sub-row to **Search (cols 1-3) | Time range (col 4)** — one less row of vertical space, one less "where do I click" decision.
+
+**Reusability.** The component is designed for adoption across any view that currently uses the From+To+Quick-chip pattern. AuditView is the first + only adopter in this PR; the other view that carries a time range (`WebhookDetailView.vue`'s replay dialog) can swap in a follow-up — it would pass `allowCustom=true` + a tighter preset list suited to replay windows (the current "All time" preset doesn't make semantic sense for a replay, which requires a bounded window).
+
+**Files.** `src/components/TimeRangePicker.vue` (new), `src/__tests__/TimeRangePicker.test.ts` (new, 17 specs), `src/views/AuditView.vue` (+ import, + `timeRange` computed, + `<TimeRangePicker>` in Row 1, − From input, − To input, − Quick-chip row, − `setTimeRange` helper).
+
+**Validation gates (CLAUDE.md).**
+
+- `vue-tsc --noEmit` — clean.
+- `vitest run` — **524 / 524 passing** across 41 files (+17 new: trigger label derivation {empty→"All time", preset pick, custom range from props}; popover open/close {closed-on-mount, click opens, Escape dismisses, click-outside dismisses}; preset emission {1h/24h windowing from pinned "now", All time→empty, popover auto-closes on pick, active preset carries aria-checked=true}; Custom flow {reveals inputs, Apply emits + closes, typing doesn't emit before Apply}; external modelValue re-sync; allowCustom=false hides Custom section).
+- `vite build` — clean, 902ms.
+
+**No version bump.** UX polish on the just-shipped v0.1.25.30 audit filter form — no wire-format or URL-contract change. AUDIT entry only.
+
 ### 2026-04-17 — AuditView filter form: three-row semantic layout + segmented Status chip control
 
 **Scope.** Dashboard-only, follow-on UX polish on the v0.1.25.30 audit filter DSL wire-up. No spec or server change.
