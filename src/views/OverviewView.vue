@@ -400,7 +400,12 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
            positive reassurance copy + neutral card if healthy.
            `id` attributes match AlertAxis.id so the banner pills
            smooth-scroll to the right card. Cards don't reorder across
-           polls — stable position, variable prominence. -->
+           polls — stable position, variable prominence.
+           Layout: row 1 = non-budget signals (webhooks / keys /
+           denials), row 2 = the three budget cards together (at cap /
+           with debt / frozen). Grouping all budget-scoped alerts on
+           one row makes "what's happening with budgets" a single
+           visual scan instead of hopping between columns. -->
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
         <!-- Failing webhooks -->
         <div
@@ -431,12 +436,99 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
           </div>
         </div>
 
+        <!-- Expiring API keys -->
+        <div
+          id="expiring-keys"
+          class="card p-4"
+          data-testid="expiring-keys-card"
+          :class="axisById['expiring-keys'] ? 'border-l-4 border-l-amber-500 dark:border-l-amber-500' : ''"
+        >
+          <div class="flex justify-between items-center mb-3">
+            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
+              <svg v-if="axisById['expiring-keys']" class="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+              Expiring API Keys <span class="muted font-normal">(7d)</span>
+              <span v-if="expiringTotal > 0" class="ml-1 badge-warning">{{ expiringTotal }}</span>
+            </h2>
+            <router-link :to="{ name: 'api-keys' }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
+          </div>
+          <div v-if="expiringKeys.length === 0" class="text-sm muted py-4 text-center">No keys expiring in the next 7 days</div>
+          <div
+            v-for="e in expiringKeys"
+            :key="e.key.key_id"
+            class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
+          >
+            <router-link
+              :to="{ name: 'api-keys', query: { key_id: e.key.key_id } }"
+              class="text-sm text-blue-600 hover:underline truncate mr-2 dark:text-blue-400"
+              :title="e.key.key_id"
+            >{{ e.key.name || e.key.key_id }}</router-link>
+            <span
+              class="text-xs shrink-0"
+              :class="e.daysUntilExpiry <= 2 ? 'text-red-600 dark:text-red-400' : 'text-yellow-700 dark:text-yellow-400'"
+            >{{ e.daysUntilExpiry }}d</span>
+          </div>
+        </div>
+
+        <!-- Recent denials (runtime plane) -->
+        <div
+          id="recent-denials"
+          class="card p-4"
+          :class="axisById['recent-denials'] ? 'border-l-4 border-l-red-500 dark:border-l-red-500' : ''"
+        >
+          <div class="flex justify-between items-center mb-3">
+            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
+              <svg v-if="axisById['recent-denials']" class="w-4 h-4 text-red-500 dark:text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+              Recent Denials <span class="muted font-normal">(1h)</span>
+              <span v-if="overview.recent_denials.length > 0" class="ml-1 badge-danger">{{ overview.recent_denials.length }}</span>
+            </h2>
+            <router-link :to="{ name: 'events', query: { type: 'reservation.denied' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
+          </div>
+          <div v-if="overview.recent_denials.length === 0" class="text-sm muted py-4 text-center">No denials in the last hour</div>
+          <!-- Reason breakdown across the full window (v0.1.25.8+ server).
+               Shown when populated — server omits the field when no
+               denial has a reason_code set, so absence is meaningful
+               (denials exist but upstream hasn't filled reason_code). -->
+          <div
+            v-if="denialReasons.length > 0"
+            data-testid="denial-reasons"
+            class="flex flex-wrap gap-1.5 pb-2 mb-2 border-b border-gray-100 dark:border-gray-700"
+          >
+            <!-- cycles-governance-admin v0.1.25.24 unlocked server-side
+                 filtering of audit logs by error_code. Each reason pill
+                 now drills into /audit?error_code=CODE&status_band=errors
+                 so the operator lands on the failed admin operations
+                 carrying that code — the actionable read behind "12
+                 denials with reason X". AuditView's URL-param wiring
+                 reads both params on mount. -->
+            <router-link
+              v-for="r in denialReasons"
+              :key="r.code"
+              :to="{ name: 'audit', query: { error_code: r.code, status_band: 'errors' } }"
+              class="chip chip-danger hover:underline"
+              :title="`View ${r.count} audit ${r.count === 1 ? 'entry' : 'entries'} with error_code ${r.code}`"
+            >{{ r.code }} <span class="ml-1 tabular-nums">×{{ r.count }}</span></router-link>
+          </div>
+          <div
+            v-for="e in overview.recent_denials"
+            :key="e.event_id"
+            class="py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
+          >
+            <div class="flex justify-between">
+              <span class="text-sm text-gray-700 truncate dark:text-gray-200">{{ e.scope || e.tenant_id }}</span>
+              <span class="muted-sm shrink-0 ml-2" :title="new Date(e.timestamp).toISOString()">{{ formatTime(e.timestamp) }}</span>
+            </div>
+            <p class="muted-sm">{{ e.data?.reason_code || 'denied' }}</p>
+          </div>
+        </div>
+
         <!-- Budgets at cap — utilization ≥ 100%. Broader than the
              spec's `over_limit` (debt > overdraft_limit) so exhausted
              budgets with no overdraft appetite also show up here;
              see atCapBudgets declaration in the script block. Shows
              utilization % so operators see the severity at a glance
-             and can prioritize the most-blown first (sorted desc). -->
+             and can prioritize the most-blown first (sorted desc).
+             Grouped with the other budget cards on row 2 so "state of
+             budgets" is a single horizontal scan. -->
         <div
           id="budgets-at-cap"
           class="card p-4"
@@ -499,39 +591,6 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
           </div>
         </div>
 
-        <!-- Expiring API keys (NEW) -->
-        <div
-          id="expiring-keys"
-          class="card p-4"
-          data-testid="expiring-keys-card"
-          :class="axisById['expiring-keys'] ? 'border-l-4 border-l-amber-500 dark:border-l-amber-500' : ''"
-        >
-          <div class="flex justify-between items-center mb-3">
-            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
-              <svg v-if="axisById['expiring-keys']" class="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
-              Expiring API Keys <span class="muted font-normal">(7d)</span>
-              <span v-if="expiringTotal > 0" class="ml-1 badge-warning">{{ expiringTotal }}</span>
-            </h2>
-            <router-link :to="{ name: 'api-keys' }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
-          </div>
-          <div v-if="expiringKeys.length === 0" class="text-sm muted py-4 text-center">No keys expiring in the next 7 days</div>
-          <div
-            v-for="e in expiringKeys"
-            :key="e.key.key_id"
-            class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
-          >
-            <router-link
-              :to="{ name: 'api-keys', query: { key_id: e.key.key_id } }"
-              class="text-sm text-blue-600 hover:underline truncate mr-2 dark:text-blue-400"
-              :title="e.key.key_id"
-            >{{ e.key.name || e.key.key_id }}</router-link>
-            <span
-              class="text-xs shrink-0"
-              :class="e.daysUntilExpiry <= 2 ? 'text-red-600 dark:text-red-400' : 'text-yellow-700 dark:text-yellow-400'"
-            >{{ e.daysUntilExpiry }}d</span>
-          </div>
-        </div>
-
         <!-- Frozen budgets -->
         <div
           id="frozen-budgets"
@@ -554,58 +613,6 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
           >
             View {{ overview.budget_counts.frozen }} frozen budget{{ overview.budget_counts.frozen !== 1 ? 's' : '' }}
           </router-link>
-        </div>
-
-        <!-- Recent denials (runtime plane) -->
-        <div
-          id="recent-denials"
-          class="card p-4"
-          :class="axisById['recent-denials'] ? 'border-l-4 border-l-red-500 dark:border-l-red-500' : ''"
-        >
-          <div class="flex justify-between items-center mb-3">
-            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
-              <svg v-if="axisById['recent-denials']" class="w-4 h-4 text-red-500 dark:text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
-              Recent Denials <span class="muted font-normal">(1h)</span>
-              <span v-if="overview.recent_denials.length > 0" class="ml-1 badge-danger">{{ overview.recent_denials.length }}</span>
-            </h2>
-            <router-link :to="{ name: 'events', query: { type: 'reservation.denied' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
-          </div>
-          <div v-if="overview.recent_denials.length === 0" class="text-sm muted py-4 text-center">No denials in the last hour</div>
-          <!-- Reason breakdown across the full window (v0.1.25.8+ server).
-               Shown when populated — server omits the field when no
-               denial has a reason_code set, so absence is meaningful
-               (denials exist but upstream hasn't filled reason_code). -->
-          <div
-            v-if="denialReasons.length > 0"
-            data-testid="denial-reasons"
-            class="flex flex-wrap gap-1.5 pb-2 mb-2 border-b border-gray-100 dark:border-gray-700"
-          >
-            <!-- cycles-governance-admin v0.1.25.24 unlocked server-side
-                 filtering of audit logs by error_code. Each reason pill
-                 now drills into /audit?error_code=CODE&status_band=errors
-                 so the operator lands on the failed admin operations
-                 carrying that code — the actionable read behind "12
-                 denials with reason X". AuditView's URL-param wiring
-                 reads both params on mount. -->
-            <router-link
-              v-for="r in denialReasons"
-              :key="r.code"
-              :to="{ name: 'audit', query: { error_code: r.code, status_band: 'errors' } }"
-              class="chip chip-danger hover:underline"
-              :title="`View ${r.count} audit ${r.count === 1 ? 'entry' : 'entries'} with error_code ${r.code}`"
-            >{{ r.code }} <span class="ml-1 tabular-nums">×{{ r.count }}</span></router-link>
-          </div>
-          <div
-            v-for="e in overview.recent_denials"
-            :key="e.event_id"
-            class="py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
-          >
-            <div class="flex justify-between">
-              <span class="text-sm text-gray-700 truncate dark:text-gray-200">{{ e.scope || e.tenant_id }}</span>
-              <span class="muted-sm shrink-0 ml-2" :title="new Date(e.timestamp).toISOString()">{{ formatTime(e.timestamp) }}</span>
-            </div>
-            <p class="muted-sm">{{ e.data?.reason_code || 'denied' }}</p>
-          </div>
         </div>
       </div>
 

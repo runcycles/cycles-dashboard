@@ -332,6 +332,38 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
     })
   })
 
+  describe('card grid row layout — budget cards on row 2', () => {
+    it('renders the three budget cards contiguously after the non-budget cards', async () => {
+      // Layout intent: the 3-column grid places non-budget signals
+      // (failing webhooks / expiring keys / recent denials) on row 1
+      // and the three budget cards (at cap / with debt / frozen) on
+      // row 2 so "state of budgets" is one horizontal scan. Assert
+      // the DOM order pins all three budget cards after the last
+      // non-budget card.
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      const w = await mountOverview()
+      const html = w.html()
+      const indices = {
+        failing: html.indexOf('id="failing-webhooks"'),
+        expiring: html.indexOf('data-testid="expiring-keys-card"'),
+        denials: html.indexOf('id="recent-denials"'),
+        atCap: html.indexOf('id="budgets-at-cap"'),
+        withDebt: html.indexOf('id="budgets-with-debt"'),
+        frozen: html.indexOf('id="frozen-budgets"'),
+      }
+      for (const [k, v] of Object.entries(indices)) {
+        expect(v, `${k} card must be present in DOM`).toBeGreaterThan(-1)
+      }
+      // Row 1 (non-budget) precedes row 2 (budgets).
+      const lastNonBudget = Math.max(indices.failing, indices.expiring, indices.denials)
+      const firstBudget = Math.min(indices.atCap, indices.withDebt, indices.frozen)
+      expect(lastNonBudget).toBeLessThan(firstBudget)
+      // Row 2 order: at-cap → with-debt → frozen.
+      expect(indices.atCap).toBeLessThan(indices.withDebt)
+      expect(indices.withDebt).toBeLessThan(indices.frozen)
+    })
+  })
+
   describe('card severity accents — left border + warning icon', () => {
     it('firing card gets border-l-4 and red accent when danger severity', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview({
