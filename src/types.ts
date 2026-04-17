@@ -489,3 +489,86 @@ export interface ReservationListResponse {
   has_more?: boolean
   next_cursor?: string
 }
+
+// cycles-governance-admin v0.1.25.21: server-side bulk-action endpoints
+// for tenants and webhook subscriptions. Replace the client's
+// rateLimitedBatch loop (one PATCH per row) with a single POST that
+// takes a filter + action + idempotency_key and returns split
+// succeeded/failed/skipped arrays. Enables W1 (select-all-matching
+// at scale) and removes the 429-backoff complexity client-side —
+// the server is the natural rate-limit boundary for a filter-wide op.
+
+// Per-row outcome in any bulk-action response's succeeded / failed /
+// skipped arrays. error_code + message populated only in failed[];
+// reason populated only in skipped[]. `id` is the affected row's PK
+// (tenant_id or subscription_id depending on the endpoint).
+export interface BulkActionRowOutcome {
+  id: string
+  error_code?: string
+  message?: string
+  reason?: string
+}
+
+export const TENANT_BULK_ACTIONS = ['SUSPEND', 'REACTIVATE', 'CLOSE'] as const
+export type TenantBulkAction = typeof TENANT_BULK_ACTIONS[number]
+
+// Filter selecting target tenants. At least one property MUST be
+// present per spec (empty filter is rejected 400 to prevent an
+// accidental all-tenants action). AND combination across properties.
+// `status` mirrors Tenant.status (string-typed in this codebase to
+// stay resilient to server enum additions).
+export interface TenantBulkFilter {
+  status?: string
+  parent_tenant_id?: string
+  observe_mode?: string
+  search?: string
+}
+
+export interface TenantBulkActionRequest {
+  filter: TenantBulkFilter
+  action: TenantBulkAction
+  // Operator-supplied count of filter matches. When present, server
+  // MUST count first and reject 409 COUNT_MISMATCH if the actual
+  // count differs — no writes. UIs should always populate this
+  // from a preview query to prevent accidental over-apply.
+  expected_count?: number
+  // Required. Operator-supplied replay key (UUID v4). Server
+  // remembers the first response for 15 minutes; repeat submits
+  // return the original response without re-applying.
+  idempotency_key: string
+}
+
+export interface TenantBulkActionResponse {
+  action: TenantBulkAction
+  total_matched: number
+  succeeded: BulkActionRowOutcome[]
+  failed: BulkActionRowOutcome[]
+  skipped: BulkActionRowOutcome[]
+  idempotency_key: string
+}
+
+export const WEBHOOK_BULK_ACTIONS = ['PAUSE', 'RESUME', 'DELETE'] as const
+export type WebhookBulkAction = typeof WEBHOOK_BULK_ACTIONS[number]
+
+export interface WebhookBulkFilter {
+  tenant_id?: string
+  status?: 'ACTIVE' | 'PAUSED' | 'DISABLED'
+  event_type?: string
+  search?: string
+}
+
+export interface WebhookBulkActionRequest {
+  filter: WebhookBulkFilter
+  action: WebhookBulkAction
+  expected_count?: number
+  idempotency_key: string
+}
+
+export interface WebhookBulkActionResponse {
+  action: WebhookBulkAction
+  total_matched: number
+  succeeded: BulkActionRowOutcome[]
+  failed: BulkActionRowOutcome[]
+  skipped: BulkActionRowOutcome[]
+  idempotency_key: string
+}

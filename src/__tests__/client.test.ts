@@ -525,6 +525,113 @@ describe('endpoint wrappers — smoke', () => {
     })
   })
 
+  // cycles-governance-admin v0.1.25.21 bulk-action endpoints.
+  // Tests guard three properties the dashboard relies on:
+  //  1. Wire shape — URL, method, body serialized verbatim.
+  //  2. Safety-gate error codes (LIMIT_EXCEEDED, COUNT_MISMATCH) surface via
+  //     ApiError.errorCode so TenantsView / WebhooksView can humanize them.
+  //  3. ApiError.details is preserved for LIMIT_EXCEEDED's `total_matched`.
+  describe('bulk-action wrappers (v0.1.25.21 filter-apply)', () => {
+    it('bulkActionTenants → POST /v1/admin/tenants/bulk-action with body verbatim', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+        action: 'SUSPEND', total_matched: 0, succeeded: [], failed: [], skipped: [],
+        idempotency_key: 'idem-t-1',
+      })))
+      await api.bulkActionTenants({
+        action: 'SUSPEND',
+        filter: { status: 'ACTIVE', search: 'acme' },
+        idempotency_key: 'idem-t-1',
+      })
+      const [url, init] = lastCall()
+      expect(String(url)).toContain('/v1/admin/tenants/bulk-action')
+      expect(init.method).toBe('POST')
+      const body = JSON.parse(init.body)
+      expect(body.action).toBe('SUSPEND')
+      expect(body.filter).toEqual({ status: 'ACTIVE', search: 'acme' })
+      expect(body.idempotency_key).toBe('idem-t-1')
+    })
+
+    it('bulkActionWebhooks → POST /v1/admin/webhooks/bulk-action with body verbatim', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+        action: 'PAUSE', total_matched: 0, succeeded: [], failed: [], skipped: [],
+        idempotency_key: 'idem-w-1',
+      })))
+      await api.bulkActionWebhooks({
+        action: 'PAUSE',
+        filter: { status: 'ACTIVE', search: 'probe' },
+        idempotency_key: 'idem-w-1',
+      })
+      const [url, init] = lastCall()
+      expect(String(url)).toContain('/v1/admin/webhooks/bulk-action')
+      expect(init.method).toBe('POST')
+      const body = JSON.parse(init.body)
+      expect(body.action).toBe('PAUSE')
+      expect(body.filter.search).toBe('probe')
+    })
+
+    it('bulkActionTenants → 400 LIMIT_EXCEEDED surfaces errorCode + details.total_matched', async () => {
+      // Regression catch for PR-B's humanized toast: the TenantsView catch block
+      // reads `ApiError.details?.total_matched` to render "server matched N".
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: () => Promise.resolve({
+          error: 'LIMIT_EXCEEDED',
+          message: 'Filter matches more than 500 tenants',
+          request_id: 'req_lim',
+          details: { total_matched: 847 },
+        }),
+      } as unknown as Response))
+      try {
+        await api.bulkActionTenants({
+          action: 'SUSPEND', filter: { status: 'ACTIVE' }, idempotency_key: 'k',
+        })
+        throw new Error('expected to throw')
+      } catch (e) {
+        expect(e).toBeInstanceOf(ApiError)
+        const err = e as ApiError
+        expect(err.status).toBe(400)
+        expect(err.errorCode).toBe('LIMIT_EXCEEDED')
+        expect(err.details?.total_matched).toBe(847)
+      }
+    })
+
+    it('bulkActionWebhooks → 409 COUNT_MISMATCH surfaces errorCode', async () => {
+      // Reserved for when expected_count gets wired; currently unused but
+      // guarded so the humanization branch stays exercised.
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: false,
+        status: 409,
+        json: () => Promise.resolve({
+          error: 'COUNT_MISMATCH',
+          message: 'Webhook list changed since preview',
+          request_id: 'req_cm',
+        }),
+      } as unknown as Response))
+      await expect(
+        api.bulkActionWebhooks({ action: 'PAUSE', filter: { status: 'ACTIVE' }, idempotency_key: 'k' }),
+      ).rejects.toMatchObject({ status: 409, errorCode: 'COUNT_MISMATCH' })
+    })
+
+    it('bulkActionTenants → 400 INVALID_REQUEST on empty filter surfaces as ApiError', async () => {
+      // Server enforces minProperties:1 on TenantBulkFilter. The dashboard
+      // disables the button when the filter would be empty, but this guards
+      // the wire contract for defense in depth.
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: () => Promise.resolve({
+          error: 'INVALID_REQUEST',
+          message: 'filter must contain at least one property',
+          request_id: 'req_mp',
+        }),
+      } as unknown as Response))
+      await expect(
+        api.bulkActionTenants({ action: 'SUSPEND', filter: {}, idempotency_key: 'k' }),
+      ).rejects.toMatchObject({ status: 400, errorCode: 'INVALID_REQUEST' })
+    })
+  })
+
   it('rotateWebhookSecret → generates whsec_ secret, PATCHes it, and returns it alongside subscription', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ subscription_id: 'sub_1', name: 'hook' })))
     const result = await api.rotateWebhookSecret('sub_1')
