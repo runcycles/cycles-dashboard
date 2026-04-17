@@ -83,7 +83,20 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
            implicit promotion and keeps horizontal scroll scoped to
            the table card's own scroll container. -->
       <main id="main-content" class="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6" tabindex="-1">
-        <router-view />
+        <!-- :key="$route.path" forces a fresh component instance when the
+             path segment changes — required for detail views (tenant-
+             detail, webhook-detail, budget-detail) that read
+             `route.params.id` into a const at setup time. Without the
+             key, navigating /tenants/A → /tenants/B reuses the
+             TenantDetailView instance, leaving `id` stale at "A" — the
+             URL updated but data stayed frozen, a silent "clicks do
+             nothing" UX bug on the Children affordances. Keying on path
+             (not fullPath) is deliberate: query-only transitions like
+             /tenants → /tenants?parent=X must NOT remount, because the
+             parentFromQuery watcher handles the filter in-place and
+             remounting would drop the loaded tenant list + pagination
+             cursor. -->
+        <router-view :key="$route.path" />
       </main>
     </div>
 

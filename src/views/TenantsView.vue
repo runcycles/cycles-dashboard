@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
@@ -25,7 +25,28 @@ import { toMessage } from '../utils/errors'
 const toast = useToast()
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
+
+// Breadcrumb back-link origin. TenantDetailView's "+N more" affordance
+// (child list) deep-links here with ?parent=XXX. Pre-fix, the query was
+// ignored — the operator landed on an unfiltered list with no way back
+// to the parent they came from. Now we (a) drive parentFilter from the
+// URL on initial load + browser back/forward, and (b) render a back
+// arrow in PageHeader's #back slot that returns to the parent's detail
+// view. Kept as a computed off route.query so Vue Router's reactive
+// navigation (back/forward) refreshes both bits of state automatically.
+const parentFromQuery = computed<string | null>(() => {
+  const p = route.query.parent
+  return typeof p === 'string' && p ? p : null
+})
+// immediate:true applies the URL parent on initial mount; subsequent
+// fires handle browser back/forward. Only writes when it differs from
+// the current filter so the operator's dropdown changes aren't clobbered
+// on unrelated re-renders.
+watch(parentFromQuery, p => {
+  if (p && parentFilter.value !== p) parentFilter.value = p
+}, { immediate: true })
 const canManage = computed(() => auth.capabilities?.manage_tenants !== false)
 
 const tenants = ref<Tenant[]>([])
@@ -396,6 +417,17 @@ const gridTemplate = computed(() =>
       :last-updated="lastUpdated"
       @refresh="refresh"
     >
+      <template v-if="parentFromQuery" #back>
+        <button
+          @click="router.push({ name: 'tenant-detail', params: { id: parentFromQuery } })"
+          :aria-label="`Back to parent tenant ${parentFromQuery}`"
+          class="muted hover:text-gray-700 cursor-pointer"
+        >
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+          </svg>
+        </button>
+      </template>
       <template #actions>
         <button @click="confirmExport('csv')" :disabled="filteredTenants.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
