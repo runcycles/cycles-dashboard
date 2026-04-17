@@ -87,6 +87,12 @@ const eventType = ref((route.query.type as string) || '')
 const tenantId = ref((route.query.tenant_id as string) || '')
 const scope = ref((route.query.scope as string) || '')
 const correlationId = ref((route.query.correlation_id as string) || '')
+// cycles-governance-admin v0.1.25.21: free-text `search` query param
+// on listEvents (case-insensitive substring match on correlation_id +
+// scope). Sits alongside the existing correlation_id and scope
+// exact/prefix filters for the case where the operator has only a
+// partial id. Debounced via the shared 300ms cadence.
+const search = ref((route.query.search as string) || '')
 
 function buildFilterParams(): Record<string, string> {
   const params: Record<string, string> = {}
@@ -95,6 +101,10 @@ function buildFilterParams(): Record<string, string> {
   if (tenantId.value) params.tenant_id = tenantId.value
   if (scope.value) params.scope = scope.value
   if (correlationId.value) params.correlation_id = correlationId.value
+  // Trim before sending — a search of spaces is semantically empty on
+  // the server, and the spec requires empty → absent.
+  const q = search.value.trim()
+  if (q) params.search = q
   if (sortKey.value) {
     params.sort_by = sortKey.value
     params.sort_dir = sortDir.value
@@ -135,6 +145,7 @@ function applyFilters() {
     ...(tenantId.value && { tenant_id: tenantId.value }),
     ...(scope.value && { scope: scope.value }),
     ...(correlationId.value && { correlation_id: correlationId.value }),
+    ...(search.value.trim() && { search: search.value.trim() }),
   }})
   // Filter change resets the extended state — a new filter means the
   // previously-loaded tail is stale (events matching the OLD filter).
@@ -164,7 +175,7 @@ async function loadMore() {
 }
 
 function clearFilters() {
-  category.value = ''; eventType.value = ''; tenantId.value = ''; scope.value = ''; correlationId.value = ''
+  category.value = ''; eventType.value = ''; tenantId.value = ''; scope.value = ''; correlationId.value = ''; search.value = ''
   loadedMorePages.value = false
   applyFilters()
 }
@@ -181,6 +192,7 @@ const DEBOUNCE_MS = 300
 const debouncedTenantId = useDebouncedRef(tenantId, DEBOUNCE_MS)
 const debouncedScope = useDebouncedRef(scope, DEBOUNCE_MS)
 const debouncedCorrelationId = useDebouncedRef(correlationId, DEBOUNCE_MS)
+const debouncedSearch = useDebouncedRef(search, DEBOUNCE_MS)
 // Selects: apply instantly (no debounce). A select change is always
 // intentional and finite — debouncing just adds perceived lag.
 watch(category, () => applyFilters())
@@ -189,6 +201,7 @@ watch(eventType, () => applyFilters())
 watch(debouncedTenantId, () => applyFilters())
 watch(debouncedScope, () => applyFilters())
 watch(debouncedCorrelationId, () => applyFilters())
+watch(debouncedSearch, () => applyFilters())
 
 // Shared export (useListExport). CSV column spec + fetchPage adapter
 // + filename stem is all that's view-specific.
@@ -231,7 +244,7 @@ const {
 
 watch(exportError, (v) => { if (v) error.value = v })
 
-const hasActiveFilters = computed(() => !!(category.value || eventType.value || tenantId.value || scope.value || correlationId.value))
+const hasActiveFilters = computed(() => !!(category.value || eventType.value || tenantId.value || scope.value || correlationId.value || search.value))
 
 const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
 
@@ -326,6 +339,10 @@ function measureRow(el: Element | { $el?: Element } | null) {
         <div>
           <label for="ev-correlation" class="form-label">Correlation ID</label>
           <input id="ev-correlation" v-model="correlationId" placeholder="correlation_id" class="form-input w-40" />
+        </div>
+        <div>
+          <label for="ev-search" class="form-label">Search</label>
+          <input id="ev-search" v-model="search" type="search" placeholder="correlation_id or scope" class="form-input w-40" aria-label="Search by correlation_id or scope substring" />
         </div>
         <button v-if="hasActiveFilters" type="button" @click="clearFilters" class="text-sm muted hover:text-gray-700 cursor-pointer ml-auto">Clear filters</button>
       </div>

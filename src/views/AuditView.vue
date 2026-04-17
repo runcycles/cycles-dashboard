@@ -53,6 +53,14 @@ const keyId = ref('')
 const operation = ref('')
 const resourceType = ref('')
 const resourceId = ref('')
+// cycles-governance-admin v0.1.25.21: free-text `search` query param
+// on listAuditLogs (case-insensitive substring match on resource_id +
+// log_id). Sits alongside the existing Resource ID form field, which
+// is already an exact-match pass-through — the search field is what
+// an operator reaches for when they have only a partial ID or want
+// to cover log_id too. Form-submit rather than debounced because this
+// view uses explicit-submit for its whole filter surface.
+const search = ref('')
 const fromDate = ref('')
 const toDate = ref('')
 
@@ -67,6 +75,11 @@ function buildFilterParams(): Record<string, string> {
   if (operation.value) params.operation = operation.value
   if (resourceType.value) params.resource_type = resourceType.value
   if (resourceId.value) params.resource_id = resourceId.value
+  // Trim before sending — a search of spaces is semantically empty on
+  // the server (case-insensitive substring ILIKE), and the spec
+  // requires empty → absent.
+  const q = search.value.trim()
+  if (q) params.search = q
   if (fromDate.value) params.from = new Date(fromDate.value).toISOString()
   if (toDate.value) params.to = new Date(toDate.value).toISOString()
   if (sortKey.value) {
@@ -173,6 +186,7 @@ function applyQueryParams() {
   if (route.query.operation) operation.value = String(route.query.operation)
   if (route.query.resource_type) resourceType.value = String(route.query.resource_type)
   if (route.query.resource_id) resourceId.value = String(route.query.resource_id)
+  if (route.query.search) search.value = String(route.query.search)
 }
 onMounted(() => {
   applyQueryParams()
@@ -275,6 +289,10 @@ function measureRow(el: Element | { $el?: Element } | null) {
         <div>
           <label for="audit-resource-id" class="form-label">Resource ID</label>
           <input id="audit-resource-id" v-model="resourceId" class="form-input w-36" placeholder="key_abc123..." />
+        </div>
+        <div>
+          <label for="audit-search" class="form-label">Search</label>
+          <input id="audit-search" v-model="search" type="search" class="form-input w-36" placeholder="resource_id or log_id" aria-label="Search by resource_id or log_id substring" />
         </div>
         <div>
           <label for="audit-from" class="form-label">From</label>

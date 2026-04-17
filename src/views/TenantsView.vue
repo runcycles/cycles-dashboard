@@ -279,27 +279,42 @@ async function executeStatusAction() {
   finally { pendingStatusAction.value = null }
 }
 
-// Fold the current sort tuple into a listTenants params record.
+// Fold the current sort + search tuple into a listTenants params record.
 // Every listTenants call site (polling, loadMore, export fetchPage)
 // must forward the same tuple — the server binds its opaque cursor to
 // (sort_by, sort_dir, filter_hash), so a mismatched follow-up 400s.
-function withSort(params: Record<string, string> = {}): Record<string, string> {
+//
+// search (cycles-governance-admin v0.1.25.21): case-insensitive
+// substring match on tenant_id + name, server-side. Empty string is
+// treated as absent — don't send `search=""`. Additive per spec:
+// older servers MUST ignore the unknown param, so the client-side
+// filter on filteredTenants stays as graceful degradation for
+// pre-0.1.25.21 deployments.
+function withListParams(params: Record<string, string> = {}): Record<string, string> {
   if (sortKey.value) {
     params.sort_by = sortKey.value
     params.sort_dir = sortDir.value
   }
+  const q = debouncedSearch.value.trim()
+  if (q) params.search = q
   return params
 }
 
 const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
-    const res = await listTenants(withSort())
+    const res = await listTenants(withListParams())
     tenants.value = res.tenants
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
     error.value = ''
   } catch (e) { error.value = toMessage(e) }
 }, 60000)
+
+// Refetch page 1 whenever the debounced search changes so the cursor
+// stays aligned with the server's (sort_by, sort_dir, search) tuple.
+// Same rationale as useSort's onChange — the opaque cursor is filter-
+// scoped, so carrying it across a filter change would 400.
+watch(debouncedSearch, () => { refresh() })
 
 // Export. filterFn mirrors the client-side filteredTenants computed
 // so the exported set matches what the operator sees on screen. The
@@ -339,7 +354,7 @@ const {
   hasMore,
   nextCursor,
   fetchPage: async (cursor) => {
-    const res = await listTenants(withSort({ cursor }))
+    const res = await listTenants(withListParams({ cursor }))
     return { items: res.tenants, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
   },
   filterFn: tenantMatchesFilter,
@@ -358,7 +373,7 @@ async function loadMore() {
   if (!nextCursor.value || loadingMore.value) return
   loadingMore.value = true
   try {
-    const res = await listTenants(withSort({ cursor: nextCursor.value }))
+    const res = await listTenants(withListParams({ cursor: nextCursor.value }))
     tenants.value = [...tenants.value, ...res.tenants]
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''

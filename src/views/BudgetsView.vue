@@ -89,6 +89,14 @@ const filterScope = ref('')
 // v-model'd number-input value. We treat both at consumption.
 const filterUtilMin = ref<number | string>('')
 const filterUtilMax = ref<number | string>('')
+// cycles-governance-admin v0.1.25.21: free-text `search` query param
+// on listBudgets (case-insensitive substring match on tenant_id +
+// scope). Distinct from `scope_prefix` (kept as-is) — scope_prefix is
+// a PREFIX match bound to scope only; search is a SUBSTRING match
+// across tenant_id + scope together. Both combine with AND on the
+// server when set. Debounced with the existing 300ms cadence so a
+// 20-char filter doesn't fire 20 fetches.
+const search = ref('')
 
 // V5 (Phase 3): debounced refs so filter auto-applies 300ms after
 // the operator stops typing. Pre-fix, the form relied on @change
@@ -101,6 +109,7 @@ const DEBOUNCE_MS = 300
 const debouncedFilterScope = useDebouncedRef(filterScope, DEBOUNCE_MS)
 const debouncedFilterUtilMin = useDebouncedRef(filterUtilMin, DEBOUNCE_MS)
 const debouncedFilterUtilMax = useDebouncedRef(filterUtilMax, DEBOUNCE_MS)
+const debouncedSearch = useDebouncedRef(search, DEBOUNCE_MS)
 
 const pageTitle = computed(() => {
   if (isDetail.value) return 'Budget Detail'
@@ -137,6 +146,12 @@ function buildListParams(extra: Record<string, string> = {}): Record<string, str
   if (filterStatus.value) params.status = filterStatus.value
   if (filterUnit.value) params.unit = filterUnit.value
   if (filterScope.value) params.scope_prefix = filterScope.value
+  // Trim before sending — a search param of spaces is semantically
+  // empty on the server (case-insensitive substring ILIKE), and the
+  // spec requires empty → absent. Trim here so the server doesn't
+  // have to.
+  const q = debouncedSearch.value.trim()
+  if (q) params.search = q
   if (activeFilter.value === 'over_limit') params.over_limit = 'true'
   if (activeFilter.value === 'has_debt') params.has_debt = 'true'
   const rawMin = filterUtilMin.value
@@ -424,6 +439,7 @@ watch(() => route.query, () => {
 watch(debouncedFilterScope, () => { if (!isDetail.value) loadList() })
 watch(debouncedFilterUtilMin, () => { if (!isDetail.value) loadList() })
 watch(debouncedFilterUtilMax, () => { if (!isDetail.value) loadList() })
+watch(debouncedSearch, () => { if (!isDetail.value) loadList() })
 
 // Export — list-mode only (detail mode is a single scope + event
 // timeline, no list to export). The server exposes cursor-paginated
@@ -652,6 +668,10 @@ function rowTenantId(b: BudgetLedger): string {
           <div>
             <label for="budget-scope" class="form-label">Scope prefix</label>
             <input id="budget-scope" v-model="filterScope" placeholder="tenant:acme" class="border border-gray-300 rounded px-2 py-1.5 text-sm" />
+          </div>
+          <div>
+            <label for="budget-search" class="form-label">Search</label>
+            <input id="budget-search" v-model="search" type="search" placeholder="tenant_id or scope" class="border border-gray-300 rounded px-2 py-1.5 text-sm" aria-label="Search by tenant_id or scope substring" />
           </div>
           <!-- v0.1.25.21 (#9): utilization range. Pure client-side
                filter on the loaded result set; doesn't refetch. -->
