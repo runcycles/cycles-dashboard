@@ -315,20 +315,25 @@ function measureRow(el: Element | { $el?: Element } | null) {
 
     <!-- Filter form: three rows on a shared 4-column grid so vertical
          field edges line up across rows. From + To + Quick chips
-         collapsed into a single TimeRangePicker trigger in col 4
+         collapsed into a single TimeRangePicker trigger
          (Cloudflare/Grafana/Datadog pattern — one control, preset
          radios + custom range in a popover).
-           Row 1: Search (cols 1-3) | Time range (col 4)
+           Row 1: Search (cols 1-2) | Time range (cols 3-4)
            Row 2: Tenant | Key | Resource Type | Resource ID
-           Row 3: Operation | Error Code | [Status chips … Run Query] -->
+           Row 3: Operation | Error Code | [Status chips … Run Query]
+         Search + Time share Row 1 as equal halves. The 50/50 split
+         gives the picker room for long custom-range labels
+         ("Apr 10 14:30 → Apr 17 09:00") without truncation while
+         still leaving Search enough width for the widened
+         v0.1.25.24 match-set placeholder. -->
     <form @submit.prevent="query" class="card p-4 mb-4 space-y-3">
       <!-- Row 1: Search + time range picker -->
       <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-end">
-        <div class="md:col-span-3">
+        <div class="md:col-span-2">
           <label for="audit-search" class="form-label">Search</label>
           <input id="audit-search" v-model="search" type="search" class="form-input" placeholder="resource_id, log_id, error_code, operation" aria-label="Free-text substring search across resource_id, log_id, error_code, and operation" />
         </div>
-        <div>
+        <div class="md:col-span-2">
           <label for="audit-time-range" class="form-label">Time range</label>
           <TimeRangePicker
             id="audit-time-range"
