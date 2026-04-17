@@ -271,6 +271,85 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       expect(bannerIdx).toBeLessThan(stripIdx)
       expect(stripIdx).toBeLessThan(expiringIdx)
     })
+
+    it('Tenants tile: total + color-coded state chips for active/suspended/closed', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        tenant_counts: { total: 12, active: 8, suspended: 3, closed: 1 },
+      }))
+      const w = await mountOverview()
+      const tile = w.find('[data-testid="tile-tenants"]')
+      expect(tile.text()).toContain('12')
+      expect(tile.find('.chip-success').text()).toContain('8 active')
+      expect(tile.find('.chip-warning').text()).toContain('3 suspended')
+      expect(tile.find('.chip-neutral').text()).toContain('1 closed')
+    })
+
+    it('Tenants tile: omits state chips with zero count', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        tenant_counts: { total: 8, active: 8, suspended: 0, closed: 0 },
+      }))
+      const w = await mountOverview()
+      const tile = w.find('[data-testid="tile-tenants"]')
+      expect(tile.findAll('.chip').length).toBe(1)
+      expect(tile.find('.chip-success').exists()).toBe(true)
+      expect(tile.find('.chip-warning').exists()).toBe(false)
+      expect(tile.find('.chip-neutral').exists()).toBe(false)
+    })
+
+    it('Budgets tile: shows active/frozen/closed plus over-limit and debt warnings', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        budget_counts: {
+          total: 20, active: 14, frozen: 2, closed: 4,
+          over_limit: 3, with_debt: 1, by_unit: {},
+        },
+      }))
+      const w = await mountOverview()
+      const tile = w.find('[data-testid="tile-budgets"]')
+      expect(tile.text()).toContain('20')
+      expect(tile.text()).toContain('14 active')
+      expect(tile.text()).toContain('2 frozen')
+      expect(tile.text()).toContain('4 closed')
+      expect(tile.text()).toContain('3 over')
+      expect(tile.text()).toContain('1 debt')
+      // over-limit gets the danger color (operator must see this).
+      expect(tile.find('.chip-danger').text()).toContain('3 over')
+    })
+
+    it('Webhooks tile: shows active/disabled/failing chips with failing in danger', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        webhook_counts: { total: 7, active: 4, disabled: 1, with_failures: 2 },
+      }))
+      const w = await mountOverview()
+      const tile = w.find('[data-testid="tile-webhooks"]')
+      expect(tile.text()).toContain('7')
+      expect(tile.find('.chip-success').text()).toContain('4 active')
+      expect(tile.find('.chip-warning').text()).toContain('1 disabled')
+      expect(tile.find('.chip-danger').text()).toContain('2 failing')
+    })
+
+    it('Events tile: renders one chip per category with category color', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        event_counts: { total_recent: 100, by_category: { runtime: 60, audit: 30, system: 10 } },
+      }))
+      const w = await mountOverview()
+      const tile = w.find('[data-testid="tile-events"]')
+      expect(tile.text()).toContain('100')
+      const chips = tile.findAll('.chip-category')
+      expect(chips.length).toBe(3)
+      const text = chips.map(c => c.text()).join(' ')
+      expect(text).toContain('60 runtime')
+      expect(text).toContain('30 audit')
+      expect(text).toContain('10 system')
+    })
+
+    it('Events tile: shows "no events" when by_category is empty', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        event_counts: { total_recent: 0, by_category: {} },
+      }))
+      const w = await mountOverview()
+      const tile = w.find('[data-testid="tile-events"]')
+      expect(tile.text()).toContain('no events')
+    })
   })
 
   describe('graceful degradation', () => {

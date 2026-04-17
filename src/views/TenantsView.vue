@@ -52,12 +52,28 @@ const parentFromQuery = computed<string | null>(() => {
 watch(parentFromQuery, p => {
   if (p && parentFilter.value !== p) parentFilter.value = p
 }, { immediate: true })
+
+// I1: status URL param drives statusFilter on initial mount + back/forward.
+// Same pattern as parent above. Used by Overview's symmetrical counter
+// tile drill-downs (e.g. /tenants?status=SUSPENDED) so a click on the
+// "N suspended" chip lands the operator on a pre-filtered list.
+const statusFromQuery = computed<string | null>(() => {
+  const s = route.query.status
+  if (typeof s !== 'string') return null
+  // Only honor known tenant status values; ignore garbage so a stale
+  // URL doesn't put the dropdown into an invalid state.
+  return s === 'ACTIVE' || s === 'SUSPENDED' || s === 'CLOSED' ? s : null
+})
+watch(statusFromQuery, s => {
+  if (s && statusFilter.value !== s) statusFilter.value = s
+}, { immediate: true })
 const canManage = computed(() => auth.capabilities?.manage_tenants !== false)
 
 const tenants = ref<Tenant[]>([])
 const error = ref('')
 const search = ref('')
 const parentFilter = ref('')
+const statusFilter = ref('')
 
 // V5 (Phase 3): debounce the search input so filter re-computation
 // runs 200ms AFTER the last keystroke instead of on every character.
@@ -109,6 +125,9 @@ const filteredTenants = computed(() => {
       out = out.filter(t => t.parent_tenant_id === parentFilter.value)
     }
   }
+  if (statusFilter.value) {
+    out = out.filter(t => t.status === statusFilter.value)
+  }
   if (debouncedSearch.value) {
     const q = debouncedSearch.value.toLowerCase()
     out = out.filter(t => t.tenant_id.toLowerCase().includes(q) || t.name.toLowerCase().includes(q))
@@ -148,7 +167,7 @@ const parentOptions = computed<Tenant[]>(() => {
 const selected = ref<Set<string>>(new Set())
 // Clear selection when filters change so a hidden-by-filter row never
 // gets unexpectedly bulk-acted on. Same reasoning as WebhooksView.
-watch([search, parentFilter], () => { selected.value = new Set() })
+watch([search, parentFilter, statusFilter], () => { selected.value = new Set() })
 function toggleSelect(id: string) {
   const next = new Set(selected.value)
   next.has(id) ? next.delete(id) : next.add(id)
@@ -635,6 +654,12 @@ const gridTemplate = computed(() =>
           <option value="__root__">(root-level only)</option>
           <option v-for="p in parentOptions" :key="p.tenant_id" :value="p.tenant_id">Children of: {{ p.name || p.tenant_id }}</option>
         </select>
+        <select v-model="statusFilter" aria-label="Filter by tenant status" class="form-select">
+          <option value="">All statuses</option>
+          <option value="ACTIVE">Active</option>
+          <option value="SUSPENDED">Suspended</option>
+          <option value="CLOSED">Closed</option>
+        </select>
         <!-- Filter-apply bulk actions. Appears when the operator has a
              non-empty filter (so the action targets an explicit subset,
              not "all tenants") AND no row-select is active (keeps the
@@ -647,7 +672,7 @@ const gridTemplate = computed(() =>
              into one element per line. role="group" + aria-label
              announces the cluster's purpose to screen readers. -->
         <div
-          v-if="canManage && (debouncedSearch.trim() || parentFilter) && selectedVisibleCount === 0"
+          v-if="canManage && (debouncedSearch.trim() || parentFilter || statusFilter) && selectedVisibleCount === 0"
           role="group"
           aria-label="Apply action to all tenants matching the current filter"
           class="inline-flex items-center gap-2 flex-wrap"
@@ -801,8 +826,8 @@ const gridTemplate = computed(() =>
       <div v-else>
         <EmptyState
           item-noun="tenant"
-          :has-active-filter="!!(search || parentFilter)"
-          :hint="search || parentFilter ? undefined : 'Tenants will appear here once created'"
+          :has-active-filter="!!(search || parentFilter || statusFilter)"
+          :hint="search || parentFilter || statusFilter ? undefined : 'Tenants will appear here once created'"
         />
       </div>
     </div>

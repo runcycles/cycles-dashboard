@@ -11,13 +11,14 @@ import { filterExpiringKeys, type ExpiringKey } from '../utils/expiringKeys'
 
 // I1 (UI/UX P0): Overview is the operator's landing page and, for an
 // admin console, "landing page" means "what needs your attention right
-// now". Pre-fix, the page opened with a row of four counter tiles
-// (Tenants / Budgets / Webhooks / Events) that pushed the actionable
-// cards below the fold. Ops at 2am don't care about totals — they care
-// about *problems*. This rewrite puts alerts at the top, adds an
-// "Expiring API keys (7d)" card and a "Recent operator activity" audit
-// feed (also closes I3), and demotes the counters to a compact strip
-// at the bottom for at-a-glance totals without stealing the top slot.
+// now". This view puts the alert banner + actionable cards at the top.
+// The 4-up counter strip (Tenants / Budgets / Webhooks / Events) sits
+// directly below the banner as a quick-jump nav aid (Linear / GitHub /
+// Grafana convention) — kept compact so it doesn't compete with the
+// alert cards for attention. Each tile is symmetrical: title + total +
+// color-coded state chips that drill down to the filtered list view.
+// Adds an "Expiring API keys (7d)" card and a "Recent operator
+// activity" audit feed (also closes I3).
 
 const overview = ref<AdminOverviewResponse | null>(null)
 const keys = ref<ApiKey[]>([])
@@ -138,35 +139,135 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
       <!-- AT-A-GLANCE TOTALS — compact 4-up strip directly below the
            status banner. Serves as quick-jump navigation to each
            resource list view (Linear / GitHub / Grafana convention).
-           Kept compact (text-lg + p-3) so it doesn't compete with the
-           alert cards below for attention — it's a nav aid, not the
-           hero. -->
+           Each tile is symmetrical: title (clickable → unfiltered list)
+           + total + a row of state chips. Each chip is a drill-down
+           link to the same list view filtered by that state.
+           Color convention: green = healthy/active, yellow =
+           paused/frozen/disabled/expiring, red = failing/over-limit,
+           gray = closed/neutral, blue/purple = event categories.
+           Kept compact (text-lg + p-3) so it stays a nav aid, not the
+           hero — alert cards below get the operator's main attention. -->
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6" data-testid="counter-strip">
-        <router-link to="/tenants" class="card p-3 hover:shadow-md transition-shadow block group">
-          <p class="text-xs muted group-hover:text-gray-700 dark:group-hover:text-gray-200">Tenants</p>
-          <p class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ overview.tenant_counts.total }}</p>
-          <p class="muted-sm">{{ overview.tenant_counts.active }} active<span v-if="overview.tenant_counts.suspended">, {{ overview.tenant_counts.suspended }} suspended</span></p>
-        </router-link>
-        <router-link to="/budgets" class="card p-3 hover:shadow-md transition-shadow block group">
-          <p class="text-xs muted group-hover:text-gray-700 dark:group-hover:text-gray-200">Budgets</p>
-          <p class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ overview.budget_counts.total }}</p>
-          <p class="muted-sm">{{ overview.budget_counts.active }} active</p>
-        </router-link>
-        <router-link to="/webhooks" class="card p-3 hover:shadow-md transition-shadow block group">
-          <p class="text-xs muted group-hover:text-gray-700 dark:group-hover:text-gray-200">Webhooks</p>
-          <p class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ overview.webhook_counts.total }}</p>
-          <p class="muted-sm">{{ overview.webhook_counts.active }} active</p>
-        </router-link>
-        <router-link to="/events" class="card p-3 hover:shadow-md transition-shadow block group">
-          <p class="text-xs muted group-hover:text-gray-700 dark:group-hover:text-gray-200">Events <span class="muted font-normal">({{ Math.round(overview.event_window_seconds / 60) }}m)</span></p>
-          <p class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ overview.event_counts.total_recent }}</p>
-          <p class="muted-sm">
-            <template v-if="Object.keys(overview.event_counts.by_category).length">
-              <span v-for="(count, cat) in overview.event_counts.by_category" :key="cat" class="mr-2">{{ cat }}: {{ count }}</span>
-            </template>
-            <span v-else>no events</span>
-          </p>
-        </router-link>
+        <!-- TENANTS — total + active / suspended / closed chips. -->
+        <div class="card p-3" data-testid="tile-tenants">
+          <div class="flex justify-between items-baseline mb-1">
+            <router-link to="/tenants" class="text-xs muted hover:text-gray-700 dark:hover:text-gray-200 hover:underline">Tenants</router-link>
+            <router-link to="/tenants" class="text-lg font-semibold text-gray-900 dark:text-gray-100 hover:underline">{{ overview.tenant_counts.total }}</router-link>
+          </div>
+          <div class="flex flex-wrap gap-1">
+            <router-link
+              v-if="overview.tenant_counts.active > 0"
+              :to="{ name: 'tenants', query: { status: 'ACTIVE' } }"
+              class="chip chip-success"
+              :title="`${overview.tenant_counts.active} active tenants`"
+            >{{ overview.tenant_counts.active }} active</router-link>
+            <router-link
+              v-if="overview.tenant_counts.suspended > 0"
+              :to="{ name: 'tenants', query: { status: 'SUSPENDED' } }"
+              class="chip chip-warning"
+              :title="`${overview.tenant_counts.suspended} suspended tenants`"
+            >{{ overview.tenant_counts.suspended }} suspended</router-link>
+            <router-link
+              v-if="overview.tenant_counts.closed > 0"
+              :to="{ name: 'tenants', query: { status: 'CLOSED' } }"
+              class="chip chip-neutral"
+              :title="`${overview.tenant_counts.closed} closed tenants`"
+            >{{ overview.tenant_counts.closed }} closed</router-link>
+          </div>
+        </div>
+
+        <!-- BUDGETS — total + active / frozen / closed chips, plus
+             over-limit / with-debt warning chips when present. -->
+        <div class="card p-3" data-testid="tile-budgets">
+          <div class="flex justify-between items-baseline mb-1">
+            <router-link to="/budgets" class="text-xs muted hover:text-gray-700 dark:hover:text-gray-200 hover:underline">Budgets</router-link>
+            <router-link to="/budgets" class="text-lg font-semibold text-gray-900 dark:text-gray-100 hover:underline">{{ overview.budget_counts.total }}</router-link>
+          </div>
+          <div class="flex flex-wrap gap-1">
+            <router-link
+              v-if="overview.budget_counts.active > 0"
+              :to="{ name: 'budgets', query: { status: 'ACTIVE' } }"
+              class="chip chip-success"
+              :title="`${overview.budget_counts.active} active budgets`"
+            >{{ overview.budget_counts.active }} active</router-link>
+            <router-link
+              v-if="overview.budget_counts.frozen > 0"
+              :to="{ name: 'budgets', query: { status: 'FROZEN' } }"
+              class="chip chip-warning"
+              :title="`${overview.budget_counts.frozen} frozen budgets`"
+            >{{ overview.budget_counts.frozen }} frozen</router-link>
+            <router-link
+              v-if="overview.budget_counts.closed > 0"
+              :to="{ name: 'budgets', query: { status: 'CLOSED' } }"
+              class="chip chip-neutral"
+              :title="`${overview.budget_counts.closed} closed budgets`"
+            >{{ overview.budget_counts.closed }} closed</router-link>
+            <router-link
+              v-if="overview.budget_counts.over_limit > 0"
+              :to="{ name: 'budgets', query: { filter: 'over_limit' } }"
+              class="chip chip-danger"
+              :title="`${overview.budget_counts.over_limit} budgets over limit`"
+            >{{ overview.budget_counts.over_limit }} over</router-link>
+            <router-link
+              v-if="overview.budget_counts.with_debt > 0"
+              :to="{ name: 'budgets', query: { filter: 'has_debt' } }"
+              class="chip chip-warning"
+              :title="`${overview.budget_counts.with_debt} budgets with debt`"
+            >{{ overview.budget_counts.with_debt }} debt</router-link>
+          </div>
+        </div>
+
+        <!-- WEBHOOKS — total + active / disabled / failing chips.
+             Failing is derived from consecutive_failures > 0, not a
+             status enum, so it deep-links via ?failing=1. -->
+        <div class="card p-3" data-testid="tile-webhooks">
+          <div class="flex justify-between items-baseline mb-1">
+            <router-link to="/webhooks" class="text-xs muted hover:text-gray-700 dark:hover:text-gray-200 hover:underline">Webhooks</router-link>
+            <router-link to="/webhooks" class="text-lg font-semibold text-gray-900 dark:text-gray-100 hover:underline">{{ overview.webhook_counts.total }}</router-link>
+          </div>
+          <div class="flex flex-wrap gap-1">
+            <router-link
+              v-if="overview.webhook_counts.active > 0"
+              :to="{ name: 'webhooks', query: { status: 'ACTIVE' } }"
+              class="chip chip-success"
+              :title="`${overview.webhook_counts.active} active webhooks`"
+            >{{ overview.webhook_counts.active }} active</router-link>
+            <router-link
+              v-if="overview.webhook_counts.disabled > 0"
+              :to="{ name: 'webhooks', query: { status: 'DISABLED' } }"
+              class="chip chip-warning"
+              :title="`${overview.webhook_counts.disabled} disabled webhooks`"
+            >{{ overview.webhook_counts.disabled }} disabled</router-link>
+            <router-link
+              v-if="overview.webhook_counts.with_failures > 0"
+              :to="{ name: 'webhooks', query: { failing: '1' } }"
+              class="chip chip-danger"
+              :title="`${overview.webhook_counts.with_failures} webhooks with failures`"
+            >{{ overview.webhook_counts.with_failures }} failing</router-link>
+          </div>
+        </div>
+
+        <!-- EVENTS — total recent + per-category chips. Categories are
+             unbounded (Record<string, number>) so we cycle through a
+             palette of category-coded chip styles for visual distinction. -->
+        <div class="card p-3" data-testid="tile-events">
+          <div class="flex justify-between items-baseline mb-1">
+            <router-link to="/events" class="text-xs muted hover:text-gray-700 dark:hover:text-gray-200 hover:underline">
+              Events <span class="font-normal">({{ Math.round(overview.event_window_seconds / 60) }}m)</span>
+            </router-link>
+            <router-link to="/events" class="text-lg font-semibold text-gray-900 dark:text-gray-100 hover:underline">{{ overview.event_counts.total_recent }}</router-link>
+          </div>
+          <div class="flex flex-wrap gap-1">
+            <router-link
+              v-for="(count, cat) in overview.event_counts.by_category"
+              :key="cat"
+              :to="{ name: 'events', query: { category: cat } }"
+              class="chip chip-category"
+              :title="`${count} ${cat} events`"
+            >{{ count }} {{ cat }}</router-link>
+            <span v-if="!Object.keys(overview.event_counts.by_category).length" class="muted-sm">no events</span>
+          </div>
+        </div>
       </div>
 
       <!-- WHAT NEEDS ATTENTION — 6 cards, alerts-first. Each card has a
