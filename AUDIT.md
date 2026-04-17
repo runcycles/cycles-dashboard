@@ -48,6 +48,16 @@ Two issues missed in the first post-review pass:
 
 Test suite still at **362 passing** — both fixes are CSS-only (classes added to existing cells / containers). The virtualized grid structure and the `gridTemplate` remain unchanged, so existing ApiKeysView unit tests that select cells by role continue to pass. Regression risk is low: the only observable change is that content wider than the cell now truncates (with a `title` attribute unchanged on the Scope Filter cell, and the permissions detail already accessible via the existing "N perms" click-through dialog).
 
+**Third review pass (same PR).**
+
+Two more consistency items surfaced in visual review; both folded into the same branch:
+
+6. **ApiKeysView duplicate key count.** PageHeader already renders the live filtered count via `:loaded="filteredKeys.length"` (the "Showing X of Y • Updated Ns ago" line at the top of every list view). ApiKeysView also rendered a secondary `<p class="muted-sm mb-2">{{ filteredKeys.length }} keys</p>` immediately above the grid — a leftover from before the V6 PageHeader count landed. No other list view repeats the count, so the second line was pure inconsistency. Removed; ApiKeysView now matches the 6 other list views' header-only count pattern.
+
+7. **EventTimeline expanded JSON cap too tight.** The embedded EventTimeline (BudgetDetail / TenantDetail) used `max-h-32 overflow-auto` (128px cap) on the JSON `data` block. Typical runtime events have 8-12 fields which pretty-print to ~160-180px, so the inner scrollbar fired for almost every expanded event even though no operator needed to actually scroll — they just wanted the full payload visible. EventsView's cap is `max-h-40` (160px) and AuditView's is `max-h-48` (192px); EventTimeline was the outlier. Bumped EventTimeline to `max-h-48` to match AuditView's ceiling, which covers the common event-payload shapes without scroll and still caps genuinely large debug payloads at a reasonable height. Outer virtualizer `measureElement` still tracks real row heights so the capped JSON block doesn't break row layout.
+
+Test suite still at **362 passing** — removal of the duplicate count is pure markup removal; max-h bump is a Tailwind class swap. No new tests: PageHeader count is already covered by the shared `PageHeader.test.ts` assertions, and the JSON block's content rendering is selector-based in the existing EventTimeline tests (not height-dependent).
+
 ### 2026-04-16 — V4 stage 2: six admin-plane views wired to server-side sort
 
 Completes V4 — "push sort to server" — for the six remaining admin-plane list views. Stage 1 shipped the `useSort` opt-in and ReservationsView as the reference wiring; Stage 2 repeats that pattern against the cycles-server-admin **v0.1.25.24** `sort_by` / `sort_dir` enums on the six admin list endpoints. After this PR, every list view in the dashboard orders rows by the server's canonical sort — no client-side re-sort of the loaded slice destroying the cursor tie-breaker or misleading operators with half-ordered pagination.

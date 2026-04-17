@@ -430,8 +430,6 @@ function closePermsViewer() { viewingPermsFor.value = null }
       </div>
     </div>
 
-    <p v-if="filteredKeys.length > 0" class="muted-sm mb-2">{{ filteredKeys.length }} key{{ filteredKeys.length !== 1 ? 's' : '' }}</p>
-
     <!-- V1 virtualized grid. Wide minimum width — horizontal scroll
          engages on narrower viewports, same behavior as pre-virt
          `min-w-[900px]` <table>.

@@ -91,7 +91,14 @@ function measureRow(el: Element | { $el?: Element } | null) {
             <div v-if="events[v.index].correlation_id"><span class="muted">Correlation ID:</span> <span class="font-mono">{{ events[v.index].correlation_id }}</span></div>
             <div v-if="events[v.index].actor"><span class="muted">Actor:</span> {{ events[v.index].actor!.type }}<span v-if="events[v.index].actor!.key_id" class="font-mono"> {{ events[v.index].actor!.key_id }}</span></div>
           </div>
-          <div v-if="events[v.index].data" class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded p-2 font-mono overflow-auto max-h-32">
+          <!-- max-h-48 matches AuditView's cap so typical 8-12 field
+               event payloads (~180px rendered) fit without triggering
+               an inner scrollbar. Pre-fix was max-h-32 = 128px which
+               forced the scroll on most real events. The outer
+               virtualizer's measureElement still measures real row
+               height, so larger payloads cap visually at 48 and the
+               operator scrolls within the JSON block for the overflow. -->
+          <div v-if="events[v.index].data" class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded p-2 font-mono overflow-auto max-h-48">
             <pre class="whitespace-pre-wrap">{{ JSON.stringify(events[v.index].data, null, 2) }}</pre>
           </div>
         </div>
