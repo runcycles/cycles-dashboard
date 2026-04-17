@@ -20,7 +20,9 @@ import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import FormDialog from '../components/FormDialog.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
+import BulkActionPreviewDialog from '../components/BulkActionPreviewDialog.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
+import { useBulkActionPreview } from '../composables/useBulkActionPreview'
 import { formatDate } from '../utils/format'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
@@ -255,8 +257,47 @@ function cancelBulk() {
 //     confirmation flow that doesn't fit a bulk action; offer later.
 const filterBulkAction = ref<TenantBulkAction | null>(null)
 const filterBulkRunning = ref(false)
+// Submit-time error surfaced inside the preview dialog (kept open on
+// error so the operator sees what failed instead of a disjoint toast).
+const filterBulkSubmitError = ref('')
+
+// O1: cursor-walk preview before commit. Walks listTenants with the
+// same `search` server-side filter as the bulk action, then filters
+// each page client-side by the action-derived status + parent_tenant_id
+// (listTenants doesn't accept those server-side). On Confirm we send
+// `expected_count: previewCount` IFF the walk reached an exact total
+// (reachedEnd) — not when capped — so the server's COUNT_MISMATCH gate
+// engages on drift between preview and submit.
+const filterBulkPreview = useBulkActionPreview<Tenant>({
+  fetchPage: async (cursor) => {
+    const params: Record<string, string> = {}
+    const q = debouncedSearch.value.trim()
+    if (q) params.search = q
+    if (cursor) params.cursor = cursor
+    const res = await listTenants(params)
+    return { items: res.tenants, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
+  },
+  filterFn: (t) => {
+    if (!filterBulkAction.value) return false
+    const wantStatus = filterBulkAction.value === 'SUSPEND' ? 'ACTIVE' : 'SUSPENDED'
+    if (t.status !== wantStatus) return false
+    if (parentFilter.value && parentFilter.value !== '__root__' && t.parent_tenant_id !== parentFilter.value) return false
+    return true
+  },
+  toSample: (t) => ({
+    id: t.tenant_id,
+    primary: t.name || '',
+    status: t.status,
+  }),
+})
+
 function openFilterBulk(action: TenantBulkAction) {
   filterBulkAction.value = action
+  filterBulkSubmitError.value = ''
+  // Kick the cursor walk immediately on open — operator's first impression
+  // is "Counting…" with a spinner, which lands within the typical first-
+  // page round-trip (≤ ~300ms).
+  void filterBulkPreview.startPreview()
 }
 function canApplyFilterBulk(): boolean {
   // parent_tenant_id='__root__' is a dashboard UI pseudo-value with no
@@ -272,8 +313,22 @@ const filterBulkSummary = computed<string>(() => {
   if (q) parts.push(`search="${q}"`)
   return parts.join(' AND ')
 })
+function cancelFilterBulk() {
+  if (filterBulkRunning.value) return
+  filterBulkPreview.cancelPreview()
+  filterBulkPreview.resetPreview()
+  filterBulkAction.value = null
+  filterBulkSubmitError.value = ''
+}
 async function executeFilterBulk() {
   if (!filterBulkAction.value || filterBulkRunning.value) return
+  // Guard rails — these mirror the dialog's Confirm-disabled conditions
+  // but are duplicated here as a defence-in-depth so a programmatic
+  // emit('confirm') can never silently send a no-op or LIMIT_EXCEEDED.
+  if (filterBulkPreview.previewLoading.value) return
+  if (filterBulkPreview.previewCount.value === 0) return
+  if (filterBulkPreview.cappedAtMax.value) return
+
   const action = filterBulkAction.value
   const filter: TenantBulkFilter = {}
   if (action === 'SUSPEND') filter.status = 'ACTIVE'
@@ -282,12 +337,20 @@ async function executeFilterBulk() {
   const q = debouncedSearch.value.trim()
   if (q) filter.search = q
   filterBulkRunning.value = true
+  filterBulkSubmitError.value = ''
   try {
-    const res = await bulkActionTenants({
+    const body: import('../types').TenantBulkActionRequest = {
       filter,
       action,
       idempotency_key: generateIdempotencyKey(),
-    })
+    }
+    // Only send expected_count when the preview walk produced an exact
+    // count. When we hit either cap, expected_count would be a partial
+    // and every submit would 409 COUNT_MISMATCH against the real total.
+    if (filterBulkPreview.reachedEnd.value) {
+      body.expected_count = filterBulkPreview.previewCount.value
+    }
+    const res = await bulkActionTenants(body)
     const verb = action === 'SUSPEND' ? 'suspended' : 'reactivated'
     const parts = [`${res.succeeded.length}/${res.total_matched} tenants ${verb}`]
     if (res.skipped.length) parts.push(`${res.skipped.length} skipped (already in target state)`)
@@ -298,25 +361,30 @@ async function executeFilterBulk() {
     for (const f of res.failed) {
       console.warn(`bulk-action ${action} failed on ${f.id}: ${f.error_code ?? 'INTERNAL_ERROR'} — ${f.message ?? ''}`)
     }
+    // Success path: close the dialog.
+    filterBulkAction.value = null
+    filterBulkPreview.resetPreview()
   } catch (e) {
     // Humanize the two bulk-action safety gates (governance spec v0.1.25.23
     // added these to the ErrorCode enum; prose was already in v0.1.25.21):
     //   - LIMIT_EXCEEDED (400): filter matched >500 rows; operator must
     //     narrow the filter. Server echoes total_matched in details.
-    //   - COUNT_MISMATCH (409): only fires when expected_count is sent;
-    //     reserved for when the dashboard wires a preview-count pass.
-    // Any other error falls through to the generic toMessage formatter.
+    //   - COUNT_MISMATCH (409): preview-time count differed from the
+    //     server's at-submit count — typically because another writer
+    //     created/deleted/changed status of a matching tenant in the
+    //     interval. Surface inline so the operator can refresh the
+    //     preview and retry.
+    // Other errors fall through to the generic toMessage formatter.
     if (e instanceof ApiError && e.errorCode === 'LIMIT_EXCEEDED') {
       const matched = typeof e.details?.total_matched === 'number' ? ` (server matched ${e.details.total_matched.toLocaleString()})` : ''
-      toast.error(`Filter matches more than 500 tenants${matched} — please narrow the filter before retrying`)
+      filterBulkSubmitError.value = `Filter matches more than 500 tenants${matched} — narrow the filter before retrying.`
     } else if (e instanceof ApiError && e.errorCode === 'COUNT_MISMATCH') {
-      toast.error('Tenant list changed between preview and submit — refresh and try again')
+      filterBulkSubmitError.value = 'Tenant list changed between preview and submit — close and reopen the preview to retry.'
     } else {
-      toast.error(`Bulk ${action} failed: ${toMessage(e)}`)
+      filterBulkSubmitError.value = `Bulk ${action} failed: ${toMessage(e)}`
     }
   } finally {
     filterBulkRunning.value = false
-    filterBulkAction.value = null
     await refresh()
   }
 }
@@ -792,24 +860,31 @@ const gridTemplate = computed(() =>
       @cancel="cancelBulk"
     />
 
-    <!-- Filter-apply confirm. Sends a single POST to /v1/admin/tenants/
-         bulk-action; the server hard-caps at 500 matching rows. No
-         expected_count is sent because listTenants doesn't expose a
-         cheap total — operators accept the "up to 500 matching" bound.
-         The response's total_matched surfaces in the toast. -->
-    <ConfirmAction
+    <!-- O1: filter-apply preview. Walks listTenants with the same server-
+         side filter as the bulk request, applies the action's full filter
+         predicate client-side, and surfaces count + first-10 sample rows
+         BEFORE arming the Confirm button. expected_count is sent on submit
+         when the walk reached an exact total so server-side COUNT_MISMATCH
+         catches drift. Server caps at 500 matches per request — the
+         dialog disables Confirm when the walk hits that cap and instructs
+         the operator to narrow the filter. -->
+    <BulkActionPreviewDialog
       v-if="filterBulkAction"
-      :title="filterBulkAction === 'SUSPEND'
-        ? 'Suspend all tenants matching filter?'
-        : 'Reactivate all tenants matching filter?'"
-      :message="filterBulkRunning
-        ? 'Working… server is applying the action to every matching tenant.'
-        : `Filter: ${filterBulkSummary || '(none)'}. Server will apply to up to 500 matching tenants in a single request. Rows already in the target state will be skipped.`"
-      :confirm-label="filterBulkRunning ? 'Working…' : filterBulkAction === 'SUSPEND' ? 'Suspend all matching' : 'Reactivate all matching'"
-      :danger="filterBulkAction === 'SUSPEND'"
-      :loading="filterBulkRunning"
+      :action-verb="filterBulkAction === 'SUSPEND' ? 'Suspend' : 'Reactivate'"
+      item-noun-plural="tenants"
+      :filter-description="filterBulkSummary"
+      :loading="filterBulkPreview.previewLoading.value"
+      :count="filterBulkPreview.previewCount.value"
+      :samples="filterBulkPreview.previewSamples.value"
+      :capped-at-max="filterBulkPreview.cappedAtMax.value"
+      :capped-at-pages="filterBulkPreview.cappedAtPages.value"
+      :reached-end="filterBulkPreview.reachedEnd.value"
+      :error="filterBulkPreview.previewError.value"
+      :submit-error="filterBulkSubmitError"
+      :submitting="filterBulkRunning"
+      :confirm-danger="filterBulkAction === 'SUSPEND'"
       @confirm="executeFilterBulk"
-      @cancel="filterBulkAction = null"
+      @cancel="cancelFilterBulk"
     />
 
     <FormDialog v-if="showCreate" title="Create Tenant" submit-label="Create Tenant" :loading="createLoading" :error="createError" @submit="submitCreate" @cancel="showCreate = false">
