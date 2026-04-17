@@ -73,6 +73,17 @@ const errorCode = ref('')
 // "just errors" / "just successes" / a class. Mutex with exact `status`
 // is sidestepped entirely because the dashboard never sends exact status.
 const statusBand = ref<'' | 'success' | 'errors' | '4xx' | '5xx'>('')
+// Five preset bands rendered as a segmented chip control. Order matches
+// triage flow: All → 2xx (clear) → 4xx+5xx (quick "all errors") → 4xx /
+// 5xx (split for client-vs-server triage). Labels stay short so the
+// whole strip fits on one line above 1024px.
+const STATUS_BANDS: { value: typeof statusBand.value; label: string }[] = [
+  { value: '',        label: 'All' },
+  { value: 'success', label: '2xx' },
+  { value: 'errors',  label: '4xx+5xx' },
+  { value: '4xx',     label: '4xx' },
+  { value: '5xx',     label: '5xx' },
+]
 const fromDate = ref('')
 const toDate = ref('')
 
@@ -303,84 +314,128 @@ function measureRow(el: Element | { $el?: Element } | null) {
 
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
-    <!-- Filter form: 8 fields in a 4-column responsive grid so the
-         whole form is 2 field-rows on md+ (Scope/Event type on row 1,
-         Identity/Time on row 2) plus a compact footer. Collapses to
-         2-col and 1-col on smaller viewports without fieldset chrome. -->
-    <form @submit.prevent="query" class="card p-4 mb-4">
-      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-end">
-        <div>
-          <label for="audit-tenant" class="form-label">Tenant ID</label>
-          <input id="audit-tenant" v-model="tenantId" class="form-input" placeholder="acme" />
-        </div>
-        <div>
-          <label for="audit-key" class="form-label">Key ID</label>
-          <input id="audit-key" v-model="keyId" class="form-input" placeholder="key_..." />
-        </div>
-        <div>
-          <label for="audit-operation" class="form-label">Operation</label>
-          <input id="audit-operation" v-model="operation" class="form-input" placeholder="createBudget" />
-        </div>
-        <div>
-          <label for="audit-resource" class="form-label">Resource Type</label>
-          <select id="audit-resource" v-model="resourceType" class="form-select w-full">
-            <option value="">All</option>
-            <option>tenant</option><option>budget</option><option>api_key</option>
-            <option>policy</option><option>webhook</option><option>config</option>
-          </select>
-        </div>
-        <div>
-          <label for="audit-resource-id" class="form-label">Resource ID</label>
-          <input id="audit-resource-id" v-model="resourceId" class="form-input" placeholder="key_abc123..." />
-        </div>
-        <div>
-          <label for="audit-error-code" class="form-label">Error Code</label>
-          <input
-            id="audit-error-code"
-            v-model="errorCode"
-            list="audit-error-code-options"
-            class="form-input"
-            placeholder="BUDGET_EXCEEDED"
-            aria-label="Filter by error_code. Comma-separated for IN-list (e.g. BUDGET_EXCEEDED, POLICY_VIOLATION)."
-          />
-          <datalist id="audit-error-code-options">
-            <option v-for="c in ERROR_CODES" :key="c" :value="c" />
-          </datalist>
-        </div>
-        <div>
-          <label for="audit-status" class="form-label">Status</label>
-          <select id="audit-status" v-model="statusBand" class="form-select w-full">
-            <option value="">All</option>
-            <option value="success">2xx Success</option>
-            <option value="errors">4xx + 5xx Errors</option>
-            <option value="4xx">4xx Client Errors</option>
-            <option value="5xx">5xx Server Errors</option>
-          </select>
-        </div>
-        <div>
+    <!-- Filter form: three semantic rows mirror the operator's mental
+         model when triaging an incident.
+           1. Header — Search (the wide wildcard) + From/To window +
+              quick-range chips. Time + freeform live together because
+              "what happened in the last hour" is the most common
+              entry point.
+           2. Identity — who/what (tenant, key, resource type, resource
+              id). 4-col grid since these fields read together as one
+              "who did this on what" tuple.
+           3. Outcome — operation, error_code, and a segmented Status
+              chip control. Status as chips (rather than a select)
+              because operators flip between bands constantly during
+              triage; one click vs. open-pick-close. Run Query lives
+              at the right edge of this row so the band you just
+              clicked is right next to the submit. -->
+    <form @submit.prevent="query" class="card p-4 mb-4 space-y-4">
+      <!-- Row 1: header (Search + time window) -->
+      <div class="flex flex-wrap items-end gap-3">
+        <div class="flex-1 min-w-[240px]">
           <label for="audit-search" class="form-label">Search</label>
           <input id="audit-search" v-model="search" type="search" class="form-input" placeholder="resource_id, log_id, error_code, operation" aria-label="Free-text substring search across resource_id, log_id, error_code, and operation" />
         </div>
-        <div>
+        <div class="w-44">
           <label for="audit-from" class="form-label">From</label>
           <input id="audit-from" v-model="fromDate" type="datetime-local" class="form-input" />
         </div>
-        <div>
+        <div class="w-44">
           <label for="audit-to" class="form-label">To</label>
           <input id="audit-to" v-model="toDate" type="datetime-local" class="form-input" />
         </div>
-      </div>
-      <div class="flex items-center justify-between gap-3 mt-3 flex-wrap">
-        <div class="flex items-center gap-2 flex-wrap">
-          <span class="muted-sm">Quick range:</span>
+        <div class="flex items-center gap-1 pb-1.5">
+          <span class="muted-sm mr-1">Quick:</span>
           <button v-for="h in [1, 6, 24, 168]" :key="h" type="button" @click="setTimeRange(h)"
             class="muted-sm hover:text-gray-700 dark:hover:text-gray-200 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer">
             {{ h < 24 ? `${h}h` : `${h / 24}d` }}
           </button>
         </div>
-        <button type="submit" :disabled="loading" class="bg-gray-900 text-white px-4 py-1.5 rounded text-sm hover:bg-gray-800 disabled:opacity-50 cursor-pointer">
-          {{ loading ? 'Querying...' : 'Run Query' }}
-        </button>
+      </div>
+
+      <!-- Row 2: Identity (who/what) -->
+      <div>
+        <div class="muted-xs uppercase tracking-wider mb-2">Identity</div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+          <div>
+            <label for="audit-tenant" class="form-label">Tenant ID</label>
+            <input id="audit-tenant" v-model="tenantId" class="form-input" placeholder="acme" />
+          </div>
+          <div>
+            <label for="audit-key" class="form-label">Key ID</label>
+            <input id="audit-key" v-model="keyId" class="form-input" placeholder="key_..." />
+          </div>
+          <div>
+            <label for="audit-resource" class="form-label">Resource Type</label>
+            <select id="audit-resource" v-model="resourceType" class="form-select w-full">
+              <option value="">All</option>
+              <option>tenant</option><option>budget</option><option>api_key</option>
+              <option>policy</option><option>webhook</option><option>config</option>
+            </select>
+          </div>
+          <div>
+            <label for="audit-resource-id" class="form-label">Resource ID</label>
+            <input id="audit-resource-id" v-model="resourceId" class="form-input" placeholder="key_abc123..." />
+          </div>
+        </div>
+      </div>
+
+      <!-- Row 3: Outcome (what happened) + submit -->
+      <div>
+        <div class="muted-xs uppercase tracking-wider mb-2">Outcome</div>
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+          <div class="md:col-span-3">
+            <label for="audit-operation" class="form-label">Operation</label>
+            <input id="audit-operation" v-model="operation" class="form-input" placeholder="createBudget" />
+          </div>
+          <div class="md:col-span-3">
+            <label for="audit-error-code" class="form-label">Error Code</label>
+            <input
+              id="audit-error-code"
+              v-model="errorCode"
+              list="audit-error-code-options"
+              class="form-input"
+              placeholder="BUDGET_EXCEEDED"
+              aria-label="Filter by error_code. Comma-separated for IN-list (e.g. BUDGET_EXCEEDED, POLICY_VIOLATION)."
+            />
+            <datalist id="audit-error-code-options">
+              <option v-for="c in ERROR_CODES" :key="c" :value="c" />
+            </datalist>
+          </div>
+          <div class="md:col-span-4">
+            <span class="form-label">Status</span>
+            <!-- Segmented chip control. role=radiogroup + role=radio +
+                 aria-checked make this a screen-reader-equivalent of
+                 the prior <select>. data-band stays stable so tests
+                 (and any downstream e2e) can target by semantic value
+                 rather than label, which we may shorten further. -->
+            <div
+              id="audit-status"
+              role="radiogroup"
+              aria-label="Filter by HTTP status band"
+              class="inline-flex flex-wrap gap-0.5 rounded border border-gray-300 dark:border-gray-700 p-0.5 bg-gray-50 dark:bg-gray-800/40"
+            >
+              <button
+                v-for="b in STATUS_BANDS"
+                :key="b.value || 'all'"
+                type="button"
+                role="radio"
+                :data-band="b.value"
+                :aria-checked="statusBand === b.value"
+                @click="statusBand = b.value"
+                class="px-2.5 py-1 text-xs rounded cursor-pointer transition-colors"
+                :class="statusBand === b.value
+                  ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                  : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'"
+              >{{ b.label }}</button>
+            </div>
+          </div>
+          <div class="md:col-span-2 flex md:justify-end">
+            <button type="submit" :disabled="loading" class="bg-gray-900 text-white px-4 py-1.5 rounded text-sm hover:bg-gray-800 disabled:opacity-50 cursor-pointer w-full md:w-auto">
+              {{ loading ? 'Querying...' : 'Run Query' }}
+            </button>
+          </div>
+        </div>
       </div>
     </form>
 

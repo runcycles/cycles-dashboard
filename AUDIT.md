@@ -31,6 +31,34 @@
 - `vitest run` — **505 / 505 passing** across 40 files (+58 new across 4 commits in this release: 32 for the I1/I3 rebuild covering alert-banner states / Expiring Keys / Recent Activity / counter-strip DOM order / per-tile chip layout / zero-count omission / graceful degradation; +3 for `recent_denials_by_reason` populated-sorted-desc + absent-field + empty-object; +1 guard that the old expiries card stays removed; +2 for raw-enum operation format matching AuditView; **+17 for the new AuditView filter DSL** covering error_code normalization / IN-list dedupe / whitespace-separated parsing / datalist enum coverage / all five status-band mappings / mutex-sidestep / search field copy / URL-param deep-link including unknown-band defensive fallback; **+3 for the Overview denial-pill router-link drill-down** asserting anchors render with href + route name + query payload + title tooltip).
 - `vite build` — clean, 897ms.
 
+### 2026-04-17 — AuditView filter form: three-row semantic layout + segmented Status chip control
+
+**Scope.** Dashboard-only, follow-on UX polish on the v0.1.25.30 audit filter DSL wire-up. No spec or server change.
+
+**Why.** With the v0.1.25.24 wire-up, AuditView's filter form had grown to **10 fields packed into a flat 4-column grid** with no visual hierarchy: Tenant ID sat next to Operation, Search next to From/To, Status select sat awkwardly between Resource ID and Search. Operator review surfaced two specific frustrations: (a) Status — the most-toggled field during incident triage — required open-pick-close on a `<select>`, breaking the rhythm of band-flipping ("show me 4xx… now 5xx… now everything"); and (b) the flat grid forced the operator to scan all 10 labels every time, even when they only wanted to tweak one dimension.
+
+**What shipped — three semantic rows mirroring triage flow.**
+
+1. **Header row (Search + time).** Search input as `flex-1 min-w-[240px]` (the wide wildcard, prominent), then `w-44` From + To `<datetime-local>` inputs, then inline Quick chips (1h / 6h / 24h / 7d) — eliminates the prior split where the date inputs lived in the field grid but the quick-range chips lived in a separate footer. "What happened in the last hour" now lives in one row.
+2. **Identity section (who/what).** Subtle section label (`muted-xs uppercase tracking-wider`) over a 4-col grid: Tenant ID | Key ID | Resource Type | Resource ID. These four fields read together as one "who did this on what" tuple.
+3. **Outcome section (what happened) + submit.** 12-col grid: Operation (col-3) | Error Code (col-3) | **Status as a segmented chip control** (col-4) | Run Query button (col-2, right-aligned). The chip control replaces the prior `<select id="audit-status">` — five buttons (`[All] [2xx] [4xx+5xx] [4xx] [5xx]`) wrapped in a bordered pill container with `role="radiogroup"` semantics, each chip carrying `role="radio"` + `aria-checked` + `data-band="<value>"` for stable test targeting independent of label copy. Active chip: solid `bg-gray-900` (light) / `bg-gray-100` (dark) with inverted text. Operators now flip bands with one click each, keeping the eye on the Outcome row instead of jumping back to a closed dropdown.
+
+**Why chips and not a tab strip / radio-list.** Tabs would imply mutually-exclusive content panels, which Status is *not* (it composes with Operation + Error Code in the same query). A native `<input type="radio">` group renders large and inconsistent across browsers — admins on mixed Linux/Mac/Windows see different baselines. The segmented chip pattern (Linear, Grafana, GitHub Issues filter bar) is the convention operators recognize at a glance and matches the dashboard's existing `.btn-pill-*` visual language.
+
+**A11y.** `role="radiogroup"` + `aria-label="Filter by HTTP status band"` on the container; `role="radio"` + `aria-checked` on each chip so screen readers announce "5 of 5 selected, errors radio button" rather than 5 unrelated buttons. The chip element keeps `id="audit-status"` so existing test selectors and any docs referencing `#audit-status` continue to land on the same conceptual control.
+
+**Test migration.** The 6 status-band specs in `src/__tests__/AuditView-filters.test.ts` switched from `find('#audit-status').setValue('errors')` (select-element idiom) to `find('[data-band="errors"]').trigger('click')` (chip-button idiom). Two URL-pre-fill specs switched from `select.value === 'errors'` to `chip.aria-checked === 'true'`. Two new specs cover (a) the radiogroup structure (5 chips, correct order, default All chip active) and (b) click → aria-checked propagation across the whole group.
+
+**Files.** `src/views/AuditView.vue` (form template rewrite + `STATUS_BANDS` constant), `src/__tests__/AuditView-filters.test.ts` (6 spec migrations + 2 new specs).
+
+**Validation gates (CLAUDE.md).**
+
+- `vue-tsc --noEmit` — clean.
+- `vitest run` — **507 / 507 passing** across 40 files (+2 net from the prior 505 — 6 status-band specs migrated in-place, 2 new chip-control specs added).
+- `vite build` — clean, 887ms.
+
+**No version bump.** Layout polish on the just-shipped v0.1.25.30 audit filter DSL — no behavior change to the wire format, the URL contract, or the filter semantics. AUDIT entry only.
+
 ### 2026-04-17 — EventsView Type filter: datalist typeahead over all 40 spec enum values
 
 **Scope.** Dashboard-only, additive. No spec or server change.

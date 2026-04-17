@@ -97,7 +97,7 @@ describe('AuditView — v0.1.25.24 status_min/status_max range filter', () => {
 
   it('2xx Success band maps to [200, 299]', async () => {
     const { lastCall } = await mountAndSubmit(async w => {
-      await w.find('#audit-status').setValue('success')
+      await w.find('[data-band="success"]').trigger('click')
     })
     expect(lastCall.status_min).toBe('200')
     expect(lastCall.status_max).toBe('299')
@@ -105,7 +105,7 @@ describe('AuditView — v0.1.25.24 status_min/status_max range filter', () => {
 
   it('4xx + 5xx Errors band maps to [400, 599]', async () => {
     const { lastCall } = await mountAndSubmit(async w => {
-      await w.find('#audit-status').setValue('errors')
+      await w.find('[data-band="errors"]').trigger('click')
     })
     expect(lastCall.status_min).toBe('400')
     expect(lastCall.status_max).toBe('599')
@@ -113,7 +113,7 @@ describe('AuditView — v0.1.25.24 status_min/status_max range filter', () => {
 
   it('4xx Client Errors band maps to [400, 499]', async () => {
     const { lastCall } = await mountAndSubmit(async w => {
-      await w.find('#audit-status').setValue('4xx')
+      await w.find('[data-band="4xx"]').trigger('click')
     })
     expect(lastCall.status_min).toBe('400')
     expect(lastCall.status_max).toBe('499')
@@ -121,7 +121,7 @@ describe('AuditView — v0.1.25.24 status_min/status_max range filter', () => {
 
   it('5xx Server Errors band maps to [500, 599]', async () => {
     const { lastCall } = await mountAndSubmit(async w => {
-      await w.find('#audit-status').setValue('5xx')
+      await w.find('[data-band="5xx"]').trigger('click')
     })
     expect(lastCall.status_min).toBe('500')
     expect(lastCall.status_max).toBe('599')
@@ -129,12 +129,32 @@ describe('AuditView — v0.1.25.24 status_min/status_max range filter', () => {
 
   it('never sends exact `status` (dashboard sidesteps the spec mutex)', async () => {
     const { lastCall } = await mountAndSubmit(async w => {
-      await w.find('#audit-status').setValue('errors')
+      await w.find('[data-band="errors"]').trigger('click')
       await w.find('#audit-error-code').setValue('BUDGET_EXCEEDED')
     })
     expect(lastCall.status).toBeUndefined()
     expect(lastCall.status_min).toBe('400')
     expect(lastCall.error_code).toBe('BUDGET_EXCEEDED')
+  })
+
+  it('renders the five preset bands as a radiogroup of chips', () => {
+    const wrapper = mount(AuditView)
+    const group = wrapper.find('#audit-status')
+    expect(group.attributes('role')).toBe('radiogroup')
+    const chips = wrapper.findAll('#audit-status [role="radio"]')
+    expect(chips.length).toBe(5)
+    const bands = chips.map(c => c.attributes('data-band'))
+    expect(bands).toEqual(['', 'success', 'errors', '4xx', '5xx'])
+    // Default state: All chip is the active radio.
+    expect(wrapper.find('[data-band=""]').attributes('aria-checked')).toBe('true')
+  })
+
+  it('clicking a band updates aria-checked for the chip group', async () => {
+    const wrapper = mount(AuditView)
+    await wrapper.find('[data-band="errors"]').trigger('click')
+    expect(wrapper.find('[data-band="errors"]').attributes('aria-checked')).toBe('true')
+    expect(wrapper.find('[data-band=""]').attributes('aria-checked')).toBe('false')
+    expect(wrapper.find('[data-band="success"]').attributes('aria-checked')).toBe('false')
   })
 })
 
@@ -172,7 +192,7 @@ describe('AuditView — URL param wiring (deep-link from Overview)', () => {
     routeQuery.status_band = 'errors'
     const wrapper = mount(AuditView)
     await flushPromises()
-    expect((wrapper.find('#audit-status').element as HTMLSelectElement).value).toBe('errors')
+    expect(wrapper.find('[data-band="errors"]').attributes('aria-checked')).toBe('true')
     const firstCall = listAuditLogsMock.mock.calls[0]?.[0] ?? {}
     expect(firstCall.status_min).toBe('400')
     expect(firstCall.status_max).toBe('599')
@@ -182,7 +202,8 @@ describe('AuditView — URL param wiring (deep-link from Overview)', () => {
     routeQuery.status_band = 'bogus'
     const wrapper = mount(AuditView)
     await flushPromises()
-    expect((wrapper.find('#audit-status').element as HTMLSelectElement).value).toBe('')
+    // Unknown band → All chip remains the active radio (defensive default).
+    expect(wrapper.find('[data-band=""]').attributes('aria-checked')).toBe('true')
     const firstCall = listAuditLogsMock.mock.calls[0]?.[0] ?? {}
     expect(firstCall.status_min).toBeUndefined()
     expect(firstCall.status_max).toBeUndefined()
