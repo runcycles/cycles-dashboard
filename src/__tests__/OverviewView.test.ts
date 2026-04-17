@@ -244,7 +244,7 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
     })
   })
 
-  describe('counter strip (demoted to bottom)', () => {
+  describe('counter strip (quick-jump nav, top of page)', () => {
     it('renders the 4-counter strip with data-testid hook', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview())
       const w = await mountOverview()
@@ -256,25 +256,20 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       expect(strip.text()).toContain('Events')
     })
 
-    it('counter strip appears AFTER the alert banner in DOM order', async () => {
+    it('counter strip appears AFTER the alert banner and BEFORE the alert cards', async () => {
+      // Banner → counter strip (quick-jump nav) → alert cards (Expiring Keys
+      // is the first new card in the attention grid). Counter strip sits
+      // below the status banner as a resource-type navigation aid,
+      // matching the Linear / GitHub / Grafana convention.
       getOverviewMock.mockResolvedValue(healthyOverview())
       const w = await mountOverview()
       const html = w.html()
       const bannerIdx = Math.max(html.indexOf('All clear'), html.indexOf('need attention'))
       const stripIdx = html.indexOf('data-testid="counter-strip"')
-      expect(bannerIdx).toBeGreaterThan(-1)
-      expect(stripIdx).toBeGreaterThan(bannerIdx)
-    })
-
-    it('Expiring Keys card appears AFTER alert banner and BEFORE counter strip', async () => {
-      getOverviewMock.mockResolvedValue(healthyOverview())
-      const w = await mountOverview()
-      const html = w.html()
-      const bannerIdx = Math.max(html.indexOf('All clear'), html.indexOf('need attention'))
       const expiringIdx = html.indexOf('data-testid="expiring-keys-card"')
-      const stripIdx = html.indexOf('data-testid="counter-strip"')
-      expect(bannerIdx).toBeLessThan(expiringIdx)
-      expect(expiringIdx).toBeLessThan(stripIdx)
+      expect(bannerIdx).toBeGreaterThan(-1)
+      expect(bannerIdx).toBeLessThan(stripIdx)
+      expect(stripIdx).toBeLessThan(expiringIdx)
     })
   })
 

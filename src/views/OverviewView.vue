@@ -135,6 +135,40 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
         </p>
       </div>
 
+      <!-- AT-A-GLANCE TOTALS — compact 4-up strip directly below the
+           status banner. Serves as quick-jump navigation to each
+           resource list view (Linear / GitHub / Grafana convention).
+           Kept compact (text-lg + p-3) so it doesn't compete with the
+           alert cards below for attention — it's a nav aid, not the
+           hero. -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6" data-testid="counter-strip">
+        <router-link to="/tenants" class="card p-3 hover:shadow-md transition-shadow block group">
+          <p class="text-xs muted group-hover:text-gray-700 dark:group-hover:text-gray-200">Tenants</p>
+          <p class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ overview.tenant_counts.total }}</p>
+          <p class="muted-sm">{{ overview.tenant_counts.active }} active<span v-if="overview.tenant_counts.suspended">, {{ overview.tenant_counts.suspended }} suspended</span></p>
+        </router-link>
+        <router-link to="/budgets" class="card p-3 hover:shadow-md transition-shadow block group">
+          <p class="text-xs muted group-hover:text-gray-700 dark:group-hover:text-gray-200">Budgets</p>
+          <p class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ overview.budget_counts.total }}</p>
+          <p class="muted-sm">{{ overview.budget_counts.active }} active</p>
+        </router-link>
+        <router-link to="/webhooks" class="card p-3 hover:shadow-md transition-shadow block group">
+          <p class="text-xs muted group-hover:text-gray-700 dark:group-hover:text-gray-200">Webhooks</p>
+          <p class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ overview.webhook_counts.total }}</p>
+          <p class="muted-sm">{{ overview.webhook_counts.active }} active</p>
+        </router-link>
+        <router-link to="/events" class="card p-3 hover:shadow-md transition-shadow block group">
+          <p class="text-xs muted group-hover:text-gray-700 dark:group-hover:text-gray-200">Events <span class="muted font-normal">({{ Math.round(overview.event_window_seconds / 60) }}m)</span></p>
+          <p class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ overview.event_counts.total_recent }}</p>
+          <p class="muted-sm">
+            <template v-if="Object.keys(overview.event_counts.by_category).length">
+              <span v-for="(count, cat) in overview.event_counts.by_category" :key="cat" class="mr-2">{{ cat }}: {{ count }}</span>
+            </template>
+            <span v-else>no events</span>
+          </p>
+        </router-link>
+      </div>
+
       <!-- WHAT NEEDS ATTENTION — 6 cards, alerts-first. Each card has a
            "problems first" orientation: count badge if firing, positive
            reassurance copy if healthy, and a deep-link to the filtered
@@ -334,36 +368,6 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
         </div>
       </div>
 
-      <!-- AT-A-GLANCE TOTALS — compact strip at the bottom. Demoted from
-           the top of the page because totals are context, not a signal.
-           Still clickable, smaller font, single row on desktop. -->
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3" data-testid="counter-strip">
-        <router-link to="/tenants" class="card p-3 hover:shadow-md transition-shadow block group">
-          <p class="text-xs muted group-hover:text-gray-700 dark:group-hover:text-gray-200">Tenants</p>
-          <p class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ overview.tenant_counts.total }}</p>
-          <p class="muted-sm">{{ overview.tenant_counts.active }} active<span v-if="overview.tenant_counts.suspended">, {{ overview.tenant_counts.suspended }} suspended</span></p>
-        </router-link>
-        <router-link to="/budgets" class="card p-3 hover:shadow-md transition-shadow block group">
-          <p class="text-xs muted group-hover:text-gray-700 dark:group-hover:text-gray-200">Budgets</p>
-          <p class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ overview.budget_counts.total }}</p>
-          <p class="muted-sm">{{ overview.budget_counts.active }} active</p>
-        </router-link>
-        <router-link to="/webhooks" class="card p-3 hover:shadow-md transition-shadow block group">
-          <p class="text-xs muted group-hover:text-gray-700 dark:group-hover:text-gray-200">Webhooks</p>
-          <p class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ overview.webhook_counts.total }}</p>
-          <p class="muted-sm">{{ overview.webhook_counts.active }} active</p>
-        </router-link>
-        <router-link to="/events" class="card p-3 hover:shadow-md transition-shadow block group">
-          <p class="text-xs muted group-hover:text-gray-700 dark:group-hover:text-gray-200">Events <span class="muted font-normal">({{ Math.round(overview.event_window_seconds / 60) }}m)</span></p>
-          <p class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ overview.event_counts.total_recent }}</p>
-          <p class="muted-sm">
-            <template v-if="Object.keys(overview.event_counts.by_category).length">
-              <span v-for="(count, cat) in overview.event_counts.by_category" :key="cat" class="mr-2">{{ cat }}: {{ count }}</span>
-            </template>
-            <span v-else>no events</span>
-          </p>
-        </router-link>
-      </div>
     </template>
   </div>
 </template>
