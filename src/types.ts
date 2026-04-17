@@ -142,23 +142,47 @@ export interface EventListResponse {
 }
 
 // Webhook types
+//
+// Mirrors the full `WebhookSubscription` schema in
+// cycles-admin-service-api/target/contract/spec.yaml (§WebhookSubscription,
+// line 2719). The server uses `@JsonInclude(NON_NULL)` on most fields, so
+// any optional field not set will be absent from the GET response (not
+// `null`) — every Optional here matches that convention.
+//
+// `signing_secret` is `writeOnly` per spec and never echoed on GET.
+// `headers` values are masked to `"********"` on GET (keys are preserved).
 export interface WebhookSubscription {
   subscription_id: string
   tenant_id: string
   name?: string
+  description?: string
   url: string
   event_types: string[]
   event_categories?: string[]
   scope_filter?: string
+  // Opaque server-managed blobs — surfaced on the detail view as JSON
+  // but not edited via the dashboard (edit flow would need a dedicated
+  // builder; both are rarely set). Kept as `unknown`-typed records to
+  // avoid stale shape drift.
+  thresholds?: Record<string, unknown>
+  retry_policy?: Record<string, unknown>
+  // Custom headers: server masks values on GET (keys preserved). Edit
+  // flow writes new keys but can't round-trip masked values back — the
+  // form treats existing headers as read-only keys + an "Add header"
+  // affordance for new entries.
+  headers?: Record<string, string>
   status: string
   consecutive_failures?: number
   created_at: string
+  updated_at?: string
+  last_triggered_at?: string
   last_success_at?: string
   last_failure_at?: string
   // v0.1.25.21: server-controlled auto-disable threshold. Surfaced on
   // the WebhookDetail summary so operators can see how close a failing
   // subscription is to being auto-disabled.
   disable_after_failures?: number
+  metadata?: Record<string, unknown>
 }
 
 export interface WebhookListResponse {

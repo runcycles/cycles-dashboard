@@ -8,7 +8,7 @@ import { useSort } from '../composables/useSort'
 import { getWebhook, listDeliveries, updateWebhook, deleteWebhook, testWebhook, replayWebhookEvents, rotateWebhookSecret } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { WebhookSubscription, WebhookDelivery, WebhookTestResponse } from '../types'
-import { EVENT_TYPES } from '../types'
+import { EVENT_TYPES, EVENT_CATEGORIES } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
@@ -158,36 +158,100 @@ async function executeRotate() {
 }
 
 // Edit webhook
+//
+// Covers every spec-editable field (cycles-governance-admin WebhookSubscription §2719):
+// name, description, url, event_types, event_categories, scope_filter,
+// disable_after_failures, metadata. `headers`, `thresholds`, and
+// `retry_policy` are returned by the server but not exposed as form
+// controls (headers values are masked on GET so the form cannot
+// round-trip them; thresholds/retry_policy are opaque server config
+// only rarely used in practice — surfaced as read-only JSON on the
+// detail page instead).
+//
+// Diff-before-patch: only the fields the operator actually changed go
+// into the PATCH body. Sending every field unconditionally would
+// overwrite server-owned fields (e.g. metadata keys set by another
+// client) on every save — the spec's PATCH semantics treat null as
+// "clear", so an echoing send of `name: ""` would wipe a name the
+// user didn't touch. `pendingChanges()` reports what will be sent so
+// the operator isn't surprised. Same pattern as ApiKeysView edit
+// (v0.1.25.24 AUDIT entry).
 const showEdit = ref(false)
 const editLoading = ref(false)
 const editError = ref('')
-const editForm = ref({ name: '', url: '', event_types: [] as string[], scope_filter: '', disable_after_failures: '' })
+const editMetadataError = ref('')
+interface EditForm {
+  name: string
+  description: string
+  url: string
+  event_types: string[]
+  event_categories: string[]
+  scope_filter: string
+  disable_after_failures: string
+  metadata: string  // JSON string — parsed on submit
+}
+const editForm = ref<EditForm>({ name: '', description: '', url: '', event_types: [], event_categories: [], scope_filter: '', disable_after_failures: '', metadata: '' })
+const editInitial = ref<EditForm | null>(null)
+
+function snapshotForm(w: WebhookSubscription): EditForm {
+  return {
+    name: w.name ?? '',
+    description: w.description ?? '',
+    url: w.url,
+    event_types: [...(w.event_types || [])],
+    event_categories: [...(w.event_categories || [])],
+    scope_filter: w.scope_filter ?? '',
+    disable_after_failures: String(w.disable_after_failures ?? 10),
+    metadata: w.metadata && Object.keys(w.metadata).length ? JSON.stringify(w.metadata, null, 2) : '',
+  }
+}
 
 function openEdit() {
   if (!webhook.value) return
-  editForm.value = {
-    name: webhook.value.name || '',
-    url: webhook.value.url,
-    event_types: [...(webhook.value.event_types || [])],
-    scope_filter: webhook.value.scope_filter || '',
-    disable_after_failures: String(webhook.value.disable_after_failures ?? '10'),
-  }
+  // Two independent snapshots: editForm gets mutated by the inputs;
+  // editInitial stays frozen as the diff baseline. Sharing the same
+  // object reference made every diff zero — the v-model writes hit
+  // both refs.
+  editForm.value = snapshotForm(webhook.value)
+  editInitial.value = snapshotForm(webhook.value)
   editError.value = ''
+  editMetadataError.value = ''
   showEdit.value = true
 }
 
 async function submitEdit() {
   editError.value = ''
+  editMetadataError.value = ''
   if (!editForm.value.event_types.length) { editError.value = 'Select at least one event type'; return }
+  const body: Record<string, unknown> = {}
+  const init = editInitial.value
+  if (!init) return
+  // Diff each field. For strings, empty → undefined so we don't echo
+  // an empty value that would overwrite a server default.
+  if (editForm.value.name !== init.name) body.name = editForm.value.name || null
+  if (editForm.value.description !== init.description) body.description = editForm.value.description || null
+  if (editForm.value.url !== init.url) body.url = editForm.value.url
+  if (JSON.stringify(editForm.value.event_types) !== JSON.stringify(init.event_types)) body.event_types = editForm.value.event_types
+  if (JSON.stringify(editForm.value.event_categories) !== JSON.stringify(init.event_categories)) body.event_categories = editForm.value.event_categories
+  if (editForm.value.scope_filter !== init.scope_filter) body.scope_filter = editForm.value.scope_filter || null
+  if (editForm.value.disable_after_failures !== init.disable_after_failures) body.disable_after_failures = Number(editForm.value.disable_after_failures)
+  if (editForm.value.metadata !== init.metadata) {
+    if (editForm.value.metadata.trim() === '') {
+      body.metadata = null
+    } else {
+      try {
+        const parsed = JSON.parse(editForm.value.metadata)
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          editMetadataError.value = 'Metadata must be a JSON object'
+          return
+        }
+        body.metadata = parsed
+      } catch { editMetadataError.value = 'Invalid JSON'; return }
+    }
+  }
+  if (Object.keys(body).length === 0) { editError.value = 'No changes to save'; return }
   editLoading.value = true
   try {
-    const body: Record<string, unknown> = {
-      url: editForm.value.url,
-      event_types: editForm.value.event_types,
-    }
-    if (editForm.value.name) body.name = editForm.value.name
-    if (editForm.value.scope_filter) body.scope_filter = editForm.value.scope_filter
-    if (editForm.value.disable_after_failures) body.disable_after_failures = Number(editForm.value.disable_after_failures)
     await updateWebhook(id, body)
     toast.success('Webhook updated')
     webhook.value = await getWebhook(id)
@@ -390,30 +454,48 @@ watch(exportError, (v) => { if (v) error.value = v })
             />
           </div>
         </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-          <div class="info-panel"><span class="form-label">URL</span><span class="font-mono text-xs break-all">{{ webhook.url }}</span></div>
-          <div class="info-panel"><span class="form-label">Tenant</span><TenantLink :tenant-id="webhook.tenant_id" /></div>
+        <!-- Compact metadata: rich content (URL, event types, headers, etc.)
+             keeps panel cards; identifiers + timestamps + failure threshold
+             collapse into single inline strips so Delivery History gets the
+             vertical space below the fold. -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+          <div class="info-panel md:col-span-2"><span class="form-label">URL</span><span class="font-mono text-xs break-all">{{ webhook.url }}</span></div>
+          <div v-if="webhook.description" class="info-panel md:col-span-2"><span class="form-label">Description</span><span class="text-gray-700 whitespace-pre-wrap">{{ webhook.description }}</span></div>
           <div class="info-panel"><span class="form-label">Subscribed Event Types</span><div class="flex flex-wrap gap-1 mt-1"><span v-for="et in (webhook.event_types || [])" :key="et" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs font-mono">{{ et }}</span><span v-if="!webhook.event_types?.length" class="muted-sm">all events</span></div></div>
+          <div v-if="webhook.event_categories?.length" class="info-panel"><span class="form-label">Event Categories</span><div class="flex flex-wrap gap-1 mt-1"><span v-for="ec in webhook.event_categories" :key="ec" class="bg-blue-50 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded text-xs font-mono">{{ ec }}</span></div></div>
           <div v-if="webhook.scope_filter" class="info-panel"><span class="form-label">Scope Filter</span><span class="font-mono text-xs">{{ webhook.scope_filter }}</span></div>
-          <div v-if="webhook.last_success_at" class="info-panel"><span class="form-label">Last Success</span>{{ formatDateTime(webhook.last_success_at) }}</div>
-          <div v-if="webhook.last_failure_at" class="info-panel"><span class="form-label">Last Failure</span>{{ formatDateTime(webhook.last_failure_at) }}</div>
-          <!-- v0.1.25.21 (#10): expose disable_after_failures so ops can
-               see the auto-disable threshold at a glance without
-               opening the edit form. Color the consecutive_failures
-               cell red as it approaches the threshold so a "trending
-               toward auto-disable" subscription is visually obvious. -->
-          <div class="info-panel">
-            <span class="form-label">Failure threshold</span>
-            <span class="tabular-nums">
-              <!-- Danger zone = within 2 of the auto-disable threshold,
-                   floored at 1 so a low threshold (e.g. 1 or 2) doesn't
-                   make 0 failures show as red (false alarm on a
-                   perfectly healthy webhook). -->
-              <span :class="(webhook.consecutive_failures ?? 0) >= Math.max((webhook.disable_after_failures ?? 10) - 2, 1) ? 'text-red-600 font-medium' : 'text-gray-700'">{{ webhook.consecutive_failures ?? 0 }}</span>
-              <span class="muted"> / {{ webhook.disable_after_failures ?? 10 }} consecutive</span>
-            </span>
-            <p class="muted-sm mt-0.5">Server auto-disables the subscription when threshold is reached.</p>
+          <div v-if="webhook.headers && Object.keys(webhook.headers).length > 0" class="info-panel"><span class="form-label">Custom Headers</span><div class="flex flex-wrap gap-1 mt-1"><span v-for="k in Object.keys(webhook.headers)" :key="k" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs font-mono">{{ k }}: ********</span></div></div>
+          <div v-if="webhook.metadata && Object.keys(webhook.metadata).length > 0" class="info-panel md:col-span-2">
+            <span class="form-label">Metadata</span>
+            <pre class="font-mono text-xs whitespace-pre-wrap break-all bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded px-2 py-1 mt-1">{{ JSON.stringify(webhook.metadata, null, 2) }}</pre>
           </div>
+        </div>
+
+        <!-- Identity + auto-disable threshold row. One line, no panel
+             chrome, monospace ID + tenant link + failure tally with the
+             same red-near-threshold signal as before. -->
+        <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs muted">
+          <span><span class="muted-sm mr-1">ID</span><span class="font-mono text-gray-700 dark:text-gray-300 break-all">{{ webhook.subscription_id }}</span></span>
+          <span><span class="muted-sm mr-1">Tenant</span><TenantLink :tenant-id="webhook.tenant_id" /></span>
+          <span :title="`Server auto-disables the subscription when ${webhook.disable_after_failures ?? 10} consecutive failures are reached.`">
+            <span class="muted-sm mr-1">Failures</span>
+            <span class="tabular-nums">
+              <span :class="(webhook.consecutive_failures ?? 0) >= Math.max((webhook.disable_after_failures ?? 10) - 2, 1) ? 'text-red-600 font-medium' : 'text-gray-700 dark:text-gray-300'">{{ webhook.consecutive_failures ?? 0 }}</span>
+              <span class="muted"> / {{ webhook.disable_after_failures ?? 10 }}</span>
+            </span>
+          </span>
+        </div>
+
+        <!-- Timestamp footer. All five date stamps inline with dot
+             separators. Previously each was its own ~50px info-panel
+             card — five cards consumed ~250px of vertical space and
+             pushed Delivery History below the fold. -->
+        <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs muted">
+          <span><span class="muted-sm mr-1">Created</span>{{ formatDateTime(webhook.created_at) }}</span>
+          <span v-if="webhook.updated_at" class="before:content-['·'] before:mr-3"><span class="muted-sm mr-1">Updated</span>{{ formatDateTime(webhook.updated_at) }}</span>
+          <span v-if="webhook.last_triggered_at" class="before:content-['·'] before:mr-3"><span class="muted-sm mr-1">Last triggered</span>{{ formatDateTime(webhook.last_triggered_at) }}</span>
+          <span v-if="webhook.last_success_at" class="before:content-['·'] before:mr-3"><span class="muted-sm mr-1">Last success</span><span class="text-green-700 dark:text-green-400">{{ formatDateTime(webhook.last_success_at) }}</span></span>
+          <span v-if="webhook.last_failure_at" class="before:content-['·'] before:mr-3"><span class="muted-sm mr-1">Last failure</span><span class="text-red-600 dark:text-red-400">{{ formatDateTime(webhook.last_failure_at) }}</span></span>
         </div>
       </div>
 
@@ -620,7 +702,11 @@ watch(exportError, (v) => { if (v) error.value = v })
     <FormDialog v-if="showEdit" title="Edit Webhook" submit-label="Save Changes" :loading="editLoading" :error="editError" @submit="submitEdit" @cancel="showEdit = false" :wide="true">
       <div>
         <label for="ew-name" class="form-label">Name</label>
-        <input id="ew-name" v-model="editForm.name" class="form-input" />
+        <input id="ew-name" v-model="editForm.name" class="form-input" placeholder="Human-readable name (optional)" maxlength="256" />
+      </div>
+      <div>
+        <label for="ew-description" class="form-label">Description</label>
+        <textarea id="ew-description" v-model="editForm.description" class="form-input" rows="2" placeholder="What this webhook is for (optional)" maxlength="1024" />
       </div>
       <div>
         <label for="ew-url" class="form-label">URL</label>
@@ -635,6 +721,15 @@ watch(exportError, (v) => { if (v) error.value = v })
           </label>
         </div>
       </div>
+      <div>
+        <label class="form-label">Event categories <span class="muted-sm">(additive — subscribes to all events in category, including future ones)</span></label>
+        <div class="flex flex-wrap gap-2 border border-gray-200 rounded p-2">
+          <label v-for="ec in EVENT_CATEGORIES" :key="ec" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+            <input type="checkbox" :value="ec" v-model="editForm.event_categories" class="rounded" />
+            {{ ec }}
+          </label>
+        </div>
+      </div>
       <div class="grid grid-cols-2 gap-3">
         <div>
           <label for="ew-scope" class="form-label">Scope filter</label>
@@ -643,6 +738,18 @@ watch(exportError, (v) => { if (v) error.value = v })
         <div>
           <label for="ew-failures" class="form-label">Disable after failures</label>
           <input id="ew-failures" v-model="editForm.disable_after_failures" type="number" min="1" class="form-input" />
+        </div>
+      </div>
+      <div>
+        <label for="ew-metadata" class="form-label">Metadata <span class="muted-sm">(JSON object, optional)</span></label>
+        <textarea id="ew-metadata" v-model="editForm.metadata" class="form-input-mono" rows="4" placeholder='{ "team": "payments", "env": "prod" }' />
+        <p v-if="editMetadataError" class="text-xs text-red-600 mt-1">{{ editMetadataError }}</p>
+      </div>
+      <div v-if="webhook && webhook.headers && Object.keys(webhook.headers).length > 0" class="info-panel">
+        <span class="form-label">Custom headers</span>
+        <p class="muted-sm mb-1">Keys preserved, values encrypted on the server and masked on read. Rotating values requires re-creating the subscription.</p>
+        <div class="flex flex-wrap gap-1 mt-1">
+          <span v-for="k in Object.keys(webhook.headers)" :key="k" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs font-mono">{{ k }}: ********</span>
         </div>
       </div>
     </FormDialog>

@@ -39,6 +39,19 @@
      the generic `.dark select` rule further down takes over. */
   .form-select      { @apply border border-gray-300 rounded px-2 py-1.5 text-sm bg-white; }
 
+  /* Focus-visible rings on form controls. Browser defaults are
+     inconsistent and often invisible on dark (Chromium's dotted outline
+     blends into the gray-800 input bg). Keyboard users lose their place
+     between tab stops; mouse users are unaffected because :focus-visible
+     suppresses the ring on click. Ring color matches SortHeader + button
+     classes below for a single "this is focused" signal across controls. */
+  .form-input:focus-visible,
+  .form-input-mono:focus-visible,
+  .form-select:focus-visible {
+    @apply outline-none ring-2 ring-blue-500;
+    border-color: var(--color-blue-500);
+  }
+
   /* Optional width: most selects are auto-width, some (create-form
      dialogs) want w-full. Compose: `class="form-select w-full"`. */
 
@@ -87,6 +100,46 @@
   /* Neutral pill — edit / send-test / secondary actions. Uses gray rather
      than a semantic color so it visually recedes next to danger/success. */
   .btn-pill-secondary { @apply text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors; }
+
+  /* Disabled + focus-visible consistency across btn-pill-* / btn-row-*.
+     Pre-fix, only `.btn-row-kebab` had a focus-visible ring, and the
+     pill classes had no :disabled handling at all — clicking a disabled
+     pill showed the hover-bg tint via the still-firing hover rule, and
+     tab-focus on any pill was invisible on dark. Matches the ring-blue-500
+     convention used by SortHeader and .form-input:focus-visible. */
+  .btn-pill-danger:focus-visible,
+  .btn-pill-success:focus-visible,
+  .btn-pill-primary:focus-visible,
+  .btn-pill-secondary:focus-visible,
+  .btn-row-danger:focus-visible,
+  .btn-row-success:focus-visible,
+  .btn-row-primary:focus-visible {
+    @apply outline-none ring-2 ring-blue-500 rounded;
+  }
+
+  .btn-pill-danger:disabled,
+  .btn-pill-success:disabled,
+  .btn-pill-primary:disabled,
+  .btn-pill-secondary:disabled,
+  .btn-row-danger:disabled,
+  .btn-row-success:disabled,
+  .btn-row-primary:disabled {
+    @apply opacity-50 cursor-not-allowed;
+  }
+  /* Defeat hover-bg / hover-underline on disabled — @apply inlines the
+     hover rules without a :not(:disabled) guard, so a disabled pill
+     otherwise still lights up on pointer-over. */
+  .btn-pill-danger:disabled:hover,
+  .btn-pill-success:disabled:hover,
+  .btn-pill-primary:disabled:hover,
+  .btn-pill-secondary:disabled:hover {
+    background-color: transparent;
+  }
+  .btn-row-danger:disabled:hover,
+  .btn-row-success:disabled:hover,
+  .btn-row-primary:disabled:hover {
+    text-decoration: none;
+  }
 
   /* Kebab (⋮) trigger — 28×28 square tap target used by RowActionsMenu.
      aria-expanded=true rotates the icon color subtly via the open state
@@ -164,6 +217,13 @@
   background-color: var(--color-gray-800);
   border-color: var(--color-gray-600);
   color: var(--color-gray-200);
+}
+/* Dark variant of the focus-visible ring — same ring color (blue-500),
+   but tune the border so it doesn't fight the ring on gray-800 bg. */
+.dark .form-input:focus-visible,
+.dark .form-input-mono:focus-visible,
+.dark .form-select:focus-visible {
+  border-color: var(--color-blue-500);
 }
 
 /* Banners */
