@@ -374,6 +374,22 @@ describe('endpoint wrappers — smoke', () => {
       expect(url.searchParams.get('tenant')).toBe('acme')
       expect(url.searchParams.get('status')).toBeNull()
       expect(url.searchParams.get('limit')).toBeNull()
+      expect(url.searchParams.get('sort_by')).toBeNull()
+      expect(url.searchParams.get('sort_dir')).toBeNull()
+    })
+
+    it('listReservations → forwards sort_by + sort_dir as query params', async () => {
+      // V4 server-sort wire-up: cycles-server v0.1.25.12+ accepts these two
+      // params and returns results sorted with a reservation_id tie-breaker.
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ reservations: [] })))
+      await api.listReservations('acme', {
+        limit: 100,
+        sort_by: 'created_at_ms',
+        sort_dir: 'desc',
+      })
+      const url = new URL(String(lastCall()[0]))
+      expect(url.searchParams.get('sort_by')).toBe('created_at_ms')
+      expect(url.searchParams.get('sort_dir')).toBe('desc')
     })
 
     it('getReservation → GET /v1/reservations/{id}', async () => {

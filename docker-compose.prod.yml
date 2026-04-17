@@ -28,7 +28,7 @@ services:
     # Runtime-plane server. Release cadence is independent of dashboard +
     # cycles-server-admin — this tag intentionally lags the others. Only
     # bump when a new runtime-plane feature requires it.
-    image: ghcr.io/runcycles/cycles-server:0.1.25.8
+    image: ghcr.io/runcycles/cycles-server:0.1.25.12
     restart: unless-stopped
     environment:
       REDIS_HOST: redis

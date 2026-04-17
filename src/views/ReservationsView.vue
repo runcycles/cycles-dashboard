@@ -59,19 +59,23 @@ const PAGE_SIZE = 100
 const hasMore = ref(false)
 const nextCursor = ref('')
 
-// Sort local, not server — the runtime spec doesn't guarantee stable
-// ordering of returned reservations. Default to created_at desc (newest
-// first): the common workflow is "what did my agents do most recently",
-// not "which reservation has been stuck longest". Click the Created
-// header once to flip back to ascending for the oldest-stuck-first view.
-// `reserved` needs an accessor because the raw field is an object
-// ({unit, amount}) — without it useSort stringifies to "[object Object]"
-// and every row compares equal (silent no-op on header click).
+// Server-side sort — cycles-server v0.1.25.12+ supports sort_by/sort_dir
+// on GET /v1/reservations with a stable reservation_id tie-breaker so
+// cursor pagination stays deterministic under ties. Default created_at_ms
+// desc (newest first): common workflow is "what did my agents do most
+// recently". Click the Created header once to flip to ascending for the
+// oldest-stuck-first view.
+//
+// The SortHeader accessors for `reserved` are no longer strictly needed
+// (server sorts by amount via the `reserved` enum key) but kept for the
+// fallback path — if a future view opts back to client-side sort we
+// don't want `[object Object]` surprises.
 const { sortKey, sortDir, toggle, sorted: sortedReservations } = useSort(
   reservations,
   'created_at_ms',
   'desc',
   { reserved: (r) => r.reserved.amount },
+  { serverSide: true, onChange: () => { loadReservations() } },
 )
 
 async function loadTenants() {
@@ -105,7 +109,16 @@ async function loadReservations() {
   nextCursor.value = ''
   hasMore.value = false
   try {
-    const params: { status?: string; limit?: number } = { limit: PAGE_SIZE }
+    const params: {
+      status?: string
+      limit?: number
+      sort_by?: string
+      sort_dir?: 'asc' | 'desc'
+    } = {
+      limit: PAGE_SIZE,
+      sort_by: sortKey.value || undefined,
+      sort_dir: sortKey.value ? sortDir.value : undefined,
+    }
     if (statusFilter.value) params.status = statusFilter.value
     const res = await listReservations(tenantFilter.value, params)
     reservations.value = res.reservations
@@ -120,9 +133,20 @@ async function loadMore() {
   if (!nextCursor.value || loadingMore.value || !tenantFilter.value) return
   loadingMore.value = true
   try {
-    const params: { status?: string; limit?: number; cursor?: string } = {
+    // Pass the same sort tuple the server validates against the cursor.
+    // Omitting sort params on page 2+ under a sorted cursor would 400
+    // with INVALID_REQUEST (cursor-tuple mismatch per v0.1.25.12 spec).
+    const params: {
+      status?: string
+      limit?: number
+      cursor?: string
+      sort_by?: string
+      sort_dir?: 'asc' | 'desc'
+    } = {
       limit: PAGE_SIZE,
       cursor: nextCursor.value,
+      sort_by: sortKey.value || undefined,
+      sort_dir: sortKey.value ? sortDir.value : undefined,
     }
     if (statusFilter.value) params.status = statusFilter.value
     const res = await listReservations(tenantFilter.value, params)
@@ -154,9 +178,20 @@ const {
   nextCursor,
   fetchPage: async (cursor) => {
     if (!tenantFilter.value) return { items: [], hasMore: false, nextCursor: '' }
-    const params: { status?: string; limit?: number; cursor?: string } = {
+    // Export pages must pass the same sort tuple bound to the cursor —
+    // the server validates the cursor's filter_hash against the current
+    // (sort_by, sort_dir, filters) tuple and 400s on mismatch.
+    const params: {
+      status?: string
+      limit?: number
+      cursor?: string
+      sort_by?: string
+      sort_dir?: 'asc' | 'desc'
+    } = {
       limit: PAGE_SIZE,
       cursor,
+      sort_by: sortKey.value || undefined,
+      sort_dir: sortKey.value ? sortDir.value : undefined,
     }
     if (statusFilter.value) params.status = statusFilter.value
     const res = await listReservations(tenantFilter.value, params)
