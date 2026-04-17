@@ -400,12 +400,25 @@ export const updateWebhookSecurityConfig = (body: import('../types').WebhookSecu
 // Server interceptor accepts X-Admin-API-Key on this allowlisted subset.
 export function listReservations(
   tenantId: string,
-  params?: { status?: string; limit?: number; cursor?: string },
+  params?: {
+    status?: string
+    limit?: number
+    cursor?: string
+    // v0.1.25.12 (cycles-server): server-side sort on GET /v1/reservations.
+    // Valid sort_by: reservation_id | tenant | scope_path | status | reserved
+    //              | created_at_ms  | expires_at_ms
+    // Valid sort_dir: asc | desc (server defaults to desc when sort_by is
+    // provided; omit both for legacy SCAN-order pagination).
+    sort_by?: string
+    sort_dir?: 'asc' | 'desc'
+  },
 ): Promise<import('../types').ReservationListResponse> {
   const q: Record<string, string> = { tenant: tenantId }
   if (params?.status) q.status = params.status
   if (params?.limit !== undefined) q.limit = String(params.limit)
   if (params?.cursor) q.cursor = params.cursor
+  if (params?.sort_by) q.sort_by = params.sort_by
+  if (params?.sort_dir) q.sort_dir = params.sort_dir
   return get<import('../types').ReservationListResponse>(`/v1/reservations`, q)
 }
 

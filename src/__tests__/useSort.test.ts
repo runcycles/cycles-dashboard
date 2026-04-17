@@ -133,4 +133,54 @@ describe('useSort', () => {
     ]
     expect(s.sorted.value.map(r => r.count)).toEqual([50, 100])
   })
+
+  // ─── Server-side sort mode (V4) ──────────────────────────────────
+
+  describe('server-side mode', () => {
+    it('does not re-sort items client-side when serverSide=true', () => {
+      const items = ref<Row[]>([...sampleRows])
+      const s = useSort<Row>(items, 'id', 'asc', undefined, { serverSide: true })
+      // Backing ref is in [c, a, b] order — server-mode passes through
+      // verbatim so the cursor tie-breaker the server chose isn't destroyed.
+      expect(s.sorted.value.map(r => r.id)).toEqual(['c', 'a', 'b'])
+    })
+
+    it('fires onChange with (key, dir) on toggle', () => {
+      const items = ref<Row[]>([...sampleRows])
+      const calls: Array<[string, 'asc' | 'desc']> = []
+      const s = useSort<Row>(items, undefined, 'asc', undefined, {
+        serverSide: true,
+        onChange: (key, dir) => { calls.push([key, dir]) },
+      })
+      s.toggle('count')
+      expect(calls).toEqual([['count', 'asc']])
+      s.toggle('count') // flip to desc
+      expect(calls).toEqual([['count', 'asc'], ['count', 'desc']])
+      s.toggle('id') // switch column → resets to asc
+      expect(calls).toEqual([['count', 'asc'], ['count', 'desc'], ['id', 'asc']])
+    })
+
+    it('updates sortKey / sortDir reactively so SortHeader reflects state', () => {
+      const items = ref<Row[]>([...sampleRows])
+      const s = useSort<Row>(items, 'id', 'asc', undefined, { serverSide: true })
+      expect(s.sortKey.value).toBe('id')
+      s.toggle('count')
+      expect(s.sortKey.value).toBe('count')
+      expect(s.sortDir.value).toBe('asc')
+      s.toggle('count')
+      expect(s.sortDir.value).toBe('desc')
+    })
+
+    it('fires onChange in client-mode too when the callback is provided', () => {
+      // Client-mode views can use onChange for analytics/telemetry even
+      // if they're not re-fetching from the server.
+      const items = ref<Row[]>([...sampleRows])
+      let called = 0
+      const s = useSort<Row>(items, undefined, 'asc', undefined, {
+        onChange: () => { called++ },
+      })
+      s.toggle('id')
+      expect(called).toBe(1)
+    })
+  })
 })
