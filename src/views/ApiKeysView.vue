@@ -481,11 +481,11 @@ function closePermsViewer() { viewingPermsFor.value = null }
           >
             <div role="cell" class="table-cell"><MaskedValue :value="sortedKeys[v.index].key_id" /></div>
             <div role="cell" class="table-cell text-gray-700 truncate">{{ sortedKeys[v.index].name || '-' }}</div>
-            <div role="cell" class="table-cell">
+            <div role="cell" class="table-cell min-w-0 overflow-hidden">
               <TenantLink :tenant-id="sortedKeys[v.index].tenant_id" />
             </div>
             <div role="cell" class="table-cell"><StatusBadge :status="sortedKeys[v.index].status" /></div>
-            <div role="cell" class="table-cell muted-sm">
+            <div role="cell" class="table-cell muted-sm min-w-0 overflow-hidden">
               <!-- Preview 4 chips (wraps 2-per-line inside the column
                    width) + always-visible "N perms" pill for the full
                    list. Row height is 76px to fit two chip rows.
@@ -494,7 +494,12 @@ function closePermsViewer() { viewingPermsFor.value = null }
                    - Pill on the right, flex-shrink-0, self-start so it
                      anchors to the top even when chips wrap.
                    - If a key has > 4 permissions the pill's count (e.g.
-                     "6 perms") signals there's more; click to open. -->
+                     "6 perms") signals there's more; click to open.
+                   - min-w-0 on the cell is load-bearing: grid items
+                     default to min-width:auto, so chip min-content
+                     would otherwise force this track wider than its
+                     minmax(260px, 2.5fr) floor and push the Actions
+                     column off-screen. -->
               <div v-if="(sortedKeys[v.index].permissions?.length ?? 0) > 0" class="flex gap-2 items-start">
                 <div class="flex flex-wrap gap-1 min-w-0 flex-1">
                   <span

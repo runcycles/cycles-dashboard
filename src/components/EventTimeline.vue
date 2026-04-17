@@ -55,7 +55,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
   <div
     v-else
     ref="scrollEl"
-    class="flex-1 overflow-y-auto min-h-[200px]"
+    class="flex-1 overflow-y-auto overflow-x-hidden min-h-[200px]"
   >
     <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
       <div
