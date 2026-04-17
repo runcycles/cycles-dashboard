@@ -23,7 +23,7 @@ import { filterExpiringKeys, type ExpiringKey } from '../utils/expiringKeys'
 const overview = ref<AdminOverviewResponse | null>(null)
 const keys = ref<ApiKey[]>([])
 const recentAudit = ref<AuditLogEntry[]>([])
-// Budgets with utilization ≥ 100%. The Overview payload's
+// Budgets at or near cap (utilization ≥ 90%). The Overview payload's
 // `over_limit_scopes` is narrower than what operators expect: per
 // spec (cycles-governance-admin-v0.1.25.yaml:1415–1417)
 // `is_over_limit = debt > overdraft_limit` — purely a financial
@@ -31,9 +31,11 @@ const recentAudit = ref<AuditLogEntry[]>([])
 // (e.g. overdraft_limit = 0, so commit_overage_policy denied the
 // overage) is NOT in `over_limit_scopes` even though it's the
 // operator-visible "this budget is broken" state. Pull the broader
-// at-cap set from listBudgets?utilization_min=1.0 to close that
-// gap. 10 rows is plenty for a landing card — operators drill in
-// from here, they don't inspect every at-cap budget inline.
+// at-or-near-cap set from listBudgets?utilization_min=0.9 to close
+// that gap AND surface budgets about to blow before they do. The
+// card encodes severity inline: rows ≥100% render red (at cap),
+// rows 90–99% render amber (near cap, approaching trouble). 10 rows
+// is plenty for a landing card.
 const atCapBudgets = ref<BudgetLedger[]>([])
 const error = ref('')
 
@@ -50,9 +52,11 @@ const { refresh, isLoading } = usePolling(async () => {
     // Last 10 audit entries, newest first. Server default sort is
     // timestamp desc per governance-admin spec, so no sort params needed.
     listAuditLogs({ limit: '10' }),
-    // Budgets at/over cap (utilization ≥ 1.0). Includes both
-    // exhausted-without-debt (our blind spot) AND over-limit-via-debt.
-    listBudgets({ utilization_min: '1.0', limit: '10' }),
+    // Budgets at or near cap (utilization ≥ 0.9). Catches
+    // exhausted-without-debt (our blind spot), over-limit-via-debt,
+    // AND the 90–99% range so operators can intervene before a
+    // budget actually blows rather than after.
+    listBudgets({ utilization_min: '0.9', limit: '10' }),
   ])
   if (ov.status === 'fulfilled') overview.value = ov.value
   if (apiKeys.status === 'fulfilled') keys.value = apiKeys.value.keys
@@ -143,10 +147,19 @@ const alertAxes = computed<AlertAxis[]>(() => {
     axes.push({ id: 'failing-webhooks', label: 'Failing webhooks', count: overview.value.webhook_counts.with_failures, severity: 'danger' })
   }
   // atCapBudgets is broader than overview.budget_counts.over_limit —
-  // catches exhausted-without-debt too (see atCapBudgets declaration
-  // for spec-gap rationale).
+  // catches exhausted-without-debt AND the 90–99% "about to blow"
+  // range (see atCapBudgets declaration for spec-gap rationale).
+  // Severity tracks the worst row: danger if any budget is actually
+  // at/over cap, warning if everything firing is in the near-cap
+  // 90–99% range.
   if (atCapBudgets.value.length > 0) {
-    axes.push({ id: 'budgets-at-cap', label: 'Budgets at cap', count: atCapBudgets.value.length, severity: 'danger' })
+    const anyAtCap = atCapBudgets.value.some(b => utilizationOf(b) >= 1)
+    axes.push({
+      id: 'budgets-at-cap',
+      label: anyAtCap ? 'Budgets at or near cap' : 'Budgets near cap',
+      count: atCapBudgets.value.length,
+      severity: anyAtCap ? 'danger' : 'warning',
+    })
   }
   if (overview.value.recent_denials.length > 0) {
     axes.push({ id: 'recent-denials', label: 'Recent denials', count: overview.value.recent_denials.length, severity: 'danger' })
@@ -250,7 +263,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
         <svg class="w-5 h-5 text-green-600 dark:text-green-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" /></svg>
         <p class="text-sm text-green-900 dark:text-green-200">
           <strong>All clear.</strong>
-          No webhooks failing, no budgets over limit, no keys near expiry, no denials in the last hour.
+          No webhooks failing, no budgets near cap, no keys near expiry, no denials in the last hour.
         </p>
       </div>
 
@@ -408,29 +421,46 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
            grouping all budget-scoped alerts on row 1 makes "state of
            budgets" a single horizontal scan. -->
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-        <!-- Budgets at cap — utilization ≥ 100%. Broader than the
-             spec's `over_limit` (debt > overdraft_limit) so exhausted
-             budgets with no overdraft appetite also show up here;
-             see atCapBudgets declaration in the script block. Shows
-             utilization % so operators see the severity at a glance
-             and can prioritize the most-blown first (sorted desc).
+        <!-- Budgets at or near cap — utilization ≥ 90%. Broader than
+             the spec's `over_limit` (debt > overdraft_limit) so
+             exhausted budgets with no overdraft appetite AND budgets
+             in the 90–99% "about to blow" range both surface here;
+             see atCapBudgets declaration in the script block. Row-level
+             color encodes per-budget severity (red ≥100%, amber 90–99%)
+             so operators can triage at-cap vs. approaching at a glance.
+             Card-level severity (border + icon + badge) follows the
+             worst row — danger if any budget is actually at/over cap,
+             warning if everything firing is in the near-cap range.
              Leads row 1 — the three budget cards are grouped together
              because "state of budgets" is the headline ops question. -->
         <div
           id="budgets-at-cap"
           class="card p-4"
           data-testid="budgets-at-cap-card"
-          :class="axisById['budgets-at-cap'] ? 'border-l-4 border-l-red-500 dark:border-l-red-500' : ''"
+          :class="axisById['budgets-at-cap']
+            ? (axisById['budgets-at-cap'].severity === 'danger'
+                ? 'border-l-4 border-l-red-500 dark:border-l-red-500'
+                : 'border-l-4 border-l-amber-500 dark:border-l-amber-500')
+            : ''"
         >
           <div class="flex justify-between items-center mb-3">
             <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
-              <svg v-if="axisById['budgets-at-cap']" class="w-4 h-4 text-red-500 dark:text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
-              Budgets at Cap
-              <span v-if="atCapBudgets.length > 0" class="ml-1 badge-danger">{{ atCapBudgets.length }}</span>
+              <svg
+                v-if="axisById['budgets-at-cap']"
+                class="w-4 h-4 shrink-0"
+                :class="axisById['budgets-at-cap'].severity === 'danger' ? 'text-red-500 dark:text-red-400' : 'text-amber-500 dark:text-amber-400'"
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"
+              ><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+              Budgets At or Near Cap
+              <span
+                v-if="atCapBudgets.length > 0"
+                class="ml-1"
+                :class="axisById['budgets-at-cap']?.severity === 'danger' ? 'badge-danger' : 'badge-warning'"
+              >{{ atCapBudgets.length }}</span>
             </h2>
-            <router-link :to="{ name: 'budgets', query: { utilization_min: '1.0' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
+            <router-link :to="{ name: 'budgets', query: { utilization_min: '0.9' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
-          <div v-if="atCapSorted.length === 0" class="text-sm muted py-4 text-center">All budgets within allocation</div>
+          <div v-if="atCapSorted.length === 0" class="text-sm muted py-4 text-center">All budgets under 90% utilized</div>
           <div
             v-for="b in atCapSorted"
             :key="b.scope + b.unit"

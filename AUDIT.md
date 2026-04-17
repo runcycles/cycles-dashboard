@@ -31,6 +31,29 @@
 - `vitest run` — **505 / 505 passing** across 40 files (+58 new across 4 commits in this release: 32 for the I1/I3 rebuild covering alert-banner states / Expiring Keys / Recent Activity / counter-strip DOM order / per-tile chip layout / zero-count omission / graceful degradation; +3 for `recent_denials_by_reason` populated-sorted-desc + absent-field + empty-object; +1 guard that the old expiries card stays removed; +2 for raw-enum operation format matching AuditView; **+17 for the new AuditView filter DSL** covering error_code normalization / IN-list dedupe / whitespace-separated parsing / datalist enum coverage / all five status-band mappings / mutex-sidestep / search field copy / URL-param deep-link including unknown-band defensive fallback; **+3 for the Overview denial-pill router-link drill-down** asserting anchors render with href + route name + query payload + title tooltip).
 - `vite build` — clean, 897ms.
 
+### 2026-04-17 — Overview "Budgets at Cap" card widened to at-or-near-cap (≥90%) with inline severity split
+
+**Scope.** Dashboard-only, tightening on the just-landed Budgets-at-Cap card. No spec or server change.
+
+**Why.** At 100% the card only fires *after* a budget has already gone over. Operators asked to be warned earlier so they can intervene before a budget blows, not after. Dropping the threshold to 90% turns the card from a "who broke what last night" read into a "what's about to break in the next hour" read — the classic near-miss watch list that Grafana / Datadog / Cloudflare surface as a single panel with severity encoded inside.
+
+**What shipped.**
+
+- **Server call** widened from `listBudgets?utilization_min=1.0` → `utilization_min=0.9`. Catches exhausted-without-debt (the 114% user-reported case), over-limit-via-debt, AND 90–99% near-miss budgets in one fetch.
+- **Inline severity split.** Row-level utilization percentage was already color-coded red (≥100%) / amber (90–99%) — the amber branch was dead code under the old 1.0 filter and is now live. Card-level severity (border-left color, title icon color, count badge) follows the **worst row**: `danger` (red) if any budget is at/over cap, `warning` (amber) if every firing budget is in the 90–99% range.
+- **Axis label is adaptive.** "Budgets at or near cap" when any row is ≥100%; "Budgets near cap" when everything firing is 90–99%. The banner pill color matches: `chip-danger` vs `chip-warning`. One card in the grid, two severity reads at a glance.
+- **Card title** → "Budgets At or Near Cap". **"View all" link** broadened to `/budgets?utilization_min=0.9` for consistency with card content. **Empty-state copy** → "All budgets under 90% utilized". **Banner all-clear copy** touched: "no budgets over limit" → "no budgets near cap" since the bar is now lower.
+
+**Files.** `src/views/OverviewView.vue` (filter param, adaptive axis severity + label, severity-gated card border/icon/badge classes, title + empty-state + all-clear copy updates). `src/__tests__/OverviewView.test.ts` (+2 new severity specs — near-cap-only fires warning / at-cap-dominates-mixed stays danger; 2 existing specs updated for new copy + new param value).
+
+**Validation gates.**
+
+- `vue-tsc --noEmit` — clean.
+- `vitest run` — **547 / 547 passing** across 42 files (+2 net — near-cap warning severity + mixed-severity danger-dominates).
+- `vite build` — clean, 938ms.
+
+**No version bump.** Threshold tightening on the same card shipped earlier today — no wire-format change, no URL-contract change (the `utilization_min` query param is already honored by BudgetsView). AUDIT entry only.
+
 ### 2026-04-17 — Overview alert grid: budget cards grouped on row 1
 
 **Scope.** Dashboard-only, layout polish on the just-landed Budgets-at-Cap rework. No spec or server change.

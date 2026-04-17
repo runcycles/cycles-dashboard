@@ -201,7 +201,7 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       const axes = w.find('[data-testid="alert-axes"]')
       expect(axes.exists()).toBe(true)
       expect(axes.text()).toContain('Failing webhooks')
-      expect(axes.text()).toContain('Budgets at cap')
+      expect(axes.text()).toContain('Budgets at or near cap')
       expect(axes.text()).toContain('Frozen budgets')
     })
 
@@ -278,12 +278,59 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       expect(card.text()).toContain('114%')
     })
 
-    it('calls listBudgets with utilization_min=1.0', async () => {
+    it('calls listBudgets with utilization_min=0.9 (catches near-cap too)', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview())
       await mountOverview()
       expect(listBudgetsMock).toHaveBeenCalledTimes(1)
       const params = listBudgetsMock.mock.calls[0][0]
-      expect(params.utilization_min).toBe('1.0')
+      expect(params.utilization_min).toBe('0.9')
+    })
+
+    it('fires as warning severity when all firing budgets are in 90-99% range (near cap, none over)', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      listBudgetsMock.mockResolvedValue({
+        ledgers: [atCapBudget('acme/prod', {
+          allocated: { unit: 'tokens', amount: 1000 },
+          spent: { unit: 'tokens', amount: 920 },
+        })], // 92%
+        has_more: false,
+      })
+      const w = await mountOverview()
+      // Axis pill carries chip-warning (amber), not chip-danger (red).
+      const pill = w.find('[data-axis="budgets-at-cap"]')
+      expect(pill.exists()).toBe(true)
+      expect(pill.classes()).toContain('chip-warning')
+      expect(pill.classes()).not.toContain('chip-danger')
+      // Card border also drops from red to amber when no row is at/over cap.
+      const card = w.find('[data-testid="budgets-at-cap-card"]')
+      expect(card.classes()).toContain('border-l-amber-500')
+      expect(card.classes()).not.toContain('border-l-red-500')
+      // Row renders in amber — the dead-code branch for 90-99% is now live.
+      expect(card.text()).toContain('92%')
+    })
+
+    it('fires as danger severity when any budget is at/over cap even if others are only near cap', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      listBudgetsMock.mockResolvedValue({
+        ledgers: [
+          atCapBudget('a', {
+            allocated: { unit: 'tokens', amount: 1000 },
+            spent: { unit: 'tokens', amount: 950 },
+          }), // 95% — near cap
+          atCapBudget('b', {
+            allocated: { unit: 'tokens', amount: 1000 },
+            spent: { unit: 'tokens', amount: 1100 },
+          }), // 110% — at cap
+        ],
+        has_more: false,
+      })
+      const w = await mountOverview()
+      // Presence of the over-cap row pulls the whole card/banner
+      // back to danger severity — the worst row sets the tone.
+      const pill = w.find('[data-axis="budgets-at-cap"]')
+      expect(pill.classes()).toContain('chip-danger')
+      const card = w.find('[data-testid="budgets-at-cap-card"]')
+      expect(card.classes()).toContain('border-l-red-500')
     })
 
     it('sorts at-cap budgets by utilization desc', async () => {
@@ -313,7 +360,7 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       listBudgetsMock.mockResolvedValue({ ledgers: [], has_more: false })
       const w = await mountOverview()
       const card = w.find('[data-testid="budgets-at-cap-card"]')
-      expect(card.text()).toContain('All budgets within allocation')
+      expect(card.text()).toContain('All budgets under 90% utilized')
       expect(w.find('[data-axis="budgets-at-cap"]').exists()).toBe(false)
     })
 
@@ -328,7 +375,7 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       // fetch failed — Promise.allSettled isolates the failure.
       expect(w.find('[data-axis="failing-webhooks"]').exists()).toBe(true)
       // At-cap card renders its empty state (ledgers ref stays []).
-      expect(w.find('[data-testid="budgets-at-cap-card"]').text()).toContain('All budgets within allocation')
+      expect(w.find('[data-testid="budgets-at-cap-card"]').text()).toContain('All budgets under 90% utilized')
     })
   })
 
