@@ -52,6 +52,21 @@ const { refresh, isLoading } = usePolling(async () => {
 const expiringKeys = computed<ExpiringKey[]>(() => filterExpiringKeys(keys.value).slice(0, 5))
 const expiringTotal = computed<number>(() => filterExpiringKeys(keys.value).length)
 
+// Paused webhook count is derived: the server's WebhookCounts schema
+// exposes only {total, active, disabled, with_failures}, but the status
+// enum is {ACTIVE, PAUSED, DISABLED} — total includes PAUSED even though
+// the field is never broken out. `with_failures` is orthogonal to status
+// (it's a failure-count overlay, not a state), so a proper state
+// breakdown is active + paused + disabled = total. Compute paused here
+// so the Webhooks tile reads as a true state aggregate.
+// Math.max guards against server drift so a transient 0-out-of-range
+// never renders a negative chip count.
+const webhookPausedCount = computed<number>(() => {
+  if (!overview.value) return 0
+  const wc = overview.value.webhook_counts
+  return Math.max(0, wc.total - wc.active - wc.disabled)
+})
+
 // Headline: how many alert axes are currently firing. Drives the
 // top-of-page banner so the operator's first glance answers "is
 // anything on fire?" in < 1 second.
@@ -233,9 +248,15 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
               :title="`${overview.webhook_counts.active} active webhooks`"
             >{{ overview.webhook_counts.active }} active</router-link>
             <router-link
+              v-if="webhookPausedCount > 0"
+              :to="{ name: 'webhooks', query: { status: 'PAUSED' } }"
+              class="chip chip-warning"
+              :title="`${webhookPausedCount} paused webhooks`"
+            >{{ webhookPausedCount }} paused</router-link>
+            <router-link
               v-if="overview.webhook_counts.disabled > 0"
               :to="{ name: 'webhooks', query: { status: 'DISABLED' } }"
-              class="chip chip-warning"
+              class="chip chip-neutral"
               :title="`${overview.webhook_counts.disabled} disabled webhooks`"
             >{{ overview.webhook_counts.disabled }} disabled</router-link>
             <router-link

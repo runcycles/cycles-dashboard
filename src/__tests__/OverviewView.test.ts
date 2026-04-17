@@ -315,16 +315,44 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       expect(tile.find('.chip-danger').text()).toContain('3 over')
     })
 
-    it('Webhooks tile: shows active/disabled/failing chips with failing in danger', async () => {
+    it('Webhooks tile: shows active/paused/disabled/failing chips with correct colors', async () => {
+      // total=8, active=4, disabled=1 → derived paused = 8-4-1 = 3.
+      // Paused is yellow (operator-set state), disabled is gray/neutral
+      // (system-terminal after failures), failing overlay is red.
       getOverviewMock.mockResolvedValue(healthyOverview({
-        webhook_counts: { total: 7, active: 4, disabled: 1, with_failures: 2 },
+        webhook_counts: { total: 8, active: 4, disabled: 1, with_failures: 2 },
       }))
       const w = await mountOverview()
       const tile = w.find('[data-testid="tile-webhooks"]')
-      expect(tile.text()).toContain('7')
+      expect(tile.text()).toContain('8')
       expect(tile.find('.chip-success').text()).toContain('4 active')
-      expect(tile.find('.chip-warning').text()).toContain('1 disabled')
+      expect(tile.find('.chip-warning').text()).toContain('3 paused')
+      expect(tile.find('.chip-neutral').text()).toContain('1 disabled')
       expect(tile.find('.chip-danger').text()).toContain('2 failing')
+    })
+
+    it('Webhooks tile: omits Paused chip when active + disabled already equals total', async () => {
+      // Server reports total=5, active=4, disabled=1 — derived paused = 0.
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        webhook_counts: { total: 5, active: 4, disabled: 1, with_failures: 0 },
+      }))
+      const w = await mountOverview()
+      const tile = w.find('[data-testid="tile-webhooks"]')
+      expect(tile.text()).not.toContain('paused')
+      expect(tile.find('.chip-success').text()).toContain('4 active')
+      expect(tile.find('.chip-neutral').text()).toContain('1 disabled')
+    })
+
+    it('Webhooks tile: guards against server drift so derived paused never goes negative', async () => {
+      // Defensive: if total < active+disabled (server snapshot drift),
+      // we clamp to 0 instead of showing a negative chip.
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        webhook_counts: { total: 3, active: 4, disabled: 1, with_failures: 0 },
+      }))
+      const w = await mountOverview()
+      const tile = w.find('[data-testid="tile-webhooks"]')
+      expect(tile.text()).not.toContain('paused')
+      expect(tile.text()).not.toContain('-')
     })
 
     it('Events tile: renders one chip per category with category color', async () => {
