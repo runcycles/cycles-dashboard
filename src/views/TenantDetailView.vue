@@ -34,6 +34,24 @@ const canManageKeys = computed(() => auth.capabilities?.manage_api_keys !== fals
 const canManageBudgets = computed(() => auth.capabilities?.manage_budgets !== false)
 const canManagePolicies = computed(() => auth.capabilities?.manage_policies !== false)
 
+// Breadcrumb back-link origin. When the operator clicks a child tenant
+// from another tenant's "Children" list, the link threads ?parent=<src>
+// so the back arrow here returns to that source instead of defaulting to
+// the flat /tenants list. Same pattern applied in TenantsView for the
+// "+N more" deep-link. Only single-hop; deeper A→B→C→… chains return to
+// the immediately-previous tenant, not the full breadcrumb root.
+const parentFromQuery = computed<string | null>(() => {
+  const p = route.query.parent
+  return typeof p === 'string' && p ? p : null
+})
+function goBack() {
+  if (parentFromQuery.value) {
+    router.push({ name: 'tenant-detail', params: { id: parentFromQuery.value } })
+  } else {
+    router.push('/tenants')
+  }
+}
+
 const tenant = ref<Tenant | null>(null)
 // v0.1.25.21 (#2): sibling tenants keyed off this tenant's id — used
 // for the "Children" list on the header card.
@@ -584,7 +602,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   <div>
     <PageHeader title="Tenant Detail" :subtitle="tenant?.tenant_id" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
       <template #back>
-        <button @click="router.push('/tenants')" aria-label="Back to tenants" class="muted hover:text-gray-700 cursor-pointer">
+        <button @click="goBack" :aria-label="parentFromQuery ? `Back to parent tenant ${parentFromQuery}` : 'Back to tenants'" class="muted hover:text-gray-700 cursor-pointer">
           <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
@@ -621,7 +639,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           <router-link
             v-for="c in childTenants.slice(0, 6)"
             :key="c.tenant_id"
-            :to="{ name: 'tenant-detail', params: { id: c.tenant_id } }"
+            :to="{ name: 'tenant-detail', params: { id: c.tenant_id }, query: { parent: tenant.tenant_id } }"
             class="text-blue-600 hover:underline text-xs font-mono"
           >{{ c.tenant_id }}</router-link>
           <router-link v-if="childTenants.length > 6" :to="{ name: 'tenants', query: { parent: tenant.tenant_id } }" class="muted-sm hover:text-gray-700 hover:underline">… +{{ childTenants.length - 6 }} more</router-link>
