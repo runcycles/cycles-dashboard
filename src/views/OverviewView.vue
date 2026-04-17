@@ -439,12 +439,20 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
             data-testid="denial-reasons"
             class="flex flex-wrap gap-1.5 pb-2 mb-2 border-b border-gray-100 dark:border-gray-700"
           >
-            <span
+            <!-- cycles-governance-admin v0.1.25.24 unlocked server-side
+                 filtering of audit logs by error_code. Each reason pill
+                 now drills into /audit?error_code=CODE&status_band=errors
+                 so the operator lands on the failed admin operations
+                 carrying that code — the actionable read behind "12
+                 denials with reason X". AuditView's URL-param wiring
+                 reads both params on mount. -->
+            <router-link
               v-for="r in denialReasons"
               :key="r.code"
-              class="chip chip-danger"
-              :title="`${r.count} denial${r.count === 1 ? '' : 's'} with reason ${r.code} in the last ${Math.round((overview.event_window_seconds || 3600) / 60)}m`"
-            >{{ r.code }} <span class="ml-1 tabular-nums">×{{ r.count }}</span></span>
+              :to="{ name: 'audit', query: { error_code: r.code, status_band: 'errors' } }"
+              class="chip chip-danger hover:underline"
+              :title="`View ${r.count} audit ${r.count === 1 ? 'entry' : 'entries'} with error_code ${r.code}`"
+            >{{ r.code }} <span class="ml-1 tabular-nums">×{{ r.count }}</span></router-link>
           </div>
           <div
             v-for="e in overview.recent_denials"

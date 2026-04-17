@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 import { listAuditLogs } from '../api/client'
 import { useSort } from '../composables/useSort'
 import { useListExport } from '../composables/useListExport'
+import { ERROR_CODES } from '../types'
 import type { AuditLogEntry } from '../types'
 import PageHeader from '../components/PageHeader.vue'
 import MaskedValue from '../components/MaskedValue.vue'
@@ -54,13 +55,24 @@ const operation = ref('')
 const resourceType = ref('')
 const resourceId = ref('')
 // cycles-governance-admin v0.1.25.21: free-text `search` query param
-// on listAuditLogs (case-insensitive substring match on resource_id +
-// log_id). Sits alongside the existing Resource ID form field, which
-// is already an exact-match pass-through — the search field is what
-// an operator reaches for when they have only a partial ID or want
-// to cover log_id too. Form-submit rather than debounced because this
-// view uses explicit-submit for its whole filter surface.
+// on listAuditLogs. Starting v0.1.25.24 the server-side match set
+// extends to resource_id OR log_id OR error_code OR operation (case-
+// insensitive substring) — closes the gap where `?search=budget`
+// missed BUDGET_EXCEEDED and createBudget. Form-submit rather than
+// debounced because this view uses explicit-submit for its whole
+// filter surface.
 const search = ref('')
+// cycles-governance-admin v0.1.25.24: IN-list on AuditLogEntry.error_code.
+// The field is a comma-separated string in the form; buildFilterParams
+// normalizes (trim, split, drop empties) and passes through as a single
+// comma-joined value for the explode=false wire format.
+const errorCode = ref('')
+// cycles-governance-admin v0.1.25.24: status_min/status_max range filter.
+// Dashboard exposes five preset bands rather than raw min/max inputs —
+// operators rarely care about specific HTTP statuses, they want either
+// "just errors" / "just successes" / a class. Mutex with exact `status`
+// is sidestepped entirely because the dashboard never sends exact status.
+const statusBand = ref<'' | 'success' | 'errors' | '4xx' | '5xx'>('')
 const fromDate = ref('')
 const toDate = ref('')
 
@@ -75,6 +87,25 @@ function buildFilterParams(): Record<string, string> {
   if (operation.value) params.operation = operation.value
   if (resourceType.value) params.resource_type = resourceType.value
   if (resourceId.value) params.resource_id = resourceId.value
+  // Error code is an IN-list (array, explode=false). Accept comma or
+  // whitespace separation in the form, normalize to trimmed comma-join.
+  // Empty / whitespace-only entries dropped; dedupe preserves order.
+  const codes = errorCode.value
+    .split(/[,\s]+/)
+    .map(s => s.trim())
+    .filter(Boolean)
+  if (codes.length > 0) params.error_code = Array.from(new Set(codes)).join(',')
+  // Status band → status_min / status_max pair.
+  if (statusBand.value) {
+    const range: Record<string, [number, number]> = {
+      success: [200, 299],
+      errors:  [400, 599],
+      '4xx':   [400, 499],
+      '5xx':   [500, 599],
+    }
+    const r = range[statusBand.value]
+    if (r) { params.status_min = String(r[0]); params.status_max = String(r[1]) }
+  }
   // Trim before sending — a search of spaces is semantically empty on
   // the server (case-insensitive substring ILIKE), and the spec
   // requires empty → absent.
@@ -190,6 +221,11 @@ function applyQueryParams() {
   if (route.query.resource_type) resourceType.value = String(route.query.resource_type)
   if (route.query.resource_id) resourceId.value = String(route.query.resource_id)
   if (route.query.search) search.value = String(route.query.search)
+  // v0.1.25.24: deep-links can pre-fill error_code (comma-list) + status
+  // band. Used by OverviewView's Recent Denials pill → /audit?error_code=X.
+  if (route.query.error_code) errorCode.value = String(route.query.error_code)
+  const sb = route.query.status_band
+  if (sb === 'success' || sb === 'errors' || sb === '4xx' || sb === '5xx') statusBand.value = sb
 }
 onMounted(() => {
   applyQueryParams()
@@ -298,8 +334,32 @@ function measureRow(el: Element | { $el?: Element } | null) {
           <input id="audit-resource-id" v-model="resourceId" class="form-input" placeholder="key_abc123..." />
         </div>
         <div>
+          <label for="audit-error-code" class="form-label">Error Code</label>
+          <input
+            id="audit-error-code"
+            v-model="errorCode"
+            list="audit-error-code-options"
+            class="form-input"
+            placeholder="BUDGET_EXCEEDED"
+            aria-label="Filter by error_code. Comma-separated for IN-list (e.g. BUDGET_EXCEEDED, POLICY_VIOLATION)."
+          />
+          <datalist id="audit-error-code-options">
+            <option v-for="c in ERROR_CODES" :key="c" :value="c" />
+          </datalist>
+        </div>
+        <div>
+          <label for="audit-status" class="form-label">Status</label>
+          <select id="audit-status" v-model="statusBand" class="form-select w-full">
+            <option value="">All</option>
+            <option value="success">2xx Success</option>
+            <option value="errors">4xx + 5xx Errors</option>
+            <option value="4xx">4xx Client Errors</option>
+            <option value="5xx">5xx Server Errors</option>
+          </select>
+        </div>
+        <div>
           <label for="audit-search" class="form-label">Search</label>
-          <input id="audit-search" v-model="search" type="search" class="form-input" placeholder="resource_id or log_id" aria-label="Search by resource_id or log_id substring" />
+          <input id="audit-search" v-model="search" type="search" class="form-input" placeholder="resource_id, log_id, error_code, operation" aria-label="Free-text substring search across resource_id, log_id, error_code, and operation" />
         </div>
         <div>
           <label for="audit-from" class="form-label">From</label>

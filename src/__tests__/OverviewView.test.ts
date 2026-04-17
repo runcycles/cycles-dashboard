@@ -4,6 +4,7 @@
 // Keys + Recent Activity cards wired to their respective endpoints.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { h as actualH } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '../stores/auth'
@@ -29,7 +30,7 @@ vi.mock('vue-router', async (importOriginal) => {
     ...actual,
     useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
     useRoute: () => ({ query: {}, params: {} }),
-    RouterLink: { props: ['to'], template: '<a :href="typeof to === \'string\' ? to : (to.name || \'\')"><slot /></a>' },
+    RouterLink: { props: ['to'], template: '<a><slot /></a>' },
   }
 })
 
@@ -98,7 +99,20 @@ async function mountOverview() {
   const { default: OverviewView } = await import('../views/OverviewView.vue')
   const w = mount(OverviewView, {
     global: {
-      stubs: { RouterLink: { props: ['to'], template: '<a><slot /></a>' } },
+      stubs: {
+        RouterLink: {
+          props: ['to'],
+          inheritAttrs: false,
+          setup(props: { to: unknown }, { slots, attrs }: { slots: { default?: () => unknown }; attrs: Record<string, unknown> }) {
+            return () => {
+              const to = props.to as { name?: string } | string | null | undefined
+              const href = typeof to === 'string' ? to : (to?.name ?? '')
+              const dataTo = JSON.stringify(to ?? null)
+              return actualH('a', { ...attrs, href, 'data-to': dataTo }, slots.default ? slots.default() : [])
+            }
+          },
+        },
+      },
     },
   })
   await flushPromises()
@@ -293,6 +307,46 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       getOverviewMock.mockResolvedValue(healthyOverview({ recent_denials_by_reason: {} }))
       const w = await mountOverview()
       expect(w.find('[data-testid="denial-reasons"]').exists()).toBe(false)
+    })
+
+    // v0.1.25.24 unlock: listAuditLogs now supports server-side
+    // error_code IN-list filtering, so each pill becomes a drill-down
+    // router-link to /audit?error_code=CODE&status_band=errors (the
+    // "who do I blame for these 12 denials" path). AuditView's
+    // applyQueryParams consumes both params.
+    it('renders each pill as an anchor (router-link) targeting /audit', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        recent_denials_by_reason: { BUDGET_EXCEEDED: 12, POLICY_VIOLATION: 3 },
+      }))
+      const w = await mountOverview()
+      const anchors = w.findAll('[data-testid="denial-reasons"] a')
+      expect(anchors.length).toBe(2)
+      expect(anchors[0].attributes('href')).toBe('audit')
+      expect(anchors[1].attributes('href')).toBe('audit')
+    })
+
+    it('each pill threads error_code + status_band=errors in the route query', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        recent_denials_by_reason: { BUDGET_EXCEEDED: 12, POLICY_VIOLATION: 3 },
+      }))
+      const w = await mountOverview()
+      const tos = w.findAll('[data-testid="denial-reasons"] a')
+        .map(a => JSON.parse(a.attributes('data-to') ?? 'null'))
+      expect(tos[0]).toEqual({ name: 'audit', query: { error_code: 'BUDGET_EXCEEDED', status_band: 'errors' } })
+      expect(tos[1]).toEqual({ name: 'audit', query: { error_code: 'POLICY_VIOLATION', status_band: 'errors' } })
+    })
+
+    it('pill title tooltips cite the filtered target ("View N audit entries with error_code X")', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        recent_denials_by_reason: { BUDGET_EXCEEDED: 12, POLICY_VIOLATION: 1 },
+      }))
+      const w = await mountOverview()
+      const anchors = w.findAll('[data-testid="denial-reasons"] a')
+      expect(anchors[0].attributes('title')).toContain('12')
+      expect(anchors[0].attributes('title')).toContain('BUDGET_EXCEEDED')
+      // Singular/plural entry noun
+      expect(anchors[1].attributes('title')).toContain('1 audit entry')
+      expect(anchors[1].attributes('title')).toContain('POLICY_VIOLATION')
     })
   })
 
