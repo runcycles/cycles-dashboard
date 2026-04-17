@@ -328,12 +328,15 @@ watch(exportError, (v) => { if (v) error.value = v })
 
 // V1 virtualization.
 const scrollEl = ref<HTMLElement | null>(null)
-// 76px accommodates two rows of permission chips (chip ~28px × 2 +
-// gap + cell padding). Trades a little vertical density for the ability
-// to preview 4 perms (2 per row) instead of 2 inline — the operators
-// asked for this explicitly, scanning 4 perms at a glance beats
-// opening the dialog for every key with > 2 perms.
-const ROW_HEIGHT_ESTIMATE = 76
+// 48px single-row height. The inline chip preview (previously 2-row
+// layout at 76px) was removed after operators reported chips clipping
+// and overflowing the cell at common viewport widths — long permission
+// strings like `governance:execute` exceeded the chip-wrap area and
+// the min-w-0 overflow-hidden guard clipped some chips mid-word. The
+// always-visible "N perms" pill click-through already surfaces the
+// full list in the permissions dialog (openPermsViewer), so the inline
+// preview was redundant for what it cost in layout fragility.
+const ROW_HEIGHT_ESTIMATE = 48
 const virtualizer = useVirtualizer(computed(() => ({
   count: sortedKeys.value.length,
   getScrollElement: () => scrollEl.value,
@@ -343,24 +346,23 @@ const virtualizer = useVirtualizer(computed(() => ({
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
 const totalHeight = computed(() => virtualizer.value.getTotalSize())
 
-// 9-column grid when canManage, 8 without. Wide total minimum
-// (~1380px) so horizontal scroll engages on smaller viewports; same
-// behavior as the pre-virt `min-w-[900px]` table. Permissions column
-// widened (260px min, 2.5fr) so more chips fit before the +N counter
-// kicks in — common keys have 2-4 perms which now render inline.
+// 9-column grid when canManage, 8 without. Total minimum is now
+// ~1220px (was 1380px pre-pill-only); the permissions column shrank
+// from `minmax(260px, 2.5fr)` to `minmax(140px, 1.2fr)` because the
+// pill rendering ("4 perms ↗") only needs ~90px versus the chip
+// preview's demand for 2 rows of 2 chips. Narrower grid = horizontal
+// scroll engages less often on typical operator viewports.
 const gridTemplate = computed(() =>
   canManage.value
-    ? '180px minmax(120px,1fr) minmax(120px,1fr) 100px minmax(260px,2.5fr) minmax(140px,1fr) 160px 140px 160px'
-    : '180px minmax(120px,1fr) minmax(120px,1fr) 100px minmax(260px,2.5fr) minmax(140px,1fr) 160px 140px',
+    ? '180px minmax(120px,1fr) minmax(120px,1fr) 100px minmax(140px,1.2fr) minmax(140px,1fr) 160px 140px 160px'
+    : '180px minmax(120px,1fr) minmax(120px,1fr) 100px minmax(140px,1.2fr) minmax(140px,1fr) 160px 140px',
 )
 
-// Permissions cell compromise: show a single pill "N permissions"
-// that's always-visible and click-expandable. The pre-fix "N inline
-// chips + N hidden" approach fought the overflow-hidden boundary —
-// on narrow viewports the +N counter disappeared into the clipped
-// region and operators had no discoverable escape hatch. Now the
-// pill is fixed-width, doesn't depend on the chip row's measured
-// width, and clicking it opens a full-permissions dialog.
+// Permissions cell: single always-visible "N perms" pill. Clicking
+// opens the full-permissions dialog (openPermsViewer). Inline chip
+// preview was removed — long permission strings overflowed the cell
+// at common viewport widths and the clipping it triggered was worse
+// UX than just surfacing the full list on click.
 const viewingPermsFor = ref<KeyWithTenant | null>(null)
 function openPermsViewer(k: KeyWithTenant) { viewingPermsFor.value = k }
 function closePermsViewer() { viewingPermsFor.value = null }
@@ -441,13 +443,18 @@ function closePermsViewer() { viewingPermsFor.value = null }
          and body divs AND overflow-x on the outer created two
          separate horizontal scrollbars that fought each other on
          resize — now there's one. -->
+    <!-- overflow-x-auto carries an implicit overflow-y:auto per the CSS
+         overflow spec, creating a second vertical scrollbar on top of
+         the inner scroll body's own overflow-y-auto. Pinning
+         overflow-y:hidden breaks that implicit promotion — exactly one
+         vertical scrollbar, localized to the virtualized scroll body. -->
     <div
-      class="bg-white rounded-lg shadow overflow-x-auto text-sm flex-1 min-h-0 flex flex-col"
+      class="bg-white rounded-lg shadow overflow-x-auto overflow-y-hidden text-sm flex-1 min-h-0 flex flex-col"
       role="table"
       :aria-rowcount="filteredKeys.length + 1"
       :aria-colcount="canManage ? 9 : 8"
     >
-     <div :style="{ minWidth: canManage ? '1380px' : '1220px' }" class="flex flex-col flex-1 min-h-0">
+     <div :style="{ minWidth: canManage ? '1260px' : '1100px' }" class="flex flex-col flex-1 min-h-0">
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
         <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
           <SortHeader as="div" label="Key ID" column="key_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
@@ -484,42 +491,28 @@ function closePermsViewer() { viewingPermsFor.value = null }
             </div>
             <div role="cell" class="table-cell"><StatusBadge :status="sortedKeys[v.index].status" /></div>
             <div role="cell" class="table-cell muted-sm min-w-0 overflow-hidden">
-              <!-- Preview 4 chips (wraps 2-per-line inside the column
-                   width) + always-visible "N perms" pill for the full
-                   list. Row height is 76px to fit two chip rows.
-                   - Chips sit in a flex-wrap min-w-0 container on the
-                     left; at typical column widths this wraps to 2x2.
-                   - Pill on the right, flex-shrink-0, self-start so it
-                     anchors to the top even when chips wrap.
-                   - If a key has > 4 permissions the pill's count (e.g.
-                     "6 perms") signals there's more; click to open.
-                   - min-w-0 on the cell is load-bearing: grid items
-                     default to min-width:auto, so chip min-content
-                     would otherwise force this track wider than its
-                     minmax(260px, 2.5fr) floor and push the Actions
-                     column off-screen. -->
-              <div v-if="(sortedKeys[v.index].permissions?.length ?? 0) > 0" class="flex gap-2 items-start">
-                <div class="flex flex-wrap gap-1 min-w-0 flex-1">
-                  <span
-                    v-for="p in (sortedKeys[v.index].permissions ?? []).slice(0, 4)"
-                    :key="p"
-                    class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded whitespace-nowrap"
-                  >{{ p }}</span>
-                </div>
-                <button
-                  type="button"
-                  @click.prevent="openPermsViewer(sortedKeys[v.index])"
-                  class="inline-flex items-center gap-1 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded px-2 py-0.5 cursor-pointer transition-colors flex-shrink-0"
-                  :aria-label="`View all ${sortedKeys[v.index].permissions!.length} permissions for ${sortedKeys[v.index].name || sortedKeys[v.index].key_id}`"
-                  :title="`View all ${sortedKeys[v.index].permissions!.length} permissions`"
-                >
-                  <span class="tabular-nums font-medium">{{ sortedKeys[v.index].permissions!.length }}</span>
-                  <span class="text-xs">perm{{ sortedKeys[v.index].permissions!.length === 1 ? '' : 's' }}</span>
-                  <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                  </svg>
-                </button>
-              </div>
+              <!-- Pill-only rendering. Inline chip preview was removed
+                   after the 2-row chip layout overflowed the cell at
+                   common viewport widths (long permission names like
+                   `governance:execute` can't fit 2-per-line in the
+                   available track). The pill is fixed-width (~90px)
+                   and click-opens the permissions dialog with the full
+                   list — no chip-vs-pill layout competition, no
+                   clipping. -->
+              <button
+                v-if="(sortedKeys[v.index].permissions?.length ?? 0) > 0"
+                type="button"
+                @click.prevent="openPermsViewer(sortedKeys[v.index])"
+                class="inline-flex items-center gap-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded px-2 py-0.5 cursor-pointer transition-colors"
+                :aria-label="`View all ${sortedKeys[v.index].permissions!.length} permissions for ${sortedKeys[v.index].name || sortedKeys[v.index].key_id}`"
+                :title="`View all ${sortedKeys[v.index].permissions!.length} permissions`"
+              >
+                <span class="tabular-nums font-medium">{{ sortedKeys[v.index].permissions!.length }}</span>
+                <span class="text-xs">perm{{ sortedKeys[v.index].permissions!.length === 1 ? '' : 's' }}</span>
+                <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                </svg>
+              </button>
               <span v-else class="text-gray-400">—</span>
             </div>
             <div role="cell" class="table-cell muted-sm font-mono truncate" :title="sortedKeys[v.index].scope_filter?.join(', ')">{{ sortedKeys[v.index].scope_filter?.join(', ') || '-' }}</div>

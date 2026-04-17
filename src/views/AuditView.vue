@@ -304,8 +304,15 @@ function measureRow(el: Element | { $el?: Element } | null) {
          header and body scroll together because they share the shim
          parent. Shell is flex-1 min-h-0 flex-col so the scroll body
          below expands to fill viewport (phase 5). -->
+    <!-- overflow-x-auto carries an implicit overflow-y:auto per the CSS
+         overflow spec ("value other than visible or clip on one axis
+         forces auto on the other axis"), which was creating a second
+         vertical scrollbar on top of the inner scroll body's own
+         overflow-y-auto. Pinning overflow-y:hidden here breaks the
+         implicit promotion so exactly one vertical scrollbar remains,
+         localized to the virtualized scroll body. -->
     <div
-      class="bg-white rounded-lg shadow overflow-x-auto text-sm flex-1 min-h-0 flex flex-col"
+      class="bg-white rounded-lg shadow overflow-x-auto overflow-y-hidden text-sm flex-1 min-h-0 flex flex-col"
       role="table"
       :aria-rowcount="entries.length + 1"
       :aria-colcount="7"
