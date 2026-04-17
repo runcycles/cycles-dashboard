@@ -68,6 +68,14 @@ Two more issues that only surface at specific viewport widths or with real permi
 
 Test suite still at **362 passing** — no existing tests depend on chip-preview markup or the 76px row height (verified by grep against `chip`, `slice(0, 4)`, `ROW_HEIGHT_ESTIMATE` across `src/__tests__/`). The permissions-dialog click-through path is unchanged and already covered by existing ApiKeysView tests.
 
+**Fifth review pass (same PR).**
+
+10. **Double horizontal scrollbar at narrow viewports (AuditView + ApiKeysView).** The round-5 fix (pinning `overflow-y-hidden` on the outer card to break the implicit promotion that produced a second vertical scrollbar) addressed the vertical-axis symptom but the exact same CSS spec rule fires in the other direction inside the virtualized scroll body. The scroll body had `flex-1 overflow-y-auto min-h-[Xpx]` — `overflow-y: auto` alone promotes `overflow-x: visible` to `auto`. When the viewport narrows below the wrapper's `min-width` (950px AuditView / 1260px ApiKeysView), the outer card's `overflow-x: auto` shows a horizontal scrollbar for "wrapper > viewport", AND the scroll body's promoted `overflow-x: auto` shows a SECOND horizontal scrollbar because the grid row's min-content slightly exceeded the scroll body width (sub-pixel rounding on cells without `min-w-0` / `truncate`, so the grid row expands above its minmax floor by a couple pixels). Fix:
+    - Pin `overflow-x-hidden` explicitly on the scroll body in both views. Horizontal scroll is now owned entirely by the outer card.
+    - Bump wrapper `min-width` to add headroom over the exact grid sum: AuditView 950→1000px (grid sum 952), ApiKeysView 1260→1280px / 1100→1120px (grid sums 1260 / 1100). Eliminates any sub-pixel row-content overflow regardless of cell-specific min-content quirks.
+
+Test suite still at **362 passing**. The fix is two CSS class additions (scroll body) and two style min-width bumps; no markup or behavior change. Every existing AuditView / ApiKeysView test is selector-based and unaffected.
+
 ### 2026-04-16 — V4 stage 2: six admin-plane views wired to server-side sort
 
 Completes V4 — "push sort to server" — for the six remaining admin-plane list views. Stage 1 shipped the `useSort` opt-in and ReservationsView as the reference wiring; Stage 2 repeats that pattern against the cycles-server-admin **v0.1.25.24** `sort_by` / `sort_dir` enums on the six admin list endpoints. After this PR, every list view in the dashboard orders rows by the server's canonical sort — no client-side re-sort of the loaded slice destroying the cursor tie-breaker or misleading operators with half-ordered pagination.

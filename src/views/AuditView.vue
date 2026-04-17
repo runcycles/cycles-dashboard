@@ -317,7 +317,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
       :aria-rowcount="entries.length + 1"
       :aria-colcount="7"
     >
-     <div style="min-width: 950px" class="flex flex-col flex-1 min-h-0">
+     <div style="min-width: 1000px" class="flex flex-col flex-1 min-h-0">
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
         <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
           <div role="columnheader" class="table-cell"></div>
@@ -330,11 +330,18 @@ function measureRow(el: Element | { $el?: Element } | null) {
         </div>
       </div>
 
+      <!-- overflow-x-hidden is load-bearing: `overflow-y: auto` alone
+           promotes overflow-x to auto per the CSS spec, which would
+           produce a SECOND horizontal scrollbar inside this scroll
+           body on top of the outer card's overflow-x-auto when the
+           viewport is narrower than the grid sum. Explicit hidden
+           here keeps horizontal scroll owned entirely by the outer
+           card. -->
       <div
         v-if="sortedEntries.length > 0"
         ref="scrollEl"
         role="rowgroup"
-        class="flex-1 overflow-y-auto min-h-[240px]"
+        class="flex-1 overflow-y-auto overflow-x-hidden min-h-[240px]"
       >
         <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
           <div

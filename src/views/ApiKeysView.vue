@@ -454,7 +454,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
       :aria-rowcount="filteredKeys.length + 1"
       :aria-colcount="canManage ? 9 : 8"
     >
-     <div :style="{ minWidth: canManage ? '1260px' : '1100px' }" class="flex flex-col flex-1 min-h-0">
+     <div :style="{ minWidth: canManage ? '1280px' : '1120px' }" class="flex flex-col flex-1 min-h-0">
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
         <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
           <SortHeader as="div" label="Key ID" column="key_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
@@ -469,11 +469,16 @@ function closePermsViewer() { viewingPermsFor.value = null }
         </div>
       </div>
 
+      <!-- overflow-x-hidden: `overflow-y: auto` alone promotes
+           overflow-x to auto per spec, creating a SECOND horizontal
+           scrollbar alongside the outer card's overflow-x-auto. Pin
+           hidden here so horizontal scroll is owned entirely by the
+           outer card. -->
       <div
         v-if="sortedKeys.length > 0"
         ref="scrollEl"
         role="rowgroup"
-        class="flex-1 overflow-y-auto min-h-[200px]"
+        class="flex-1 overflow-y-auto overflow-x-hidden min-h-[200px]"
       >
         <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
           <div
