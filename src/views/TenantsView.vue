@@ -6,7 +6,7 @@ import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useListExport } from '../composables/useListExport'
-import { listTenants, createTenant, updateTenantStatus, bulkActionTenants } from '../api/client'
+import { listTenants, createTenant, updateTenantStatus, bulkActionTenants, ApiError } from '../api/client'
 import { rateLimitedBatch } from '../utils/rateLimitedBatch'
 import { generateIdempotencyKey } from '../utils/idempotencyKey'
 import type { TenantBulkAction, TenantBulkFilter } from '../types'
@@ -298,7 +298,21 @@ async function executeFilterBulk() {
       console.warn(`bulk-action ${action} failed on ${f.id}: ${f.error_code ?? 'INTERNAL_ERROR'} — ${f.message ?? ''}`)
     }
   } catch (e) {
-    toast.error(`Bulk ${action} failed: ${toMessage(e)}`)
+    // Humanize the two bulk-action safety gates (governance spec v0.1.25.23
+    // added these to the ErrorCode enum; prose was already in v0.1.25.21):
+    //   - LIMIT_EXCEEDED (400): filter matched >500 rows; operator must
+    //     narrow the filter. Server echoes total_matched in details.
+    //   - COUNT_MISMATCH (409): only fires when expected_count is sent;
+    //     reserved for when the dashboard wires a preview-count pass.
+    // Any other error falls through to the generic toMessage formatter.
+    if (e instanceof ApiError && e.errorCode === 'LIMIT_EXCEEDED') {
+      const matched = typeof e.details?.total_matched === 'number' ? ` (server matched ${e.details.total_matched.toLocaleString()})` : ''
+      toast.error(`Filter matches more than 500 tenants${matched} — please narrow the filter before retrying`)
+    } else if (e instanceof ApiError && e.errorCode === 'COUNT_MISMATCH') {
+      toast.error('Tenant list changed between preview and submit — refresh and try again')
+    } else {
+      toast.error(`Bulk ${action} failed: ${toMessage(e)}`)
+    }
   } finally {
     filterBulkRunning.value = false
     filterBulkAction.value = null

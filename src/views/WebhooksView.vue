@@ -6,7 +6,7 @@ import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useListExport } from '../composables/useListExport'
-import { listWebhooks, listTenants, createWebhook, updateWebhook, getWebhookSecurityConfig, updateWebhookSecurityConfig, bulkActionWebhooks } from '../api/client'
+import { listWebhooks, listTenants, createWebhook, updateWebhook, getWebhookSecurityConfig, updateWebhookSecurityConfig, bulkActionWebhooks, ApiError } from '../api/client'
 import { rateLimitedBatch } from '../utils/rateLimitedBatch'
 import { generateIdempotencyKey } from '../utils/idempotencyKey'
 import type { WebhookBulkAction, WebhookBulkFilter } from '../types'
@@ -279,7 +279,17 @@ async function executeFilterBulk() {
       console.warn(`bulk-action ${action} failed on ${f.id}: ${f.error_code ?? 'INTERNAL_ERROR'} — ${f.message ?? ''}`)
     }
   } catch (e) {
-    toast.error(`Bulk ${action} failed: ${toMessage(e)}`)
+    // Humanize bulk-action safety-gate codes (governance spec v0.1.25.23
+    // ErrorCode enum widening; v0.1.25.21 prose). See TenantsView
+    // executeFilterBulk for the full rationale.
+    if (e instanceof ApiError && e.errorCode === 'LIMIT_EXCEEDED') {
+      const matched = typeof e.details?.total_matched === 'number' ? ` (server matched ${e.details.total_matched.toLocaleString()})` : ''
+      toast.error(`Filter matches more than 500 webhooks${matched} — please narrow the filter before retrying`)
+    } else if (e instanceof ApiError && e.errorCode === 'COUNT_MISMATCH') {
+      toast.error('Subscription list changed between preview and submit — refresh and try again')
+    } else {
+      toast.error(`Bulk ${action} failed: ${toMessage(e)}`)
+    }
   } finally {
     filterBulkRunning.value = false
     filterBulkAction.value = null
