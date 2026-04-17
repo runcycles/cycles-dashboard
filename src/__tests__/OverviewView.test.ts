@@ -216,7 +216,11 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       expect(card.text()).toContain('No operator changes in range')
     })
 
-    it('renders audit entries with humanized operation names', async () => {
+    // Operation name rendered raw (dot-separated enum) to match how
+    // AuditView.vue renders the same column — prior humanize-to-title-case
+    // diverged from Audit and forced the operator to cross-reference two
+    // different formats for the same field.
+    it('renders audit operations as raw enum values matching AuditView format', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview())
       listAuditLogsMock.mockResolvedValue({
         logs: [
@@ -227,8 +231,10 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       })
       const w = await mountOverview()
       const card = w.find('[data-testid="recent-activity-card"]')
-      expect(card.text()).toContain('Tenant Suspended')
-      expect(card.text()).toContain('Budget Frozen')
+      expect(card.text()).toContain('tenant.suspended')
+      expect(card.text()).toContain('budget.frozen')
+      expect(card.text()).not.toContain('Tenant Suspended')
+      expect(card.text()).not.toContain('Budget Frozen')
     })
 
     it('surfaces error codes on failed audit rows', async () => {

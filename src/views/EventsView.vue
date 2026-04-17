@@ -329,6 +329,14 @@ function measureRow(el: Element | { $el?: Element } | null) {
           </select>
         </div>
         <div>
+          <!-- Type filter. Surfaces the `?type=` URL param (e.g. set by
+               Overview "Recent Denials → View all" deep-link) as a
+               visible, clearable input. Without this, the URL param
+               silently filters the list with no operator-visible cue. -->
+          <label for="ev-type" class="form-label">Type</label>
+          <input id="ev-type" v-model="eventType" placeholder="reservation.denied" class="form-input w-44" />
+        </div>
+        <div>
           <label for="ev-tenant" class="form-label">Tenant ID</label>
           <input id="ev-tenant" v-model="tenantId" placeholder="tenant id" class="form-input w-32" />
         </div>

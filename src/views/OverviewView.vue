@@ -99,17 +99,6 @@ const alertCount = computed<number>(() => {
   return n
 })
 
-// Humanize the audit operation for the recent-activity card. Audit
-// operations are stable enums like `tenant.suspended`, `budget.frozen`
-// — the Audit view renders them as-is because operators filter on
-// them; here we want readable verbs.
-function humanizeOperation(op: string): string {
-  return op
-    .replace(/\./g, ' ')
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase())
-}
-
 // Map an audit entry to the most useful detail-view link. Falls back
 // to the Audit view with a pre-filled filter so "click through for
 // context" always works.
@@ -486,11 +475,13 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
             class="py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
           >
             <div class="flex justify-between items-baseline gap-2">
+              <!-- Operation name rendered raw (dot-separated enum) in
+                   font-mono to match AuditView.vue column render. -->
               <router-link
                 :to="auditLinkFor(a)"
-                class="text-sm text-blue-600 hover:underline truncate dark:text-blue-400"
+                class="font-mono text-xs text-blue-600 hover:underline truncate dark:text-blue-400"
                 :title="a.operation"
-              >{{ humanizeOperation(a.operation) }}</router-link>
+              >{{ a.operation }}</router-link>
               <span class="muted-sm shrink-0" :title="new Date(a.timestamp).toISOString()">{{ formatTime(a.timestamp) }}</span>
             </div>
             <p class="muted-sm truncate">
