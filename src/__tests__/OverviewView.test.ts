@@ -242,6 +242,19 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       const w = await mountOverview()
       expect(w.text()).toContain('INVALID_REQUEST')
     })
+
+    // The old "Recent Reservation Expiries (1h)" card was dropped — low
+    // signal (usually empty) and linked to /events (wrong plane) when ops
+    // actually want /reservations. Replacement is a Reservations tile in
+    // the counter strip, which requires server-side reservation_counts
+    // (follow-up — see AUDIT.md). Assert the card is gone so a future
+    // refactor doesn't resurrect it by accident.
+    it('does not render the old "Recent Reservation Expiries" card', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      const w = await mountOverview()
+      expect(w.text()).not.toContain('Recent Reservation Expiries')
+      expect(w.text()).not.toContain('No expiries in the last hour')
+    })
   })
 
   describe('counter strip (quick-jump nav, top of page)', () => {

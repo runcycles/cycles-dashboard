@@ -438,12 +438,9 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
         </div>
       </div>
 
-      <!-- RECENT OPERATOR ACTIVITY (NEW — also closes I3) + recent expiries.
-           The audit feed is the "who did what in the last hour" read that
-           was missing from the old Overview; Recent Expiries still lives
-           here because reservation expiries are a runtime-plane signal,
-           not an operator-action signal. -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      <!-- RECENT OPERATOR ACTIVITY (closes I3) — the "who did what in the
+           last hour" read that was missing from the old Overview. -->
+      <div class="mb-6">
         <div class="card p-4" data-testid="recent-activity-card">
           <div class="flex justify-between items-center mb-3">
             <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200">Recent Operator Activity</h2>
@@ -468,24 +465,6 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
               <span v-if="a.error_code" class="ml-1 text-red-600 dark:text-red-400">· {{ a.error_code }}</span>
               <span v-else-if="a.status >= 400" class="ml-1 text-red-600 dark:text-red-400">· {{ a.status }}</span>
             </p>
-          </div>
-        </div>
-
-        <div class="card p-4">
-          <div class="flex justify-between items-center mb-3">
-            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200">Recent Reservation Expiries <span class="muted font-normal">(1h)</span></h2>
-            <router-link :to="{ name: 'events', query: { type: 'reservation.expired' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
-          </div>
-          <div v-if="overview.recent_expiries.length === 0" class="text-sm muted py-4 text-center">No expiries in the last hour</div>
-          <div
-            v-for="e in overview.recent_expiries"
-            :key="e.event_id"
-            class="py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
-          >
-            <div class="flex justify-between">
-              <span class="text-sm text-gray-700 truncate dark:text-gray-200">{{ e.scope || e.tenant_id }}</span>
-              <span class="muted-sm shrink-0 ml-2" :title="new Date(e.timestamp).toISOString()">{{ formatTime(e.timestamp) }}</span>
-            </div>
           </div>
         </div>
       </div>
