@@ -193,6 +193,47 @@ describe('BudgetsView — cross-tenant list wire-up', () => {
     expect(page2Params.cursor).toBe('t-a|led-1')
   })
 
+  // V4 stage 2 — server-sort wire-up. The default useSort state
+   // (sortKey='utilization', sortDir='desc') must ride every listBudgets
+   // call, and Load-more must forward the same tuple because the
+   // server's opaque cursor is bound to (sort_by, sort_dir, filters).
+  it('forwards the default sort tuple (utilization desc) on initial fetch', async () => {
+    listBudgetsMock.mockResolvedValue({ ledgers: [], has_more: false })
+    const { default: BudgetsView } = await import('../views/BudgetsView.vue')
+    mount(BudgetsView, { global: stdMounts() })
+    await flushPromises(); await flushPromises()
+
+    const params = listBudgetsMock.mock.calls[0][0] as Record<string, string>
+    expect(params.sort_by).toBe('utilization')
+    expect(params.sort_dir).toBe('desc')
+  })
+
+  it('forwards the sort tuple on Load more so cursor binding stays valid', async () => {
+    listBudgetsMock
+      .mockResolvedValueOnce({
+        ledgers: [{
+          ledger_id: 'led-1', tenant_id: 't-a', scope: 'tenant:t-a/p',
+          unit: 'USD_MICROCENTS', allocated: { unit: 'USD_MICROCENTS', amount: 100 },
+          remaining: { unit: 'USD_MICROCENTS', amount: 10 }, status: 'ACTIVE',
+          created_at: '2026-04-01T00:00:00Z',
+        }],
+        has_more: true, next_cursor: 't-a|led-1',
+      })
+      .mockResolvedValueOnce({ ledgers: [], has_more: false })
+    const { default: BudgetsView } = await import('../views/BudgetsView.vue')
+    const w = mount(BudgetsView, { global: stdMounts() })
+    await flushPromises(); await flushPromises()
+
+    const loadMoreBtn = w.findAll('button').find(b => b.text() === 'Load more')
+    await loadMoreBtn!.trigger('click')
+    await flushPromises()
+
+    const page2Params = listBudgetsMock.mock.calls[1][0] as Record<string, string>
+    expect(page2Params.sort_by).toBe('utilization')
+    expect(page2Params.sort_dir).toBe('desc')
+    expect(page2Params.cursor).toBe('t-a|led-1')
+  })
+
   it('renders tenant_id from the ledger (prefers wire field over scope-parsing)', async () => {
     listBudgetsMock.mockResolvedValue({
       ledgers: [{
