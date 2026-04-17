@@ -31,6 +31,28 @@
 - `vitest run` — **505 / 505 passing** across 40 files (+58 new across 4 commits in this release: 32 for the I1/I3 rebuild covering alert-banner states / Expiring Keys / Recent Activity / counter-strip DOM order / per-tile chip layout / zero-count omission / graceful degradation; +3 for `recent_denials_by_reason` populated-sorted-desc + absent-field + empty-object; +1 guard that the old expiries card stays removed; +2 for raw-enum operation format matching AuditView; **+17 for the new AuditView filter DSL** covering error_code normalization / IN-list dedupe / whitespace-separated parsing / datalist enum coverage / all five status-band mappings / mutex-sidestep / search field copy / URL-param deep-link including unknown-band defensive fallback; **+3 for the Overview denial-pill router-link drill-down** asserting anchors render with href + route name + query payload + title tooltip).
 - `vite build` — clean, 897ms.
 
+### 2026-04-17 — Overview Budgets At or Near Cap card: cap display at 5 rows + tighten row padding
+
+**Scope.** Dashboard-only, density polish on the just-widened at-or-near-cap card. No spec or server change.
+
+**Why.** With the 90% threshold the card can realistically hold up to 10 rows on a busy tenant, and at `py-2` row padding that stretches the card well past the two sibling budget cards — the row reads as empty-space dominated. Two low-risk fixes: cap display at 5 (matching the Expiring Keys card which already caps at 5) and drop row padding `py-2 → py-1.5` since budget rows are single-line (scope + %) and don't need the same vertical breathing room as webhook / denial rows that carry URLs or timestamps.
+
+**What shipped.**
+
+- **Client-side slice to 5** in the `atCapSorted` computed after sort-by-utilization-desc. Server `limit=10` unchanged (gives us buffer if any of the top 10 tie on utilization and scope tiebreak shifts). The top-5 worst render; the rest are implicit in the "View all" link.
+- **Banner count stays honest.** The badge + pill count reflect the full `atCapBudgets.length`, not the sliced 5, so operators see "7 at or near cap" in the banner even though the card only shows 5 — the truncation isn't a lie about severity.
+- **Row padding `py-2 → py-1.5`** scoped to this card only. Other cards untouched (webhook URLs, denial scopes, and audit operation rows still get the full `py-2`). Border-b between rows preserved.
+
+**Files.** `src/views/OverviewView.vue` (`.slice(0, 5)` in computed, `py-2 → py-1.5` on the v-for row). `src/__tests__/OverviewView.test.ts` (+1 new spec pinning the 5-row cap + banner-count-reflects-full-set invariant — render 8 ledgers, assert 5 rows, assert tenant-0 at top, assert tenant-7 absent, assert banner pill shows ·8).
+
+**Validation gates.**
+
+- `vue-tsc --noEmit` — clean.
+- `vitest run` — **548 / 548 passing** (+1 from 547 — row-cap spec).
+- `vite build` — clean, 906ms.
+
+**No version bump.** Density polish on the same card shipped earlier today — no behavior change, no wire-format change, no URL-contract change. AUDIT entry only.
+
 ### 2026-04-17 — Overview "Budgets at Cap" card widened to at-or-near-cap (≥90%) with inline severity split
 
 **Scope.** Dashboard-only, tightening on the just-landed Budgets-at-Cap card. No spec or server change.

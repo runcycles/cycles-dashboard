@@ -80,14 +80,20 @@ function utilizationOf(b: BudgetLedger): number {
 }
 
 // Sorted descending by utilization so the most-broken budget leads
-// the card display. Tie-break by scope for stable rendering.
+// the card display. Tie-break by scope for stable rendering. Sliced
+// to 5 to match the Expiring Keys card convention — landing-page
+// summary, not a full list; "View all" link carries operators to
+// /budgets?utilization_min=0.9 for the complete set. The banner
+// badge still shows the full count (atCapBudgets.length), so the
+// operator sees "7" on the pill and 5 rows in the card with the
+// "View all" link implicitly covering the other 2.
 const atCapSorted = computed<BudgetLedger[]>(() => {
   return [...atCapBudgets.value].sort((a, b) => {
     const ua = utilizationOf(a)
     const ub = utilizationOf(b)
     if (ua !== ub) return ub - ua
     return a.scope.localeCompare(b.scope)
-  })
+  }).slice(0, 5)
 })
 
 // Expiring keys (7d) — sorted soonest-first, capped to 5 for the card.
@@ -464,7 +470,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
           <div
             v-for="b in atCapSorted"
             :key="b.scope + b.unit"
-            class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
+            class="flex justify-between items-center py-1.5 border-b border-gray-100 last:border-0 dark:border-gray-700"
           >
             <router-link
               :to="{ name: 'budgets', query: { scope: b.scope, unit: b.unit } }"

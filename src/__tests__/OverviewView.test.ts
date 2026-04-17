@@ -355,6 +355,33 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       expect(text.indexOf('150%')).toBeLessThan(text.indexOf('105%'))
     })
 
+    it('caps the card at 5 rows but the banner count reflects the full set', async () => {
+      // Server returns up to 10; card shows the worst 5 so height
+      // stays predictable on the landing page. Banner badge shows
+      // the full count so operators aren't misled into thinking
+      // there are only 5 — "View all" carries them to /budgets
+      // for the remainder.
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      const ledgers = Array.from({ length: 8 }, (_, i) => atCapBudget(`tenant-${i}`, {
+        allocated: { unit: 'tokens', amount: 1000 },
+        // Descending utilization so we can assert worst-first
+        // survives the slice.
+        spent: { unit: 'tokens', amount: 2000 - i * 100 },
+      }))
+      listBudgetsMock.mockResolvedValue({ ledgers, has_more: false })
+      const w = await mountOverview()
+      const card = w.find('[data-testid="budgets-at-cap-card"]')
+      // 5 rows rendered, not 8.
+      const rows = card.findAll('a[title^="tenant-"]')
+      expect(rows.length).toBe(5)
+      // Worst-first: tenant-0 (200%) renders; tenant-7 (130%) doesn't.
+      expect(card.text()).toContain('tenant-0')
+      expect(card.text()).not.toContain('tenant-7')
+      // Banner pill reflects the full count (8), not the sliced 5.
+      const pill = w.find('[data-axis="budgets-at-cap"]')
+      expect(pill.text()).toContain('·8')
+    })
+
     it('renders the healthy empty state when no budgets at cap', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview())
       listBudgetsMock.mockResolvedValue({ ledgers: [], has_more: false })
