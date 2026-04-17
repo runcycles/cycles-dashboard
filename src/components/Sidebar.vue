@@ -73,7 +73,7 @@ function logout() {
           <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 10a7 7 0 11-14 0 7 7 0 0114 0z" />
         </svg>
         <span class="flex-1 text-left">Find tenant</span>
-        <kbd class="text-[10px] text-gray-500 border border-gray-700 rounded px-1">{{ isMac ? '⌘K' : 'Ctrl K' }}</kbd>
+        <kbd class="text-[10px] text-gray-300 border border-gray-600 rounded px-1">{{ isMac ? '⌘K' : 'Ctrl K' }}</kbd>
       </button>
     </div>
     <nav class="flex-1 py-3 space-y-0.5">
