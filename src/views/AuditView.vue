@@ -395,7 +395,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
               </div>
               <div role="cell" class="table-cell min-w-0 overflow-hidden whitespace-nowrap" :title="sortedEntries[v.index].error_code ? `${sortedEntries[v.index].status} ${sortedEntries[v.index].error_code}` : String(sortedEntries[v.index].status)">
                 <span class="px-1.5 py-0.5 rounded text-xs font-medium" :class="sortedEntries[v.index].status >= 400 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'">{{ sortedEntries[v.index].status }}</span>
-                <span v-if="sortedEntries[v.index].error_code" class="ml-1 text-xs text-red-500 font-mono">{{ sortedEntries[v.index].error_code }}</span>
+                <span v-if="sortedEntries[v.index].error_code" class="ml-1 text-xs text-red-700 font-mono">{{ sortedEntries[v.index].error_code }}</span>
               </div>
             </div>
 
@@ -408,7 +408,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
                 <div v-if="sortedEntries[v.index].request_id"><span class="muted">Request ID:</span> <span class="font-mono">{{ sortedEntries[v.index].request_id }}</span></div>
                 <div v-if="sortedEntries[v.index].source_ip"><span class="muted">Source IP:</span> <span class="font-mono">{{ sortedEntries[v.index].source_ip }}</span></div>
                 <div v-if="sortedEntries[v.index].user_agent"><span class="muted">User Agent:</span> {{ sortedEntries[v.index].user_agent }}</div>
-                <div v-if="sortedEntries[v.index].error_code"><span class="muted">Error Code:</span> <span class="font-mono text-red-500">{{ sortedEntries[v.index].error_code }}</span></div>
+                <div v-if="sortedEntries[v.index].error_code"><span class="muted">Error Code:</span> <span class="font-mono text-red-700">{{ sortedEntries[v.index].error_code }}</span></div>
                 <div v-if="sortedEntries[v.index].resource_type"><span class="muted">Resource Type:</span> {{ sortedEntries[v.index].resource_type }}</div>
                 <div v-if="sortedEntries[v.index].resource_id"><span class="muted">Resource ID:</span> <span class="font-mono">{{ sortedEntries[v.index].resource_id }}</span></div>
               </div>
