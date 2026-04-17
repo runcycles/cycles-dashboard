@@ -280,6 +280,29 @@ describe('CommandPalette', () => {
     w.unmount()
   })
 
+  it('paste-then-Enter activates the command immediately (no 150ms debounce gap)', async () => {
+    // Regression: `parsed` is debounced 150ms, so the prior implementation
+    // dispatched off a stale value when an operator pasted `/wh <id>` and
+    // hit Enter inside the debounce window. activate() must re-parse the
+    // live `query` synchronously to avoid swallowing that Enter.
+    const w = await mountPaletteOpen()
+    const input = document.body.querySelector<HTMLInputElement>('#command-palette-input')!
+    input.value = '/wh sub-pasted-fast'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    // Intentionally do NOT wait for the 150ms debounce — fire Enter on the
+    // very next tick. nextTick lets the v-model write propagate to query.
+    await nextTick()
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')!
+    const inner = dialog.querySelector<HTMLElement>('[class*="max-w-xl"]')!
+    inner.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await flushPromises()
+    expect(routerPushMock).toHaveBeenCalledWith({
+      name: 'webhook-detail',
+      params: { id: 'sub-pasted-fast' },
+    })
+    w.unmount()
+  })
+
   it('command needing arg (e.g. just "/wh") shows an "enter <arg>" hint and Enter does nothing', async () => {
     const w = await mountPaletteOpen()
     const input = document.body.querySelector<HTMLInputElement>('#command-palette-input')!

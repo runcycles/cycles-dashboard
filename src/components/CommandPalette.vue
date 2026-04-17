@@ -160,13 +160,16 @@ const filteredTenants = computed<Tenant[]>(() => {
 
 // Total selectable items in the current mode — drives ArrowDown/Up
 // wraparound and the "no results" empty state.
+//
+// command-needs-arg returns 0 even though it renders a single hint
+// row, because that row has no id and Enter is a no-op — counting it
+// would point aria-activedescendant at a missing element id.
 const selectableCount = computed(() => {
   switch (parsed.value.mode) {
     case 'search': return filteredTenants.value.length
     case 'commands-list': return visibleCommands.value.length
-    case 'command-ready':
+    case 'command-ready': return 1
     case 'command-needs-arg':
-      return 1
     case 'unknown-command':
       return 0
   }
@@ -234,8 +237,17 @@ function pickCommandForCompletion(cmd: CommandDef) {
 
 function activate() {
   // Enter dispatch — what fires depends on the current mode.
-  const p = parsed.value
+  //
+  // Re-parse from the live `query` (not the debounced `parsed`) so a
+  // paste-then-Enter within the 150ms debounce window still activates.
+  // Otherwise an operator who pastes `/wh sub-abc-123` and immediately
+  // hits Enter would get a no-op because `parsed.value` is still in
+  // command-needs-arg mode from the prior debounce tick.
+  const p = parseInput(query.value)
   if (p.mode === 'search') {
+    // Fall back to the debounced filteredTenants list — the live query
+    // hasn't propagated to that filter yet, but the operator's intent
+    // (Enter on the highlighted row) is unambiguous.
     const pick = filteredTenants.value[activeIndex.value]
     if (pick) selectTenant(pick)
     return
