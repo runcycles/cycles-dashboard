@@ -15,6 +15,7 @@ import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
+import TimeRangePicker from '../components/TimeRangePicker.vue'
 import { formatDateTime } from '../utils/format'
 import { toMessage } from '../utils/errors'
 import { safeJsonStringify } from '../utils/safe'
@@ -94,6 +95,16 @@ const correlationId = ref((route.query.correlation_id as string) || '')
 // exact/prefix filters for the case where the operator has only a
 // partial id. Debounced via the shared 300ms cadence.
 const search = ref((route.query.search as string) || '')
+// Spec: listEvents accepts `from` / `to` as RFC 3339 date-time.
+// TimeRangePicker emits datetime-local strings (YYYY-MM-DDTHH:MM,
+// local tz) which the server normalizes — matches what AuditView
+// already sends.
+const fromDate = ref((route.query.from as string) || '')
+const toDate = ref((route.query.to as string) || '')
+const timeRange = computed({
+  get: () => ({ from: fromDate.value, to: toDate.value }),
+  set: (v: { from: string; to: string }) => { fromDate.value = v.from; toDate.value = v.to },
+})
 
 function buildFilterParams(): Record<string, string> {
   const params: Record<string, string> = {}
@@ -106,6 +117,8 @@ function buildFilterParams(): Record<string, string> {
   // the server, and the spec requires empty → absent.
   const q = search.value.trim()
   if (q) params.search = q
+  if (fromDate.value) params.from = fromDate.value
+  if (toDate.value) params.to = toDate.value
   if (sortKey.value) {
     params.sort_by = sortKey.value
     params.sort_dir = sortDir.value
@@ -147,6 +160,8 @@ function applyFilters() {
     ...(scope.value && { scope: scope.value }),
     ...(correlationId.value && { correlation_id: correlationId.value }),
     ...(search.value.trim() && { search: search.value.trim() }),
+    ...(fromDate.value && { from: fromDate.value }),
+    ...(toDate.value && { to: toDate.value }),
   }})
   // Filter change resets the extended state — a new filter means the
   // previously-loaded tail is stale (events matching the OLD filter).
@@ -177,6 +192,7 @@ async function loadMore() {
 
 function clearFilters() {
   category.value = ''; eventType.value = ''; tenantId.value = ''; scope.value = ''; correlationId.value = ''; search.value = ''
+  fromDate.value = ''; toDate.value = ''
   loadedMorePages.value = false
   applyFilters()
 }
@@ -203,6 +219,11 @@ watch(debouncedTenantId, () => applyFilters())
 watch(debouncedScope, () => applyFilters())
 watch(debouncedCorrelationId, () => applyFilters())
 watch(debouncedSearch, () => applyFilters())
+// TimeRangePicker: emits only on explicit preset-click or custom
+// Apply, so no debounce is needed — each change is already a
+// committed intent.
+watch(fromDate, () => applyFilters())
+watch(toDate, () => applyFilters())
 
 // Shared export (useListExport). CSV column spec + fetchPage adapter
 // + filename stem is all that's view-specific.
@@ -245,7 +266,7 @@ const {
 
 watch(exportError, (v) => { if (v) error.value = v })
 
-const hasActiveFilters = computed(() => !!(category.value || eventType.value || tenantId.value || scope.value || correlationId.value || search.value))
+const hasActiveFilters = computed(() => !!(category.value || eventType.value || tenantId.value || scope.value || correlationId.value || search.value || fromDate.value || toDate.value))
 
 const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
 
@@ -366,6 +387,14 @@ function measureRow(el: Element | { $el?: Element } | null) {
         <div>
           <label for="ev-search" class="form-label">Search</label>
           <input id="ev-search" v-model="search" type="search" placeholder="correlation_id or scope" class="form-input w-40" aria-label="Search by correlation_id or scope substring" />
+        </div>
+        <div class="w-52">
+          <label for="ev-time-range" class="form-label">Time range</label>
+          <TimeRangePicker
+            id="ev-time-range"
+            v-model="timeRange"
+            aria-label="Event stream time range"
+          />
         </div>
         <button v-if="hasActiveFilters" type="button" @click="clearFilters" class="text-sm muted hover:text-gray-700 cursor-pointer ml-auto">Clear filters</button>
       </div>

@@ -31,6 +31,29 @@
 - `vitest run` — **505 / 505 passing** across 40 files (+58 new across 4 commits in this release: 32 for the I1/I3 rebuild covering alert-banner states / Expiring Keys / Recent Activity / counter-strip DOM order / per-tile chip layout / zero-count omission / graceful degradation; +3 for `recent_denials_by_reason` populated-sorted-desc + absent-field + empty-object; +1 guard that the old expiries card stays removed; +2 for raw-enum operation format matching AuditView; **+17 for the new AuditView filter DSL** covering error_code normalization / IN-list dedupe / whitespace-separated parsing / datalist enum coverage / all five status-band mappings / mutex-sidestep / search field copy / URL-param deep-link including unknown-band defensive fallback; **+3 for the Overview denial-pill router-link drill-down** asserting anchors render with href + route name + query payload + title tooltip).
 - `vite build` — clean, 897ms.
 
+### 2026-04-17 — EventsView adopts `TimeRangePicker` (second consumer)
+
+**Scope.** Dashboard-only, additive. EventsView gains a Time range filter. No spec or server change — `listEvents` already accepts `from` + `to` as RFC 3339 date-time per `cycles-governance-admin-v0.1.25.yaml:6537–6546`; the dashboard was simply not surfacing them.
+
+**Why.** Events are noisier than audit (every reservation/budget/webhook signal) and the core debug flow is inherently time-scoped ("why did this webhook fire at 14:32 UTC?"). Without a time filter, operators reconstructing a 2am incident scrolled past thousands of irrelevant rows. EventsView already sorts by timestamp and polls every 15s, so the data model was ready — the filter surface was the missing piece. Adopting `TimeRangePicker` here rather than re-implementing three fields gives Events the same Cloudflare-style single-control UX we just landed on Audit, and validates the component as reusable (second consumer, first external adoption).
+
+**What shipped.**
+
+- **EventsView filter row** — new `Time range` field between Search and the Clear-filters button, wrapped in `w-52` so the trigger fits the longest preset label ("Last 24 hours") and truncates custom ranges gracefully.
+- **`fromDate` / `toDate` refs** initialized from `?from=` / `?to=` query params so deep-links pre-fill (matches AuditView's URL-restore idiom). New `timeRange` computed passthrough over the two refs so the picker's `v-model` reads/writes a single `{from, to}` object.
+- **`buildFilterParams`** emits `from` and `to` when non-empty, consistent with the other 6 filter fields.
+- **`applyFilters` URL persistence** — `?from=` / `?to=` added to the `router.replace` query spread alongside the existing 6 params.
+- **`clearFilters`** resets `fromDate` + `toDate`, and `hasActiveFilters` now tracks the range too (so the Clear-filters button shows when only a range is set — matches the pattern for every other filter).
+- **Watchers** — `fromDate` / `toDate` reuse the direct (non-debounced) `applyFilters` pattern. The picker only emits on preset-click or custom Apply, so every emission is already a committed intent; debouncing would just add perceived lag.
+
+**Files touched.** `src/views/EventsView.vue` (+ `TimeRangePicker` import, + `fromDate` / `toDate` refs + `timeRange` computed passthrough, + `from`/`to` in `buildFilterParams`, + URL persistence, + watchers, + filter-row markup, + range reset in `clearFilters`, + `hasActiveFilters` includes range). New `src/__tests__/EventsView-time-range.test.ts` (7 specs).
+
+**Validation gates.**
+
+- `vue-tsc --noEmit` — clean.
+- `vitest run` — **531 / 531 passing** across 42 files (+7 new: empty-range omission / picker-rendered-and-labeled / preset emission with pinned fake timers / custom-range Apply emission / `?from=`+`?to=` URL pre-fill with trigger-label verification / URL persistence on range change / Clear-filters resets the range).
+- `vite build` — clean, 884ms.
+
 ### 2026-04-17 — `TimeRangePicker` component + AuditView collapse From/To/Quick into one control
 
 **Scope.** Dashboard-only, additive + subtractive. New reusable component + AuditView wire-up. No spec or server change.
