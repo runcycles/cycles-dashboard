@@ -65,9 +65,10 @@ test('operator revokes a leaked API key and the row reflects REVOKED status', as
   const targetRow = page.getByRole('row').filter({ hasText: revokeKeyName })
   await expect(targetRow).toBeVisible({ timeout: 10_000 })
 
-  // Click the row's Revoke button. Row-scoped to avoid ambiguity with
-  // any other keys that might also show a Revoke button.
-  await targetRow.getByRole('button', { name: /^revoke$/i }).click()
+  // Open the row's action menu (kebab) and click Revoke. Row-scoped
+  // to avoid ambiguity with any other keys' menus.
+  await targetRow.getByRole('button', { name: /^actions for api key/i }).click()
+  await page.getByRole('menuitem', { name: /^revoke$/i }).click()
 
   // ConfirmAction dialog with row-name in its message, scope the
   // confirm button via role="dialog".

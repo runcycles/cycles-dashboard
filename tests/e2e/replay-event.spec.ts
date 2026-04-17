@@ -61,8 +61,10 @@ test('operator submits a replay and sees the events_queued banner', async ({ pag
     { timeout: 10_000 },
   )
 
-  // Click Replay to open the FormDialog.
-  await page.getByRole('button', { name: /^replay$/i }).click()
+  // Replay now sits inside the header's "More actions" menu (Send Test
+  // is the one action kept inline). Open the menu, then click Replay.
+  await page.getByRole('button', { name: /more webhook actions/i }).click()
+  await page.getByRole('menuitem', { name: /^replay$/i }).click()
   const dialog = page.getByRole('dialog', { name: /replay events/i })
   await expect(dialog).toBeVisible()
 

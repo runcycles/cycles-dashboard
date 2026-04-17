@@ -50,15 +50,21 @@ test('operator freezes an ACTIVE budget and then unfreezes it', async ({ page })
   const budgetRow = page.getByRole('row').filter({ hasText: fx.budgetScope })
   await expect(budgetRow).toBeVisible({ timeout: 10_000 })
 
-  // Initial state: Freeze button visible, Unfreeze hidden.
-  const freezeBtn = budgetRow.getByRole('button', { name: /^freeze$/i })
-  const unfreezeBtn = budgetRow.getByRole('button', { name: /^unfreeze$/i })
-  await expect(freezeBtn).toBeVisible()
-  await expect(unfreezeBtn).toBeHidden()
+  // Row actions live behind a kebab menu; Freeze / Unfreeze are
+  // mutually-exclusive menuitems gated on status. The regression guard
+  // is "the visible menuitem matches the current status" — open the
+  // menu and check both presence and absence.
+  const kebab = budgetRow.getByRole('button', { name: /actions for budget/i })
+  const freezeItem = page.getByRole('menuitem', { name: /^freeze$/i })
+  const unfreezeItem = page.getByRole('menuitem', { name: /^unfreeze$/i })
 
-  // Freeze. ConfirmAction is a separate modal with its own confirm
-  // button; scope strictly to avoid clicking the row-level button.
-  await freezeBtn.click()
+  // Initial state (ACTIVE): Freeze menuitem visible, Unfreeze absent.
+  await kebab.click()
+  await expect(freezeItem).toBeVisible()
+  await expect(unfreezeItem).toHaveCount(0)
+
+  // Click Freeze. The menu closes and the ConfirmAction modal opens.
+  await freezeItem.click()
   const freezeConfirm = page.getByRole('dialog', { name: /freeze this budget/i })
   await expect(freezeConfirm).toBeVisible()
 
@@ -72,15 +78,16 @@ test('operator freezes an ACTIVE budget and then unfreezes it', async ({ page })
   expect(freezeResponse.status()).toBeGreaterThanOrEqual(200)
   expect(freezeResponse.status()).toBeLessThan(300)
 
-  // After freeze: Unfreeze button visible, Freeze gone, status badge
-  // reads FROZEN. The StatusBadge renders the literal status text.
-  await expect(unfreezeBtn).toBeVisible({ timeout: 5_000 })
-  await expect(freezeBtn).toBeHidden()
-  await expect(budgetRow.getByText('FROZEN')).toBeVisible()
+  // After freeze: status badge reads FROZEN and the menu now exposes
+  // Unfreeze instead of Freeze.
+  await expect(budgetRow.getByText('FROZEN')).toBeVisible({ timeout: 5_000 })
+  await kebab.click()
+  await expect(unfreezeItem).toBeVisible()
+  await expect(freezeItem).toHaveCount(0)
 
   // Now unfreeze — restores the fixture to ACTIVE so subsequent specs
   // aren't surprised.
-  await unfreezeBtn.click()
+  await unfreezeItem.click()
   const unfreezeConfirm = page.getByRole('dialog', { name: /unfreeze this budget/i })
   await expect(unfreezeConfirm).toBeVisible()
 
@@ -95,7 +102,8 @@ test('operator freezes an ACTIVE budget and then unfreezes it', async ({ page })
   expect(unfreezeResponse.status()).toBeLessThan(300)
 
   // Back to original state.
-  await expect(freezeBtn).toBeVisible({ timeout: 5_000 })
-  await expect(unfreezeBtn).toBeHidden()
-  await expect(budgetRow.getByText('ACTIVE')).toBeVisible()
+  await expect(budgetRow.getByText('ACTIVE')).toBeVisible({ timeout: 5_000 })
+  await kebab.click()
+  await expect(freezeItem).toBeVisible()
+  await expect(unfreezeItem).toHaveCount(0)
 })

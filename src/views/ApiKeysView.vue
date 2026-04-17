@@ -19,6 +19,7 @@ import EmptyState from '../components/EmptyState.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
+import RowActionsMenu from '../components/RowActionsMenu.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import { formatDateTime } from '../utils/format'
@@ -113,6 +114,15 @@ const editingKey = ref<KeyWithTenant | null>(null)
 const editLoading = ref(false)
 const editError = ref('')
 const editForm = ref({ name: '', permissions: [] as string[], scope_filter: '' })
+
+async function copyKeyId(id: string) {
+  try {
+    await navigator.clipboard.writeText(id)
+    toast.success('Key ID copied')
+  } catch {
+    toast.error('Copy failed — clipboard unavailable')
+  }
+}
 
 function openEdit(k: KeyWithTenant) {
   // Filter out any stored permission that isn't in the canonical PERMISSIONS
@@ -556,15 +566,21 @@ function closePermsViewer() { viewingPermsFor.value = null }
               {{ sortedKeys[v.index].expires_at ? formatDateTime(sortedKeys[v.index].expires_at) : 'Never' }}
             </div>
             <div v-if="canManage" role="cell" class="table-cell">
-              <div class="flex gap-2">
-                <!-- One-click drill into audit log pre-filtered by this
-                     key. Available regardless of status — investigating
-                     revoked keys is the most common reason to want
-                     their history. -->
-                <router-link :to="{ name: 'audit', query: { key_id: sortedKeys[v.index].key_id } }" class="text-xs text-gray-600 hover:text-gray-800 cursor-pointer hover:underline">Activity</router-link>
-                <button v-if="sortedKeys[v.index].status === 'ACTIVE'" @click="openEdit(sortedKeys[v.index])" class="btn-row-primary">Edit</button>
-                <button v-if="sortedKeys[v.index].status === 'ACTIVE'" @click="pendingRevoke = sortedKeys[v.index]" class="btn-row-danger">Revoke</button>
-              </div>
+              <!-- Activity drills into audit log pre-filtered by this key
+                   (available regardless of status — investigating revoked
+                   keys is the most common reason to want their history).
+                   Edit/Revoke are gated on ACTIVE. Revoke sits under the
+                   separator as a destructive terminal action. -->
+              <RowActionsMenu
+                :aria-label="`Actions for API key ${sortedKeys[v.index].name || sortedKeys[v.index].key_id}`"
+                :items="[
+                  { label: 'Activity', to: { name: 'audit', query: { key_id: sortedKeys[v.index].key_id } } },
+                  { label: 'Copy key ID', onClick: () => copyKeyId(sortedKeys[v.index].key_id) },
+                  { label: 'Edit', onClick: () => openEdit(sortedKeys[v.index]), hidden: sortedKeys[v.index].status !== 'ACTIVE' },
+                  { separator: true },
+                  { label: 'Revoke', onClick: () => pendingRevoke = sortedKeys[v.index], danger: true, hidden: sortedKeys[v.index].status !== 'ACTIVE' },
+                ]"
+              />
             </div>
           </div>
         </div>

@@ -66,9 +66,10 @@ test('editing an API key renames it and updates permissions visibly', async ({ p
   const targetRow = page.getByRole('row').filter({ hasText: editKeyOriginalName })
   await expect(targetRow).toBeVisible({ timeout: 10_000 })
 
-  // Open the edit dialog. Scoped to the target row so we don't click
-  // an Edit button on a different key.
-  await targetRow.getByRole('button', { name: /^edit$/i }).click()
+  // Open the edit dialog via the row's action menu (kebab). Scoped to
+  // the target row so we don't open a different key's menu.
+  await targetRow.getByRole('button', { name: /^actions for api key/i }).click()
+  await page.getByRole('menuitem', { name: /^edit$/i }).click()
 
   const editDialog = page.getByRole('dialog', { name: /edit api key/i })
   await expect(editDialog).toBeVisible()

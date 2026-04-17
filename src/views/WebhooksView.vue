@@ -23,6 +23,7 @@ import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
+import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 
@@ -697,8 +698,16 @@ const gridTemplate = computed(() =>
               :title="sortedWebhooks[v.index].event_types?.join(', ') || sortedWebhooks[v.index].event_categories?.join(', ') || 'all events'"
             >{{ sortedWebhooks[v.index].event_types?.join(', ') || sortedWebhooks[v.index].event_categories?.join(', ') || 'all' }}</div>
             <div v-if="canManage" role="cell" class="table-cell">
-              <button v-if="sortedWebhooks[v.index].status === 'ACTIVE'" @click="pendingStatusAction = { id: sortedWebhooks[v.index].subscription_id, url: sortedWebhooks[v.index].url, action: 'PAUSED' }" class="btn-row-danger">Pause</button>
-              <button v-if="sortedWebhooks[v.index].status === 'PAUSED' || sortedWebhooks[v.index].status === 'DISABLED'" @click="pendingStatusAction = { id: sortedWebhooks[v.index].subscription_id, url: sortedWebhooks[v.index].url, action: 'ACTIVE' }" class="btn-row-success">Enable</button>
+              <RowActionsMenu
+                :aria-label="`Actions for webhook ${sortedWebhooks[v.index].name || sortedWebhooks[v.index].url}`"
+                :items="[
+                  { label: 'Activity', to: { name: 'audit', query: { resource_type: 'webhook', resource_id: sortedWebhooks[v.index].subscription_id } } },
+                  { label: 'Edit', to: { name: 'webhook-detail', params: { id: sortedWebhooks[v.index].subscription_id }, query: { action: 'edit' } } },
+                  { label: 'Enable', onClick: () => pendingStatusAction = { id: sortedWebhooks[v.index].subscription_id, url: sortedWebhooks[v.index].url, action: 'ACTIVE' }, hidden: sortedWebhooks[v.index].status !== 'PAUSED' && sortedWebhooks[v.index].status !== 'DISABLED' },
+                  { separator: true },
+                  { label: 'Pause', onClick: () => pendingStatusAction = { id: sortedWebhooks[v.index].subscription_id, url: sortedWebhooks[v.index].url, action: 'PAUSED' }, danger: true, hidden: sortedWebhooks[v.index].status !== 'ACTIVE' },
+                ]"
+              />
             </div>
           </div>
         </div>

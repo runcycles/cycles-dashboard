@@ -171,8 +171,11 @@ function setTimeRange(hours: number) {
   toDate.value = fmt(now)
 }
 
-function hasDetail(e: AuditLogEntry): boolean {
-  return !!(e.resource_type || e.resource_id || e.metadata || e.error_code || e.request_id || e.source_ip || e.user_agent)
+// Every audit entry carries a log_id (the compliance-grade identifier
+// that the search filter explicitly covers). Since the expand block
+// surfaces log_id, every row is expandable — no conditional gate.
+function hasDetail(_e: AuditLogEntry): boolean {
+  return true
 }
 
 // v0.1.25.21 (#8): accept audit drill-down params from the URL. Lets
@@ -264,23 +267,27 @@ function measureRow(el: Element | { $el?: Element } | null) {
 
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
+    <!-- Filter form: 8 fields in a 4-column responsive grid so the
+         whole form is 2 field-rows on md+ (Scope/Event type on row 1,
+         Identity/Time on row 2) plus a compact footer. Collapses to
+         2-col and 1-col on smaller viewports without fieldset chrome. -->
     <form @submit.prevent="query" class="card p-4 mb-4">
-      <div class="flex gap-3 flex-wrap items-end">
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-end">
         <div>
           <label for="audit-tenant" class="form-label">Tenant ID</label>
-          <input id="audit-tenant" v-model="tenantId" class="form-input w-32" placeholder="acme" />
+          <input id="audit-tenant" v-model="tenantId" class="form-input" placeholder="acme" />
         </div>
         <div>
           <label for="audit-key" class="form-label">Key ID</label>
-          <input id="audit-key" v-model="keyId" class="form-input w-32" placeholder="key_..." />
+          <input id="audit-key" v-model="keyId" class="form-input" placeholder="key_..." />
         </div>
         <div>
           <label for="audit-operation" class="form-label">Operation</label>
-          <input id="audit-operation" v-model="operation" class="form-input w-32" placeholder="createBudget" />
+          <input id="audit-operation" v-model="operation" class="form-input" placeholder="createBudget" />
         </div>
         <div>
           <label for="audit-resource" class="form-label">Resource Type</label>
-          <select id="audit-resource" v-model="resourceType" class="form-select">
+          <select id="audit-resource" v-model="resourceType" class="form-select w-full">
             <option value="">All</option>
             <option>tenant</option><option>budget</option><option>api_key</option>
             <option>policy</option><option>webhook</option><option>config</option>
@@ -288,11 +295,11 @@ function measureRow(el: Element | { $el?: Element } | null) {
         </div>
         <div>
           <label for="audit-resource-id" class="form-label">Resource ID</label>
-          <input id="audit-resource-id" v-model="resourceId" class="form-input w-36" placeholder="key_abc123..." />
+          <input id="audit-resource-id" v-model="resourceId" class="form-input" placeholder="key_abc123..." />
         </div>
         <div>
           <label for="audit-search" class="form-label">Search</label>
-          <input id="audit-search" v-model="search" type="search" class="form-input w-36" placeholder="resource_id or log_id" aria-label="Search by resource_id or log_id substring" />
+          <input id="audit-search" v-model="search" type="search" class="form-input" placeholder="resource_id or log_id" aria-label="Search by resource_id or log_id substring" />
         </div>
         <div>
           <label for="audit-from" class="form-label">From</label>
@@ -302,15 +309,17 @@ function measureRow(el: Element | { $el?: Element } | null) {
           <label for="audit-to" class="form-label">To</label>
           <input id="audit-to" v-model="toDate" type="datetime-local" class="form-input" />
         </div>
+      </div>
+      <div class="flex items-center justify-between gap-3 mt-3 flex-wrap">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="muted-sm">Quick range:</span>
+          <button v-for="h in [1, 6, 24, 168]" :key="h" type="button" @click="setTimeRange(h)"
+            class="muted-sm hover:text-gray-700 dark:hover:text-gray-200 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer">
+            {{ h < 24 ? `${h}h` : `${h / 24}d` }}
+          </button>
+        </div>
         <button type="submit" :disabled="loading" class="bg-gray-900 text-white px-4 py-1.5 rounded text-sm hover:bg-gray-800 disabled:opacity-50 cursor-pointer">
           {{ loading ? 'Querying...' : 'Run Query' }}
-        </button>
-      </div>
-      <div class="flex gap-2 mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
-        <span class="muted-sm py-1">Quick range:</span>
-        <button v-for="h in [1, 6, 24, 168]" :key="h" type="button" @click="setTimeRange(h)"
-          class="muted-sm hover:text-gray-700 dark:hover:text-gray-200 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer">
-          {{ h < 24 ? `${h}h` : `${h / 24}d` }}
         </button>
       </div>
     </form>
@@ -420,9 +429,13 @@ function measureRow(el: Element | { $el?: Element } | null) {
             <!-- Expanded detail — rendered when this row's log_id is
                  in the `expanded` set. Multi-row open so reviewers can
                  compare entries (e.g. before/after of a permission
-                 change). Adds ~160-280px depending on metadata. -->
+                 change). Adds ~160-280px depending on metadata.
+                 log_id leads: it is the compliance identifier operators
+                 cite in reports and the only field the `search` filter
+                 hits that isn't otherwise visible in the row. -->
             <div v-if="expanded.has(sortedEntries[v.index].log_id)" class="bg-gray-50/70 dark:bg-gray-800/40 px-4 py-3 border-t border-gray-100 dark:border-gray-700">
               <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3">
+                <div><span class="muted">Log ID:</span> <span class="font-mono">{{ sortedEntries[v.index].log_id }}</span></div>
                 <div v-if="sortedEntries[v.index].request_id"><span class="muted">Request ID:</span> <span class="font-mono">{{ sortedEntries[v.index].request_id }}</span></div>
                 <div v-if="sortedEntries[v.index].source_ip"><span class="muted">Source IP:</span> <span class="font-mono">{{ sortedEntries[v.index].source_ip }}</span></div>
                 <div v-if="sortedEntries[v.index].user_agent"><span class="muted">User Agent:</span> {{ sortedEntries[v.index].user_agent }}</div>

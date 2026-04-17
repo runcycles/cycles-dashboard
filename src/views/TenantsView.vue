@@ -20,6 +20,7 @@ import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import FormDialog from '../components/FormDialog.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
+import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { formatDate } from '../utils/format'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
@@ -352,6 +353,15 @@ async function submitCreate() {
 
 // ─── Single-row suspend / reactivate (retained) ──────────────────────
 const pendingStatusAction = ref<{ tenantId: string; name: string; action: 'SUSPENDED' | 'ACTIVE' } | null>(null)
+
+async function copyTenantId(tenantId: string) {
+  try {
+    await navigator.clipboard.writeText(tenantId)
+    toast.success('Tenant ID copied')
+  } catch {
+    toast.error('Copy failed — clipboard unavailable')
+  }
+}
 
 async function executeStatusAction() {
   if (!pendingStatusAction.value) return
@@ -702,8 +712,19 @@ const gridTemplate = computed(() =>
             <div role="cell" class="table-cell"><StatusBadge :status="sortedTenants[v.index].status" /></div>
             <div role="cell" class="table-cell muted-sm">{{ formatDate(sortedTenants[v.index].created_at) }}</div>
             <div v-if="canManage" role="cell" class="table-cell">
-              <button v-if="sortedTenants[v.index].status === 'ACTIVE'" @click="pendingStatusAction = { tenantId: sortedTenants[v.index].tenant_id, name: sortedTenants[v.index].name, action: 'SUSPENDED' }" class="btn-row-danger">Suspend</button>
-              <button v-if="sortedTenants[v.index].status === 'SUSPENDED'" @click="pendingStatusAction = { tenantId: sortedTenants[v.index].tenant_id, name: sortedTenants[v.index].name, action: 'ACTIVE' }" class="btn-row-success">Reactivate</button>
+              <!-- Activity + Copy tenant ID always shown so even CLOSED
+                   tenants (terminal — both Reactivate and Suspend are
+                   hidden) still expose a 2-item menu. -->
+              <RowActionsMenu
+                :aria-label="`Actions for tenant ${sortedTenants[v.index].name || sortedTenants[v.index].tenant_id}`"
+                :items="[
+                  { label: 'Activity', to: { name: 'audit', query: { tenant_id: sortedTenants[v.index].tenant_id } } },
+                  { label: 'Copy tenant ID', onClick: () => copyTenantId(sortedTenants[v.index].tenant_id) },
+                  { label: 'Reactivate', onClick: () => pendingStatusAction = { tenantId: sortedTenants[v.index].tenant_id, name: sortedTenants[v.index].name, action: 'ACTIVE' }, hidden: sortedTenants[v.index].status !== 'SUSPENDED' },
+                  { separator: true },
+                  { label: 'Suspend', onClick: () => pendingStatusAction = { tenantId: sortedTenants[v.index].tenant_id, name: sortedTenants[v.index].name, action: 'SUSPENDED' }, danger: true, hidden: sortedTenants[v.index].status !== 'ACTIVE' },
+                ]"
+              />
             </div>
           </div>
         </div>

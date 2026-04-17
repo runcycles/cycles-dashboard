@@ -67,7 +67,11 @@ test('Activity link on an API key row drills into a pre-filtered audit view', as
   const targetRow = page.getByRole('row').filter({ hasText: targetKeyName })
   await expect(targetRow).toBeVisible({ timeout: 10_000 })
 
-  await targetRow.getByRole('link', { name: /^activity$/i }).click()
+  // Activity now lives inside the row's action menu (kebab). Open and
+  // click the menuitem — it's a router-link under the hood, so the
+  // navigation behavior is unchanged.
+  await targetRow.getByRole('button', { name: /^actions for api key/i }).click()
+  await page.getByRole('menuitem', { name: /^activity$/i }).click()
 
   // Landed on /audit with key_id query param preserved. URL assertion
   // catches a regression where the router-link target drops or

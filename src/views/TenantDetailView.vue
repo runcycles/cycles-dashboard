@@ -16,6 +16,7 @@ import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
 import ScopeBuilder from '../components/ScopeBuilder.vue'
+import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 import { rateLimitedBatch } from '../utils/rateLimitedBatch'
@@ -125,6 +126,15 @@ async function executeTenantAction() {
 
 // API key revoke action
 const pendingKeyRevoke = ref<ApiKey | null>(null)
+
+async function copyKeyId(keyId: string) {
+  try {
+    await navigator.clipboard.writeText(keyId)
+    toast.success('Key ID copied')
+  } catch {
+    toast.error('Copy failed — clipboard unavailable')
+  }
+}
 
 async function executeKeyRevoke() {
   if (!pendingKeyRevoke.value) return
@@ -617,14 +627,25 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
           <h2 class="text-lg font-medium text-gray-900">{{ tenant.name }}</h2>
           <StatusBadge :status="tenant.status" />
           <span class="flex-1" />
-          <div v-if="canManageTenants" class="flex gap-2 flex-wrap">
-            <button @click="openEditTenant" class="btn-pill-secondary">Edit</button>
-            <!-- #7 Emergency Freeze: only shown if there are ACTIVE budgets
-                 to freeze. Otherwise the button would just confirm a no-op. -->
-            <button v-if="canManageBudgets && activeBudgets.length > 0" @click="openEmergencyFreeze" class="btn-pill-danger">Emergency Freeze ({{ activeBudgets.length }})</button>
-            <button v-if="tenant.status === 'ACTIVE'" @click="pendingTenantAction = 'SUSPENDED'" class="btn-pill-danger">Suspend</button>
-            <button v-if="tenant.status === 'SUSPENDED'" @click="pendingTenantAction = 'ACTIVE'" class="btn-pill-success">Reactivate</button>
-            <button v-if="tenant.status !== 'CLOSED'" @click="pendingTenantAction = 'CLOSED'" class="btn-pill-danger">Close</button>
+          <div class="flex gap-2 flex-wrap">
+            <!-- Active-tab "Create X" primary action sits here alongside
+                 the tenant-level actions (Edit/Suspend/Close) so every
+                 primary affordance is in the same header row — matches
+                 WebhooksView's "Create Webhook" placement. Contextual:
+                 only the current tab's creator shows, keeping the header
+                 uncluttered. -->
+            <button v-if="tab === 'budgets' && canManageBudgets" @click="openCreateBudget" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Budget</button>
+            <button v-if="tab === 'keys' && canManageKeys" @click="openCreateKey" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create API Key</button>
+            <button v-if="tab === 'policies' && canManagePolicies" @click="openCreatePolicy" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Policy</button>
+            <template v-if="canManageTenants">
+              <button @click="openEditTenant" class="btn-pill-secondary">Edit</button>
+              <!-- #7 Emergency Freeze: only shown if there are ACTIVE budgets
+                   to freeze. Otherwise the button would just confirm a no-op. -->
+              <button v-if="canManageBudgets && activeBudgets.length > 0" @click="openEmergencyFreeze" class="btn-pill-danger">Emergency Freeze ({{ activeBudgets.length }})</button>
+              <button v-if="tenant.status === 'ACTIVE'" @click="pendingTenantAction = 'SUSPENDED'" class="btn-pill-danger">Suspend</button>
+              <button v-if="tenant.status === 'SUSPENDED'" @click="pendingTenantAction = 'ACTIVE'" class="btn-pill-success">Reactivate</button>
+              <button v-if="tenant.status !== 'CLOSED'" @click="pendingTenantAction = 'CLOSED'" class="btn-pill-danger">Close</button>
+            </template>
           </div>
         </div>
         <p class="text-sm muted font-mono">{{ tenant.tenant_id }}</p>
@@ -685,10 +706,9 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         </button>
       </div>
 
-      <!-- Budgets tab -->
-      <div v-if="tab === 'budgets' && canManageBudgets" class="flex justify-end mb-2">
-        <button @click="openCreateBudget" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Budget</button>
-      </div>
+      <!-- Budgets tab. Create button lives in the page header action
+           row (above) per design convention — every primary action in
+           the same place. -->
       <div v-if="tab === 'budgets'" class="card-table">
         <table class="w-full text-sm min-w-[520px]">
           <thead class="table-header">
@@ -706,10 +726,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         </table>
       </div>
 
-      <!-- API Keys tab -->
-      <div v-if="tab === 'keys' && canManageKeys" class="flex justify-end mb-2">
-        <button @click="openCreateKey" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create API Key</button>
-      </div>
+      <!-- API Keys tab. Create button lives in the page header. -->
       <div v-if="tab === 'keys'" class="card-table">
         <table class="w-full text-sm min-w-[520px]">
           <thead class="table-header">
@@ -722,12 +739,16 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
               <td class="table-cell"><StatusBadge :status="k.status" /></td>
               <td class="table-cell muted-sm">{{ k.permissions.join(', ') }}</td>
               <td v-if="canManageKeys" class="table-cell">
-                <div class="flex gap-2">
-                  <!-- #8: same drill-down as ApiKeysView.vue. -->
-                  <router-link :to="{ name: 'audit', query: { key_id: k.key_id } }" class="text-xs text-gray-600 hover:text-gray-800 cursor-pointer hover:underline">Activity</router-link>
-                  <button v-if="k.status === 'ACTIVE'" @click="openEditKey(k)" class="btn-row-primary">Edit</button>
-                  <button v-if="k.status === 'ACTIVE'" @click="pendingKeyRevoke = k" class="btn-row-danger">Revoke</button>
-                </div>
+                <RowActionsMenu
+                  :aria-label="`Actions for API key ${k.name || k.key_id}`"
+                  :items="[
+                    { label: 'Activity', to: { name: 'audit', query: { key_id: k.key_id } } },
+                    { label: 'Copy key ID', onClick: () => copyKeyId(k.key_id) },
+                    { label: 'Edit', onClick: () => openEditKey(k), hidden: k.status !== 'ACTIVE' },
+                    { separator: true },
+                    { label: 'Revoke', onClick: () => pendingKeyRevoke = k, danger: true, hidden: k.status !== 'ACTIVE' },
+                  ]"
+                />
               </td>
             </tr>
             <tr v-if="apiKeys.length === 0"><td :colspan="canManageKeys ? 5 : 4"><EmptyState message="No API keys" hint="API keys will appear here once created" /></td></tr>
@@ -735,10 +756,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
         </table>
       </div>
 
-      <!-- Policies tab -->
-      <div v-if="tab === 'policies' && canManagePolicies" class="flex justify-end mb-2">
-        <button @click="openCreatePolicy" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Policy</button>
-      </div>
+      <!-- Policies tab. Create button lives in the page header. -->
       <div v-if="tab === 'policies'" class="card-table">
         <table class="w-full text-sm min-w-[520px]">
           <thead class="table-header">
@@ -751,7 +769,13 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
               <td class="table-cell muted font-mono text-xs">{{ p.scope_pattern }}</td>
               <td class="table-cell"><StatusBadge :status="p.status" /></td>
               <td v-if="canManagePolicies" class="table-cell">
-                <button @click="openEditPolicy(p)" class="text-xs text-gray-600 hover:text-gray-800 cursor-pointer hover:underline">Edit</button>
+                <RowActionsMenu
+                  :aria-label="`Actions for policy ${p.name || p.policy_id}`"
+                  :items="[
+                    { label: 'Activity', to: { name: 'audit', query: { resource_type: 'policy', resource_id: p.policy_id } } },
+                    { label: 'Edit', onClick: () => openEditPolicy(p) },
+                  ]"
+                />
               </td>
             </tr>
             <tr v-if="policies.length === 0"><td :colspan="canManagePolicies ? 5 : 4"><EmptyState message="No policies" hint="Policies will appear here once configured" /></td></tr>
