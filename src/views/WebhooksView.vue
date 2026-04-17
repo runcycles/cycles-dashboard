@@ -6,8 +6,10 @@ import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useListExport } from '../composables/useListExport'
-import { listWebhooks, listTenants, createWebhook, updateWebhook, getWebhookSecurityConfig, updateWebhookSecurityConfig } from '../api/client'
+import { listWebhooks, listTenants, createWebhook, updateWebhook, getWebhookSecurityConfig, updateWebhookSecurityConfig, bulkActionWebhooks } from '../api/client'
 import { rateLimitedBatch } from '../utils/rateLimitedBatch'
+import { generateIdempotencyKey } from '../utils/idempotencyKey'
+import type { WebhookBulkAction, WebhookBulkFilter } from '../types'
 import { useAuthStore } from '../stores/auth'
 import type { WebhookSubscription, WebhookCreateResponse, Tenant, WebhookSecurityConfig } from '../types'
 import { EVENT_TYPES } from '../types'
@@ -209,6 +211,79 @@ function cancelBulk() {
     bulkAbort?.abort()
   } else {
     bulkAction.value = null
+  }
+}
+
+// ─── W1 filter-apply path (cycles-governance-admin v0.1.25.21) ───────
+// Mirrors TenantsView: additive alongside the row-select path above.
+// Single POST to /v1/admin/webhooks/bulk-action, filter body is
+// derived from the active UI filters + the action's implied status.
+//
+//   - PAUSE → status=ACTIVE (only mutate webhooks currently delivering)
+//   - RESUME → status=PAUSED (only un-pause operator-paused subs; the
+//     server auto-DISABLES after repeated failures, and a bulk RESUME
+//     should NOT sweep those back up — they need per-row verification)
+//   - DELETE not offered on the filter-apply path — destructive,
+//     needs a per-row confirmation flow that the dashboard owns.
+//
+// Guardrails:
+//   - tenantFilter === SYSTEM_TENANT_ID is a dashboard pseudo-value
+//     with no server-side equivalent, so the button is disabled.
+//   - urlFilter containing `*` is wildcard-matched client-side only;
+//     the server's `search` is literal substring, so sending the
+//     wildcard string would silently produce a different match set.
+//     Disable the button in that case.
+const filterBulkAction = ref<WebhookBulkAction | null>(null)
+const filterBulkRunning = ref(false)
+function openFilterBulk(action: WebhookBulkAction) {
+  filterBulkAction.value = action
+}
+function canApplyWebhookFilterBulk(): boolean {
+  if (tenantFilter.value === SYSTEM_TENANT_ID) return false
+  if (debouncedUrlFilter.value.includes('*')) return false
+  return true
+}
+const filterBulkSummary = computed<string>(() => {
+  const parts: string[] = []
+  if (filterBulkAction.value === 'PAUSE') parts.push('status=ACTIVE')
+  else if (filterBulkAction.value === 'RESUME') parts.push('status=PAUSED')
+  if (tenantFilter.value && tenantFilter.value !== SYSTEM_TENANT_ID) parts.push(`tenant_id=${tenantFilter.value}`)
+  const q = debouncedUrlFilter.value.trim()
+  if (q && !q.includes('*')) parts.push(`search="${q}"`)
+  return parts.join(' AND ')
+})
+async function executeFilterBulk() {
+  if (!filterBulkAction.value || filterBulkRunning.value) return
+  const action = filterBulkAction.value
+  const filter: WebhookBulkFilter = {}
+  if (action === 'PAUSE') filter.status = 'ACTIVE'
+  else if (action === 'RESUME') filter.status = 'PAUSED'
+  if (tenantFilter.value && tenantFilter.value !== SYSTEM_TENANT_ID) filter.tenant_id = tenantFilter.value
+  const q = debouncedUrlFilter.value.trim()
+  if (q && !q.includes('*')) filter.search = q
+  filterBulkRunning.value = true
+  try {
+    const res = await bulkActionWebhooks({
+      filter,
+      action,
+      idempotency_key: generateIdempotencyKey(),
+    })
+    const verb = action === 'PAUSE' ? 'paused' : 'resumed'
+    const parts = [`${res.succeeded.length}/${res.total_matched} webhooks ${verb}`]
+    if (res.skipped.length) parts.push(`${res.skipped.length} skipped (already in target state)`)
+    if (res.failed.length) parts.push(`${res.failed.length} failed`)
+    const summary = parts.join(', ')
+    if (res.failed.length) toast.error(`${summary} — check console for details`)
+    else toast.success(summary)
+    for (const f of res.failed) {
+      console.warn(`bulk-action ${action} failed on ${f.id}: ${f.error_code ?? 'INTERNAL_ERROR'} — ${f.message ?? ''}`)
+    }
+  } catch (e) {
+    toast.error(`Bulk ${action} failed: ${toMessage(e)}`)
+  } finally {
+    filterBulkRunning.value = false
+    filterBulkAction.value = null
+    await refresh()
   }
 }
 
@@ -481,6 +556,26 @@ const gridTemplate = computed(() =>
           aria-label="Filter webhooks by URL"
           class="border border-gray-300 rounded px-3 py-1.5 text-sm w-72"
         />
+        <!-- Filter-apply bulk actions (see TenantsView for rationale).
+             Appears when a filter is set AND no row-select is active.
+             Disabled for SYSTEM_TENANT_ID (no server equivalent) and
+             for wildcard url-filters (server uses literal substring). -->
+        <template v-if="canManage && (tenantFilter || debouncedUrlFilter.trim()) && selectedVisibleCount === 0">
+          <div class="w-px h-5 bg-gray-200" aria-hidden="true"></div>
+          <span class="muted-sm">Apply to all matching filter:</span>
+          <button
+            @click="openFilterBulk('PAUSE')"
+            :disabled="!canApplyWebhookFilterBulk()"
+            class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            :title="canApplyWebhookFilterBulk() ? 'Pause all ACTIVE webhooks matching filter' : 'System-wide or wildcard filter is not supported by server bulk-action'"
+          >Pause all</button>
+          <button
+            @click="openFilterBulk('RESUME')"
+            :disabled="!canApplyWebhookFilterBulk()"
+            class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            :title="canApplyWebhookFilterBulk() ? 'Resume all PAUSED webhooks matching filter' : 'System-wide or wildcard filter is not supported by server bulk-action'"
+          >Resume all</button>
+        </template>
       </div>
     </div>
 
@@ -645,6 +740,23 @@ const gridTemplate = computed(() =>
       :loading="bulkRunning"
       @confirm="executeBulk"
       @cancel="cancelBulk"
+    />
+
+    <!-- Filter-apply confirm. Single POST to /v1/admin/webhooks/
+         bulk-action; server hard-caps at 500 matching rows. -->
+    <ConfirmAction
+      v-if="filterBulkAction"
+      :title="filterBulkAction === 'PAUSE'
+        ? 'Pause all webhooks matching filter?'
+        : 'Resume all webhooks matching filter?'"
+      :message="filterBulkRunning
+        ? 'Working… server is applying the action to every matching subscription.'
+        : `Filter: ${filterBulkSummary || '(none)'}. Server will apply to up to 500 matching subscriptions in a single request. Subscriptions already in the target state will be skipped. DISABLED subscriptions (auto-disabled after failures) are NOT reactivated — they need per-row verification.`"
+      :confirm-label="filterBulkRunning ? 'Working…' : filterBulkAction === 'PAUSE' ? 'Pause all matching' : 'Resume all matching'"
+      :danger="filterBulkAction === 'PAUSE'"
+      :loading="filterBulkRunning"
+      @confirm="executeFilterBulk"
+      @cancel="filterBulkAction = null"
     />
 
     <FormDialog v-if="showCreate" title="Create Webhook" submit-label="Create Webhook" :loading="createLoading" :error="createError" @submit="submitCreate" @cancel="showCreate = false" :wide="true">

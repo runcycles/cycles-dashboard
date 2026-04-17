@@ -6,8 +6,10 @@ import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useListExport } from '../composables/useListExport'
-import { listTenants, createTenant, updateTenantStatus } from '../api/client'
+import { listTenants, createTenant, updateTenantStatus, bulkActionTenants } from '../api/client'
 import { rateLimitedBatch } from '../utils/rateLimitedBatch'
+import { generateIdempotencyKey } from '../utils/idempotencyKey'
+import type { TenantBulkAction, TenantBulkFilter } from '../types'
 import { useAuthStore } from '../stores/auth'
 import type { Tenant } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -228,6 +230,79 @@ function cancelBulk() {
     bulkAbort?.abort()
   } else {
     bulkAction.value = null
+  }
+}
+
+// ─── W1 filter-apply path (cycles-governance-admin v0.1.25.21) ───────
+// Additive alongside the row-select path above. Row-select issues one
+// PATCH per tenant via rateLimitedBatch (bounded concurrency + 429
+// backoff). Filter-apply sends a single POST to /v1/admin/tenants/
+// bulk-action with a filter body — the server counts matches, enforces
+// a 500-row hard cap, and returns split succeeded/failed/skipped arrays.
+//
+// Scope deliberately conservative on first cut:
+//   - status filter is DERIVED from the action (SUSPEND→ACTIVE,
+//     REACTIVATE→SUSPENDED). The server would otherwise silently skip
+//     mismatched rows, which is correct but wastes the 500-row budget.
+//   - parent_tenant_id filter is taken from parentFilter when the
+//     operator has selected a specific parent (not '__root__' — the
+//     server has no "null parent" filter, so that UI pseudo-option is
+//     unsupported on the bulk path and the button is disabled).
+//   - search is taken from debouncedSearch.trim() when non-empty.
+//   - CLOSE is not offered here — the server-side spec allows it but
+//     CLOSE is terminal and the dashboard requires a per-tenant
+//     confirmation flow that doesn't fit a bulk action; offer later.
+const filterBulkAction = ref<TenantBulkAction | null>(null)
+const filterBulkRunning = ref(false)
+function openFilterBulk(action: TenantBulkAction) {
+  filterBulkAction.value = action
+}
+function canApplyFilterBulk(): boolean {
+  // parent_tenant_id='__root__' is a dashboard UI pseudo-value with no
+  // server-side equivalent on the bulk endpoint, so disallow.
+  return parentFilter.value !== '__root__'
+}
+const filterBulkSummary = computed<string>(() => {
+  const parts: string[] = []
+  if (filterBulkAction.value === 'SUSPEND') parts.push('status=ACTIVE')
+  else if (filterBulkAction.value === 'REACTIVATE') parts.push('status=SUSPENDED')
+  if (parentFilter.value && parentFilter.value !== '__root__') parts.push(`parent_tenant_id=${parentFilter.value}`)
+  const q = debouncedSearch.value.trim()
+  if (q) parts.push(`search="${q}"`)
+  return parts.join(' AND ')
+})
+async function executeFilterBulk() {
+  if (!filterBulkAction.value || filterBulkRunning.value) return
+  const action = filterBulkAction.value
+  const filter: TenantBulkFilter = {}
+  if (action === 'SUSPEND') filter.status = 'ACTIVE'
+  else if (action === 'REACTIVATE') filter.status = 'SUSPENDED'
+  if (parentFilter.value && parentFilter.value !== '__root__') filter.parent_tenant_id = parentFilter.value
+  const q = debouncedSearch.value.trim()
+  if (q) filter.search = q
+  filterBulkRunning.value = true
+  try {
+    const res = await bulkActionTenants({
+      filter,
+      action,
+      idempotency_key: generateIdempotencyKey(),
+    })
+    const verb = action === 'SUSPEND' ? 'suspended' : 'reactivated'
+    const parts = [`${res.succeeded.length}/${res.total_matched} tenants ${verb}`]
+    if (res.skipped.length) parts.push(`${res.skipped.length} skipped (already in target state)`)
+    if (res.failed.length) parts.push(`${res.failed.length} failed`)
+    const summary = parts.join(', ')
+    if (res.failed.length) toast.error(`${summary} — check console for details`)
+    else toast.success(summary)
+    for (const f of res.failed) {
+      console.warn(`bulk-action ${action} failed on ${f.id}: ${f.error_code ?? 'INTERNAL_ERROR'} — ${f.message ?? ''}`)
+    }
+  } catch (e) {
+    toast.error(`Bulk ${action} failed: ${toMessage(e)}`)
+  } finally {
+    filterBulkRunning.value = false
+    filterBulkAction.value = null
+    await refresh()
   }
 }
 
@@ -468,6 +543,29 @@ const gridTemplate = computed(() =>
           <option value="__root__">(root-level only)</option>
           <option v-for="p in parentOptions" :key="p.tenant_id" :value="p.tenant_id">Children of: {{ p.name || p.tenant_id }}</option>
         </select>
+        <!-- Filter-apply bulk actions. Appears when the operator has a
+             non-empty filter (so the action targets an explicit subset,
+             not "all tenants") AND no row-select is active (keeps the
+             two paths visually distinct). Disabled when parentFilter
+             is '__root__' — server bulk endpoint has no null-parent
+             filter, so the '(root-level only)' pseudo-option isn't
+             applicable on this path. -->
+        <template v-if="canManage && (debouncedSearch.trim() || parentFilter) && selectedVisibleCount === 0">
+          <div class="w-px h-5 bg-gray-200" aria-hidden="true"></div>
+          <span class="muted-sm">Apply to all matching filter:</span>
+          <button
+            @click="openFilterBulk('SUSPEND')"
+            :disabled="!canApplyFilterBulk()"
+            class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            :title="canApplyFilterBulk() ? 'Suspend all ACTIVE tenants matching filter' : 'Root-level filter is not supported by server bulk-action'"
+          >Suspend all</button>
+          <button
+            @click="openFilterBulk('REACTIVATE')"
+            :disabled="!canApplyFilterBulk()"
+            class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            :title="canApplyFilterBulk() ? 'Reactivate all SUSPENDED tenants matching filter' : 'Root-level filter is not supported by server bulk-action'"
+          >Reactivate all</button>
+        </template>
       </div>
     </div>
 
@@ -648,6 +746,26 @@ const gridTemplate = computed(() =>
       :loading="bulkRunning"
       @confirm="executeBulk"
       @cancel="cancelBulk"
+    />
+
+    <!-- Filter-apply confirm. Sends a single POST to /v1/admin/tenants/
+         bulk-action; the server hard-caps at 500 matching rows. No
+         expected_count is sent because listTenants doesn't expose a
+         cheap total — operators accept the "up to 500 matching" bound.
+         The response's total_matched surfaces in the toast. -->
+    <ConfirmAction
+      v-if="filterBulkAction"
+      :title="filterBulkAction === 'SUSPEND'
+        ? 'Suspend all tenants matching filter?'
+        : 'Reactivate all tenants matching filter?'"
+      :message="filterBulkRunning
+        ? 'Working… server is applying the action to every matching tenant.'
+        : `Filter: ${filterBulkSummary || '(none)'}. Server will apply to up to 500 matching tenants in a single request. Rows already in the target state will be skipped.`"
+      :confirm-label="filterBulkRunning ? 'Working…' : filterBulkAction === 'SUSPEND' ? 'Suspend all matching' : 'Reactivate all matching'"
+      :danger="filterBulkAction === 'SUSPEND'"
+      :loading="filterBulkRunning"
+      @confirm="executeFilterBulk"
+      @cancel="filterBulkAction = null"
     />
 
     <FormDialog v-if="showCreate" title="Create Tenant" submit-label="Create Tenant" :loading="createLoading" :error="createError" @submit="submitCreate" @cancel="showCreate = false">

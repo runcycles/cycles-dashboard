@@ -280,6 +280,17 @@ export const updateTenant = (id: string, body: import('../types').TenantUpdateRe
 export const updateTenantStatus = (id: string, status: string) =>
   patch<import('../types').Tenant>(`${BASE}/admin/tenants/${id}`, { status })
 
+// cycles-governance-admin v0.1.25.21: POST /v1/admin/tenants/bulk-action.
+// Single request applies an action (SUSPEND / REACTIVATE / CLOSE) to
+// every tenant matching the filter. Body MUST include an
+// idempotency_key (UUID v4); server remembers the first response for
+// 15 min and replays it on retry. expected_count is optional but
+// strongly recommended — if present, mismatching the server count
+// returns 409 COUNT_MISMATCH with no writes. Replaces the client's
+// prior rateLimitedBatch PATCH loop.
+export const bulkActionTenants = (body: import('../types').TenantBulkActionRequest) =>
+  post<import('../types').TenantBulkActionResponse>(`${BASE}/admin/tenants/bulk-action`, body as unknown as Record<string, unknown>)
+
 // API Keys
 export const createApiKey = (body: import('../types').ApiKeyCreateRequest) =>
   post<import('../types').ApiKeyCreateResponse>(`${BASE}/admin/api-keys`, body as unknown as Record<string, unknown>)
@@ -299,6 +310,16 @@ export const updateWebhook = (id: string, body: Record<string, unknown>) =>
 
 export const deleteWebhook = (id: string) =>
   del<void>(`${BASE}/admin/webhooks/${id}`)
+
+// cycles-governance-admin v0.1.25.21: POST /v1/admin/webhooks/bulk-action.
+// Mirrors bulkActionTenants — single request applies an action
+// (PAUSE / RESUME / DELETE) to every subscription matching the
+// filter. Same idempotency_key + expected_count + 409 COUNT_MISMATCH
+// safety semantics. Replaces the client's prior rateLimitedBatch
+// PATCH loop for pause/resume, and opens the door to filter-wide
+// delete (W1 select-all-matching) which had no prior client path.
+export const bulkActionWebhooks = (body: import('../types').WebhookBulkActionRequest) =>
+  post<import('../types').WebhookBulkActionResponse>(`${BASE}/admin/webhooks/bulk-action`, body as unknown as Record<string, unknown>)
 
 export const testWebhook = (id: string) =>
   post<import('../types').WebhookTestResponse>(`${BASE}/admin/webhooks/${id}/test`, {})
