@@ -497,10 +497,17 @@ const gridTemplate = computed(() =>
       </Transition>
     </Teleport>
 
-    <!-- V1 virtualized grid. Same pattern as ReservationsView /
-         TenantsView. Shell flex-fills within the page's flex-col. -->
+    <!-- V1 virtualized grid. Shell flex-fills within the page's flex-col.
+         overflow-x-auto + overflow-y-hidden pattern (same as AuditView /
+         ApiKeysView): horizontal scroll is owned by the card so sticky
+         header + virtual rows scroll together at narrow viewports, and
+         the inner scroll body only handles vertical. Both axes pinned
+         explicitly — the CSS spec auto-promotes the opposite axis from
+         visible to auto when one axis is non-visible, which previously
+         created a page-level horizontal scrollbar below "Load more"
+         when the grid's min-content (≈946px) exceeded <main> width. -->
     <div
-      class="bg-white rounded-lg shadow overflow-hidden text-sm flex-1 min-h-0 flex flex-col"
+      class="bg-white rounded-lg shadow overflow-x-auto overflow-y-hidden text-sm flex-1 min-h-0 flex flex-col"
       role="table"
       :aria-rowcount="filteredWebhooks.length + 1"
       :aria-colcount="canManage ? 7 : 5"
@@ -524,7 +531,7 @@ const gridTemplate = computed(() =>
         v-if="sortedWebhooks.length > 0"
         ref="scrollEl"
         role="rowgroup"
-        class="flex-1 overflow-auto min-h-[200px]"
+        class="flex-1 overflow-y-auto overflow-x-hidden min-h-[200px]"
       >
         <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
           <div

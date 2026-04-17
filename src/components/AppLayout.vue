@@ -37,8 +37,16 @@ const sidebarOpen = ref(false)
            overflow-x-auto. List views inside opt into flex-fill via
            `h-full flex flex-col min-h-0` on their root so the table
            body grows/shrinks with viewport size — no magic-number
-           calc(100vh - Npx) per view. -->
-      <main id="main-content" class="flex-1 overflow-y-auto p-4 md:p-6" tabindex="-1">
+           calc(100vh - Npx) per view.
+           overflow-x-hidden pinned explicitly: per CSS spec, setting
+           overflow-y to anything non-visible implicitly promotes
+           overflow-x from visible to auto, which re-introduced a
+           page-level horizontal scrollbar below WebhooksView's
+           "Load more" button whenever the table card's content-driven
+           min-width exceeded viewport. Explicit hidden defeats the
+           implicit promotion and keeps horizontal scroll scoped to
+           the table card's own scroll container. -->
+      <main id="main-content" class="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6" tabindex="-1">
         <router-view />
       </main>
     </div>
