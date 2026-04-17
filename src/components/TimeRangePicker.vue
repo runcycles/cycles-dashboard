@@ -216,7 +216,6 @@ onBeforeUnmount(() => {
       :data-testid="`${id}-popover`"
       class="absolute right-0 mt-1 z-20 w-72 card p-3 shadow-lg"
     >
-      <div class="muted-xs uppercase tracking-wider mb-2">Quick ranges</div>
       <div role="radiogroup" :aria-label="`${ariaLabel} presets`" class="flex flex-col gap-0.5">
         <button
           v-for="p in presets"
