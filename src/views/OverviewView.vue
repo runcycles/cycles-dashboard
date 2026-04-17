@@ -401,12 +401,107 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
            `id` attributes match AlertAxis.id so the banner pills
            smooth-scroll to the right card. Cards don't reorder across
            polls — stable position, variable prominence.
-           Layout: row 1 = non-budget signals (webhooks / keys /
-           denials), row 2 = the three budget cards together (at cap /
-           with debt / frozen). Grouping all budget-scoped alerts on
-           one row makes "what's happening with budgets" a single
-           visual scan instead of hopping between columns. -->
+           Layout: row 1 = the three budget cards together (at cap /
+           with debt / frozen), row 2 = non-budget signals (webhooks /
+           keys / denials). Budgets lead because "is anything over
+           cap?" is the single most-asked ops question at 2am, and
+           grouping all budget-scoped alerts on row 1 makes "state of
+           budgets" a single horizontal scan. -->
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+        <!-- Budgets at cap — utilization ≥ 100%. Broader than the
+             spec's `over_limit` (debt > overdraft_limit) so exhausted
+             budgets with no overdraft appetite also show up here;
+             see atCapBudgets declaration in the script block. Shows
+             utilization % so operators see the severity at a glance
+             and can prioritize the most-blown first (sorted desc).
+             Leads row 1 — the three budget cards are grouped together
+             because "state of budgets" is the headline ops question. -->
+        <div
+          id="budgets-at-cap"
+          class="card p-4"
+          data-testid="budgets-at-cap-card"
+          :class="axisById['budgets-at-cap'] ? 'border-l-4 border-l-red-500 dark:border-l-red-500' : ''"
+        >
+          <div class="flex justify-between items-center mb-3">
+            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
+              <svg v-if="axisById['budgets-at-cap']" class="w-4 h-4 text-red-500 dark:text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+              Budgets at Cap
+              <span v-if="atCapBudgets.length > 0" class="ml-1 badge-danger">{{ atCapBudgets.length }}</span>
+            </h2>
+            <router-link :to="{ name: 'budgets', query: { utilization_min: '1.0' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
+          </div>
+          <div v-if="atCapSorted.length === 0" class="text-sm muted py-4 text-center">All budgets within allocation</div>
+          <div
+            v-for="b in atCapSorted"
+            :key="b.scope + b.unit"
+            class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
+          >
+            <router-link
+              :to="{ name: 'budgets', query: { scope: b.scope, unit: b.unit } }"
+              class="text-sm text-blue-600 hover:underline truncate mr-2 dark:text-blue-400"
+              :title="b.scope"
+            >{{ b.scope }}</router-link>
+            <span
+              class="text-xs shrink-0 tabular-nums"
+              :class="utilizationOf(b) >= 1 ? 'text-red-600 dark:text-red-400' : 'text-amber-700 dark:text-amber-400'"
+              :title="`${b.spent?.amount?.toLocaleString() ?? '0'} / ${b.allocated?.amount?.toLocaleString() ?? '0'} ${b.unit}`"
+            >{{ Math.round(utilizationOf(b) * 100) }}%</span>
+          </div>
+        </div>
+
+        <!-- Budgets with debt -->
+        <div
+          id="budgets-with-debt"
+          class="card p-4"
+          :class="axisById['budgets-with-debt'] ? 'border-l-4 border-l-amber-500 dark:border-l-amber-500' : ''"
+        >
+          <div class="flex justify-between items-center mb-3">
+            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
+              <svg v-if="axisById['budgets-with-debt']" class="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+              Budgets with Debt
+              <span v-if="overview.budget_counts.with_debt > 0" class="ml-1 badge-warning">{{ overview.budget_counts.with_debt }}</span>
+            </h2>
+            <router-link :to="{ name: 'budgets', query: { filter: 'has_debt' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
+          </div>
+          <div v-if="overview.debt_scopes.length === 0" class="text-sm muted py-4 text-center">No outstanding debt</div>
+          <div
+            v-for="s in overview.debt_scopes"
+            :key="s.scope + s.unit"
+            class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
+          >
+            <router-link
+              :to="{ name: 'budgets', query: { scope: s.scope, unit: s.unit } }"
+              class="text-sm text-blue-600 hover:underline truncate mr-2 dark:text-blue-400"
+              :title="s.scope"
+            >{{ s.scope }}</router-link>
+            <span class="muted-sm shrink-0">{{ s.debt.toLocaleString() }} / {{ s.overdraft_limit.toLocaleString() }}</span>
+          </div>
+        </div>
+
+        <!-- Frozen budgets -->
+        <div
+          id="frozen-budgets"
+          class="card p-4"
+          :class="axisById['frozen-budgets'] ? 'border-l-4 border-l-amber-500 dark:border-l-amber-500' : ''"
+        >
+          <div class="flex justify-between items-center mb-3">
+            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
+              <svg v-if="axisById['frozen-budgets']" class="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+              Frozen Budgets
+              <span v-if="overview.budget_counts.frozen > 0" class="ml-1 badge-warning">{{ overview.budget_counts.frozen }}</span>
+            </h2>
+            <router-link :to="{ name: 'budgets', query: { status: 'FROZEN' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
+          </div>
+          <div v-if="overview.budget_counts.frozen === 0" class="text-sm muted py-4 text-center">No frozen budgets</div>
+          <router-link
+            v-else
+            :to="{ name: 'budgets', query: { status: 'FROZEN' } }"
+            class="text-sm text-blue-600 hover:underline block py-4 text-center dark:text-blue-400"
+          >
+            View {{ overview.budget_counts.frozen }} frozen budget{{ overview.budget_counts.frozen !== 1 ? 's' : '' }}
+          </router-link>
+        </div>
+
         <!-- Failing webhooks -->
         <div
           id="failing-webhooks"
@@ -519,100 +614,6 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
             </div>
             <p class="muted-sm">{{ e.data?.reason_code || 'denied' }}</p>
           </div>
-        </div>
-
-        <!-- Budgets at cap — utilization ≥ 100%. Broader than the
-             spec's `over_limit` (debt > overdraft_limit) so exhausted
-             budgets with no overdraft appetite also show up here;
-             see atCapBudgets declaration in the script block. Shows
-             utilization % so operators see the severity at a glance
-             and can prioritize the most-blown first (sorted desc).
-             Grouped with the other budget cards on row 2 so "state of
-             budgets" is a single horizontal scan. -->
-        <div
-          id="budgets-at-cap"
-          class="card p-4"
-          data-testid="budgets-at-cap-card"
-          :class="axisById['budgets-at-cap'] ? 'border-l-4 border-l-red-500 dark:border-l-red-500' : ''"
-        >
-          <div class="flex justify-between items-center mb-3">
-            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
-              <svg v-if="axisById['budgets-at-cap']" class="w-4 h-4 text-red-500 dark:text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
-              Budgets at Cap
-              <span v-if="atCapBudgets.length > 0" class="ml-1 badge-danger">{{ atCapBudgets.length }}</span>
-            </h2>
-            <router-link :to="{ name: 'budgets', query: { utilization_min: '1.0' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
-          </div>
-          <div v-if="atCapSorted.length === 0" class="text-sm muted py-4 text-center">All budgets within allocation</div>
-          <div
-            v-for="b in atCapSorted"
-            :key="b.scope + b.unit"
-            class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
-          >
-            <router-link
-              :to="{ name: 'budgets', query: { scope: b.scope, unit: b.unit } }"
-              class="text-sm text-blue-600 hover:underline truncate mr-2 dark:text-blue-400"
-              :title="b.scope"
-            >{{ b.scope }}</router-link>
-            <span
-              class="text-xs shrink-0 tabular-nums"
-              :class="utilizationOf(b) >= 1 ? 'text-red-600 dark:text-red-400' : 'text-amber-700 dark:text-amber-400'"
-              :title="`${b.spent?.amount?.toLocaleString() ?? '0'} / ${b.allocated?.amount?.toLocaleString() ?? '0'} ${b.unit}`"
-            >{{ Math.round(utilizationOf(b) * 100) }}%</span>
-          </div>
-        </div>
-
-        <!-- Budgets with debt -->
-        <div
-          id="budgets-with-debt"
-          class="card p-4"
-          :class="axisById['budgets-with-debt'] ? 'border-l-4 border-l-amber-500 dark:border-l-amber-500' : ''"
-        >
-          <div class="flex justify-between items-center mb-3">
-            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
-              <svg v-if="axisById['budgets-with-debt']" class="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
-              Budgets with Debt
-              <span v-if="overview.budget_counts.with_debt > 0" class="ml-1 badge-warning">{{ overview.budget_counts.with_debt }}</span>
-            </h2>
-            <router-link :to="{ name: 'budgets', query: { filter: 'has_debt' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
-          </div>
-          <div v-if="overview.debt_scopes.length === 0" class="text-sm muted py-4 text-center">No outstanding debt</div>
-          <div
-            v-for="s in overview.debt_scopes"
-            :key="s.scope + s.unit"
-            class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
-          >
-            <router-link
-              :to="{ name: 'budgets', query: { scope: s.scope, unit: s.unit } }"
-              class="text-sm text-blue-600 hover:underline truncate mr-2 dark:text-blue-400"
-              :title="s.scope"
-            >{{ s.scope }}</router-link>
-            <span class="muted-sm shrink-0">{{ s.debt.toLocaleString() }} / {{ s.overdraft_limit.toLocaleString() }}</span>
-          </div>
-        </div>
-
-        <!-- Frozen budgets -->
-        <div
-          id="frozen-budgets"
-          class="card p-4"
-          :class="axisById['frozen-budgets'] ? 'border-l-4 border-l-amber-500 dark:border-l-amber-500' : ''"
-        >
-          <div class="flex justify-between items-center mb-3">
-            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
-              <svg v-if="axisById['frozen-budgets']" class="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
-              Frozen Budgets
-              <span v-if="overview.budget_counts.frozen > 0" class="ml-1 badge-warning">{{ overview.budget_counts.frozen }}</span>
-            </h2>
-            <router-link :to="{ name: 'budgets', query: { status: 'FROZEN' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
-          </div>
-          <div v-if="overview.budget_counts.frozen === 0" class="text-sm muted py-4 text-center">No frozen budgets</div>
-          <router-link
-            v-else
-            :to="{ name: 'budgets', query: { status: 'FROZEN' } }"
-            class="text-sm text-blue-600 hover:underline block py-4 text-center dark:text-blue-400"
-          >
-            View {{ overview.budget_counts.frozen }} frozen budget{{ overview.budget_counts.frozen !== 1 ? 's' : '' }}
-          </router-link>
         </div>
       </div>
 

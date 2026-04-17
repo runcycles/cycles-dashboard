@@ -31,21 +31,21 @@
 - `vitest run` — **505 / 505 passing** across 40 files (+58 new across 4 commits in this release: 32 for the I1/I3 rebuild covering alert-banner states / Expiring Keys / Recent Activity / counter-strip DOM order / per-tile chip layout / zero-count omission / graceful degradation; +3 for `recent_denials_by_reason` populated-sorted-desc + absent-field + empty-object; +1 guard that the old expiries card stays removed; +2 for raw-enum operation format matching AuditView; **+17 for the new AuditView filter DSL** covering error_code normalization / IN-list dedupe / whitespace-separated parsing / datalist enum coverage / all five status-band mappings / mutex-sidestep / search field copy / URL-param deep-link including unknown-band defensive fallback; **+3 for the Overview denial-pill router-link drill-down** asserting anchors render with href + route name + query payload + title tooltip).
 - `vite build` — clean, 897ms.
 
-### 2026-04-17 — Overview alert grid: budget cards grouped on row 2
+### 2026-04-17 — Overview alert grid: budget cards grouped on row 1
 
 **Scope.** Dashboard-only, layout polish on the just-landed Budgets-at-Cap rework. No spec or server change.
 
-**Why.** The 3-column alert grid previously interleaved budget and non-budget cards (row 1: Failing Webhooks / Budgets at Cap / Budgets with Debt; row 2: Expiring Keys / Frozen Budgets / Recent Denials). Operator review flagged that "state of budgets" required hopping across both rows to piece together — at-cap on row 1 col 2, with-debt on row 1 col 3, frozen on row 2 col 2. Grouping all three budget cards on one row makes "what's happening with budgets" a single horizontal scan.
+**Why.** Two iterations on the same gap in one session: the 3-column alert grid originally interleaved budget and non-budget cards so "state of budgets" required hopping across both rows. First pass grouped the budget cards on row 2 (non-budget on row 1). Operator review on that flipped the intent — budgets should **lead** the attention grid because "is anything over cap?" is the single most-asked question at 2am, so row 1 is the right home. This commit restores that: row 1 = the three budget cards (at cap / with debt / frozen), row 2 = non-budget signals (failing webhooks / expiring keys / recent denials).
 
-**What shipped.** DOM order reorganized so row 1 carries the non-budget signals (Failing Webhooks / Expiring API Keys / Recent Denials) and row 2 carries the three budget cards in increasing severity-then-count order (Budgets at Cap / Budgets with Debt / Frozen Budgets). No card removed, no new severity logic — purely a position swap. Grid classes unchanged (`grid-cols-1 md:grid-cols-2 lg:grid-cols-3`) so the row-2 intent holds on `lg` and above; on narrower viewports the cards stack but preserve the non-budget-then-budget sequence.
+**What shipped.** DOM order reorganized so row 1 carries the three budget cards in severity order (Budgets at Cap / Budgets with Debt / Frozen Budgets) and row 2 carries the non-budget cards (Failing Webhooks / Expiring API Keys / Recent Denials). No card removed, no new severity logic — purely a position swap. Grid classes unchanged (`grid-cols-1 md:grid-cols-2 lg:grid-cols-3`) so the row-1 intent holds on `lg` and above; on narrower viewports the cards stack but preserve the budget-then-non-budget sequence.
 
-**Files.** `src/views/OverviewView.vue` (template reorder + updated layout comment), `src/__tests__/OverviewView.test.ts` (+1 new describe "card grid row layout — budget cards on row 2" with a single DOM-order spec pinning the intent against future shuffles).
+**Files.** `src/views/OverviewView.vue` (template reorder + updated layout comment), `src/__tests__/OverviewView.test.ts` (row-layout spec flipped to assert all three budget cards render **before** all three non-budget cards; counter-strip spec comment refreshed since "first card" is no longer Expiring Keys).
 
 **Validation gates.**
 
 - `vue-tsc --noEmit` — clean.
-- `vitest run` — **545 / 545 passing** across 42 files (+1 new: row-layout spec asserting all three budget cards render after all three non-budget cards, and that within row 2 the order is at-cap → with-debt → frozen).
-- `vite build` — clean, 890ms.
+- `vitest run` — **545 / 545 passing** across 42 files (test count unchanged — the row-layout spec's assertion was flipped in-place, not added).
+- `vite build` — clean, 884ms.
 
 **No version bump.** Layout polish on the just-shipped Budgets-at-Cap rework — no behavior change, no wire-format change, no URL-contract change. AUDIT entry only.
 
