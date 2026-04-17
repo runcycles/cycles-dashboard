@@ -31,6 +31,32 @@
 - `vitest run` — **505 / 505 passing** across 40 files (+58 new across 4 commits in this release: 32 for the I1/I3 rebuild covering alert-banner states / Expiring Keys / Recent Activity / counter-strip DOM order / per-tile chip layout / zero-count omission / graceful degradation; +3 for `recent_denials_by_reason` populated-sorted-desc + absent-field + empty-object; +1 guard that the old expiries card stays removed; +2 for raw-enum operation format matching AuditView; **+17 for the new AuditView filter DSL** covering error_code normalization / IN-list dedupe / whitespace-separated parsing / datalist enum coverage / all five status-band mappings / mutex-sidestep / search field copy / URL-param deep-link including unknown-band defensive fallback; **+3 for the Overview denial-pill router-link drill-down** asserting anchors render with href + route name + query payload + title tooltip).
 - `vite build` — clean, 897ms.
 
+### 2026-04-17 — Overview "Budgets at Cap" card replaces "Over-limit Budgets" (closes the exhausted-without-debt gap)
+
+**Scope.** Dashboard-only, additive + subtractive. Overview alert axis reworked. No spec or server change.
+
+**Why.** Operator report: a real production budget with `allocated=350,000` / `spent=400,000` / `remaining=-50,000` / `debt=0` / `overdraft_limit=0` was not flagged anywhere on Overview despite being 114% utilized. Root cause is a spec-vs-mental-model gap: cycles-governance-admin v0.1.25 defines `is_over_limit = (debt > overdraft_limit)` (see `cycles-governance-admin-v0.1.25.yaml:1415–1417`), which is false for a budget that went over allocation without ever entering debt (e.g. spent-to-zero-remaining with no debt accrual path configured). The previous "Over-limit Budgets" axis keyed off `overview.budget_counts.over_limit`, which the server populates from the spec definition — so the exhausted-without-debt case slipped through the landing page entirely. Operators think of "over cap" as `spent > allocated`, not `debt > overdraft_limit`. Flagging both cases closes the cognitive gap without a spec change.
+
+**What shipped.**
+
+1. **New parallel fetch.** `listBudgets({ utilization_min: '1.0', limit: '10' })` added to the `usePolling` `Promise.allSettled` chain so an exhausted-budget snapshot lands alongside the existing overview + audit + api-key fetches. `utilization_min=1.0` is the spec filter at `cycles-governance-admin-v0.1.25.yaml:4368` — server does the filtering, dashboard renders the top 10 sorted by utilization desc.
+2. **New `atCapBudgets` ref + `utilizationOf` helper + `atCapSorted` computed.** Utilization is derived client-side as `spent / allocated` for display; the axis fires whenever `atCapBudgets.length > 0`, which by construction covers both (a) exhausted-without-debt budgets (the reported case) and (b) classic over-limit-with-debt budgets, since both satisfy `utilization >= 1.0`.
+3. **Alert axis renamed** from `over-limit-budgets` → `budgets-at-cap` (severity `danger`). Banner pill text: "Budgets at cap". Single axis now covers the previously-missed exhausted case plus the previously-covered over-limit case, so the card count is the true "budgets in trouble" number rather than a subset.
+4. **Card rewrite.** Title "Budgets at Cap" with triangle icon when firing. Body: up to 5 rows, each showing `scope` + utilization percentage (red ≥100%, amber 80–99% — but since `utilization_min=1.0` filters server-side, only red rows appear in practice), `title` tooltip carries exact `spent / allocated` for hover context. Footer: "View all budgets →" router-link to `/budgets`. Empty state: "All budgets within allocation" (reassurance copy parity with the rest of the Overview alert cards).
+5. **Graceful degradation.** If `listBudgets` rejects (per-axis `Promise.allSettled`), `atCapBudgets` stays empty, the axis doesn't fire, and the rest of the Overview renders unaffected — matching the resilience model already in place for the other 5 axes.
+
+**Spec gap acknowledgment.** This is not a spec bug — `is_over_limit` has a legitimate server-side meaning (debt-financing exceeded ceiling, which is a distinct operational event from simple exhaustion). The gap is that the Overview page should flag *any* budget the operator needs to look at, which is a superset of the formal `is_over_limit` flag. The dashboard bridges this with a client-side filter call that doesn't require a new server endpoint or a spec bump.
+
+**Files.** `src/views/OverviewView.vue` (+ `listBudgets` import, + `BudgetLedger` import, + `atCapBudgets` ref, + `listBudgets` call in the `Promise.allSettled` chain, + `utilizationOf` helper, + `atCapSorted` computed, + alert-axis entry swap, + card template rewrite, − old "Over-limit Budgets" card + axis). `src/__tests__/OverviewView.test.ts` (+ `listBudgetsMock` infra, + `atCapBudget` factory helper, + 5 new specs under "Budgets at Cap card — catches exhausted-without-debt": user-reported scenario renders banner pill + 114%, server call includes `utilization_min=1.0`, sort order (150% before 105%), healthy empty state, graceful degradation on listBudgets rejection).
+
+**Validation gates.**
+
+- `vue-tsc --noEmit` — clean.
+- `vitest run` — **544 / 544 passing** across 42 files (+5 new; 0 removed — the pre-existing `budget_counts.over_limit` counter-tile tests continue to pass since the counter strip under the status banner is untouched; the rewrite only affects the alert axis + detail card).
+- `vite build` — clean, 900ms.
+
+**No version bump.** Defect-class fix on the just-shipped v0.1.25.30 Overview rebuild — a user-visible alert that wasn't firing now fires. Operators on v0.1.25.30 see the new card without a release cut; AUDIT entry only.
+
 ### 2026-04-17 — EventsView adopts `TimeRangePicker` (second consumer)
 
 **Scope.** Dashboard-only, additive. EventsView gains a Time range filter. No spec or server change — `listEvents` already accepts `from` + `to` as RFC 3339 date-time per `cycles-governance-admin-v0.1.25.yaml:6537–6546`; the dashboard was simply not surfacing them.

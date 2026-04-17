@@ -8,11 +8,12 @@ import { h as actualH } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '../stores/auth'
-import type { Capabilities, AdminOverviewResponse, ApiKey, AuditLogEntry } from '../types'
+import type { Capabilities, AdminOverviewResponse, ApiKey, AuditLogEntry, BudgetLedger } from '../types'
 
 const getOverviewMock = vi.fn()
 const listApiKeysMock = vi.fn()
 const listAuditLogsMock = vi.fn()
+const listBudgetsMock = vi.fn()
 
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
@@ -21,6 +22,7 @@ vi.mock('../api/client', async () => {
     getOverview: (...args: unknown[]) => getOverviewMock(...args),
     listApiKeys: (...args: unknown[]) => listApiKeysMock(...args),
     listAuditLogs: (...args: unknown[]) => listAuditLogsMock(...args),
+    listBudgets: (...args: unknown[]) => listBudgetsMock(...args),
   }
 })
 
@@ -84,6 +86,23 @@ function key(id: string, overrides: Partial<ApiKey> = {}): ApiKey {
   }
 }
 
+function atCapBudget(scope: string, overrides: Partial<BudgetLedger> = {}): BudgetLedger {
+  return {
+    ledger_id: `ldg_${scope}`,
+    scope,
+    unit: 'tokens',
+    allocated: { unit: 'tokens', amount: 1000 },
+    remaining: { unit: 'tokens', amount: -100 },
+    spent: { unit: 'tokens', amount: 1100 },
+    debt: { unit: 'tokens', amount: 0 },
+    overdraft_limit: { unit: 'tokens', amount: 0 },
+    is_over_limit: false,
+    status: 'ACTIVE',
+    created_at: '2026-01-01T00:00:00Z',
+    ...overrides,
+  }
+}
+
 function auditEntry(id: string, overrides: Partial<AuditLogEntry> = {}): AuditLogEntry {
   return {
     log_id: id,
@@ -128,8 +147,11 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
     getOverviewMock.mockReset()
     listApiKeysMock.mockReset()
     listAuditLogsMock.mockReset()
+    listBudgetsMock.mockReset()
     listApiKeysMock.mockResolvedValue({ keys: [], has_more: false })
     listAuditLogsMock.mockResolvedValue({ logs: [], has_more: false })
+    // Default: no at-cap budgets. Individual tests override as needed.
+    listBudgetsMock.mockResolvedValue({ ledgers: [], has_more: false })
   })
 
   describe('top-of-page headline', () => {
@@ -171,15 +193,15 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
         webhook_counts: { total: 3, active: 2, disabled: 0, with_failures: 1 },
         failing_webhooks: [{ subscription_id: 'wh_a', url: 'https://a', consecutive_failures: 3 }],
         budget_counts: {
-          total: 4, active: 2, frozen: 1, closed: 0, over_limit: 2, with_debt: 0, by_unit: {},
+          total: 4, active: 2, frozen: 1, closed: 0, over_limit: 0, with_debt: 0, by_unit: {},
         },
-        over_limit_scopes: [{ scope: 'acme/foo', unit: 'tokens', usage: 110, limit: 100, utilization: 1.1 }],
       }))
+      listBudgetsMock.mockResolvedValue({ ledgers: [atCapBudget('acme/foo')], has_more: false })
       const w = await mountOverview()
       const axes = w.find('[data-testid="alert-axes"]')
       expect(axes.exists()).toBe(true)
       expect(axes.text()).toContain('Failing webhooks')
-      expect(axes.text()).toContain('Over-limit budgets')
+      expect(axes.text()).toContain('Budgets at cap')
       expect(axes.text()).toContain('Frozen budgets')
     })
 
@@ -206,7 +228,7 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       const w = await mountOverview()
       // Only Failing webhooks fires — the other five axes should NOT have pills.
       expect(w.find('[data-axis="failing-webhooks"]').exists()).toBe(true)
-      expect(w.find('[data-axis="over-limit-budgets"]').exists()).toBe(false)
+      expect(w.find('[data-axis="budgets-at-cap"]').exists()).toBe(false)
       expect(w.find('[data-axis="budgets-with-debt"]').exists()).toBe(false)
       expect(w.find('[data-axis="expiring-keys"]').exists()).toBe(false)
       expect(w.find('[data-axis="frozen-budgets"]').exists()).toBe(false)
@@ -218,6 +240,95 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       const w = await mountOverview()
       expect(w.find('[data-testid="alert-banner"]').exists()).toBe(false)
       expect(w.find('[data-testid="alert-axes"]').exists()).toBe(false)
+    })
+  })
+
+  describe('Budgets at Cap card — catches exhausted-without-debt', () => {
+    it('fires for a budget with spent > allocated even if debt = 0 (user-reported spec gap)', async () => {
+      // Exact scenario reported: allocated 350k, spent 400k, debt 0,
+      // overdraft 0. Spec's is_over_limit = (debt > overdraft_limit)
+      // yields false — overview.budget_counts.over_limit = 0 — but
+      // listBudgets?utilization_min=1.0 returns it, so the dashboard
+      // flags it via the new at-cap axis.
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        budget_counts: {
+          total: 1, active: 1, frozen: 0, closed: 0,
+          over_limit: 0, with_debt: 0, by_unit: {},
+        },
+        over_limit_scopes: [],
+      }))
+      listBudgetsMock.mockResolvedValue({
+        ledgers: [atCapBudget('acme/prod', {
+          allocated: { unit: 'tokens', amount: 350_000 },
+          spent: { unit: 'tokens', amount: 400_000 },
+          remaining: { unit: 'tokens', amount: -50_000 },
+          debt: { unit: 'tokens', amount: 0 },
+          overdraft_limit: { unit: 'tokens', amount: 0 },
+          is_over_limit: false,
+        })],
+        has_more: false,
+      })
+      const w = await mountOverview()
+      // Banner pill present.
+      expect(w.find('[data-axis="budgets-at-cap"]').exists()).toBe(true)
+      // Card shows the scope with its utilization.
+      const card = w.find('[data-testid="budgets-at-cap-card"]')
+      expect(card.text()).toContain('acme/prod')
+      // 400/350 = 1.142857… → 114%.
+      expect(card.text()).toContain('114%')
+    })
+
+    it('calls listBudgets with utilization_min=1.0', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      await mountOverview()
+      expect(listBudgetsMock).toHaveBeenCalledTimes(1)
+      const params = listBudgetsMock.mock.calls[0][0]
+      expect(params.utilization_min).toBe('1.0')
+    })
+
+    it('sorts at-cap budgets by utilization desc', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      listBudgetsMock.mockResolvedValue({
+        ledgers: [
+          atCapBudget('b', {
+            allocated: { unit: 'tokens', amount: 100 },
+            spent: { unit: 'tokens', amount: 105 },
+          }), // 105%
+          atCapBudget('a', {
+            allocated: { unit: 'tokens', amount: 100 },
+            spent: { unit: 'tokens', amount: 150 },
+          }), // 150%
+        ],
+        has_more: false,
+      })
+      const w = await mountOverview()
+      const card = w.find('[data-testid="budgets-at-cap-card"]')
+      const text = card.text()
+      // Most-blown budget leads so operator triages worst-first.
+      expect(text.indexOf('150%')).toBeLessThan(text.indexOf('105%'))
+    })
+
+    it('renders the healthy empty state when no budgets at cap', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      listBudgetsMock.mockResolvedValue({ ledgers: [], has_more: false })
+      const w = await mountOverview()
+      const card = w.find('[data-testid="budgets-at-cap-card"]')
+      expect(card.text()).toContain('All budgets within allocation')
+      expect(w.find('[data-axis="budgets-at-cap"]').exists()).toBe(false)
+    })
+
+    it('degrades gracefully when listBudgets fails (other sections still render)', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        webhook_counts: { total: 3, active: 2, disabled: 0, with_failures: 1 },
+        failing_webhooks: [{ subscription_id: 'wh_a', url: 'https://a', consecutive_failures: 3 }],
+      }))
+      listBudgetsMock.mockRejectedValue(new Error('simulated outage'))
+      const w = await mountOverview()
+      // Failing-webhooks axis still renders even though the at-cap
+      // fetch failed — Promise.allSettled isolates the failure.
+      expect(w.find('[data-axis="failing-webhooks"]').exists()).toBe(true)
+      // At-cap card renders its empty state (ledgers ref stays []).
+      expect(w.find('[data-testid="budgets-at-cap-card"]').text()).toContain('All budgets within allocation')
     })
   })
 

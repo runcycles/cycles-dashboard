@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { usePolling } from '../composables/usePolling'
-import { getOverview, listApiKeys, listAuditLogs } from '../api/client'
-import type { AdminOverviewResponse, ApiKey, AuditLogEntry } from '../types'
+import { getOverview, listApiKeys, listAuditLogs, listBudgets } from '../api/client'
+import type { AdminOverviewResponse, ApiKey, AuditLogEntry, BudgetLedger } from '../types'
 import PageHeader from '../components/PageHeader.vue'
 import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import { formatTime } from '../utils/format'
@@ -23,13 +23,25 @@ import { filterExpiringKeys, type ExpiringKey } from '../utils/expiringKeys'
 const overview = ref<AdminOverviewResponse | null>(null)
 const keys = ref<ApiKey[]>([])
 const recentAudit = ref<AuditLogEntry[]>([])
+// Budgets with utilization ≥ 100%. The Overview payload's
+// `over_limit_scopes` is narrower than what operators expect: per
+// spec (cycles-governance-admin-v0.1.25.yaml:1415–1417)
+// `is_over_limit = debt > overdraft_limit` — purely a financial
+// overdraft signal. A budget with spent > allocated but debt = 0
+// (e.g. overdraft_limit = 0, so commit_overage_policy denied the
+// overage) is NOT in `over_limit_scopes` even though it's the
+// operator-visible "this budget is broken" state. Pull the broader
+// at-cap set from listBudgets?utilization_min=1.0 to close that
+// gap. 10 rows is plenty for a landing card — operators drill in
+// from here, they don't inspect every at-cap budget inline.
+const atCapBudgets = ref<BudgetLedger[]>([])
 const error = ref('')
 
-// All three fetches parallelize; any individual failure degrades
+// All four fetches parallelize; any individual failure degrades
 // gracefully (error banner, but other sections keep rendering so a
 // flaky audit endpoint doesn't blank out the whole landing page).
 const { refresh, isLoading } = usePolling(async () => {
-  const [ov, apiKeys, audit] = await Promise.allSettled([
+  const [ov, apiKeys, audit, atCap] = await Promise.allSettled([
     getOverview(),
     // Pull one page; client-side filter for 7d window. Fine even for
     // tenants with thousands of keys — we don't need the full set,
@@ -38,15 +50,41 @@ const { refresh, isLoading } = usePolling(async () => {
     // Last 10 audit entries, newest first. Server default sort is
     // timestamp desc per governance-admin spec, so no sort params needed.
     listAuditLogs({ limit: '10' }),
+    // Budgets at/over cap (utilization ≥ 1.0). Includes both
+    // exhausted-without-debt (our blind spot) AND over-limit-via-debt.
+    listBudgets({ utilization_min: '1.0', limit: '10' }),
   ])
   if (ov.status === 'fulfilled') overview.value = ov.value
   if (apiKeys.status === 'fulfilled') keys.value = apiKeys.value.keys
   if (audit.status === 'fulfilled') recentAudit.value = audit.value.logs
+  if (atCap.status === 'fulfilled') atCapBudgets.value = atCap.value.ledgers
   // Surface the first failure so the operator sees *something* wrong —
   // but only error-banner; cards for the successful fetches still render.
-  const firstFail = [ov, apiKeys, audit].find(r => r.status === 'rejected')
+  const firstFail = [ov, apiKeys, audit, atCap].find(r => r.status === 'rejected')
   error.value = firstFail && firstFail.status === 'rejected' ? toMessage(firstFail.reason) : ''
 }, 30000)
+
+// Utilization helper — BudgetLedger carries {unit, amount} Amount
+// objects for allocated/spent. When allocated.amount is 0, utilization
+// is undefined; report 0 so the sort is stable and "over cap" logic
+// doesn't mis-flag the empty-allocation case.
+function utilizationOf(b: BudgetLedger): number {
+  const alloc = b.allocated?.amount ?? 0
+  const spent = b.spent?.amount ?? 0
+  if (alloc <= 0) return 0
+  return spent / alloc
+}
+
+// Sorted descending by utilization so the most-broken budget leads
+// the card display. Tie-break by scope for stable rendering.
+const atCapSorted = computed<BudgetLedger[]>(() => {
+  return [...atCapBudgets.value].sort((a, b) => {
+    const ua = utilizationOf(a)
+    const ub = utilizationOf(b)
+    if (ua !== ub) return ub - ua
+    return a.scope.localeCompare(b.scope)
+  })
+})
 
 // Expiring keys (7d) — sorted soonest-first, capped to 5 for the card.
 const expiringKeys = computed<ExpiringKey[]>(() => filterExpiringKeys(keys.value).slice(0, 5))
@@ -104,8 +142,11 @@ const alertAxes = computed<AlertAxis[]>(() => {
   if (overview.value.webhook_counts.with_failures > 0) {
     axes.push({ id: 'failing-webhooks', label: 'Failing webhooks', count: overview.value.webhook_counts.with_failures, severity: 'danger' })
   }
-  if (overview.value.budget_counts.over_limit > 0) {
-    axes.push({ id: 'over-limit-budgets', label: 'Over-limit budgets', count: overview.value.budget_counts.over_limit, severity: 'danger' })
+  // atCapBudgets is broader than overview.budget_counts.over_limit —
+  // catches exhausted-without-debt too (see atCapBudgets declaration
+  // for spec-gap rationale).
+  if (atCapBudgets.value.length > 0) {
+    axes.push({ id: 'budgets-at-cap', label: 'Budgets at cap', count: atCapBudgets.value.length, severity: 'danger' })
   }
   if (overview.value.recent_denials.length > 0) {
     axes.push({ id: 'recent-denials', label: 'Recent denials', count: overview.value.recent_denials.length, severity: 'danger' })
@@ -390,32 +431,42 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
           </div>
         </div>
 
-        <!-- Over-limit budgets -->
+        <!-- Budgets at cap — utilization ≥ 100%. Broader than the
+             spec's `over_limit` (debt > overdraft_limit) so exhausted
+             budgets with no overdraft appetite also show up here;
+             see atCapBudgets declaration in the script block. Shows
+             utilization % so operators see the severity at a glance
+             and can prioritize the most-blown first (sorted desc). -->
         <div
-          id="over-limit-budgets"
+          id="budgets-at-cap"
           class="card p-4"
-          :class="axisById['over-limit-budgets'] ? 'border-l-4 border-l-red-500 dark:border-l-red-500' : ''"
+          data-testid="budgets-at-cap-card"
+          :class="axisById['budgets-at-cap'] ? 'border-l-4 border-l-red-500 dark:border-l-red-500' : ''"
         >
           <div class="flex justify-between items-center mb-3">
             <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
-              <svg v-if="axisById['over-limit-budgets']" class="w-4 h-4 text-red-500 dark:text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
-              Over-limit Budgets
-              <span v-if="overview.budget_counts.over_limit > 0" class="ml-1 badge-danger">{{ overview.budget_counts.over_limit }}</span>
+              <svg v-if="axisById['budgets-at-cap']" class="w-4 h-4 text-red-500 dark:text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+              Budgets at Cap
+              <span v-if="atCapBudgets.length > 0" class="ml-1 badge-danger">{{ atCapBudgets.length }}</span>
             </h2>
-            <router-link :to="{ name: 'budgets', query: { filter: 'over_limit' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
+            <router-link :to="{ name: 'budgets', query: { utilization_min: '1.0' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
-          <div v-if="overview.over_limit_scopes.length === 0" class="text-sm muted py-4 text-center">All budgets within limits</div>
+          <div v-if="atCapSorted.length === 0" class="text-sm muted py-4 text-center">All budgets within allocation</div>
           <div
-            v-for="s in overview.over_limit_scopes"
-            :key="s.scope + s.unit"
+            v-for="b in atCapSorted"
+            :key="b.scope + b.unit"
             class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
           >
             <router-link
-              :to="{ name: 'budgets', query: { scope: s.scope, unit: s.unit } }"
+              :to="{ name: 'budgets', query: { scope: b.scope, unit: b.unit } }"
               class="text-sm text-blue-600 hover:underline truncate mr-2 dark:text-blue-400"
-              :title="s.scope"
-            >{{ s.scope }}</router-link>
-            <span class="muted-sm shrink-0">{{ s.unit }}</span>
+              :title="b.scope"
+            >{{ b.scope }}</router-link>
+            <span
+              class="text-xs shrink-0 tabular-nums"
+              :class="utilizationOf(b) >= 1 ? 'text-red-600 dark:text-red-400' : 'text-amber-700 dark:text-amber-400'"
+              :title="`${b.spent?.amount?.toLocaleString() ?? '0'} / ${b.allocated?.amount?.toLocaleString() ?? '0'} ${b.unit}`"
+            >{{ Math.round(utilizationOf(b) * 100) }}%</span>
           </div>
         </div>
 
