@@ -15,7 +15,7 @@
 |-------------------|-------------------------------------------------------------------------------------------------------------------|
 | ApiKeysView       | Activity · Copy key ID · Edit (ACTIVE) · — · Revoke (ACTIVE, danger)                                              |
 | ReservationsView  | Activity · Copy reservation ID · — · Force release (ACTIVE, danger)                                               |
-| TenantsView       | Activity · Reactivate (SUSPENDED) · — · Suspend (ACTIVE, danger)                                                  |
+| TenantsView       | Activity · Copy tenant ID · Reactivate (SUSPENDED) · — · Suspend (ACTIVE, danger)                                 |
 | WebhooksView      | Activity · Edit · Enable (PAUSED/DISABLED) · — · Pause (ACTIVE, danger)                                           |
 | BudgetsView       | Activity · Copy scope · Fund (ACTIVE) · Unfreeze (FROZEN) · — · Freeze (ACTIVE, danger)                           |
 | TenantDetail keys | Activity · Copy key ID · Edit (ACTIVE) · — · Revoke (ACTIVE, danger)                                              |
