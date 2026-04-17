@@ -42,6 +42,11 @@ const triggerEl = ref<HTMLButtonElement | null>(null)
 const menuEl = ref<HTMLUListElement | null>(null)
 const activeIdx = ref<number>(-1)
 const menuStyle = ref<Record<string, string>>({})
+// Timestamp of the most recent open. `onWindowScroll` ignores events
+// fired within ~150ms of opening so a focus()-induced scroll-into-view
+// or a layout shift from the Teleport mount can't immediately close
+// the menu we just opened. Real user scrolls fire later than this.
+let openedAt = 0
 
 // Drop hidden items and collapse leading/trailing/duplicate separators
 // so a section whose entire contents got hidden (e.g. by status gate)
@@ -97,6 +102,7 @@ function adjustOverflow() {
 
 async function openMenu(focusFirst: boolean) {
   computePosition()
+  openedAt = performance.now()
   open.value = true
   await nextTick()
   adjustOverflow()
@@ -109,7 +115,12 @@ async function openMenu(focusFirst: boolean) {
 function close(returnFocus = false) {
   open.value = false
   activeIdx.value = -1
-  if (returnFocus) triggerEl.value?.focus()
+  // preventScroll: real browsers will scroll-into-view on focus(), and
+  // any scroll re-triggers our capture-mode `onWindowScroll` dismiss
+  // listener — at best a no-op (already closed), at worst it intercepts
+  // a re-open that's mid-flight. jsdom-based unit tests don't fire the
+  // scroll, so this only manifested in Playwright.
+  if (returnFocus) triggerEl.value?.focus({ preventScroll: true })
 }
 
 function toggle() {
@@ -119,7 +130,11 @@ function toggle() {
 
 function focusActive() {
   const el = menuEl.value?.querySelector<HTMLElement>(`[data-idx="${activeIdx.value}"]`)
-  el?.focus()
+  // preventScroll: focusing the just-mounted menuitem (Teleport target,
+  // position:fixed) was firing a scroll event in chromium that our own
+  // capture-mode `onWindowScroll` listener interpreted as user scroll
+  // and closed the menu — Playwright then never saw the menuitem.
+  el?.focus({ preventScroll: true })
 }
 
 function onTriggerKeydown(e: KeyboardEvent) {
@@ -177,7 +192,13 @@ function onDocumentMousedown(e: MouseEvent) {
 function onWindowScroll() {
   // Scrolling drifts the trigger's bounding rect — rather than recompute
   // continuously, dismiss. Matches native <select> behavior.
-  if (open.value) close()
+  // Skip scrolls fired within the open-grace window (see `openedAt`):
+  // chromium fires a scroll event when the just-mounted menuitem
+  // receives focus, even with preventScroll, in some virtualized-grid
+  // layouts. That scroll is ours, not the user's.
+  if (!open.value) return
+  if (performance.now() - openedAt < 150) return
+  close()
 }
 
 function onWindowResize() {
