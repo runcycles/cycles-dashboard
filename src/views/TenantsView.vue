@@ -92,21 +92,19 @@ const filteredTenants = computed(() => {
 // Default sort: newest tenants first. created_at is an ISO-8601 string,
 // which sorts lexicographically in chronological order, so 'desc' ==
 // newest first. Click any header to switch to that column's natural order.
+//
+// V4 stage 2: server-side sort against listTenants (tenant_id, name,
+// status, created_at enum). Parent + Children columns are NOT server-
+// sortable — they're client-derived from tenantById / childCountMap
+// and the server has no index over them — so those columns render as
+// plain headers below (no SortHeader). onChange refreshes page 1 so
+// the cursor tuple stays aligned with the new (sort_by, sort_dir).
 const { sortKey, sortDir, toggle, sorted: sortedTenants } = useSort(
   filteredTenants,
   'created_at',
   'desc',
-  {
-    // `parent` sorts by parent NAME (what's rendered in the cell)
-    // rather than parent_tenant_id so operators see alphabetical
-    // matching the visible text. Tenants with no parent group at
-    // the end (null sorts last in either direction per useSort).
-    parent: (t) => (t.parent_tenant_id ? (tenantById.value.get(t.parent_tenant_id)?.name ?? t.parent_tenant_id) : null),
-    // `children` sorts numerically by how many child tenants this
-    // tenant has — operators looking for "fat" parents vs leaf
-    // tenants can flip this header to find outliers fast.
-    children: (t) => childCountMap.value[t.tenant_id] ?? 0,
-  },
+  undefined,
+  { serverSide: true, onChange: () => { refresh() } },
 )
 
 // Parents available in the filter dropdown — union of tenants that have
@@ -260,9 +258,21 @@ async function executeStatusAction() {
   finally { pendingStatusAction.value = null }
 }
 
+// Fold the current sort tuple into a listTenants params record.
+// Every listTenants call site (polling, loadMore, export fetchPage)
+// must forward the same tuple — the server binds its opaque cursor to
+// (sort_by, sort_dir, filter_hash), so a mismatched follow-up 400s.
+function withSort(params: Record<string, string> = {}): Record<string, string> {
+  if (sortKey.value) {
+    params.sort_by = sortKey.value
+    params.sort_dir = sortDir.value
+  }
+  return params
+}
+
 const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
-    const res = await listTenants()
+    const res = await listTenants(withSort())
     tenants.value = res.tenants
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
@@ -306,7 +316,7 @@ const {
   hasMore,
   nextCursor,
   fetchPage: async (cursor) => {
-    const res = await listTenants({ cursor })
+    const res = await listTenants(withSort({ cursor }))
     return { items: res.tenants, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
   },
   filterFn: tenantMatchesFilter,
@@ -325,7 +335,7 @@ async function loadMore() {
   if (!nextCursor.value || loadingMore.value) return
   loadingMore.value = true
   try {
-    const res = await listTenants({ cursor: nextCursor.value })
+    const res = await listTenants(withSort({ cursor: nextCursor.value }))
     tenants.value = [...tenants.value, ...res.tenants]
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
@@ -468,8 +478,14 @@ const gridTemplate = computed(() =>
           </div>
           <SortHeader as="div" label="Tenant ID" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Name" column="name" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-          <SortHeader as="div" label="Parent" column="parent" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-          <SortHeader as="div" label="Children" column="children" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <!-- Parent + Children are client-derived (tenantById name +
+               childCountMap count) and have no server-side index — the
+               listTenants sort_by enum is limited to tenant_id, name,
+               status, created_at. Rendered as plain columnheader divs
+               so operators can't request a sort that would only
+               reorder the currently-loaded slice. -->
+          <div role="columnheader" class="table-cell text-left">Parent</div>
+          <div role="columnheader" class="table-cell text-left">Children</div>
           <SortHeader as="div" label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Created" column="created_at" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <div v-if="canManage" role="columnheader" class="table-cell" data-column="action"></div>

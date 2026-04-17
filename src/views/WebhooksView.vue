@@ -93,7 +93,29 @@ function isSystemWebhook(w: WebhookSubscription): boolean {
 // ids — clicking "Pause selected" would silently affect tenant A's
 // webhooks even though tenant B is what's on screen.
 watch([tenantFilter, urlFilter], () => { selected.value = new Set() })
-const { sortKey, sortDir, toggle, sorted: sortedWebhooks } = useSort(filteredWebhooks)
+// V4 stage 2: server-side sort. Columns (url, tenant_id, status,
+// consecutive_failures) map onto listWebhookSubscriptions sort_by.
+// Health + Events columns are NOT sortable — they're derived client-side
+// and don't have server enum values. onChange refreshes page 1 so the
+// cursor stays aligned with the new (sort_by, sort_dir) tuple.
+const { sortKey, sortDir, toggle, sorted: sortedWebhooks } = useSort(
+  filteredWebhooks,
+  undefined,
+  'asc',
+  undefined,
+  { serverSide: true, onChange: () => { refresh() } },
+)
+
+// Helper to fold the current sort tuple into a listWebhooks params
+// record. Every call site (polling, loadMore, export fetchPage) must
+// forward the same tuple or the cursor-bound server validation fails.
+function withSort(params: Record<string, string> = {}): Record<string, string> {
+  if (sortKey.value) {
+    params.sort_by = sortKey.value
+    params.sort_dir = sortDir.value
+  }
+  return params
+}
 
 const selected = ref<Set<string>>(new Set())
 function toggleSelect(id: string) {
@@ -291,7 +313,7 @@ async function submitSecurityConfig() {
 
 const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
-    const [wRes, tRes] = await Promise.all([listWebhooks(), listTenants()])
+    const [wRes, tRes] = await Promise.all([listWebhooks(withSort()), listTenants()])
     webhooks.value = wRes.subscriptions
     hasMore.value = !!wRes.has_more
     nextCursor.value = wRes.next_cursor ?? ''
@@ -304,7 +326,7 @@ async function loadMore() {
   if (!nextCursor.value || loadingMore.value) return
   loadingMore.value = true
   try {
-    const res = await listWebhooks({ cursor: nextCursor.value })
+    const res = await listWebhooks(withSort({ cursor: nextCursor.value }))
     webhooks.value = [...webhooks.value, ...res.subscriptions]
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
@@ -335,7 +357,7 @@ const {
   hasMore,
   nextCursor,
   fetchPage: async (cursor) => {
-    const res = await listWebhooks({ cursor })
+    const res = await listWebhooks(withSort({ cursor }))
     return { items: res.subscriptions, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
   },
   filterFn: webhookMatchesFilter,

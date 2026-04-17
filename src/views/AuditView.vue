@@ -29,7 +29,18 @@ function toggleExpanded(id: string) {
   if (expanded.value.has(id)) expanded.value.delete(id)
   else expanded.value.add(id)
 }
-const { sortKey, sortDir, toggle, sorted: sortedEntries } = useSort(entries)
+// V4 stage 2: server-side sort. Columns (timestamp, operation,
+// resource_type, tenant_id, key_id, status) map directly onto the
+// listAuditLogs sort_by enum. onChange re-runs query() which resets
+// the cursor — reusing the old cursor under a different sort would
+// return 400 CURSOR_SORT_MISMATCH.
+const { sortKey, sortDir, toggle, sorted: sortedEntries } = useSort(
+  entries,
+  undefined,
+  'asc',
+  undefined,
+  { serverSide: true, onChange: () => { query() } },
+)
 
 // Pagination state. query() loads page 1; hasMore signals that the
 // export flow must paginate through the server's cursor to avoid
@@ -58,6 +69,10 @@ function buildFilterParams(): Record<string, string> {
   if (resourceId.value) params.resource_id = resourceId.value
   if (fromDate.value) params.from = new Date(fromDate.value).toISOString()
   if (toDate.value) params.to = new Date(toDate.value).toISOString()
+  if (sortKey.value) {
+    params.sort_by = sortKey.value
+    params.sort_dir = sortDir.value
+  }
   return params
 }
 

@@ -34,7 +34,24 @@ function toggleExpanded(id: string) {
   if (expanded.value.has(id)) expanded.value.delete(id)
   else expanded.value.add(id)
 }
-const { sortKey, sortDir, toggle, sorted: sortedEvents } = useSort(events)
+// V4 stage 2: server-side sort. Columns (event_type, category, scope,
+// tenant_id, timestamp) map onto listEvents sort_by. onChange must reset
+// `loadedMorePages` because a new sort order invalidates the tail
+// cursor — page 1 under the new order is a different tuple and the
+// merge-from-head dedup wouldn't know about the displaced rows.
+const { sortKey, sortDir, toggle, sorted: sortedEvents } = useSort(
+  events,
+  undefined,
+  'asc',
+  undefined,
+  {
+    serverSide: true,
+    onChange: () => {
+      loadedMorePages.value = false
+      load()
+    },
+  },
+)
 
 
 // Pre-R7: every 15s poll called load() which overwrote events.value,
@@ -78,6 +95,10 @@ function buildFilterParams(): Record<string, string> {
   if (tenantId.value) params.tenant_id = tenantId.value
   if (scope.value) params.scope = scope.value
   if (correlationId.value) params.correlation_id = correlationId.value
+  if (sortKey.value) {
+    params.sort_by = sortKey.value
+    params.sort_dir = sortDir.value
+  }
   return params
 }
 

@@ -205,7 +205,19 @@ const filteredKeys = computed(() => {
 })
 // Default sort: newest keys first. created_at is an ISO-8601 string, which
 // sorts lexicographically in chronological order, so 'desc' == newest first.
-const { sortKey, sortDir, toggle, sorted: sortedKeys } = useSort(filteredKeys, 'created_at', 'desc')
+//
+// V4 stage 2: server-side sort on admin-plane listApiKeys (columns
+// key_id, name, tenant_id, status, created_at, expires_at). onChange
+// re-fetches page 1 via refresh() so the cursor tuple stays consistent
+// with the new (sort_by, sort_dir) pair. Client-side status filter
+// still runs on top of the server-sorted page.
+const { sortKey, sortDir, toggle, sorted: sortedKeys } = useSort(
+  filteredKeys,
+  'created_at',
+  'desc',
+  undefined,
+  { serverSide: true, onChange: () => { refresh() } },
+)
 
 const statusCounts = computed(() => {
   const counts: Record<string, number> = {}
@@ -230,6 +242,10 @@ async function fetchKeysPage(cursor?: string): Promise<{
   const params: Record<string, string> = { limit: String(PAGE_SIZE) }
   if (filterTenant.value) params.tenant_id = filterTenant.value
   if (cursor) params.cursor = cursor
+  if (sortKey.value) {
+    params.sort_by = sortKey.value
+    params.sort_dir = sortDir.value
+  }
   const res = await listApiKeys(params)
   return {
     keys: decorate(res.keys),

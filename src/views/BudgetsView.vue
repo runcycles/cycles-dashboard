@@ -47,11 +47,23 @@ const error = ref('')
 // care about "which scopes are closest to running dry", not when a
 // ledger was provisioned — the near-exhausted rows are the actionable
 // ones. Clicking any header switches to that column's natural order.
-const { sortKey, sortDir, toggle, sorted: sortedBudgets } = useSort(budgets, 'utilization', 'desc', {
-  utilization: (b: BudgetLedger) => b.allocated.amount > 0 ? (b.allocated.amount - b.remaining.amount) / b.allocated.amount : 0,
-  debt: (b: BudgetLedger) => b.debt?.amount ?? 0,
-  tenant_id: (b: BudgetLedger) => b.tenant_id || '',
-})
+// V4 stage 2: server-side sort. All sort columns map cleanly to the
+// admin-plane spec's listBudgets sort_by enum
+// (tenant_id, scope, unit, status, commit_overage_policy, utilization,
+// debt). onChange re-fetches page 1 because the cursor is bound to the
+// (sort_by, sort_dir, filters) tuple — reusing a cursor under a new sort
+// order returns 400 CURSOR_SORT_MISMATCH on 0.1.25.12+.
+const { sortKey, sortDir, toggle, sorted: sortedBudgets } = useSort(
+  budgets,
+  'utilization',
+  'desc',
+  {
+    utilization: (b: BudgetLedger) => b.allocated.amount > 0 ? (b.allocated.amount - b.remaining.amount) / b.allocated.amount : 0,
+    debt: (b: BudgetLedger) => b.debt?.amount ?? 0,
+    tenant_id: (b: BudgetLedger) => b.tenant_id || '',
+  },
+  { serverSide: true, onChange: () => { loadList() } },
+)
 const detail = ref<BudgetLedger | null>(null)
 const detailEvents = ref<Event[]>([])
 // R8 (scale-hardening): paginate the budget-detail event timeline.
@@ -138,6 +150,10 @@ function buildListParams(extra: Record<string, string> = {}): Record<string, str
   if (maxSet) {
     const n = Number(rawMax)
     if (Number.isFinite(n)) params.utilization_max = String(Math.max(0, Math.min(1, n / 100)))
+  }
+  if (sortKey.value) {
+    params.sort_by = sortKey.value
+    params.sort_dir = sortDir.value
   }
   return params
 }
