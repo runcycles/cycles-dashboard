@@ -127,6 +127,15 @@ async function executeTenantAction() {
 // API key revoke action
 const pendingKeyRevoke = ref<ApiKey | null>(null)
 
+async function copyKeyId(keyId: string) {
+  try {
+    await navigator.clipboard.writeText(keyId)
+    toast.success('Key ID copied')
+  } catch {
+    toast.error('Copy failed — clipboard unavailable')
+  }
+}
+
 async function executeKeyRevoke() {
   if (!pendingKeyRevoke.value) return
   try {
@@ -734,6 +743,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
                   :aria-label="`Actions for API key ${k.name || k.key_id}`"
                   :items="[
                     { label: 'Activity', to: { name: 'audit', query: { key_id: k.key_id } } },
+                    { label: 'Copy key ID', onClick: () => copyKeyId(k.key_id) },
                     { label: 'Edit', onClick: () => openEditKey(k), hidden: k.status !== 'ACTIVE' },
                     { separator: true },
                     { label: 'Revoke', onClick: () => pendingKeyRevoke = k, danger: true, hidden: k.status !== 'ACTIVE' },
@@ -762,6 +772,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
                 <RowActionsMenu
                   :aria-label="`Actions for policy ${p.name || p.policy_id}`"
                   :items="[
+                    { label: 'Activity', to: { name: 'audit', query: { resource_type: 'policy', resource_id: p.policy_id } } },
                     { label: 'Edit', onClick: () => openEditPolicy(p) },
                   ]"
                 />

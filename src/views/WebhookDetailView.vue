@@ -253,9 +253,19 @@ function buildDeliveryParams(): Record<string, string> {
   return p
 }
 
+// WebhooksView kebab "Edit" routes here with ?action=edit; apply once
+// after the first successful webhook fetch (openEdit depends on
+// webhook.value being populated). Guarded so polling-driven refetches
+// don't keep re-opening the dialog if the user dismisses it.
+let editIntentApplied = false
+
 const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
     webhook.value = await getWebhook(id)
+    if (!editIntentApplied && route.query.action === 'edit' && webhook.value) {
+      editIntentApplied = true
+      openEdit()
+    }
     const res = await listDeliveries(id, buildDeliveryParams())
     deliveries.value = res.deliveries
     deliveriesHasMore.value = !!res.has_more

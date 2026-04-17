@@ -115,6 +115,15 @@ const editLoading = ref(false)
 const editError = ref('')
 const editForm = ref({ name: '', permissions: [] as string[], scope_filter: '' })
 
+async function copyKeyId(id: string) {
+  try {
+    await navigator.clipboard.writeText(id)
+    toast.success('Key ID copied')
+  } catch {
+    toast.error('Copy failed — clipboard unavailable')
+  }
+}
+
 function openEdit(k: KeyWithTenant) {
   // Filter out any stored permission that isn't in the canonical PERMISSIONS
   // set. Unknown values (legacy records like `decide`, typos from direct
@@ -566,6 +575,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
                 :aria-label="`Actions for API key ${sortedKeys[v.index].name || sortedKeys[v.index].key_id}`"
                 :items="[
                   { label: 'Activity', to: { name: 'audit', query: { key_id: sortedKeys[v.index].key_id } } },
+                  { label: 'Copy key ID', onClick: () => copyKeyId(sortedKeys[v.index].key_id) },
                   { label: 'Edit', onClick: () => openEdit(sortedKeys[v.index]), hidden: sortedKeys[v.index].status !== 'ACTIVE' },
                   { separator: true },
                   { label: 'Revoke', onClick: () => pendingRevoke = sortedKeys[v.index], danger: true, hidden: sortedKeys[v.index].status !== 'ACTIVE' },

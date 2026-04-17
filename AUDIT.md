@@ -9,15 +9,17 @@
 
 **New component: `RowActionsMenu`.** A reusable kebab menu (`src/components/RowActionsMenu.vue` + `src/__tests__/RowActionsMenu.test.ts`). Renders into `<Teleport to="body">` so the menu can escape the virtualized-grid clip; positioning is computed against the trigger's bounding rect on open. WAI-ARIA: trigger is `aria-haspopup="menu"` + `aria-expanded`; menu is `role="menu"`; items are `role="menuitem"`. Items support `label`, `onClick` *or* router `to`, `hidden`, `danger`, and `separator: true`. Dark-mode parity is delivered via `src/style.css` component classes (`.row-actions-menu`, `.row-actions-item`, `.row-actions-item-danger`, `.row-actions-separator`) with explicit `.dark .row-actions-*` overrides — the initial scoped `:global(.dark)` approach proved unreliable through the Teleport boundary because Vue's scoped data-attribute is not propagated across teleports.
 
-**Adopted across 5 list views.** Per-view items, status-gated, with destructive items below a `separator` per Linear/GitHub convention:
+**Adopted across 5 list views.** Per-view items, status-gated, with destructive items below a `separator` per Linear/GitHub convention. Post-merge consistency sweep (same tag, follow-up commit) guarantees **every kebab renders ≥2 actions in every status state** — some states had gated every mutable item off, leaving a 1-item menu (Webhooks ACTIVE showed only Pause; Reservations non-ACTIVE showed nothing; Budgets CLOSED / ApiKeys REVOKED similarly). Fix: prepend always-shown `Activity` (drills Audit pre-filtered by the row's natural key) on every kebab, plus a `Copy <id>` read-only item where `Activity` alone could be the only survivor (Reservations/Budgets/ApiKeys/TenantDetail keys). `WebhooksView` gains `Edit` as a second always-shown item routing to `webhook-detail?action=edit` (consumed on mount via a guarded `editIntentApplied` flag so polling refetches don't re-open the dialog). Current per-view items:
 
-| View              | Items (top → bottom)                                                  |
-|-------------------|------------------------------------------------------------------------|
-| ApiKeysView       | Activity (always) · Edit (ACTIVE) · — · Revoke (ACTIVE, danger)        |
-| ReservationsView  | Force release (ACTIVE, danger)                                         |
-| TenantsView       | Reactivate (SUSPENDED) · — · Suspend (ACTIVE, danger)                  |
-| WebhooksView      | Enable (PAUSED/DISABLED) · — · Pause (ACTIVE, danger)                  |
-| BudgetsView       | Fund (ACTIVE) · Unfreeze (FROZEN) · — · Freeze (ACTIVE, danger)        |
+| View              | Items (top → bottom)                                                                                             |
+|-------------------|-------------------------------------------------------------------------------------------------------------------|
+| ApiKeysView       | Activity · Copy key ID · Edit (ACTIVE) · — · Revoke (ACTIVE, danger)                                              |
+| ReservationsView  | Activity · Copy reservation ID · — · Force release (ACTIVE, danger)                                               |
+| TenantsView       | Activity · Reactivate (SUSPENDED) · — · Suspend (ACTIVE, danger)                                                  |
+| WebhooksView      | Activity · Edit · Enable (PAUSED/DISABLED) · — · Pause (ACTIVE, danger)                                           |
+| BudgetsView       | Activity · Copy scope · Fund (ACTIVE) · Unfreeze (FROZEN) · — · Freeze (ACTIVE, danger)                           |
+| TenantDetail keys | Activity · Copy key ID · Edit (ACTIVE) · — · Revoke (ACTIVE, danger)                                              |
+| TenantDetail pol. | Activity · Edit                                                                                                   |
 
 `Fund` from the BudgetsView row kebab is the one new operator action in this release. Previously Fund Budget was only reachable from detail mode. A new `fundTarget` ref<BudgetLedger | null> decouples the fund-dialog from `detail.value` so list-mode invocation works without first entering detail mode; on success in list mode the view refreshes via `loadList()` instead of `loadDetail()`. Dialog header shows "Funding `<scope>` (`<unit>`)" so the operator sees which budget they're acting on.
 

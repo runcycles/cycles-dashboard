@@ -706,6 +706,7 @@ const gridTemplate = computed(() =>
               <RowActionsMenu
                 :aria-label="`Actions for tenant ${sortedTenants[v.index].name || sortedTenants[v.index].tenant_id}`"
                 :items="[
+                  { label: 'Activity', to: { name: 'audit', query: { tenant_id: sortedTenants[v.index].tenant_id } } },
                   { label: 'Reactivate', onClick: () => pendingStatusAction = { tenantId: sortedTenants[v.index].tenant_id, name: sortedTenants[v.index].name, action: 'ACTIVE' }, hidden: sortedTenants[v.index].status !== 'SUSPENDED' },
                   { separator: true },
                   { label: 'Suspend', onClick: () => pendingStatusAction = { tenantId: sortedTenants[v.index].tenant_id, name: sortedTenants[v.index].name, action: 'SUSPENDED' }, danger: true, hidden: sortedTenants[v.index].status !== 'ACTIVE' },

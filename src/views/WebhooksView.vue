@@ -701,6 +701,8 @@ const gridTemplate = computed(() =>
               <RowActionsMenu
                 :aria-label="`Actions for webhook ${sortedWebhooks[v.index].name || sortedWebhooks[v.index].url}`"
                 :items="[
+                  { label: 'Activity', to: { name: 'audit', query: { resource_type: 'webhook', resource_id: sortedWebhooks[v.index].subscription_id } } },
+                  { label: 'Edit', to: { name: 'webhook-detail', params: { id: sortedWebhooks[v.index].subscription_id }, query: { action: 'edit' } } },
                   { label: 'Enable', onClick: () => pendingStatusAction = { id: sortedWebhooks[v.index].subscription_id, url: sortedWebhooks[v.index].url, action: 'ACTIVE' }, hidden: sortedWebhooks[v.index].status !== 'PAUSED' && sortedWebhooks[v.index].status !== 'DISABLED' },
                   { separator: true },
                   { label: 'Pause', onClick: () => pendingStatusAction = { id: sortedWebhooks[v.index].subscription_id, url: sortedWebhooks[v.index].url, action: 'PAUSED' }, danger: true, hidden: sortedWebhooks[v.index].status !== 'ACTIVE' },

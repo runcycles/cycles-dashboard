@@ -258,6 +258,15 @@ function requestFreeze(scope: string, unit: string, action: 'freeze' | 'unfreeze
   pendingAction.value = { action, scope, unit }
 }
 
+async function copyScope(scope: string) {
+  try {
+    await navigator.clipboard.writeText(scope)
+    toast.success('Scope copied')
+  } catch {
+    toast.error('Copy failed — clipboard unavailable')
+  }
+}
+
 async function executeBudgetAction() {
   if (!pendingAction.value) return
   const { action, scope, unit } = pendingAction.value
@@ -764,9 +773,15 @@ function rowTenantId(b: BudgetLedger): string {
               </div>
               <div role="cell" class="table-cell text-right tabular-nums" :class="(sortedBudgets[v.index].debt?.amount ?? 0) > 0 ? 'text-red-600 font-medium' : 'muted'">{{ (sortedBudgets[v.index].debt?.amount ?? 0).toLocaleString() }}</div>
               <div v-if="canManage" role="cell" class="table-cell">
+                <!-- Activity + Copy scope are always shown so even
+                     CLOSED budgets (which gate every other action off)
+                     still expose a 2-item kebab. Activity drills the
+                     audit log pre-filtered to this budget scope. -->
                 <RowActionsMenu
                   :aria-label="`Actions for budget ${sortedBudgets[v.index].scope}`"
                   :items="[
+                    { label: 'Activity', to: { name: 'audit', query: { resource_type: 'budget', resource_id: sortedBudgets[v.index].scope } } },
+                    { label: 'Copy scope', onClick: () => copyScope(sortedBudgets[v.index].scope) },
                     { label: 'Fund', onClick: () => openFund(sortedBudgets[v.index]), hidden: sortedBudgets[v.index].status !== 'ACTIVE' },
                     { label: 'Unfreeze', onClick: () => requestFreeze(sortedBudgets[v.index].scope, sortedBudgets[v.index].unit, 'unfreeze'), hidden: sortedBudgets[v.index].status !== 'FROZEN' },
                     { separator: true },
