@@ -165,12 +165,33 @@ async function mountAndLoad(Component: unknown) {
   return w
 }
 
+// Row actions are now rendered via RowActionsMenu — the kebab trigger
+// sits in the row, and items like "Revoke" only render once the menu
+// opens (into a <Teleport to="body">). Helper: click the kebab to open
+// the menu, then click the named menuitem in document.body.
+async function clickMenuItem(w: ReturnType<typeof mount>, triggerAriaLabelStartsWith: string, itemLabel: string) {
+  const trigger = w.findAll('button').find(b =>
+    b.attributes('aria-haspopup') === 'menu' &&
+    (b.attributes('aria-label') || '').startsWith(triggerAriaLabelStartsWith),
+  )
+  if (!trigger) throw new Error(`no row-actions trigger starting with "${triggerAriaLabelStartsWith}"`)
+  await trigger.trigger('click')
+  await flushPromises()
+  const item = Array.from(document.body.querySelectorAll<HTMLElement>('[role="menuitem"]'))
+    .find(el => (el.textContent || '').trim() === itemLabel)
+  if (!item) throw new Error(`no menuitem labeled "${itemLabel}"`)
+  item.click()
+  await flushPromises()
+}
+
 describe('error surfacing — view catch blocks actually render toasts', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     toasts.value = []
     revokeApiKey.mockReset()
     replayWebhookEvents.mockReset()
+    // Prevent teleported menus from leaking into the next test's body.
+    document.body.innerHTML = ''
   })
 
   // ApiKeysView.executeRevoke prepends "Revoke failed:" — locks in both
@@ -183,11 +204,9 @@ describe('error surfacing — view catch blocks actually render toasts', () => {
     const { default: ApiKeysView } = await import('../views/ApiKeysView.vue')
     const w = await mountAndLoad(ApiKeysView)
 
-    // Click the row-level Revoke button to populate pendingRevoke.
-    const revokeBtn = w.findAll('button').find(b => b.text() === 'Revoke')
-    expect(revokeBtn, 'Revoke button should render for ACTIVE key with manage cap').toBeDefined()
-    await revokeBtn!.trigger('click')
-    await flushPromises()
+    // Click the row-level Revoke action (now inside the kebab menu)
+    // to populate pendingRevoke.
+    await clickMenuItem(w, 'Actions for API key', 'Revoke')
 
     // ConfirmAction renders with confirm-label "Revoke Key". Click it.
     const confirmBtn = w.findAll('button').find(b => b.text().includes('Revoke Key'))
@@ -209,8 +228,7 @@ describe('error surfacing — view catch blocks actually render toasts', () => {
     const { default: ApiKeysView } = await import('../views/ApiKeysView.vue')
     const w = await mountAndLoad(ApiKeysView)
 
-    await w.findAll('button').find(b => b.text() === 'Revoke')!.trigger('click')
-    await flushPromises()
+    await clickMenuItem(w, 'Actions for API key', 'Revoke')
     await w.findAll('button').find(b => b.text().includes('Revoke Key'))!.trigger('click')
     await flushPromises()
 
@@ -229,8 +247,7 @@ describe('error surfacing — view catch blocks actually render toasts', () => {
     const { default: ApiKeysView } = await import('../views/ApiKeysView.vue')
     const w = await mountAndLoad(ApiKeysView)
 
-    await w.findAll('button').find(b => b.text() === 'Revoke')!.trigger('click')
-    await flushPromises()
+    await clickMenuItem(w, 'Actions for API key', 'Revoke')
     await w.findAll('button').find(b => b.text().includes('Revoke Key'))!.trigger('click')
     await flushPromises()
 
@@ -250,8 +267,7 @@ describe('error surfacing — view catch blocks actually render toasts', () => {
     const { default: ApiKeysView } = await import('../views/ApiKeysView.vue')
     const w = await mountAndLoad(ApiKeysView)
 
-    await w.findAll('button').find(b => b.text() === 'Revoke')!.trigger('click')
-    await flushPromises()
+    await clickMenuItem(w, 'Actions for API key', 'Revoke')
     await w.findAll('button').find(b => b.text().includes('Revoke Key'))!.trigger('click')
     await flushPromises()
 

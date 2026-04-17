@@ -36,7 +36,7 @@ const tag = computed(() => props.as ?? 'th')
     @keydown.enter.prevent="$emit('sort', column)"
     @keydown.space.prevent="$emit('sort', column)"
   >
-    <span class="inline-flex items-center gap-1">
+    <span class="inline-flex items-center gap-1 whitespace-nowrap">
       {{ label }}
       <svg v-if="activeColumn === column" class="w-3 h-3" :class="direction === 'desc' ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7" />

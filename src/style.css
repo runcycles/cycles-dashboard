@@ -88,6 +88,49 @@
      than a semantic color so it visually recedes next to danger/success. */
   .btn-pill-secondary { @apply text-xs text-gray-600 hover:text-gray-800 border border-gray-200 rounded px-2.5 py-1 hover:bg-gray-100 cursor-pointer transition-colors; }
 
+  /* Kebab (⋮) trigger — 28×28 square tap target used by RowActionsMenu.
+     aria-expanded=true rotates the icon color subtly via the open state
+     on the component; here we only care about the idle/hover/focus ring. */
+  .btn-row-kebab {
+    @apply inline-flex items-center justify-center w-7 h-7 rounded text-gray-500 hover:text-gray-800 hover:bg-gray-100 cursor-pointer transition-colors;
+  }
+  .btn-row-kebab:focus-visible {
+    @apply outline-none ring-2 ring-gray-400;
+  }
+
+  /* Row-actions popover — teleported to <body>, so dark overrides must be
+     declared at global scope (see the `.dark .row-actions-*` rules below).
+     Scoped CSS + :global(.dark) through a Teleport boundary is unreliable
+     in practice; matching the convention used by every other component
+     class in this file. */
+  .row-actions-menu {
+    @apply z-50 min-w-[10rem] rounded-md border border-gray-200 bg-white py-1 shadow-lg;
+  }
+  .row-actions-separator {
+    @apply my-1 h-px bg-gray-200;
+  }
+  .row-actions-item {
+    @apply block w-full text-left px-3 py-1.5 text-xs cursor-pointer;
+    color: var(--color-gray-700);
+  }
+  .row-actions-item:hover,
+  .row-actions-item:focus {
+    background-color: var(--color-gray-100);
+    outline: none;
+  }
+  .row-actions-item:disabled {
+    @apply opacity-50 cursor-not-allowed;
+  }
+  .row-actions-item:disabled:hover,
+  .row-actions-item:disabled:focus {
+    background-color: transparent;
+  }
+  .row-actions-item-danger { color: var(--color-red-600); }
+  .row-actions-item-danger:hover,
+  .row-actions-item-danger:focus {
+    background-color: color-mix(in oklab, var(--color-red-500) 8%, transparent);
+  }
+
   /* ── Count / status badge pills ─────────────────────────────────
      Small numeric or short-label tints used on Overview counters
      and inline status indicators. Dark-mode backgrounds come from
@@ -175,6 +218,40 @@
 .dark .btn-pill-secondary:hover {
   background-color: var(--color-gray-800);
   color: var(--color-gray-100);
+}
+
+/* Kebab trigger — sits inside table rows on gray-900 surface on dark. */
+.dark .btn-row-kebab {
+  color: var(--color-gray-400);
+}
+.dark .btn-row-kebab:hover {
+  background-color: var(--color-gray-800);
+  color: var(--color-gray-100);
+}
+
+/* Row-actions popover — teleported outside the view tree so it doesn't
+   inherit any view-scoped dark overrides. Explicit rules here. */
+.dark .row-actions-menu {
+  background-color: var(--color-gray-900);
+  border-color: var(--color-gray-700);
+}
+.dark .row-actions-separator {
+  background-color: var(--color-gray-700);
+}
+.dark .row-actions-item {
+  color: var(--color-gray-200);
+}
+.dark .row-actions-item:hover,
+.dark .row-actions-item:focus {
+  background-color: var(--color-gray-800);
+}
+.dark .row-actions-item-danger {
+  color: var(--color-red-400);
+}
+.dark .row-actions-item-danger:hover,
+.dark .row-actions-item-danger:focus {
+  background-color: color-mix(in oklab, var(--color-red-800) 30%, transparent);
+  color: var(--color-red-300);
 }
 
 /* Count / status badges — translucent tints on dark for readability */

@@ -19,6 +19,7 @@ import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
+import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 
@@ -291,7 +292,7 @@ const deliveryVirt = useVirtualizer(computed(() => ({
 })))
 const deliveryVirtualRows = computed(() => deliveryVirt.value.getVirtualItems())
 const deliveryTotalHeight = computed(() => deliveryVirt.value.getTotalSize())
-const deliveryGridTemplate = '120px 100px 100px minmax(220px,1fr) 160px'
+const deliveryGridTemplate = '120px 120px 100px minmax(220px,1fr) 160px'
 
 // Status filter refetches page 1 so the filter is server-enforced
 // (not just client-side filtering of already-loaded data — that
@@ -357,14 +358,26 @@ watch(exportError, (v) => { if (v) error.value = v })
           <span v-if="(webhook.consecutive_failures ?? 0) > 0" class="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-medium">{{ webhook.consecutive_failures }} failures</span>
           <span class="flex-1" />
           <div v-if="canManage" class="flex gap-2 flex-wrap">
-            <button @click="openEdit"class="btn-pill-secondary">Edit</button>
+            <!-- Send Test stays inline because it is the single "do-it-now"
+                 action operators reach for most during webhook triage.
+                 Everything else — edit, rotate, replay, state changes,
+                 delete — lives in the overflow menu so the header no
+                 longer wraps onto two rows. -->
             <button @click="runTest" :disabled="testLoading" class="btn-pill-secondary disabled:opacity-50">{{ testLoading ? 'Testing...' : 'Send Test' }}</button>
-            <button @click="openRotate" class="btn-pill-secondary">Rotate Secret</button>
-            <button @click="showReplay = true" class="btn-pill-secondary">Replay</button>
-            <button v-if="(webhook.consecutive_failures ?? 0) > 0 && webhook.status !== 'ACTIVE'" @click="pendingAction = 'reset'" class="btn-pill-primary">Reset &amp; Re-enable</button>
-            <button v-if="webhook.status === 'ACTIVE'" @click="pendingAction = 'PAUSED'" class="btn-pill-danger">Pause</button>
-            <button v-if="webhook.status === 'DISABLED' || webhook.status === 'PAUSED'" @click="pendingAction = 'ACTIVE'" class="btn-pill-success">Enable</button>
-            <button @click="openDelete" class="btn-pill-danger">Delete</button>
+            <RowActionsMenu
+              aria-label="More webhook actions"
+              trigger-label="More actions"
+              :items="[
+                { label: 'Edit', onClick: openEdit },
+                { label: 'Rotate Secret', onClick: openRotate },
+                { label: 'Replay', onClick: () => { showReplay = true } },
+                { label: 'Reset & Re-enable', onClick: () => { pendingAction = 'reset' }, hidden: !((webhook.consecutive_failures ?? 0) > 0 && webhook.status !== 'ACTIVE') },
+                { label: 'Enable', onClick: () => { pendingAction = 'ACTIVE' }, hidden: webhook.status !== 'DISABLED' && webhook.status !== 'PAUSED' },
+                { separator: true },
+                { label: 'Pause', onClick: () => { pendingAction = 'PAUSED' }, danger: true, hidden: webhook.status !== 'ACTIVE' },
+                { label: 'Delete', onClick: openDelete, danger: true },
+              ]"
+            />
           </div>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
@@ -420,17 +433,24 @@ watch(exportError, (v) => { if (v) error.value = v })
         <button type="button" @click="replayResult = null" aria-label="Dismiss replay notification" class="text-blue-500 hover:text-blue-800 cursor-pointer shrink-0">✕</button>
       </div>
 
-      <!-- V1 virtualized delivery history. Same pattern as the
-           top-level list views. Status filter applied server-side
-           so pagination stays consistent; Load-more appends. -->
+      <!-- V1 virtualized delivery history. Title on its own row at the
+           top so it stays anchored even when the toolbar below wraps
+           onto multiple lines at narrow viewports. Controls row holds
+           the counter, status filter, and export buttons. Button
+           labels say "Export CSV" / "Export JSON" for consistency with
+           AuditView / WebhooksView / BudgetsView / every other list
+           view — "CSV" / "JSON" was a lone abbreviation. Status filter
+           applied server-side so pagination stays consistent;
+           Load-more appends. -->
       <div class="bg-white rounded-lg shadow overflow-hidden text-sm" role="table" :aria-rowcount="filteredDeliveries.length + 1" :aria-colcount="5">
-        <div class="table-cell border-b border-gray-100 flex justify-between items-center gap-3 flex-wrap">
+        <div class="table-cell border-b border-gray-100 space-y-2">
           <h3 class="text-sm font-medium text-gray-700">Delivery History</h3>
-          <div class="flex items-center gap-3 ml-auto">
+          <div class="flex items-center gap-x-3 gap-y-2 flex-wrap">
             <span class="muted-sm tabular-nums">
               {{ filteredDeliveries.length.toLocaleString() }} loaded
               <span v-if="deliveriesHasMore" class="text-amber-600 ml-1">(more available)</span>
             </span>
+            <span class="flex-1" />
             <select v-model="deliveryStatusFilter" aria-label="Filter deliveries by status" class="form-select">
               <option value="">All statuses</option>
               <option>PENDING</option>
@@ -440,11 +460,11 @@ watch(exportError, (v) => { if (v) error.value = v })
             </select>
             <button @click="confirmExport('csv')" :disabled="filteredDeliveries.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-              CSV
+              Export CSV
             </button>
             <button @click="confirmExport('json')" :disabled="filteredDeliveries.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-              JSON
+              Export JSON
             </button>
           </div>
         </div>

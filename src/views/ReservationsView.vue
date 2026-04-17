@@ -28,6 +28,7 @@ import EmptyState from '../components/EmptyState.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import FormDialog from '../components/FormDialog.vue'
+import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { formatDateTime, formatRelative } from '../utils/format'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
@@ -444,13 +445,15 @@ const gridTemplate = computed(() =>
             </div>
             <div v-if="canManage" role="cell" class="table-cell">
               <!-- Only ACTIVE reservations can be released. COMMITTED /
-                   RELEASED / EXPIRED are terminal states — no release
-                   action makes sense. -->
-              <button
-                v-if="sortedReservations[v.index].status === 'ACTIVE'"
-                @click="openRelease(sortedReservations[v.index])"
-                class="btn-row-danger"
-              >Force release</button>
+                   RELEASED / EXPIRED are terminal states — the single
+                   destructive item is gated off and the kebab renders
+                   nothing at all in those cases. -->
+              <RowActionsMenu
+                :aria-label="`Actions for reservation ${sortedReservations[v.index].reservation_id}`"
+                :items="[
+                  { label: 'Force release', onClick: () => openRelease(sortedReservations[v.index]), danger: true, hidden: sortedReservations[v.index].status !== 'ACTIVE' },
+                ]"
+              />
             </div>
           </div>
         </div>

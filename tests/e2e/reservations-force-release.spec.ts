@@ -36,9 +36,12 @@ test('operator force-releases a hung reservation and the row disappears', async 
   const targetRow = page.getByRole('row').filter({ hasText: fx.reservationIdForRelease })
   await expect(targetRow).toBeVisible({ timeout: 10_000 })
 
-  // Click the row's Force release button. There are three rows for
-  // this tenant; scoping to targetRow guarantees we click the right one.
-  await targetRow.getByRole('button', { name: /force release/i }).click()
+  // Open the row's action menu (kebab) and click Force release. There
+  // are three rows for this tenant; scoping to targetRow guarantees we
+  // open the right menu, and the menuitem is the only destructive
+  // option so page-scoped lookup is safe.
+  await targetRow.getByRole('button', { name: /^actions for reservation/i }).click()
+  await page.getByRole('menuitem', { name: /force release/i }).click()
 
   // FormDialog renders with role="dialog" and aria-label from the
   // title prop — scope to that specific dialog so the "Force release"

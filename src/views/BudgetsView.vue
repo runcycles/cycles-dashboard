@@ -22,6 +22,7 @@ import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import EventTimeline from '../components/EventTimeline.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
+import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 
@@ -279,6 +280,11 @@ async function executeBudgetAction() {
 
 // Budget fund operations
 const showFund = ref(false)
+// `fundTarget` is the budget being funded. In detail mode it mirrors
+// `detail.value`; in list mode the row's kebab Fund action passes the row
+// directly so the dialog can operate on a budget that isn't the active
+// detail. submitFund / the dialog header read from this, not detail.
+const fundTarget = ref<BudgetLedger | null>(null)
 // `amount` is typed as `number | string` because Vue 3 v-model on
 // `<input type="number">` writes back a number after user input, but we
 // initialize with an empty string so the field starts blank rather than
@@ -303,7 +309,10 @@ const fundHints: Record<string, string> = {
   REPAY_DEBT: 'Reduces outstanding debt by this amount.',
 }
 
-function openFund() {
+function openFund(target?: BudgetLedger) {
+  const t = target ?? detail.value
+  if (!t) return
+  fundTarget.value = t
   fundForm.value = { operation: 'CREDIT', amount: '', reason: '', spent: '' }
   fundError.value = ''
   showFund.value = true
@@ -315,7 +324,7 @@ function openFund() {
 // prefill doesn't bleed into a CREDIT/DEBIT submission.
 watch(() => fundForm.value.operation, (op, prevOp) => {
   if (op === 'RESET_SPENT' && prevOp !== 'RESET_SPENT') {
-    const current = detail.value?.allocated?.amount
+    const current = fundTarget.value?.allocated?.amount
     fundForm.value.amount = typeof current === 'number' ? current : ''
   } else if (op !== 'RESET_SPENT' && prevOp === 'RESET_SPENT') {
     fundForm.value.amount = ''
@@ -324,7 +333,8 @@ watch(() => fundForm.value.operation, (op, prevOp) => {
 })
 
 async function submitFund() {
-  if (!detail.value) return
+  if (!fundTarget.value) return
+  const target = fundTarget.value
   // Reset error up-front so a stale "Invalid amount" doesn't flash on retry.
   fundError.value = ''
   // parsePositiveAmount handles the string-or-number ambiguity caused by
@@ -369,9 +379,9 @@ async function submitFund() {
   // Prefer the dropdown selection; otherwise derive from the ledger scope.
   // Previously this silently returned when selectedTenant was '' — users
   // arriving at a budget via drill-down saw the Execute button do nothing.
-  const tenantId = selectedTenant.value || tenantFromScope(detail.value.scope)
+  const tenantId = selectedTenant.value || tenantFromScope(target.scope)
   if (!tenantId) {
-    fundError.value = `Cannot determine tenant for scope "${detail.value.scope}". Expected a "tenant:<id>" prefix.`
+    fundError.value = `Cannot determine tenant for scope "${target.scope}". Expected a "tenant:<id>" prefix.`
     return
   }
   if (fundLoading.value) return // double-submit guard (defense in depth alongside :disabled)
@@ -383,9 +393,10 @@ async function submitFund() {
     // operations (or rejects the second as a true duplicate when intended).
     const rand = crypto.getRandomValues(new Uint8Array(8))
     const suffix = Array.from(rand, b => b.toString(16).padStart(2, '0')).join('')
-    const idempotencyKey = `dashboard-${fundForm.value.operation.toLowerCase()}-${detail.value.scope}-${Date.now()}-${suffix}`
-    await fundBudget(tenantId, detail.value.scope, detail.value.unit, fundForm.value.operation, amount, idempotencyKey, fundForm.value.reason || `${fundForm.value.operation} via admin dashboard`, spent)
-    await loadDetail()
+    const idempotencyKey = `dashboard-${fundForm.value.operation.toLowerCase()}-${target.scope}-${Date.now()}-${suffix}`
+    await fundBudget(tenantId, target.scope, target.unit, fundForm.value.operation, amount, idempotencyKey, fundForm.value.reason || `${fundForm.value.operation} via admin dashboard`, spent)
+    if (isDetail.value) await loadDetail()
+    else await loadList()
     showFund.value = false
     const labels: Record<string, string> = { CREDIT: 'Budget credited', DEBIT: 'Budget debited', RESET: 'Budget allocation reset', RESET_SPENT: 'Budget spent reset', REPAY_DEBT: 'Debt repaid' }
     toast.success(labels[fundForm.value.operation] || 'Budget updated')
@@ -569,7 +580,7 @@ function rowTenantId(b: BudgetLedger): string {
     <!-- Detail mode -->
     <template v-if="isDetail && detail">
       <div class="bg-white rounded-lg shadow p-6 mb-4">
-        <div class="flex items-center gap-3 mb-4">
+        <div class="flex items-center gap-3 mb-4 flex-wrap">
           <h2 class="text-lg font-medium text-gray-900 font-mono">{{ detail.scope }}</h2>
           <StatusBadge :status="detail.status" />
           <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs font-medium">{{ detail.unit }}</span>
@@ -581,6 +592,12 @@ function rowTenantId(b: BudgetLedger): string {
           </span>
           <span v-if="detail.is_over_limit" class="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-medium">OVER LIMIT</span>
           <span class="flex-1" />
+          <!-- Fund Budget leads the action row — it is the most-used
+               operator action on this view (credit/debit/reset/repay
+               all live behind the same dialog). btn-pill-primary keeps
+               the emphasis the bordered middle-of-card section used to
+               provide. -->
+          <button v-if="canManage && detail.status === 'ACTIVE'" @click="openFund()" class="btn-pill-primary">Fund Budget</button>
           <button v-if="canManage" @click="openEditBudget" class="btn-pill-secondary">Edit</button>
           <button v-if="canManage && detail.status === 'ACTIVE'" @click="requestFreeze(detail.scope, detail.unit, 'freeze')" class="btn-pill-danger">Freeze</button>
           <button v-if="canManage && detail.status === 'FROZEN'" @click="requestFreeze(detail.scope, detail.unit, 'unfreeze')" class="btn-pill-success">Unfreeze</button>
@@ -600,11 +617,6 @@ function rowTenantId(b: BudgetLedger): string {
           <UtilizationBar :remaining="detail.overdraft_limit.amount - detail.debt.amount" :allocated="detail.overdraft_limit.amount" label="Debt utilization" />
         </div>
 
-        <!-- Fund budget -->
-        <div v-if="canManage && detail.status === 'ACTIVE'" class="mt-4 pt-4 border-t border-gray-200 flex items-center justify-between">
-          <span class="muted-sm">Credit, debit, reset allocation, or repay debt</span>
-          <button @click="openFund" class="btn-pill-primary">Fund Budget</button>
-        </div>
       </div>
 
       <!-- Event timeline card flex-fills the remaining viewport so
@@ -752,8 +764,15 @@ function rowTenantId(b: BudgetLedger): string {
               </div>
               <div role="cell" class="table-cell text-right tabular-nums" :class="(sortedBudgets[v.index].debt?.amount ?? 0) > 0 ? 'text-red-600 font-medium' : 'muted'">{{ (sortedBudgets[v.index].debt?.amount ?? 0).toLocaleString() }}</div>
               <div v-if="canManage" role="cell" class="table-cell">
-                <button v-if="sortedBudgets[v.index].status === 'ACTIVE'" @click.prevent="requestFreeze(sortedBudgets[v.index].scope, sortedBudgets[v.index].unit, 'freeze')" class="btn-row-danger">Freeze</button>
-                <button v-if="sortedBudgets[v.index].status === 'FROZEN'" @click.prevent="requestFreeze(sortedBudgets[v.index].scope, sortedBudgets[v.index].unit, 'unfreeze')" class="btn-row-success">Unfreeze</button>
+                <RowActionsMenu
+                  :aria-label="`Actions for budget ${sortedBudgets[v.index].scope}`"
+                  :items="[
+                    { label: 'Fund', onClick: () => openFund(sortedBudgets[v.index]), hidden: sortedBudgets[v.index].status !== 'ACTIVE' },
+                    { label: 'Unfreeze', onClick: () => requestFreeze(sortedBudgets[v.index].scope, sortedBudgets[v.index].unit, 'unfreeze'), hidden: sortedBudgets[v.index].status !== 'FROZEN' },
+                    { separator: true },
+                    { label: 'Freeze', onClick: () => requestFreeze(sortedBudgets[v.index].scope, sortedBudgets[v.index].unit, 'freeze'), danger: true, hidden: sortedBudgets[v.index].status !== 'ACTIVE' },
+                  ]"
+                />
               </div>
             </div>
           </div>
@@ -786,10 +805,11 @@ function rowTenantId(b: BudgetLedger): string {
     />
 
     <FormDialog v-if="showFund" title="Fund Budget" submit-label="Execute" :loading="fundLoading" :error="fundError" @submit="submitFund" @cancel="showFund = false">
+      <p v-if="fundTarget" class="muted-sm mb-1">Funding <span class="font-mono">{{ fundTarget.scope }}</span> ({{ fundTarget.unit }}).</p>
       <div class="info-panel text-xs grid grid-cols-3 gap-2 mb-1">
-        <div><span class="muted block">Allocated</span><span class="font-semibold">{{ detail?.allocated.amount.toLocaleString() }}</span></div>
-        <div><span class="muted block">Remaining</span><span class="font-semibold">{{ detail?.remaining.amount.toLocaleString() }}</span></div>
-        <div><span class="muted block">Debt</span><span class="font-semibold" :class="(detail?.debt?.amount ?? 0) > 0 ? 'text-red-600' : ''">{{ (detail?.debt?.amount ?? 0).toLocaleString() }}</span></div>
+        <div><span class="muted block">Allocated</span><span class="font-semibold">{{ fundTarget?.allocated.amount.toLocaleString() }}</span></div>
+        <div><span class="muted block">Remaining</span><span class="font-semibold">{{ fundTarget?.remaining.amount.toLocaleString() }}</span></div>
+        <div><span class="muted block">Debt</span><span class="font-semibold" :class="(fundTarget?.debt?.amount ?? 0) > 0 ? 'text-red-600' : ''">{{ (fundTarget?.debt?.amount ?? 0).toLocaleString() }}</span></div>
       </div>
       <div>
         <label for="fund-op" class="form-label">Operation</label>
@@ -804,13 +824,13 @@ function rowTenantId(b: BudgetLedger): string {
       </div>
       <div>
         <label for="fund-amount" class="form-label">
-          {{ fundForm.operation === 'RESET_SPENT' ? `Allocated for new period (${detail?.unit})` : `Amount (${detail?.unit})` }}
+          {{ fundForm.operation === 'RESET_SPENT' ? `Allocated for new period (${fundTarget?.unit})` : `Amount (${fundTarget?.unit})` }}
         </label>
         <input id="fund-amount" v-model="fundForm.amount" type="number" :min="fundForm.operation === 'RESET_SPENT' ? 0 : 0" step="1" required class="form-input-mono" />
         <p v-if="fundForm.operation === 'RESET_SPENT'" class="muted-sm mt-0.5">Pre-filled with current allocated. Change to start the new billing period at a different allocation.</p>
       </div>
       <div v-if="fundForm.operation === 'RESET_SPENT'">
-        <label for="fund-spent" class="form-label">Spent override ({{ detail?.unit }}, optional)</label>
+        <label for="fund-spent" class="form-label">Spent override ({{ fundTarget?.unit }}, optional)</label>
         <input id="fund-spent" v-model="fundForm.spent" type="number" min="0" step="1" class="form-input-mono" placeholder="Leave blank to reset to zero" />
         <p class="muted-sm mt-0.5">Blank = reset spent to 0. Provide a value to set an exact starting spent for the new billing period.</p>
       </div>
