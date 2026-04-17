@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useRouter, useRoute } from 'vue-router'
 import { useDarkMode } from '../composables/useDarkMode'
+import { useCommandPalette } from '../composables/useCommandPalette'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -9,6 +11,15 @@ const route = useRoute()
 const caps = auth.capabilities
 const version = __APP_VERSION__
 const { isDark, toggle: toggleDark } = useDarkMode()
+const palette = useCommandPalette()
+
+// Platform-appropriate keyboard hint — ⌘K on macOS, Ctrl+K elsewhere.
+// Picked off navigator.platform rather than userAgent because the
+// platform string is stable across Chromium version skew on Windows
+// and still correctly identifies "MacIntel" on macOS.
+const isMac = computed(() =>
+  typeof navigator !== 'undefined' && /mac|iphone|ipad|ipod/i.test(navigator.platform || ''),
+)
 
 const navItems = [
   { name: 'Overview', route: '/', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4', cap: caps?.view_overview },
@@ -47,6 +58,23 @@ function logout() {
         <h1 class="text-white font-semibold text-lg leading-tight">Cycles</h1>
         <p class="text-xs text-gray-400">Admin Dashboard</p>
       </div>
+    </div>
+    <!-- W3: "Find tenant" palette trigger. Cmd/K or Ctrl+K from anywhere
+         opens it; this button just surfaces discoverability for mouse-
+         driven operators and mobile where no keyboard shortcut exists. -->
+    <div class="px-3 py-2 border-b border-gray-700">
+      <button
+        type="button"
+        @click="palette.open()"
+        aria-label="Find tenant (press Command K or Control K)"
+        class="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-gray-400 bg-gray-800/60 hover:bg-gray-800 rounded transition-colors cursor-pointer"
+      >
+        <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 10a7 7 0 11-14 0 7 7 0 0114 0z" />
+        </svg>
+        <span class="flex-1 text-left">Find tenant</span>
+        <kbd class="text-[10px] text-gray-500 border border-gray-700 rounded px-1">{{ isMac ? '⌘K' : 'Ctrl K' }}</kbd>
+      </button>
     </div>
     <nav class="flex-1 py-3 space-y-0.5">
       <template v-for="item in navItems" :key="item.route">

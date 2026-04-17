@@ -1,8 +1,44 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, onBeforeUnmount, ref } from 'vue'
 import Sidebar from './Sidebar.vue'
+import CommandPalette from './CommandPalette.vue'
+import { useCommandPalette } from '../composables/useCommandPalette'
 
 const sidebarOpen = ref(false)
+const palette = useCommandPalette()
+
+// W3: global Cmd/K (macOS) / Ctrl+K (other) opens the tenant palette.
+// Swallow the default browser shortcut (locks focus to the browser
+// omnibox on some platforms) and prevent it from firing while an
+// <input> or <textarea> already has focus — consistent with every
+// other palette-style UI the operator is likely to know (Linear,
+// GitHub, Slack, Raycast).
+//
+// 'k' check is case-insensitive so caps-lock doesn't break the
+// shortcut. Also binds '/' as a secondary shortcut when nothing is
+// focused on an input — a long-standing GitHub convention for "focus
+// search".
+function onGlobalKeydown(e: KeyboardEvent) {
+  const target = e.target as HTMLElement | null
+  const inEditable =
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target?.isContentEditable === true
+
+  const key = e.key.toLowerCase()
+  if ((e.metaKey || e.ctrlKey) && key === 'k') {
+    e.preventDefault()
+    palette.toggle()
+    return
+  }
+  if (key === '/' && !inEditable && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    e.preventDefault()
+    palette.open()
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', onGlobalKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
 </script>
 
 <template>
@@ -50,5 +86,7 @@ const sidebarOpen = ref(false)
         <router-view />
       </main>
     </div>
+
+    <CommandPalette />
   </div>
 </template>
