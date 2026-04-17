@@ -670,6 +670,57 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
     })
   })
 
+  // Cross-card consistency — every "what needs attention" card should
+  // behave the same way on the landing page: inline list of top-5 items,
+  // with the full count kept on the banner/badge and a "View all" link
+  // carrying the operator to the complete set. Budgets cards set the
+  // convention (see above); these specs pin it down for the non-budget
+  // signals — Failing Webhooks + Recent Denials — so a future change
+  // that renders the full list again (or drops the cap entirely) fails
+  // the suite rather than silently regressing visual density parity.
+  describe('landing-card row caps — all non-budget cards slice to 5', () => {
+    it('Failing Webhooks card caps at 5 rows even when the server returns more', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        webhook_counts: { total: 10, active: 3, disabled: 0, with_failures: 7 },
+        failing_webhooks: Array.from({ length: 7 }, (_, i) => ({
+          subscription_id: `wh_${i}`,
+          url: `https://wh-${i}.example/hook`,
+          consecutive_failures: i + 1,
+        })),
+      }))
+      const w = await mountOverview()
+      const card = w.find('#failing-webhooks')
+      // 7 firing upstream; card renders 5. Badge + banner pill still
+      // show the full count so the operator knows 2 are hidden behind
+      // "View all".
+      const rows = card.findAll('.border-b')
+      expect(rows.length).toBe(5)
+      expect(card.find('.badge-danger').text()).toBe('7')
+    })
+
+    it('Recent Denials card caps at 5 rows even when the server returns 10', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        recent_denials: Array.from({ length: 10 }, (_, i) => ({
+          event_id: `evt_${i}`,
+          timestamp: '2026-04-17T11:59:00Z',
+          tenant_id: 'acme',
+          scope: `acme/scope-${i}`,
+          data: { reason_code: 'BUDGET_EXCEEDED' },
+        })),
+      }))
+      const w = await mountOverview()
+      const card = w.find('#recent-denials')
+      // Server caps list at 10; landing card shows 5 for parity.
+      // Use the scope text as a row-count proxy — 5 of the 10 scopes
+      // should be present, and the 6th+ should NOT be.
+      expect(card.text()).toContain('acme/scope-0')
+      expect(card.text()).toContain('acme/scope-4')
+      expect(card.text()).not.toContain('acme/scope-5')
+      // Axis badge shows the full server-returned count.
+      expect(card.find('.badge-danger').text()).toBe('10')
+    })
+  })
+
   describe('Recent Operator Activity card (new)', () => {
     it('fetches listAuditLogs with limit=10 on mount', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview())

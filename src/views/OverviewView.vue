@@ -128,6 +128,22 @@ const debtScopesSorted = computed(() => {
 const expiringKeys = computed<ExpiringKey[]>(() => filterExpiringKeys(keys.value).slice(0, 5))
 const expiringTotal = computed<number>(() => filterExpiringKeys(keys.value).length)
 
+// Failing webhooks — slice to 5 for landing-page summary parity with
+// the three budget cards and Expiring Keys. "View all" link carries
+// operators to /webhooks?failing=1 for the complete set. The axis
+// badge still shows the full `webhook_counts.with_failures` aggregate,
+// so "7 failing · showing 5" reads consistently across cards.
+const failingWebhooksSorted = computed(() => {
+  return (overview.value?.failing_webhooks ?? []).slice(0, 5)
+})
+
+// Recent denials — slice to 5 for the same reason. The server caps the
+// list at 10; we trim to 5 so every landing-card shows the same top-N
+// depth. Full count still flows through the axis badge + banner pill.
+const recentDenialsSorted = computed(() => {
+  return (overview.value?.recent_denials ?? []).slice(0, 5)
+})
+
 // Paused webhook count is derived: the server's WebhookCounts schema
 // exposes only {total, active, disabled, with_failures}, but the status
 // enum is {ACTIVE, PAUSED, DISABLED} — total includes PAUSED even though
@@ -316,7 +332,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
         <!-- TENANTS — total + active / suspended / closed chips. -->
         <div class="card p-3" data-testid="tile-tenants">
           <div class="flex justify-between items-baseline mb-1">
-            <router-link to="/tenants" class="text-xs muted hover:text-gray-700 dark:hover:text-gray-200 hover:underline">Tenants</router-link>
+            <router-link to="/tenants" class="text-sm font-medium text-gray-700 dark:text-gray-200 hover:underline">Tenants</router-link>
             <router-link to="/tenants" class="text-lg font-semibold text-gray-900 dark:text-gray-100 hover:underline">{{ overview.tenant_counts.total }}</router-link>
           </div>
           <div class="flex flex-wrap gap-1">
@@ -345,7 +361,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
              over-limit / with-debt warning chips when present. -->
         <div class="card p-3" data-testid="tile-budgets">
           <div class="flex justify-between items-baseline mb-1">
-            <router-link to="/budgets" class="text-xs muted hover:text-gray-700 dark:hover:text-gray-200 hover:underline">Budgets</router-link>
+            <router-link to="/budgets" class="text-sm font-medium text-gray-700 dark:text-gray-200 hover:underline">Budgets</router-link>
             <router-link to="/budgets" class="text-lg font-semibold text-gray-900 dark:text-gray-100 hover:underline">{{ overview.budget_counts.total }}</router-link>
           </div>
           <div class="flex flex-wrap gap-1">
@@ -387,7 +403,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
              status enum, so it deep-links via ?failing=1. -->
         <div class="card p-3" data-testid="tile-webhooks">
           <div class="flex justify-between items-baseline mb-1">
-            <router-link to="/webhooks" class="text-xs muted hover:text-gray-700 dark:hover:text-gray-200 hover:underline">Webhooks</router-link>
+            <router-link to="/webhooks" class="text-sm font-medium text-gray-700 dark:text-gray-200 hover:underline">Webhooks</router-link>
             <router-link to="/webhooks" class="text-lg font-semibold text-gray-900 dark:text-gray-100 hover:underline">{{ overview.webhook_counts.total }}</router-link>
           </div>
           <div class="flex flex-wrap gap-1">
@@ -423,8 +439,8 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
              palette of category-coded chip styles for visual distinction. -->
         <div class="card p-3" data-testid="tile-events">
           <div class="flex justify-between items-baseline mb-1">
-            <router-link to="/events" class="text-xs muted hover:text-gray-700 dark:hover:text-gray-200 hover:underline">
-              Events <span class="font-normal">({{ Math.round(overview.event_window_seconds / 60) }}m)</span>
+            <router-link to="/events" class="text-sm font-medium text-gray-700 dark:text-gray-200 hover:underline">
+              Events <span class="muted font-normal">({{ Math.round(overview.event_window_seconds / 60) }}m)</span>
             </router-link>
             <router-link to="/events" class="text-lg font-semibold text-gray-900 dark:text-gray-100 hover:underline">{{ overview.event_counts.total_recent }}</router-link>
           </div>
@@ -600,9 +616,9 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
           </div>
           <div v-if="overview.failing_webhooks.length === 0" class="text-sm muted py-4 text-center">All webhooks healthy</div>
           <div
-            v-for="w in overview.failing_webhooks"
+            v-for="w in failingWebhooksSorted"
             :key="w.subscription_id"
-            class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
+            class="flex justify-between items-center py-1.5 border-b border-gray-100 last:border-0 dark:border-gray-700"
           >
             <router-link
               :to="{ name: 'webhook-detail', params: { id: w.subscription_id } }"
@@ -632,7 +648,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
           <div
             v-for="e in expiringKeys"
             :key="e.key.key_id"
-            class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
+            class="flex justify-between items-center py-1.5 border-b border-gray-100 last:border-0 dark:border-gray-700"
           >
             <router-link
               :to="{ name: 'api-keys', query: { key_id: e.key.key_id } }"
@@ -686,9 +702,9 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
             >{{ r.code }} <span class="ml-1 tabular-nums">×{{ r.count }}</span></router-link>
           </div>
           <div
-            v-for="e in overview.recent_denials"
+            v-for="e in recentDenialsSorted"
             :key="e.event_id"
-            class="py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
+            class="py-1.5 border-b border-gray-100 last:border-0 dark:border-gray-700"
           >
             <div class="flex justify-between">
               <span class="text-sm text-gray-700 truncate dark:text-gray-200">{{ e.scope || e.tenant_id }}</span>

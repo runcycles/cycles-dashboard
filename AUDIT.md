@@ -55,6 +55,33 @@
 
 **No version bump.** Cross-card parity polish on the same attention grid shipped earlier today — no wire-format change, no URL-contract change (uses the existing `listBudgets` status filter). AUDIT entry only.
 
+### 2026-04-17 — Overview cross-card consistency: non-budget cards slice to 5 + tighten padding + counter-strip title sizing
+
+**Scope.** Dashboard-only, second parity pass on the same "What needs attention" grid plus the counter-strip directly below the status banner. No spec or server change.
+
+**Why.** Operator review surfaced two remaining inconsistencies after the budget-cards pass:
+
+1. **Non-budget alert cards didn't match the budget cards.** Failing Webhooks and Recent Denials rendered the full server-returned list (up to 10 rows) with `py-2` padding, while the three budget cards and Expiring Keys had converged on "top-5 inline, py-1.5". So a grid that was supposed to read as six equivalently-shaped attention cards actually had three heights and two row-densities.
+2. **Counter-strip tile titles were visibly smaller than alert-card titles.** The four tile labels (Tenants / Budgets / Webhooks / Events) used `text-xs muted`, while all six alert cards and the Recent Operator Activity card used `text-sm font-medium text-gray-700`. On a landing page this read as "the counter strip is a different product" rather than "the counter strip is quick-jump nav in the same design system".
+
+**What shipped.**
+
+- **Failing Webhooks card** gains a `failingWebhooksSorted` computed that slices `overview.failing_webhooks` to 5. The `webhook_counts.with_failures` aggregate still flows through the axis badge + banner pill, so the full count stays visible while the card depth matches its neighbors.
+- **Recent Denials card** gains a `recentDenialsSorted` computed that slices `overview.recent_denials` to 5 (server caps the list at 10, so "top 5" is a real reduction). Axis badge continues to show the server-returned list length.
+- **Row padding normalized to `py-1.5`** on all three non-budget alert-grid cards (Failing Webhooks / Expiring API Keys / Recent Denials). Budget cards already use `py-1.5` from the earlier pass — the entire grid now reads as one density.
+- **Counter-strip tile titles bumped** from `text-xs muted hover:text-gray-700 hover:underline` to `text-sm font-medium text-gray-700 dark:text-gray-200 hover:underline` — identical to alert-card `<h2>` typography. The parenthetical time-window span inside the Events tile (`(60m)`) flips from bare `font-normal` to `muted font-normal` to preserve the same weight relationship the Expiring API Keys card uses (`(7d)` muted).
+- **Recent Operator Activity card unchanged** — two-line rows (operation + timestamp + metadata) genuinely warrant the extra breathing room of `py-2`; collapsing it would crowd the sub-line.
+
+**Files.** `src/views/OverviewView.vue` (+ `failingWebhooksSorted` / `recentDenialsSorted` computeds; 4 v-for loops updated; 4 counter-strip tile title classes updated; 3 row-padding `py-2 → py-1.5` edits). `src/__tests__/OverviewView.test.ts` (+2 new specs in a new "landing-card row caps" describe block — Failing Webhooks caps at 5 with full count on badge / Recent Denials caps at 5 with full count on badge).
+
+**Validation gates.**
+
+- `vue-tsc --noEmit` — clean.
+- `vitest run` — **556 / 556 passing** across 42 files (+2 from 554).
+- `vite build` — clean, 906ms.
+
+**No version bump.** Same-day parity polish on the same attention grid. AUDIT entry only.
+
 ### 2026-04-17 — Overview Budgets At or Near Cap card: cap display at 5 rows + tighten row padding
 
 **Scope.** Dashboard-only, density polish on the just-widened at-or-near-cap card. No spec or server change.
