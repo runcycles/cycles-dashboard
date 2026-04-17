@@ -204,9 +204,14 @@ const virtualRows = computed(() => virtualizer.value.getVirtualItems())
 const totalHeight = computed(() => virtualizer.value.getTotalSize())
 
 // 7 columns: chevron (32) | time (160) | operation (flex) | resource (flex)
-// | tenant (130) | key_id (150) | status (110). Horizontal scroll engages
-// below ~900px, matching pre-virt `min-w-[900px]` <table>.
-const gridTemplate = 'minmax(32px,32px) 160px minmax(140px,1.5fr) minmax(180px,2fr) minmax(130px,1fr) 150px 110px'
+// | tenant (130) | key_id (150) | status (160). Status was 110px pre-fix
+// but status + error_code ("401 UNAUTHORIZED") overflowed the track and
+// forced the inner wrapper past its 950px min-width — the operator saw
+// an extra horizontal scrollbar at certain viewport widths. 160px fits
+// a 3-digit status + the longest canonical error_code comfortably, and
+// the cell itself now clips with min-w-0 overflow-hidden as a belt-and-
+// suspenders guard against any future error_code that still overflows.
+const gridTemplate = 'minmax(32px,32px) 160px minmax(140px,1.5fr) minmax(180px,2fr) minmax(130px,1fr) 150px 160px'
 
 function measureRow(el: Element | { $el?: Element } | null) {
   const node = (el as { $el?: Element })?.$el ?? (el as Element | null)
@@ -230,7 +235,18 @@ function measureRow(el: Element | { $el?: Element } | null) {
       item-noun-plural="log entries"
       :loaded="entries.length"
       :has-more="hasMore"
-    />
+    >
+      <template #actions>
+        <button @click="confirmExport('csv')" :disabled="loading || entries.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 dark:hover:text-gray-200 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export CSV
+        </button>
+        <button @click="confirmExport('json')" :disabled="loading || entries.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 dark:hover:text-gray-200 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export JSON
+        </button>
+      </template>
+    </PageHeader>
 
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
@@ -281,20 +297,6 @@ function measureRow(el: Element | { $el?: Element } | null) {
       </div>
     </form>
 
-    <!-- Export toolbar. Count + "(more available)" marker moved to
-         PageHeader's V6 count line; keeping them inline was a
-         duplicate display. -->
-    <div v-if="!loading && entries.length > 0" class="flex justify-end gap-2 mb-2">
-      <button @click="confirmExport('csv')" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 dark:hover:text-gray-200 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800">
-        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-        Export CSV
-      </button>
-      <button @click="confirmExport('json')" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 dark:hover:text-gray-200 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800">
-        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-        Export JSON
-      </button>
-    </div>
-
     <!-- V1 virtualized grid with measureElement (Phase 2c). Variable
          row heights let expand/collapse re-layout smoothly without
          flicker. Horizontal scroll engages on narrow viewports via
@@ -308,7 +310,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
       :aria-rowcount="entries.length + 1"
       :aria-colcount="7"
     >
-     <div style="min-width: 900px" class="flex flex-col flex-1 min-h-0">
+     <div style="min-width: 950px" class="flex flex-col flex-1 min-h-0">
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
         <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
           <div role="columnheader" class="table-cell"></div>
@@ -377,7 +379,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
                 <MaskedValue v-if="sortedEntries[v.index].key_id" :value="sortedEntries[v.index].key_id!" />
                 <span v-else class="muted-sm">-</span>
               </div>
-              <div role="cell" class="table-cell">
+              <div role="cell" class="table-cell min-w-0 overflow-hidden whitespace-nowrap" :title="sortedEntries[v.index].error_code ? `${sortedEntries[v.index].status} ${sortedEntries[v.index].error_code}` : String(sortedEntries[v.index].status)">
                 <span class="px-1.5 py-0.5 rounded text-xs font-medium" :class="sortedEntries[v.index].status >= 400 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'">{{ sortedEntries[v.index].status }}</span>
                 <span v-if="sortedEntries[v.index].error_code" class="ml-1 text-xs text-red-500 font-mono">{{ sortedEntries[v.index].error_code }}</span>
               </div>

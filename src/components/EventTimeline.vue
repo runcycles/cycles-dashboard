@@ -55,7 +55,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
   <div
     v-else
     ref="scrollEl"
-    class="flex-1 overflow-auto min-h-[200px]"
+    class="flex-1 overflow-y-auto min-h-[200px]"
   >
     <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
       <div
@@ -77,8 +77,8 @@ function measureRow(el: Element | { $el?: Element } | null) {
           <svg class="w-3 h-3 muted shrink-0 transition-transform" :class="expanded.has(events[v.index].event_id) ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
           </svg>
-          <span class="font-mono text-xs text-gray-700 flex-1 truncate" :title="events[v.index].event_type">{{ events[v.index].event_type }}</span>
-          <span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs shrink-0">{{ events[v.index].category }}</span>
+          <span class="font-mono text-xs text-gray-700 flex-1 min-w-0 truncate" :title="events[v.index].event_type">{{ events[v.index].event_type }}</span>
+          <span class="bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 px-1.5 py-0.5 rounded text-xs shrink-0">{{ events[v.index].category }}</span>
           <span class="muted-sm shrink-0 whitespace-nowrap" :title="new Date(events[v.index].timestamp).toISOString()">{{ formatDateTime(events[v.index].timestamp) }}</span>
         </div>
         <div v-if="expanded.has(events[v.index].event_id)" class="pl-6 pb-2 text-xs">
@@ -91,7 +91,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
             <div v-if="events[v.index].correlation_id"><span class="muted">Correlation ID:</span> <span class="font-mono">{{ events[v.index].correlation_id }}</span></div>
             <div v-if="events[v.index].actor"><span class="muted">Actor:</span> {{ events[v.index].actor!.type }}<span v-if="events[v.index].actor!.key_id" class="font-mono"> {{ events[v.index].actor!.key_id }}</span></div>
           </div>
-          <div v-if="events[v.index].data" class="bg-white border border-gray-200 rounded p-2 font-mono overflow-auto max-h-32">
+          <div v-if="events[v.index].data" class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded p-2 font-mono overflow-auto max-h-32">
             <pre class="whitespace-pre-wrap">{{ JSON.stringify(events[v.index].data, null, 2) }}</pre>
           </div>
         </div>
