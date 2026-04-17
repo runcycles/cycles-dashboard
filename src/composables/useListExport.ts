@@ -80,6 +80,15 @@ export function useListExport<T>(options: UseListExportOptions<T>) {
   const exporting = ref(false)
   const exportFetched = ref(0)
   const exportError = ref('')
+  // Cancellation: the multi-page export loop observes this ref and bails
+  // cleanly on the next iteration. Reset to null outside an active
+  // export; a live AbortController means the overlay's Cancel button
+  // should render. Not an AbortSignal threaded into fetch() directly
+  // because `fetchPage` doesn't accept one — the in-flight request
+  // still completes, but no subsequent page is fetched and no blob is
+  // assembled.
+  let abortExport: AbortController | null = null
+  const exportCancellable = ref(false)
 
   function confirmExport(format: 'csv' | 'json') {
     if (options.currentItems.value.length === 0) return
@@ -90,6 +99,10 @@ export function useListExport<T>(options: UseListExportOptions<T>) {
     showExportConfirm.value = null
   }
 
+  function cancelRunningExport() {
+    abortExport?.abort()
+  }
+
   async function fetchAllForExport(): Promise<readonly T[] | null> {
     const all: T[] = [...options.currentItems.value]
     exportFetched.value = all.length
@@ -97,6 +110,10 @@ export function useListExport<T>(options: UseListExportOptions<T>) {
     let hasMoreLocal = options.hasMore.value
     let pagesFetched = 1
     while (hasMoreLocal && cursor && all.length < maxRows && pagesFetched < maxPages) {
+      if (abortExport?.signal.aborted) {
+        exportError.value = 'Export cancelled.'
+        return null
+      }
       const page = await options.fetchPage(cursor)
       const matched = options.filterFn ? page.items.filter(options.filterFn) : page.items
       all.push(...matched)
@@ -104,6 +121,10 @@ export function useListExport<T>(options: UseListExportOptions<T>) {
       hasMoreLocal = page.hasMore
       cursor = page.nextCursor
       pagesFetched++
+    }
+    if (abortExport?.signal.aborted) {
+      exportError.value = 'Export cancelled.'
+      return null
     }
     if (all.length >= maxRows && hasMoreLocal) {
       exportError.value = `Export aborted: result set exceeds ${maxRows.toLocaleString()} rows. Narrow your filter before retrying.`
@@ -146,11 +167,15 @@ export function useListExport<T>(options: UseListExportOptions<T>) {
     }
 
     // Slow path: paginate through remaining pages. Blocking progress
-    // overlay visible via the `exporting` ref — operators shouldn't
-    // close the tab mid-assembly (Blob only flushes when every page
-    // has been gathered).
+    // overlay visible via the `exporting` ref. The overlay now renders
+    // a Cancel button (wired to `cancelRunningExport`) because a
+    // wrong-filter export that's going to hit the 50k cap is otherwise
+    // a 500-page dead wait — the operator's only previous option was
+    // to close the tab and discard everything including session state.
     exporting.value = true
+    exportCancellable.value = true
     exportFetched.value = options.currentItems.value.length
+    abortExport = new AbortController()
     try {
       const all = await fetchAllForExport()
       if (!all) return // exportError already set
@@ -160,6 +185,8 @@ export function useListExport<T>(options: UseListExportOptions<T>) {
       exportError.value = e instanceof Error ? e.message : String(e)
     } finally {
       exporting.value = false
+      exportCancellable.value = false
+      abortExport = null
     }
   }
 
@@ -168,9 +195,11 @@ export function useListExport<T>(options: UseListExportOptions<T>) {
     exporting,
     exportFetched,
     exportError,
+    exportCancellable,
     maxRows,
     confirmExport,
     cancelExport,
+    cancelRunningExport,
     executeExport,
   }
 }

@@ -197,9 +197,11 @@ const {
   exporting,
   exportFetched,
   exportError,
+  exportCancellable,
   maxRows: EXPORT_MAX_ROWS,
   confirmExport,
   cancelExport,
+  cancelRunningExport,
   executeExport,
 } = useListExport<Event>({
   itemNoun: 'event',
@@ -284,7 +286,18 @@ function measureRow(el: Element | { $el?: Element } | null) {
       :loading="isLoading"
       :last-updated="lastUpdated"
       @refresh="refresh"
-    />
+    >
+      <template #actions>
+        <button @click="confirmExport('csv')" :disabled="events.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 dark:hover:text-gray-200 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export CSV
+        </button>
+        <button @click="confirmExport('json')" :disabled="events.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 dark:hover:text-gray-200 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export JSON
+        </button>
+      </template>
+    </PageHeader>
 
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
@@ -304,35 +317,19 @@ function measureRow(el: Element | { $el?: Element } | null) {
         </div>
         <div>
           <label for="ev-tenant" class="form-label">Tenant ID</label>
-          <input id="ev-tenant" v-model="tenantId" placeholder="tenant id" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-32" />
+          <input id="ev-tenant" v-model="tenantId" placeholder="tenant id" class="form-input w-32" />
         </div>
         <div>
           <label for="ev-scope" class="form-label">Scope</label>
-          <input id="ev-scope" v-model="scope" placeholder="scope prefix" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-40" />
+          <input id="ev-scope" v-model="scope" placeholder="scope prefix" class="form-input w-40" />
         </div>
         <div>
           <label for="ev-correlation" class="form-label">Correlation ID</label>
-          <input id="ev-correlation" v-model="correlationId" placeholder="correlation_id" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-40" />
+          <input id="ev-correlation" v-model="correlationId" placeholder="correlation_id" class="form-input w-40" />
         </div>
         <button v-if="hasActiveFilters" type="button" @click="clearFilters" class="text-sm muted hover:text-gray-700 cursor-pointer ml-auto">Clear filters</button>
       </div>
     </form>
-
-    <!-- Export toolbar. The row count + "(more available)" marker
-         that lived here pre-V6 was moved into PageHeader's count
-         line — the two were displaying the same info; duplicating
-         it read as a bug. Export buttons stay as the only toolbar
-         action. -->
-    <div v-if="events.length > 0" class="flex justify-end gap-2 mb-2">
-      <button @click="confirmExport('csv')" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100">
-        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-        Export CSV
-      </button>
-      <button @click="confirmExport('json')" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100">
-        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-        Export JSON
-      </button>
-    </div>
 
     <!-- V1 virtualized grid with measureElement for variable row
          heights. Each virtualized item wraps compact-row + optional
@@ -398,7 +395,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
                 </button>
               </div>
               <div role="cell" class="table-cell font-mono text-xs truncate" :title="sortedEvents[v.index].event_type">{{ sortedEvents[v.index].event_type }}</div>
-              <div role="cell" class="table-cell"><span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs">{{ sortedEvents[v.index].category }}</span></div>
+              <div role="cell" class="table-cell"><span class="bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 px-1.5 py-0.5 rounded text-xs">{{ sortedEvents[v.index].category }}</span></div>
               <div role="cell" class="table-cell text-gray-700 font-mono text-xs truncate" :title="sortedEvents[v.index].scope">{{ sortedEvents[v.index].scope || '-' }}</div>
               <div role="cell" class="table-cell">
                 <TenantLink v-if="sortedEvents[v.index].tenant_id" :tenant-id="sortedEvents[v.index].tenant_id" @click.stop />
@@ -413,7 +410,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
                  height; measureElement reports the new height and
                  the virtualizer re-lays out sibling rows below on
                  the next tick. -->
-            <div v-if="expanded.has(sortedEvents[v.index].event_id)" class="bg-gray-50/70 px-4 py-3 border-t border-gray-100">
+            <div v-if="expanded.has(sortedEvents[v.index].event_id)" class="bg-gray-50/70 dark:bg-gray-800/40 px-4 py-3 border-t border-gray-100 dark:border-gray-700">
               <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3">
                 <div><span class="muted">Event ID:</span> <span class="font-mono">{{ sortedEvents[v.index].event_id }}</span></div>
                 <div><span class="muted">Source:</span> {{ sortedEvents[v.index].source }}</div>
@@ -475,7 +472,9 @@ function measureRow(el: Element | { $el?: Element } | null) {
     <ExportProgressOverlay
       :open="exporting"
       :fetched="exportFetched"
+      :cancellable="exportCancellable"
       item-noun-plural="events"
+      @cancel="cancelRunningExport"
     />
   </div>
 </template>

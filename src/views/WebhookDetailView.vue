@@ -307,9 +307,11 @@ const {
   exporting,
   exportFetched,
   exportError,
+  exportCancellable,
   maxRows: EXPORT_MAX_ROWS,
   confirmExport,
   cancelExport,
+  cancelRunningExport,
   executeExport,
 } = useListExport<WebhookDelivery>({
   itemNoun: 'delivery',
@@ -579,7 +581,9 @@ watch(exportError, (v) => { if (v) error.value = v })
     <ExportProgressOverlay
       :open="exporting"
       :fetched="exportFetched"
+      :cancellable="exportCancellable"
       item-noun-plural="deliveries"
+      @cancel="cancelRunningExport"
     />
 
     <!-- Edit webhook dialog -->

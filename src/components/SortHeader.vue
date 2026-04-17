@@ -27,11 +27,14 @@ const tag = computed(() => props.as ?? 'th')
 <template>
   <component
     :is="tag"
-    :class="['table-cell cursor-pointer select-none hover:text-gray-700 transition-colors', align === 'right' ? 'text-right' : 'text-left']"
+    :class="['table-cell cursor-pointer select-none hover:text-gray-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset rounded-sm', align === 'right' ? 'text-right' : 'text-left']"
     :aria-sort="ariaSortValue"
     :aria-label="`Sort by ${label}`"
     role="columnheader"
+    :tabindex="0"
     @click="$emit('sort', column)"
+    @keydown.enter.prevent="$emit('sort', column)"
+    @keydown.space.prevent="$emit('sort', column)"
   >
     <span class="inline-flex items-center gap-1">
       {{ label }}

@@ -305,9 +305,11 @@ const {
   exporting,
   exportFetched,
   exportError,
+  exportCancellable,
   maxRows: EXPORT_MAX_ROWS,
   confirmExport,
   cancelExport,
+  cancelRunningExport,
   executeExport,
 } = useListExport<Tenant>({
   itemNoun: 'tenant',
@@ -632,7 +634,9 @@ const gridTemplate = computed(() =>
     <ExportProgressOverlay
       :open="exporting"
       :fetched="exportFetched"
+      :cancellable="exportCancellable"
       item-noun-plural="tenants"
+      @cancel="cancelRunningExport"
     />
   </div>
 </template>

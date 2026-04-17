@@ -83,9 +83,11 @@ const {
   exporting,
   exportFetched,
   exportError,
+  exportCancellable,
   maxRows: EXPORT_MAX_ROWS,
   confirmExport,
   cancelExport,
+  cancelRunningExport,
   executeExport,
 } = useListExport<AuditLogEntry>({
   itemNoun: 'log entry',
@@ -202,9 +204,14 @@ const virtualRows = computed(() => virtualizer.value.getVirtualItems())
 const totalHeight = computed(() => virtualizer.value.getTotalSize())
 
 // 7 columns: chevron (32) | time (160) | operation (flex) | resource (flex)
-// | tenant (130) | key_id (150) | status (110). Horizontal scroll engages
-// below ~900px, matching pre-virt `min-w-[900px]` <table>.
-const gridTemplate = 'minmax(32px,32px) 160px minmax(140px,1.5fr) minmax(180px,2fr) minmax(130px,1fr) 150px 110px'
+// | tenant (130) | key_id (150) | status (160). Status was 110px pre-fix
+// but status + error_code ("401 UNAUTHORIZED") overflowed the track and
+// forced the inner wrapper past its 950px min-width — the operator saw
+// an extra horizontal scrollbar at certain viewport widths. 160px fits
+// a 3-digit status + the longest canonical error_code comfortably, and
+// the cell itself now clips with min-w-0 overflow-hidden as a belt-and-
+// suspenders guard against any future error_code that still overflows.
+const gridTemplate = 'minmax(32px,32px) 160px minmax(140px,1.5fr) minmax(180px,2fr) minmax(130px,1fr) 150px 160px'
 
 function measureRow(el: Element | { $el?: Element } | null) {
   const node = (el as { $el?: Element })?.$el ?? (el as Element | null)
@@ -228,7 +235,18 @@ function measureRow(el: Element | { $el?: Element } | null) {
       item-noun-plural="log entries"
       :loaded="entries.length"
       :has-more="hasMore"
-    />
+    >
+      <template #actions>
+        <button @click="confirmExport('csv')" :disabled="loading || entries.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 dark:hover:text-gray-200 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export CSV
+        </button>
+        <button @click="confirmExport('json')" :disabled="loading || entries.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 dark:hover:text-gray-200 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Export JSON
+        </button>
+      </template>
+    </PageHeader>
 
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
@@ -236,15 +254,15 @@ function measureRow(el: Element | { $el?: Element } | null) {
       <div class="flex gap-3 flex-wrap items-end">
         <div>
           <label for="audit-tenant" class="form-label">Tenant ID</label>
-          <input id="audit-tenant" v-model="tenantId" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-32" placeholder="acme" />
+          <input id="audit-tenant" v-model="tenantId" class="form-input w-32" placeholder="acme" />
         </div>
         <div>
           <label for="audit-key" class="form-label">Key ID</label>
-          <input id="audit-key" v-model="keyId" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-32" placeholder="key_..." />
+          <input id="audit-key" v-model="keyId" class="form-input w-32" placeholder="key_..." />
         </div>
         <div>
           <label for="audit-operation" class="form-label">Operation</label>
-          <input id="audit-operation" v-model="operation" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-32" placeholder="createBudget" />
+          <input id="audit-operation" v-model="operation" class="form-input w-32" placeholder="createBudget" />
         </div>
         <div>
           <label for="audit-resource" class="form-label">Resource Type</label>
@@ -256,42 +274,28 @@ function measureRow(el: Element | { $el?: Element } | null) {
         </div>
         <div>
           <label for="audit-resource-id" class="form-label">Resource ID</label>
-          <input id="audit-resource-id" v-model="resourceId" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-36" placeholder="key_abc123..." />
+          <input id="audit-resource-id" v-model="resourceId" class="form-input w-36" placeholder="key_abc123..." />
         </div>
         <div>
           <label for="audit-from" class="form-label">From</label>
-          <input id="audit-from" v-model="fromDate" type="datetime-local" class="border border-gray-300 rounded px-2 py-1.5 text-sm" />
+          <input id="audit-from" v-model="fromDate" type="datetime-local" class="form-input" />
         </div>
         <div>
           <label for="audit-to" class="form-label">To</label>
-          <input id="audit-to" v-model="toDate" type="datetime-local" class="border border-gray-300 rounded px-2 py-1.5 text-sm" />
+          <input id="audit-to" v-model="toDate" type="datetime-local" class="form-input" />
         </div>
         <button type="submit" :disabled="loading" class="bg-gray-900 text-white px-4 py-1.5 rounded text-sm hover:bg-gray-800 disabled:opacity-50 cursor-pointer">
           {{ loading ? 'Querying...' : 'Run Query' }}
         </button>
       </div>
-      <div class="flex gap-2 mt-3 pt-3 border-t border-gray-100">
+      <div class="flex gap-2 mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
         <span class="muted-sm py-1">Quick range:</span>
         <button v-for="h in [1, 6, 24, 168]" :key="h" type="button" @click="setTimeRange(h)"
-          class="muted-sm hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 cursor-pointer">
+          class="muted-sm hover:text-gray-700 dark:hover:text-gray-200 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer">
           {{ h < 24 ? `${h}h` : `${h / 24}d` }}
         </button>
       </div>
     </form>
-
-    <!-- Export toolbar. Count + "(more available)" marker moved to
-         PageHeader's V6 count line; keeping them inline was a
-         duplicate display. -->
-    <div v-if="!loading && entries.length > 0" class="flex justify-end gap-2 mb-2">
-      <button @click="confirmExport('csv')" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100">
-        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-        Export CSV
-      </button>
-      <button @click="confirmExport('json')" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100">
-        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-        Export JSON
-      </button>
-    </div>
 
     <!-- V1 virtualized grid with measureElement (Phase 2c). Variable
          row heights let expand/collapse re-layout smoothly without
@@ -300,13 +304,20 @@ function measureRow(el: Element | { $el?: Element } | null) {
          header and body scroll together because they share the shim
          parent. Shell is flex-1 min-h-0 flex-col so the scroll body
          below expands to fill viewport (phase 5). -->
+    <!-- overflow-x-auto carries an implicit overflow-y:auto per the CSS
+         overflow spec ("value other than visible or clip on one axis
+         forces auto on the other axis"), which was creating a second
+         vertical scrollbar on top of the inner scroll body's own
+         overflow-y-auto. Pinning overflow-y:hidden here breaks the
+         implicit promotion so exactly one vertical scrollbar remains,
+         localized to the virtualized scroll body. -->
     <div
-      class="bg-white rounded-lg shadow overflow-x-auto text-sm flex-1 min-h-0 flex flex-col"
+      class="bg-white rounded-lg shadow overflow-x-auto overflow-y-hidden text-sm flex-1 min-h-0 flex flex-col"
       role="table"
       :aria-rowcount="entries.length + 1"
       :aria-colcount="7"
     >
-     <div style="min-width: 900px" class="flex flex-col flex-1 min-h-0">
+     <div style="min-width: 1000px" class="flex flex-col flex-1 min-h-0">
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
         <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
           <div role="columnheader" class="table-cell"></div>
@@ -319,11 +330,18 @@ function measureRow(el: Element | { $el?: Element } | null) {
         </div>
       </div>
 
+      <!-- overflow-x-hidden is load-bearing: `overflow-y: auto` alone
+           promotes overflow-x to auto per the CSS spec, which would
+           produce a SECOND horizontal scrollbar inside this scroll
+           body on top of the outer card's overflow-x-auto when the
+           viewport is narrower than the grid sum. Explicit hidden
+           here keeps horizontal scroll owned entirely by the outer
+           card. -->
       <div
         v-if="sortedEntries.length > 0"
         ref="scrollEl"
         role="rowgroup"
-        class="flex-1 overflow-y-auto min-h-[240px]"
+        class="flex-1 overflow-y-auto overflow-x-hidden min-h-[240px]"
       >
         <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
           <div
@@ -363,7 +381,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
               <div role="cell" class="table-cell muted whitespace-nowrap text-xs" :title="new Date(sortedEntries[v.index].timestamp).toISOString()">{{ formatDateTime(sortedEntries[v.index].timestamp) }}</div>
               <div role="cell" class="table-cell font-mono text-xs truncate" :title="sortedEntries[v.index].operation">{{ sortedEntries[v.index].operation }}</div>
               <div role="cell" class="table-cell text-xs truncate">
-                <span v-if="sortedEntries[v.index].resource_type" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{{ sortedEntries[v.index].resource_type }}</span>
+                <span v-if="sortedEntries[v.index].resource_type" class="bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 px-1.5 py-0.5 rounded">{{ sortedEntries[v.index].resource_type }}</span>
                 <span v-if="sortedEntries[v.index].resource_id" class="ml-1 font-mono muted" :title="sortedEntries[v.index].resource_id">{{ sortedEntries[v.index].resource_id }}</span>
                 <span v-if="!sortedEntries[v.index].resource_type && !sortedEntries[v.index].resource_id" class="muted">-</span>
               </div>
@@ -375,9 +393,9 @@ function measureRow(el: Element | { $el?: Element } | null) {
                 <MaskedValue v-if="sortedEntries[v.index].key_id" :value="sortedEntries[v.index].key_id!" />
                 <span v-else class="muted-sm">-</span>
               </div>
-              <div role="cell" class="table-cell">
+              <div role="cell" class="table-cell min-w-0 overflow-hidden whitespace-nowrap" :title="sortedEntries[v.index].error_code ? `${sortedEntries[v.index].status} ${sortedEntries[v.index].error_code}` : String(sortedEntries[v.index].status)">
                 <span class="px-1.5 py-0.5 rounded text-xs font-medium" :class="sortedEntries[v.index].status >= 400 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'">{{ sortedEntries[v.index].status }}</span>
-                <span v-if="sortedEntries[v.index].error_code" class="ml-1 text-xs text-red-500 font-mono">{{ sortedEntries[v.index].error_code }}</span>
+                <span v-if="sortedEntries[v.index].error_code" class="ml-1 text-xs text-red-700 font-mono">{{ sortedEntries[v.index].error_code }}</span>
               </div>
             </div>
 
@@ -385,12 +403,12 @@ function measureRow(el: Element | { $el?: Element } | null) {
                  in the `expanded` set. Multi-row open so reviewers can
                  compare entries (e.g. before/after of a permission
                  change). Adds ~160-280px depending on metadata. -->
-            <div v-if="expanded.has(sortedEntries[v.index].log_id)" class="bg-gray-50/70 px-4 py-3 border-t border-gray-100">
+            <div v-if="expanded.has(sortedEntries[v.index].log_id)" class="bg-gray-50/70 dark:bg-gray-800/40 px-4 py-3 border-t border-gray-100 dark:border-gray-700">
               <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3">
                 <div v-if="sortedEntries[v.index].request_id"><span class="muted">Request ID:</span> <span class="font-mono">{{ sortedEntries[v.index].request_id }}</span></div>
                 <div v-if="sortedEntries[v.index].source_ip"><span class="muted">Source IP:</span> <span class="font-mono">{{ sortedEntries[v.index].source_ip }}</span></div>
                 <div v-if="sortedEntries[v.index].user_agent"><span class="muted">User Agent:</span> {{ sortedEntries[v.index].user_agent }}</div>
-                <div v-if="sortedEntries[v.index].error_code"><span class="muted">Error Code:</span> <span class="font-mono text-red-500">{{ sortedEntries[v.index].error_code }}</span></div>
+                <div v-if="sortedEntries[v.index].error_code"><span class="muted">Error Code:</span> <span class="font-mono text-red-700">{{ sortedEntries[v.index].error_code }}</span></div>
                 <div v-if="sortedEntries[v.index].resource_type"><span class="muted">Resource Type:</span> {{ sortedEntries[v.index].resource_type }}</div>
                 <div v-if="sortedEntries[v.index].resource_id"><span class="muted">Resource ID:</span> <span class="font-mono">{{ sortedEntries[v.index].resource_id }}</span></div>
               </div>
@@ -434,7 +452,9 @@ function measureRow(el: Element | { $el?: Element } | null) {
     <ExportProgressOverlay
       :open="exporting"
       :fetched="exportFetched"
+      :cancellable="exportCancellable"
       item-noun-plural="log entries"
+      @cancel="cancelRunningExport"
     />
   </div>
 </template>
