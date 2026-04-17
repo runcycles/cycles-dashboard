@@ -106,14 +106,26 @@ const { sortKey, sortDir, toggle, sorted: sortedWebhooks } = useSort(
   { serverSide: true, onChange: () => { refresh() } },
 )
 
-// Helper to fold the current sort tuple into a listWebhooks params
-// record. Every call site (polling, loadMore, export fetchPage) must
-// forward the same tuple or the cursor-bound server validation fails.
-function withSort(params: Record<string, string> = {}): Record<string, string> {
+// Helper to fold the current sort tuple + server-side search into a
+// listWebhooks params record. Every call site (polling, loadMore,
+// export fetchPage) must forward the same tuple or the cursor-bound
+// server validation fails.
+//
+// v0.1.25.21 `search`: case-insensitive substring match on
+// (subscription_id, url). Wildcard (`*`) input remains client-only —
+// the wire contract is literal substring, so a user typing `*.internal`
+// would hit zero server rows. When the filter contains `*` we skip the
+// server param and let the client-side wildcard matcher do the work.
+// Client-side filter (urlMatches) also covers `name`, which the server
+// search doesn't match per spec — kept as graceful degradation for
+// both pre-0.1.25.21 servers and for wildcard/name matches.
+function withListParams(params: Record<string, string> = {}): Record<string, string> {
   if (sortKey.value) {
     params.sort_by = sortKey.value
     params.sort_dir = sortDir.value
   }
+  const q = debouncedUrlFilter.value.trim()
+  if (q && !q.includes('*')) params.search = q
   return params
 }
 
@@ -313,7 +325,7 @@ async function submitSecurityConfig() {
 
 const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   try {
-    const [wRes, tRes] = await Promise.all([listWebhooks(withSort()), listTenants()])
+    const [wRes, tRes] = await Promise.all([listWebhooks(withListParams()), listTenants()])
     webhooks.value = wRes.subscriptions
     hasMore.value = !!wRes.has_more
     nextCursor.value = wRes.next_cursor ?? ''
@@ -322,11 +334,18 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
   } catch (e) { error.value = toMessage(e) }
 }, 60000)
 
+// Refetch page 1 whenever the debounced URL/search filter changes so
+// the cursor stays aligned with the server's (sort_by, sort_dir,
+// search) tuple. Same rationale as useSort's onChange — the opaque
+// cursor is filter-scoped, so carrying it across a filter change
+// would 400.
+watch(debouncedUrlFilter, () => { refresh() })
+
 async function loadMore() {
   if (!nextCursor.value || loadingMore.value) return
   loadingMore.value = true
   try {
-    const res = await listWebhooks(withSort({ cursor: nextCursor.value }))
+    const res = await listWebhooks(withListParams({ cursor: nextCursor.value }))
     webhooks.value = [...webhooks.value, ...res.subscriptions]
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
@@ -359,7 +378,7 @@ const {
   hasMore,
   nextCursor,
   fetchPage: async (cursor) => {
-    const res = await listWebhooks(withSort({ cursor }))
+    const res = await listWebhooks(withListParams({ cursor }))
     return { items: res.subscriptions, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
   },
   filterFn: webhookMatchesFilter,

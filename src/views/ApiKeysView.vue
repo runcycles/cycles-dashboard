@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
+import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useListExport } from '../composables/useListExport'
 import { listTenants, listApiKeys, revokeApiKey, createApiKey, updateApiKey } from '../api/client'
 import { useAuthStore } from '../stores/auth'
@@ -36,6 +37,14 @@ const keys = ref<KeyWithTenant[]>([])
 const error = ref('')
 const filterStatus = ref('')
 const filterTenant = ref('')
+// cycles-governance-admin v0.1.25.21: free-text `search` query param
+// on listApiKeys (case-insensitive substring match on key_id + name).
+// Debounced 200ms so a 20-char fragment doesn't fire 20 fetches. The
+// client-side filter on filteredKeys is kept as graceful degradation
+// for pre-0.1.25.21 servers — older admin tiers MUST ignore the
+// unknown param, so we still do the substring match locally.
+const search = ref('')
+const debouncedSearch = useDebouncedRef(search, 200)
 const tenants = ref<Tenant[]>([])
 const pendingRevoke = ref<KeyWithTenant | null>(null)
 
@@ -201,6 +210,13 @@ const filteredKeys = computed(() => {
   let result = keys.value
   if (filterStatus.value) result = result.filter(k => k.status === filterStatus.value)
   if (filterTenant.value) result = result.filter(k => k.tenant_id === filterTenant.value)
+  if (debouncedSearch.value) {
+    const q = debouncedSearch.value.toLowerCase()
+    result = result.filter(k =>
+      k.key_id.toLowerCase().includes(q) ||
+      (k.name ?? '').toLowerCase().includes(q),
+    )
+  }
   return result
 })
 // Default sort: newest keys first. created_at is an ISO-8601 string, which
@@ -227,8 +243,8 @@ const statusCounts = computed(() => {
   return counts
 })
 
-const hasActiveFilters = computed(() => !!(filterStatus.value || filterTenant.value))
-function clearFilters() { filterStatus.value = ''; filterTenant.value = '' }
+const hasActiveFilters = computed(() => !!(filterStatus.value || filterTenant.value || debouncedSearch.value))
+function clearFilters() { filterStatus.value = ''; filterTenant.value = ''; search.value = '' }
 
 function decorate(list: ApiKey[]): KeyWithTenant[] {
   return list.map((k) => ({ ...k, tenant_name: tenantsById.value.get(k.tenant_id)?.name }))
@@ -246,6 +262,11 @@ async function fetchKeysPage(cursor?: string): Promise<{
     params.sort_by = sortKey.value
     params.sort_dir = sortDir.value
   }
+  // Trim before sending — a search of spaces is semantically empty
+  // on the server (case-insensitive substring ILIKE), and the spec
+  // requires empty → absent.
+  const q = debouncedSearch.value.trim()
+  if (q) params.search = q
   const res = await listApiKeys(params)
   return {
     keys: decorate(res.keys),
@@ -284,6 +305,11 @@ async function loadMore() {
 
 // Refresh on filter change so we restart page-1 scoped to the new tenant.
 watch(filterTenant, () => { refresh() })
+// Refetch page 1 whenever the debounced search changes so the cursor
+// stays aligned with the server's (sort_by, sort_dir, search) tuple.
+// Same rationale as useSort's onChange — the opaque cursor is
+// filter-scoped, so carrying it across a filter change would 400.
+watch(debouncedSearch, () => { refresh() })
 
 // Export. ApiKeysView is a cross-tenant aggregation (no cursor
 // endpoint) — since the server now exposes cursor-paginated cross-tenant
@@ -424,6 +450,10 @@ function closePermsViewer() { viewingPermsFor.value = null }
             <option>REVOKED</option>
             <option>EXPIRED</option>
           </select>
+        </div>
+        <div>
+          <label for="keys-search" class="form-label">Search</label>
+          <input id="keys-search" v-model="search" type="search" placeholder="key_id or name" class="border border-gray-300 rounded px-2 py-1.5 text-sm" aria-label="Search by key_id or name substring" />
         </div>
         <button v-if="hasActiveFilters" @click="clearFilters" class="muted-sm hover:text-gray-700 cursor-pointer">Clear</button>
         <div v-if="isLoading" class="flex items-center">
