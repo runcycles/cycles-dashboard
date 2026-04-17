@@ -999,7 +999,11 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       listApiKeysMock.mockRejectedValue(new Error('api-keys endpoint down'))
       const w = await mountOverview()
       // Overview cards still render.
-      expect(w.text()).toContain('Failing Webhooks')
+      expect(w.text()).toContain('Failing webhooks')
+      // Use the card id to avoid ambiguity — the banner-pill label
+      // also reads "Failing webhooks" when the axis is firing, so a
+      // raw text match isn't enough to prove the card rendered.
+      expect(w.find('#failing-webhooks').exists()).toBe(true)
       // Error banner visible.
       expect(w.text()).toContain('api-keys endpoint down')
     })
@@ -1008,7 +1012,8 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       getOverviewMock.mockResolvedValue(healthyOverview())
       listAuditLogsMock.mockRejectedValue(new Error('audit endpoint down'))
       const w = await mountOverview()
-      expect(w.text()).toContain('Failing Webhooks')
+      expect(w.text()).toContain('Failing webhooks')
+      expect(w.find('#failing-webhooks').exists()).toBe(true)
       expect(w.text()).toContain('audit endpoint down')
     })
 
@@ -1022,7 +1027,7 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       })
       await flushPromises()
       // No cards yet.
-      expect(w.text()).not.toContain('Failing Webhooks')
+      expect(w.text()).not.toContain('Failing webhooks')
       // Skeleton present (LoadingSkeleton renders animated placeholder divs).
       expect(w.findAll('.animate-pulse').length).toBeGreaterThan(0)
       // Clean up the pending promise so vitest doesn't complain.

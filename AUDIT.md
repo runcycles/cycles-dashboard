@@ -82,6 +82,36 @@
 
 **No version bump.** Same-day parity polish on the same attention grid. AUDIT entry only.
 
+### 2026-04-17 — Overview consistency sweep: card titles to sentence case + tabular-nums parity + amber/yellow normalization
+
+**Scope.** Dashboard-only, typographic + micro-color consistency across all 7 landing-page cards (+ Recent operator activity) and the alert banner. No behavioral change, no spec or server change.
+
+**Why.** Review of the post-slice-to-5 layout surfaced five small but non-trivial inconsistencies that were eye-dragging across the seven cards of the landing page:
+
+1. **Card title case was mixed.** "Budgets **At** or Near Cap" capitalized its small words while "Budgets **with** Debt" correctly lowercased them — internal conflict in the same row. Sister cards ("Frozen Budgets", "Failing Webhooks", "Expiring API Keys", etc.) were Title Case, but the page subtitle ("What needs attention") and every banner pill label already used sentence case, so the cards were the odd ones out.
+2. **`tabular-nums` was missing** on two of the six numeric secondary columns (Failing Webhooks "N failures", Expiring Keys "Nd"), which meant those right-column metrics wobbled as the digit count shifted between rows while Budgets At-or-Near-Cap / Debt / Frozen / Denial-timestamps all sat on a fixed grid.
+3. **Expiring Keys day count used Tailwind `yellow`** while the card's border, icon, badge, and banner pill all use `amber` — yellow and amber are different hues in Tailwind (yellow is brighter/more saturated), so the row metric visibly didn't match the card's own severity framing.
+4. **Recent Operator Activity rows were `py-2`** while Recent Denials (same two-line row shape — primary + timestamp on line 1, sub-line beneath) used `py-1.5`. Both are two-liners; there's no reason for the two cards to have different densities.
+5. **Banner pill label "Keys expiring"** broke the adjective-then-noun pattern of its siblings ("Failing webhooks", "Frozen budgets", "Recent denials") — reads as a different grammatical shape.
+
+**What shipped.**
+
+- **Seven card `<h2>` titles flipped to sentence case.** "Budgets At or Near Cap" → "Budgets at or near cap"; "Budgets with Debt" → "Budgets with debt"; "Frozen Budgets" → "Frozen budgets"; "Failing Webhooks" → "Failing webhooks"; "Expiring API Keys (7d)" → "Expiring API keys (7d)" (API preserved as acronym); "Recent Denials (1h)" → "Recent denials (1h)"; "Recent Operator Activity" → "Recent operator activity". Now internally consistent, 1:1 with banner pills, and matches the page subtitle.
+- **Banner pill "Keys expiring" → "Expiring keys"** to match the `adjective + noun` shape of the other axis labels.
+- **`tabular-nums` added** to Failing Webhooks failure count + Expiring Keys day count — every right-column numeric metric on the landing page is now monospaced-digit.
+- **Expiring Keys day-count `text-yellow-*` → `text-amber-*`.** The red `<=2d` threshold stays red (that's the urgent signal); the `3–7d` range now reads amber, aligning with the card's border + icon + badge + banner pill.
+- **Recent Operator Activity rows `py-2` → `py-1.5`** to match Recent Denials (same two-line shape). The whole alert grid + the activity strip below now share a single row-height.
+
+**Files.** `src/views/OverviewView.vue` (7 h2 title edits, 1 banner label edit, 2 tabular-nums additions, 1 yellow→amber swap, 1 padding edit). `src/__tests__/OverviewView.test.ts` (3 test assertions updated from "Failing Webhooks" to "Failing webhooks" via `replace_all`; the two graceful-degradation specs now additionally assert on the card `#failing-webhooks` id to disambiguate card-rendered-vs-banner-rendered).
+
+**Validation gates.**
+
+- `vue-tsc --noEmit` — clean.
+- `vitest run` — **556 / 556 passing** across 42 files (no test count change — same 556 as the last commit, just different expected strings).
+- `vite build` — clean, 885ms.
+
+**No version bump.** Pure typographic + micro-color polish with no wire-format or URL-contract change. Same-day consistency sweep following the card-shape + counter-strip-title work earlier in the day. AUDIT entry only.
+
 ### 2026-04-17 — Overview Budgets At or Near Cap card: cap display at 5 rows + tighten row padding
 
 **Scope.** Dashboard-only, density polish on the just-widened at-or-near-cap card. No spec or server change.

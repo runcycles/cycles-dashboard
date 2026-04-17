@@ -218,7 +218,7 @@ const alertAxes = computed<AlertAxis[]>(() => {
     axes.push({ id: 'budgets-with-debt', label: 'Budgets with debt', count: overview.value.budget_counts.with_debt, severity: 'warning' })
   }
   if (expiringTotal.value > 0) {
-    axes.push({ id: 'expiring-keys', label: 'Keys expiring', count: expiringTotal.value, severity: 'warning' })
+    axes.push({ id: 'expiring-keys', label: 'Expiring keys', count: expiringTotal.value, severity: 'warning' })
   }
   if (overview.value.budget_counts.frozen > 0) {
     axes.push({ id: 'frozen-budgets', label: 'Frozen budgets', count: overview.value.budget_counts.frozen, severity: 'warning' })
@@ -501,7 +501,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
                 :class="axisById['budgets-at-cap'].severity === 'danger' ? 'text-red-500 dark:text-red-400' : 'text-amber-500 dark:text-amber-400'"
                 fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"
               ><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
-              Budgets At or Near Cap
+              Budgets at or near cap
               <span
                 v-if="atCapBudgets.length > 0"
                 class="ml-1"
@@ -538,7 +538,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
           <div class="flex justify-between items-center mb-3">
             <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
               <svg v-if="axisById['budgets-with-debt']" class="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
-              Budgets with Debt
+              Budgets with debt
               <span v-if="overview.budget_counts.with_debt > 0" class="ml-1 badge-warning">{{ overview.budget_counts.with_debt }}</span>
             </h2>
             <router-link :to="{ name: 'budgets', query: { filter: 'has_debt' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
@@ -567,7 +567,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
           <div class="flex justify-between items-center mb-3">
             <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
               <svg v-if="axisById['frozen-budgets']" class="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
-              Frozen Budgets
+              Frozen budgets
               <span v-if="overview.budget_counts.frozen > 0" class="ml-1 badge-warning">{{ overview.budget_counts.frozen }}</span>
             </h2>
             <router-link :to="{ name: 'budgets', query: { status: 'FROZEN' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
@@ -609,7 +609,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
           <div class="flex justify-between items-center mb-3">
             <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
               <svg v-if="axisById['failing-webhooks']" class="w-4 h-4 text-red-500 dark:text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
-              Failing Webhooks
+              Failing webhooks
               <span v-if="overview.webhook_counts.with_failures > 0" class="ml-1 badge-danger">{{ overview.webhook_counts.with_failures }}</span>
             </h2>
             <router-link to="/webhooks" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
@@ -625,7 +625,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
               class="text-sm text-blue-600 hover:underline truncate mr-2 dark:text-blue-400"
               :title="w.url"
             >{{ w.url }}</router-link>
-            <span class="text-xs text-red-600 dark:text-red-400 shrink-0">{{ w.consecutive_failures }} failures</span>
+            <span class="text-xs text-red-600 dark:text-red-400 shrink-0 tabular-nums">{{ w.consecutive_failures }} failures</span>
           </div>
         </div>
 
@@ -639,7 +639,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
           <div class="flex justify-between items-center mb-3">
             <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
               <svg v-if="axisById['expiring-keys']" class="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
-              Expiring API Keys <span class="muted font-normal">(7d)</span>
+              Expiring API keys <span class="muted font-normal">(7d)</span>
               <span v-if="expiringTotal > 0" class="ml-1 badge-warning">{{ expiringTotal }}</span>
             </h2>
             <router-link :to="{ name: 'api-keys' }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
@@ -656,8 +656,8 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
               :title="e.key.key_id"
             >{{ e.key.name || e.key.key_id }}</router-link>
             <span
-              class="text-xs shrink-0"
-              :class="e.daysUntilExpiry <= 2 ? 'text-red-600 dark:text-red-400' : 'text-yellow-700 dark:text-yellow-400'"
+              class="text-xs shrink-0 tabular-nums"
+              :class="e.daysUntilExpiry <= 2 ? 'text-red-600 dark:text-red-400' : 'text-amber-700 dark:text-amber-400'"
             >{{ e.daysUntilExpiry }}d</span>
           </div>
         </div>
@@ -671,7 +671,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
           <div class="flex justify-between items-center mb-3">
             <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
               <svg v-if="axisById['recent-denials']" class="w-4 h-4 text-red-500 dark:text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
-              Recent Denials <span class="muted font-normal">(1h)</span>
+              Recent denials <span class="muted font-normal">(1h)</span>
               <span v-if="overview.recent_denials.length > 0" class="ml-1 badge-danger">{{ overview.recent_denials.length }}</span>
             </h2>
             <router-link :to="{ name: 'events', query: { type: 'reservation.denied' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
@@ -720,14 +720,14 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
       <div class="mb-6">
         <div class="card p-4" data-testid="recent-activity-card">
           <div class="flex justify-between items-center mb-3">
-            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200">Recent Operator Activity</h2>
+            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200">Recent operator activity</h2>
             <router-link :to="{ name: 'audit' }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
           <div v-if="recentAudit.length === 0" class="text-sm muted py-4 text-center">No operator changes in range</div>
           <div
             v-for="a in recentAudit"
             :key="a.log_id"
-            class="py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
+            class="py-1.5 border-b border-gray-100 last:border-0 dark:border-gray-700"
           >
             <div class="flex justify-between items-baseline gap-2">
               <!-- Operation name rendered raw (dot-separated enum) in
