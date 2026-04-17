@@ -84,20 +84,58 @@ const denialReasons = computed<DenialReason[]>(() => {
     .sort((a, b) => b.count - a.count)
 })
 
-// Headline: how many alert axes are currently firing. Drives the
-// top-of-page banner so the operator's first glance answers "is
-// anything on fire?" in < 1 second.
-const alertCount = computed<number>(() => {
-  if (!overview.value) return 0
-  let n = 0
-  if (overview.value.webhook_counts.with_failures > 0) n++
-  if (overview.value.budget_counts.over_limit > 0) n++
-  if (overview.value.budget_counts.with_debt > 0) n++
-  if (overview.value.budget_counts.frozen > 0) n++
-  if (overview.value.recent_denials.length > 0) n++
-  if (expiringTotal.value > 0) n++
-  return n
+// Firing-axis model. Each axis declares its severity ('danger' =
+// red, something is broken; 'warning' = amber, something needs
+// a closer look but isn't outright failing), its count, and the
+// anchor id of the card that explains it. The banner enumerates
+// this list as jump-link pills so "what and where" is answered
+// on the first glance — the operator doesn't have to scan all
+// six cards to find the two that are firing.
+type AxisSeverity = 'danger' | 'warning'
+interface AlertAxis {
+  id: string          // hash anchor — matches the card's id attribute
+  label: string       // short human label, pluralized elsewhere
+  count: number
+  severity: AxisSeverity
+}
+const alertAxes = computed<AlertAxis[]>(() => {
+  if (!overview.value) return []
+  const axes: AlertAxis[] = []
+  if (overview.value.webhook_counts.with_failures > 0) {
+    axes.push({ id: 'failing-webhooks', label: 'Failing webhooks', count: overview.value.webhook_counts.with_failures, severity: 'danger' })
+  }
+  if (overview.value.budget_counts.over_limit > 0) {
+    axes.push({ id: 'over-limit-budgets', label: 'Over-limit budgets', count: overview.value.budget_counts.over_limit, severity: 'danger' })
+  }
+  if (overview.value.recent_denials.length > 0) {
+    axes.push({ id: 'recent-denials', label: 'Recent denials', count: overview.value.recent_denials.length, severity: 'danger' })
+  }
+  if (overview.value.budget_counts.with_debt > 0) {
+    axes.push({ id: 'budgets-with-debt', label: 'Budgets with debt', count: overview.value.budget_counts.with_debt, severity: 'warning' })
+  }
+  if (expiringTotal.value > 0) {
+    axes.push({ id: 'expiring-keys', label: 'Keys expiring', count: expiringTotal.value, severity: 'warning' })
+  }
+  if (overview.value.budget_counts.frozen > 0) {
+    axes.push({ id: 'frozen-budgets', label: 'Frozen budgets', count: overview.value.budget_counts.frozen, severity: 'warning' })
+  }
+  return axes
 })
+// Lookup by card id → firing state. Card templates consult this to
+// decide whether to apply the severity border + warning icon.
+const axisById = computed<Record<string, AlertAxis>>(() => {
+  const m: Record<string, AlertAxis> = {}
+  for (const a of alertAxes.value) m[a.id] = a
+  return m
+})
+const alertCount = computed<number>(() => alertAxes.value.length)
+// Scroll-to-card handler. Smooth-scroll gives visual continuity
+// between banner click and card focus without the jarring jump the
+// default anchor nav produces.
+function jumpTo(id: string) {
+  const el = document.getElementById(id)
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 
 // Map an audit entry to the most useful detail-view link. Falls back
 // to the Audit view with a pre-filled filter so "click through for
@@ -132,18 +170,36 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
     <LoadingSkeleton v-if="!overview" />
 
     <template v-else>
-      <!-- Alert headline. Only visible when something is actually firing;
-           collapses quietly when everything's healthy. -->
+      <!-- Alert headline. Enumerates firing axes as jump-link pills so
+           "what and where" is answered on the first glance — operator
+           clicks a pill to smooth-scroll to the card that explains it.
+           Each pill carries its own severity color (red = danger,
+           amber = warning) so even users with color-vision deficiency
+           have the triangle icon as a second cue. -->
       <div
         v-if="alertCount > 0"
         role="status"
-        class="mb-4 px-4 py-3 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-800 flex items-center gap-3"
+        data-testid="alert-banner"
+        class="mb-4 px-4 py-3 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-800"
       >
-        <svg class="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
-        <p class="text-sm text-amber-900 dark:text-amber-200">
-          <strong>{{ alertCount }} {{ alertCount === 1 ? 'area needs' : 'areas need' }} attention</strong>
-          — review the cards below.
-        </p>
+        <div class="flex items-center gap-3 mb-2">
+          <svg class="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+          <p class="text-sm text-amber-900 dark:text-amber-200">
+            <strong>{{ alertCount }} {{ alertCount === 1 ? 'area needs' : 'areas need' }} attention</strong>
+          </p>
+        </div>
+        <div class="flex flex-wrap gap-1.5 pl-8" data-testid="alert-axes">
+          <button
+            v-for="a in alertAxes"
+            :key="a.id"
+            type="button"
+            :data-axis="a.id"
+            @click="jumpTo(a.id)"
+            class="chip cursor-pointer hover:underline"
+            :class="a.severity === 'danger' ? 'chip-danger' : 'chip-warning'"
+            :title="`Jump to ${a.label}`"
+          >{{ a.label }} <span class="ml-1 tabular-nums">·{{ a.count }}</span></button>
+        </div>
       </div>
       <div
         v-else
@@ -298,14 +354,22 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
       </div>
 
       <!-- WHAT NEEDS ATTENTION — 6 cards, alerts-first. Each card has a
-           "problems first" orientation: count badge if firing, positive
-           reassurance copy if healthy, and a deep-link to the filtered
-           list view so Click → Context is one hop. -->
+           "problems first" orientation: count badge + severity-colored
+           left border + warning icon in the title row if firing;
+           positive reassurance copy + neutral card if healthy.
+           `id` attributes match AlertAxis.id so the banner pills
+           smooth-scroll to the right card. Cards don't reorder across
+           polls — stable position, variable prominence. -->
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
         <!-- Failing webhooks -->
-        <div class="card p-4">
+        <div
+          id="failing-webhooks"
+          class="card p-4"
+          :class="axisById['failing-webhooks'] ? 'border-l-4 border-l-red-500 dark:border-l-red-500' : ''"
+        >
           <div class="flex justify-between items-center mb-3">
-            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200">
+            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
+              <svg v-if="axisById['failing-webhooks']" class="w-4 h-4 text-red-500 dark:text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
               Failing Webhooks
               <span v-if="overview.webhook_counts.with_failures > 0" class="ml-1 badge-danger">{{ overview.webhook_counts.with_failures }}</span>
             </h2>
@@ -327,9 +391,14 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
         </div>
 
         <!-- Over-limit budgets -->
-        <div class="card p-4">
+        <div
+          id="over-limit-budgets"
+          class="card p-4"
+          :class="axisById['over-limit-budgets'] ? 'border-l-4 border-l-red-500 dark:border-l-red-500' : ''"
+        >
           <div class="flex justify-between items-center mb-3">
-            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200">
+            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
+              <svg v-if="axisById['over-limit-budgets']" class="w-4 h-4 text-red-500 dark:text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
               Over-limit Budgets
               <span v-if="overview.budget_counts.over_limit > 0" class="ml-1 badge-danger">{{ overview.budget_counts.over_limit }}</span>
             </h2>
@@ -351,9 +420,14 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
         </div>
 
         <!-- Budgets with debt -->
-        <div class="card p-4">
+        <div
+          id="budgets-with-debt"
+          class="card p-4"
+          :class="axisById['budgets-with-debt'] ? 'border-l-4 border-l-amber-500 dark:border-l-amber-500' : ''"
+        >
           <div class="flex justify-between items-center mb-3">
-            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200">
+            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
+              <svg v-if="axisById['budgets-with-debt']" class="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
               Budgets with Debt
               <span v-if="overview.budget_counts.with_debt > 0" class="ml-1 badge-warning">{{ overview.budget_counts.with_debt }}</span>
             </h2>
@@ -375,9 +449,15 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
         </div>
 
         <!-- Expiring API keys (NEW) -->
-        <div class="card p-4" data-testid="expiring-keys-card">
+        <div
+          id="expiring-keys"
+          class="card p-4"
+          data-testid="expiring-keys-card"
+          :class="axisById['expiring-keys'] ? 'border-l-4 border-l-amber-500 dark:border-l-amber-500' : ''"
+        >
           <div class="flex justify-between items-center mb-3">
-            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200">
+            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
+              <svg v-if="axisById['expiring-keys']" class="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
               Expiring API Keys <span class="muted font-normal">(7d)</span>
               <span v-if="expiringTotal > 0" class="ml-1 badge-warning">{{ expiringTotal }}</span>
             </h2>
@@ -402,9 +482,14 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
         </div>
 
         <!-- Frozen budgets -->
-        <div class="card p-4">
+        <div
+          id="frozen-budgets"
+          class="card p-4"
+          :class="axisById['frozen-budgets'] ? 'border-l-4 border-l-amber-500 dark:border-l-amber-500' : ''"
+        >
           <div class="flex justify-between items-center mb-3">
-            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200">
+            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
+              <svg v-if="axisById['frozen-budgets']" class="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
               Frozen Budgets
               <span v-if="overview.budget_counts.frozen > 0" class="ml-1 badge-warning">{{ overview.budget_counts.frozen }}</span>
             </h2>
@@ -421,9 +506,14 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
         </div>
 
         <!-- Recent denials (runtime plane) -->
-        <div class="card p-4">
+        <div
+          id="recent-denials"
+          class="card p-4"
+          :class="axisById['recent-denials'] ? 'border-l-4 border-l-red-500 dark:border-l-red-500' : ''"
+        >
           <div class="flex justify-between items-center mb-3">
-            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200">
+            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
+              <svg v-if="axisById['recent-denials']" class="w-4 h-4 text-red-500 dark:text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
               Recent Denials <span class="muted font-normal">(1h)</span>
               <span v-if="overview.recent_denials.length > 0" class="ml-1 badge-danger">{{ overview.recent_denials.length }}</span>
             </h2>

@@ -165,6 +165,111 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
     })
   })
 
+  describe('banner axis pills — "what & where" jump-links', () => {
+    it('enumerates firing axes as named pills (not just a count)', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        webhook_counts: { total: 3, active: 2, disabled: 0, with_failures: 1 },
+        failing_webhooks: [{ subscription_id: 'wh_a', url: 'https://a', consecutive_failures: 3 }],
+        budget_counts: {
+          total: 4, active: 2, frozen: 1, closed: 0, over_limit: 2, with_debt: 0, by_unit: {},
+        },
+        over_limit_scopes: [{ scope: 'acme/foo', unit: 'tokens', usage: 110, limit: 100, utilization: 1.1 }],
+      }))
+      const w = await mountOverview()
+      const axes = w.find('[data-testid="alert-axes"]')
+      expect(axes.exists()).toBe(true)
+      expect(axes.text()).toContain('Failing webhooks')
+      expect(axes.text()).toContain('Over-limit budgets')
+      expect(axes.text()).toContain('Frozen budgets')
+    })
+
+    it('each axis pill carries severity class (danger=red, warning=amber)', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        webhook_counts: { total: 3, active: 2, disabled: 0, with_failures: 1 },
+        failing_webhooks: [{ subscription_id: 'wh_a', url: 'https://a', consecutive_failures: 3 }],
+        budget_counts: {
+          total: 2, active: 1, frozen: 1, closed: 0, over_limit: 0, with_debt: 0, by_unit: {},
+        },
+      }))
+      const w = await mountOverview()
+      const failing = w.find('[data-axis="failing-webhooks"]')
+      const frozen = w.find('[data-axis="frozen-budgets"]')
+      expect(failing.classes()).toContain('chip-danger')
+      expect(frozen.classes()).toContain('chip-warning')
+    })
+
+    it('omits axis pills for non-firing axes (no healthy chips)', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        webhook_counts: { total: 3, active: 2, disabled: 0, with_failures: 1 },
+        failing_webhooks: [{ subscription_id: 'wh_a', url: 'https://a', consecutive_failures: 3 }],
+      }))
+      const w = await mountOverview()
+      // Only Failing webhooks fires — the other five axes should NOT have pills.
+      expect(w.find('[data-axis="failing-webhooks"]').exists()).toBe(true)
+      expect(w.find('[data-axis="over-limit-budgets"]').exists()).toBe(false)
+      expect(w.find('[data-axis="budgets-with-debt"]').exists()).toBe(false)
+      expect(w.find('[data-axis="expiring-keys"]').exists()).toBe(false)
+      expect(w.find('[data-axis="frozen-budgets"]').exists()).toBe(false)
+      expect(w.find('[data-axis="recent-denials"]').exists()).toBe(false)
+    })
+
+    it('banner is absent entirely when all clear', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      const w = await mountOverview()
+      expect(w.find('[data-testid="alert-banner"]').exists()).toBe(false)
+      expect(w.find('[data-testid="alert-axes"]').exists()).toBe(false)
+    })
+  })
+
+  describe('card severity accents — left border + warning icon', () => {
+    it('firing card gets border-l-4 and red accent when danger severity', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        webhook_counts: { total: 3, active: 2, disabled: 0, with_failures: 1 },
+        failing_webhooks: [{ subscription_id: 'wh_a', url: 'https://a', consecutive_failures: 3 }],
+      }))
+      const w = await mountOverview()
+      const card = w.find('#failing-webhooks')
+      expect(card.exists()).toBe(true)
+      expect(card.classes()).toContain('border-l-4')
+      expect(card.classes()).toContain('border-l-red-500')
+    })
+
+    it('firing card gets border-l-4 and amber accent when warning severity', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        budget_counts: {
+          total: 2, active: 1, frozen: 1, closed: 0, over_limit: 0, with_debt: 0, by_unit: {},
+        },
+      }))
+      const w = await mountOverview()
+      const card = w.find('#frozen-budgets')
+      expect(card.classes()).toContain('border-l-4')
+      expect(card.classes()).toContain('border-l-amber-500')
+    })
+
+    it('healthy card has no severity border', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      const w = await mountOverview()
+      const card = w.find('#failing-webhooks')
+      expect(card.classes()).not.toContain('border-l-4')
+      expect(card.classes()).not.toContain('border-l-red-500')
+    })
+
+    it('card ids match axis ids so banner pills can scroll-anchor', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        webhook_counts: { total: 3, active: 2, disabled: 0, with_failures: 1 },
+        failing_webhooks: [{ subscription_id: 'wh_a', url: 'https://a', consecutive_failures: 3 }],
+      }))
+      const w = await mountOverview()
+      // Every axis pill's data-axis must point at an element with the
+      // same id, or the smooth-scroll handler won't find its target.
+      const pills = w.findAll('[data-axis]')
+      for (const pill of pills) {
+        const id = pill.attributes('data-axis')!
+        expect(w.find(`#${id}`).exists()).toBe(true)
+      }
+    })
+  })
+
   describe('Expiring API Keys card (new)', () => {
     it('fetches listApiKeys on mount', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview())
