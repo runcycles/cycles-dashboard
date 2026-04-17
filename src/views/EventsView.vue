@@ -117,8 +117,12 @@ function buildFilterParams(): Record<string, string> {
   // the server, and the spec requires empty → absent.
   const q = search.value.trim()
   if (q) params.search = q
-  if (fromDate.value) params.from = fromDate.value
-  if (toDate.value) params.to = toDate.value
+  // datetime-local emits 'YYYY-MM-DDTHH:MM' with no seconds or tz;
+  // the spec's `from`/`to` are RFC 3339 date-time, which the server
+  // validates strictly. new Date(...).toISOString() normalizes the
+  // local-time input to UTC ISO 8601 — matches AuditView's wire format.
+  if (fromDate.value) params.from = new Date(fromDate.value).toISOString()
+  if (toDate.value) params.to = new Date(toDate.value).toISOString()
   if (sortKey.value) {
     params.sort_by = sortKey.value
     params.sort_dir = sortDir.value

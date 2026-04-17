@@ -66,7 +66,7 @@ describe('EventsView — time range wire-up', () => {
     expect(wrapper.find('label[for="ev-time-range"]').text()).toBe('Time range')
   })
 
-  it('sends from/to when a preset is selected', async () => {
+  it('sends from/to as RFC 3339 ISO 8601 when a preset is selected', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(2026, 3, 17, 12, 0, 0))
     try {
@@ -77,15 +77,22 @@ describe('EventsView — time range wire-up', () => {
       await wrapper.get('[data-preset="24h"]').trigger('click')
       await flushPromises()
       const call = listEventsMock.mock.calls.at(-1)?.[0] ?? {}
-      expect(call.from).toBe('2026-04-16T12:00')
-      expect(call.to).toBe('2026-04-17T12:00')
+      // datetime-local ('YYYY-MM-DDTHH:MM', local tz) → ISO 8601 UTC.
+      // Don't assert exact tz offset since the suite may run in any tz;
+      // assert the shape: YYYY-MM-DDTHH:MM:SS.sssZ.
+      expect(call.from).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
+      expect(call.to).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
+      // The window is 24h regardless of tz: to - from === 24h.
+      const fromMs = new Date(call.from).getTime()
+      const toMs = new Date(call.to).getTime()
+      expect(toMs - fromMs).toBe(24 * 3600_000)
       wrapper.unmount()
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('sends from/to when a custom range is applied', async () => {
+  it('sends from/to as RFC 3339 ISO 8601 when a custom range is applied', async () => {
     const wrapper = mount(EventsView)
     await flushPromises()
     listEventsMock.mockClear()
@@ -96,8 +103,10 @@ describe('EventsView — time range wire-up', () => {
     await wrapper.get('[data-testid="ev-time-range-custom-apply"]').trigger('click')
     await flushPromises()
     const call = listEventsMock.mock.calls.at(-1)?.[0] ?? {}
-    expect(call.from).toBe('2026-04-10T09:00')
-    expect(call.to).toBe('2026-04-17T17:00')
+    // new Date(local-string).toISOString() round-trips — the UTC
+    // instant parses back to the same local wall-clock.
+    expect(new Date(call.from).toISOString()).toBe(new Date('2026-04-10T09:00').toISOString())
+    expect(new Date(call.to).toISOString()).toBe(new Date('2026-04-17T17:00').toISOString())
     wrapper.unmount()
   })
 
@@ -107,8 +116,11 @@ describe('EventsView — time range wire-up', () => {
     const wrapper = mount(EventsView)
     await flushPromises()
     const firstCall = listEventsMock.mock.calls[0]?.[0] ?? {}
-    expect(firstCall.from).toBe('2026-04-10T00:00')
-    expect(firstCall.to).toBe('2026-04-17T00:00')
+    // URL carries local-time datetime-local strings (round-trips with
+    // our own router.replace spread); buildFilterParams normalizes to
+    // ISO 8601 on the wire.
+    expect(new Date(firstCall.from).toISOString()).toBe(new Date('2026-04-10T00:00').toISOString())
+    expect(new Date(firstCall.to).toISOString()).toBe(new Date('2026-04-17T00:00').toISOString())
     // Trigger label reflects the restored range.
     const label = wrapper.get('[data-testid="ev-time-range-trigger"]').text()
     expect(label).toContain('Apr 10')
