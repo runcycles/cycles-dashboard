@@ -281,9 +281,25 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
     it('calls listBudgets with utilization_min=0.9 (catches near-cap too)', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview())
       await mountOverview()
-      expect(listBudgetsMock).toHaveBeenCalledTimes(1)
-      const params = listBudgetsMock.mock.calls[0][0]
-      expect(params.utilization_min).toBe('0.9')
+      // Two listBudgets calls total — one for at-or-near-cap
+      // (utilization_min=0.9), one for frozen scopes (status=FROZEN).
+      // Asserting on the at-cap one by matching its param shape so
+      // the spec is resilient to call-order changes.
+      expect(listBudgetsMock).toHaveBeenCalledTimes(2)
+      const atCapCall = listBudgetsMock.mock.calls
+        .map(c => c[0] as Record<string, string>)
+        .find(p => p.utilization_min !== undefined)
+      expect(atCapCall?.utilization_min).toBe('0.9')
+    })
+
+    it('calls listBudgets with status=FROZEN for the frozen-scopes fetch', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      await mountOverview()
+      const frozenCall = listBudgetsMock.mock.calls
+        .map(c => c[0] as Record<string, string>)
+        .find(p => p.status === 'FROZEN')
+      expect(frozenCall).toBeDefined()
+      expect(frozenCall?.limit).toBe('10')
     })
 
     it('fires as warning severity when all firing budgets are in 90-99% range (near cap, none over)', async () => {
@@ -403,6 +419,123 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       expect(w.find('[data-axis="failing-webhooks"]').exists()).toBe(true)
       // At-cap card renders its empty state (ledgers ref stays []).
       expect(w.find('[data-testid="budgets-at-cap-card"]').text()).toContain('All budgets under 90% utilized')
+    })
+  })
+
+  describe('Frozen Budgets card — lists top-5 scopes (parity with at-cap + debt cards)', () => {
+    function frozenBudget(scope: string, overrides: Partial<BudgetLedger> = {}): BudgetLedger {
+      return {
+        ledger_id: `ldg_${scope}`,
+        scope,
+        unit: 'tokens',
+        allocated: { unit: 'tokens', amount: 10_000 },
+        remaining: { unit: 'tokens', amount: 10_000 },
+        spent: { unit: 'tokens', amount: 0 },
+        debt: { unit: 'tokens', amount: 0 },
+        overdraft_limit: { unit: 'tokens', amount: 0 },
+        is_over_limit: false,
+        status: 'FROZEN',
+        created_at: '2026-01-01T00:00:00Z',
+        ...overrides,
+      }
+    }
+
+    it('renders each frozen scope inline with its allocated amount', async () => {
+      // Card used to render as a center "View N frozen budgets"
+      // hyperlink with no scope names — operator had to click through
+      // to see which budgets were frozen. Now lists the scopes inline
+      // so the card matches the at-cap / with-debt pattern.
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        budget_counts: { total: 5, active: 3, frozen: 2, closed: 0, over_limit: 0, with_debt: 0, by_unit: {} },
+      }))
+      listBudgetsMock.mockImplementation((params: Record<string, string>) => {
+        if (params.status === 'FROZEN') {
+          return Promise.resolve({
+            ledgers: [
+              frozenBudget('acme/prod', { allocated: { unit: 'tokens', amount: 50_000 } }),
+              frozenBudget('beta/eu', { allocated: { unit: 'tokens', amount: 10_000 } }),
+            ],
+            has_more: false,
+          })
+        }
+        return Promise.resolve({ ledgers: [], has_more: false })
+      })
+      const w = await mountOverview()
+      const card = w.find('#frozen-budgets')
+      expect(card.text()).toContain('acme/prod')
+      expect(card.text()).toContain('beta/eu')
+      // Allocated amount surfaces as the secondary read.
+      expect(card.text()).toContain('50,000')
+      expect(card.text()).toContain('10,000')
+      // Center "View N frozen budgets" link is gone — the header
+      // "View all" link is the only one now.
+      expect(card.text()).not.toContain('View 2 frozen budgets')
+    })
+
+    it('caps frozen card at 5 rows (parity with at-cap card)', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        budget_counts: { total: 10, active: 3, frozen: 7, closed: 0, over_limit: 0, with_debt: 0, by_unit: {} },
+      }))
+      listBudgetsMock.mockImplementation((params: Record<string, string>) => {
+        if (params.status === 'FROZEN') {
+          return Promise.resolve({
+            ledgers: Array.from({ length: 7 }, (_, i) => frozenBudget(`scope-${i}`)),
+            has_more: false,
+          })
+        }
+        return Promise.resolve({ ledgers: [], has_more: false })
+      })
+      const w = await mountOverview()
+      const card = w.find('#frozen-budgets')
+      const rows = card.findAll('a[title^="scope-"]')
+      expect(rows.length).toBe(5)
+    })
+
+    it('falls back to "N frozen — details unavailable" when the list fetch fails but overview count is non-zero', async () => {
+      // Graceful degradation: if listBudgets?status=FROZEN rejects
+      // but the overview count says there ARE 3 frozen budgets, we
+      // surface the count rather than silently rendering
+      // "No frozen budgets" — otherwise the card contradicts the
+      // banner axis pill.
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        budget_counts: { total: 5, active: 2, frozen: 3, closed: 0, over_limit: 0, with_debt: 0, by_unit: {} },
+      }))
+      listBudgetsMock.mockImplementation((params: Record<string, string>) => {
+        if (params.status === 'FROZEN') return Promise.reject(new Error('outage'))
+        return Promise.resolve({ ledgers: [], has_more: false })
+      })
+      const w = await mountOverview()
+      const card = w.find('#frozen-budgets')
+      expect(card.text()).toContain('3 frozen budgets — details unavailable')
+      expect(card.text()).not.toContain('No frozen budgets')
+    })
+
+    it('renders healthy empty state only when BOTH list and count are empty', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      const w = await mountOverview()
+      const card = w.find('#frozen-budgets')
+      expect(card.text()).toContain('No frozen budgets')
+    })
+  })
+
+  describe('Budgets with Debt card — caps at 5 rows (parity with other budget cards)', () => {
+    it('slices overview.debt_scopes to 5 on the landing card', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        budget_counts: { total: 10, active: 3, frozen: 0, closed: 0, over_limit: 0, with_debt: 7, by_unit: {} },
+        debt_scopes: Array.from({ length: 7 }, (_, i) => ({
+          scope: `scope-${i}`,
+          unit: 'tokens',
+          debt: 100 - i,
+          overdraft_limit: 500,
+        })),
+      }))
+      const w = await mountOverview()
+      const card = w.find('#budgets-with-debt')
+      const rows = card.findAll('a[title^="scope-"]')
+      expect(rows.length).toBe(5)
+      // Worst-first preserved (server sorts desc by debt).
+      expect(card.text()).toContain('scope-0')
+      expect(card.text()).not.toContain('scope-6')
     })
   })
 

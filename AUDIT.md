@@ -31,6 +31,30 @@
 - `vitest run` — **505 / 505 passing** across 40 files (+58 new across 4 commits in this release: 32 for the I1/I3 rebuild covering alert-banner states / Expiring Keys / Recent Activity / counter-strip DOM order / per-tile chip layout / zero-count omission / graceful degradation; +3 for `recent_denials_by_reason` populated-sorted-desc + absent-field + empty-object; +1 guard that the old expiries card stays removed; +2 for raw-enum operation format matching AuditView; **+17 for the new AuditView filter DSL** covering error_code normalization / IN-list dedupe / whitespace-separated parsing / datalist enum coverage / all five status-band mappings / mutex-sidestep / search field copy / URL-param deep-link including unknown-band defensive fallback; **+3 for the Overview denial-pill router-link drill-down** asserting anchors render with href + route name + query payload + title tooltip).
 - `vite build` — clean, 897ms.
 
+### 2026-04-17 — Overview row 1: all three budget cards now list top-5 scopes inline (consistency pass)
+
+**Scope.** Dashboard-only, parity polish across the three budget cards on the Overview attention grid. No spec or server change.
+
+**Why.** The three budget cards on row 1 had drifted into three different shapes: Budgets At or Near Cap lists scopes with utilization %, Budgets with Debt lists scopes with debt/limit numerics, but **Frozen Budgets** rendered as a single center hyperlink ("View N frozen budgets") with no scope names. Operators flagged the inconsistency — the whole point of grouping the three on one row is so "state of budgets" reads as one scan, but the Frozen card was forcing a click-through just to see *which* budgets were frozen. Fixed by giving Frozen Budgets the same inline-list treatment as its siblings.
+
+**What shipped.**
+
+- **New `listBudgets?status=FROZEN&limit=10` fetch** added to the Overview's parallel `Promise.allSettled` chain (5 fetches now). Scopes populate a new `frozenBudgets` ref; `frozenSorted` computed sorts alphabetically by scope and slices to 5 for display parity with Budgets At or Near Cap.
+- **Frozen Budgets card rewrite.** Center link → inline list of scope rows. Each row shows `scope` + `allocated amount` (the sensible secondary since "frozen" is a binary state, not a magnitude like utilization or debt).
+- **Budgets with Debt now slices `debt_scopes` to 5** via `debtScopesSorted` computed, matching the row cap on the other two budget cards. Server already sorts desc by debt so worst-first is preserved. Row padding `py-2 → py-1.5` for density parity.
+- **Frozen card graceful-degradation fallback.** If `listBudgets?status=FROZEN` rejects but `overview.budget_counts.frozen > 0`, the card shows "N frozen budgets — details unavailable" instead of silently rendering "No frozen budgets" — the card no longer contradicts the banner axis pill during a partial outage. Healthy empty state ("No frozen budgets") now requires both the list AND the count to be zero.
+- **Axis wiring unchanged.** The frozen-budgets alert axis still keys off `overview.budget_counts.frozen > 0`, not the list length, so the axis fires even if the scope-details fetch fails — the banner + card stay in sync via the fallback copy.
+
+**Files.** `src/views/OverviewView.vue` (+ `frozenBudgets` ref, + 5th `listBudgets?status=FROZEN` fetch in usePolling, + `frozenSorted` / `debtScopesSorted` computeds, Frozen card template rewrite with fallback, Budgets with Debt v-for switched to `debtScopesSorted` + `py-1.5`). `src/__tests__/OverviewView.test.ts` (+6 new specs across two new describe blocks — frozen list renders inline with allocated amount / frozen cap-at-5 / frozen degradation fallback / frozen healthy empty / debt card slice to 5 / new listBudgets status=FROZEN param check; 1 existing `toHaveBeenCalledTimes(1)` spec updated to expect 2 calls and match by param shape).
+
+**Validation gates.**
+
+- `vue-tsc --noEmit` — clean.
+- `vitest run` — **554 / 554 passing** across 42 files (+6 from 548).
+- `vite build` — clean, 923ms.
+
+**No version bump.** Cross-card parity polish on the same attention grid shipped earlier today — no wire-format change, no URL-contract change (uses the existing `listBudgets` status filter). AUDIT entry only.
+
 ### 2026-04-17 — Overview Budgets At or Near Cap card: cap display at 5 rows + tighten row padding
 
 **Scope.** Dashboard-only, density polish on the just-widened at-or-near-cap card. No spec or server change.

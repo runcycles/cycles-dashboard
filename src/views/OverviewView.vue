@@ -37,13 +37,20 @@ const recentAudit = ref<AuditLogEntry[]>([])
 // rows 90–99% render amber (near cap, approaching trouble). 10 rows
 // is plenty for a landing card.
 const atCapBudgets = ref<BudgetLedger[]>([])
+// Frozen budgets — `overview.budget_counts.frozen` gives us the
+// count, but not the scopes, so the card had to render as a
+// "View N frozen budgets" center link instead of a list. Fetch
+// listBudgets?status=FROZEN to surface the top-5 frozen scopes
+// inline, matching the at-or-near-cap + with-debt pattern so all
+// three budget cards on row 1 read consistently.
+const frozenBudgets = ref<BudgetLedger[]>([])
 const error = ref('')
 
-// All four fetches parallelize; any individual failure degrades
+// All five fetches parallelize; any individual failure degrades
 // gracefully (error banner, but other sections keep rendering so a
 // flaky audit endpoint doesn't blank out the whole landing page).
 const { refresh, isLoading } = usePolling(async () => {
-  const [ov, apiKeys, audit, atCap] = await Promise.allSettled([
+  const [ov, apiKeys, audit, atCap, frozen] = await Promise.allSettled([
     getOverview(),
     // Pull one page; client-side filter for 7d window. Fine even for
     // tenants with thousands of keys — we don't need the full set,
@@ -57,14 +64,18 @@ const { refresh, isLoading } = usePolling(async () => {
     // AND the 90–99% range so operators can intervene before a
     // budget actually blows rather than after.
     listBudgets({ utilization_min: '0.9', limit: '10' }),
+    // Frozen budgets — scopes, not just a count. Lets the Frozen
+    // Budgets card list the top 5 inline instead of a center link.
+    listBudgets({ status: 'FROZEN', limit: '10' }),
   ])
   if (ov.status === 'fulfilled') overview.value = ov.value
   if (apiKeys.status === 'fulfilled') keys.value = apiKeys.value.keys
   if (audit.status === 'fulfilled') recentAudit.value = audit.value.logs
   if (atCap.status === 'fulfilled') atCapBudgets.value = atCap.value.ledgers
+  if (frozen.status === 'fulfilled') frozenBudgets.value = frozen.value.ledgers
   // Surface the first failure so the operator sees *something* wrong —
   // but only error-banner; cards for the successful fetches still render.
-  const firstFail = [ov, apiKeys, audit, atCap].find(r => r.status === 'rejected')
+  const firstFail = [ov, apiKeys, audit, atCap, frozen].find(r => r.status === 'rejected')
   error.value = firstFail && firstFail.status === 'rejected' ? toMessage(firstFail.reason) : ''
 }, 30000)
 
@@ -94,6 +105,23 @@ const atCapSorted = computed<BudgetLedger[]>(() => {
     if (ua !== ub) return ub - ua
     return a.scope.localeCompare(b.scope)
   }).slice(0, 5)
+})
+
+// Frozen budgets — sort by scope (no natural severity ordering;
+// "frozen" is a binary state) and slice to 5 for the landing-page
+// summary. "View all" in the header carries operators to the full
+// filtered BudgetsView.
+const frozenSorted = computed<BudgetLedger[]>(() => {
+  return [...frozenBudgets.value]
+    .sort((a, b) => a.scope.localeCompare(b.scope))
+    .slice(0, 5)
+})
+
+// Debt scopes — slice to 5 for parity with the other two budget
+// cards. The server already sorts desc by debt (per overview spec),
+// so we keep that ordering.
+const debtScopesSorted = computed(() => {
+  return (overview.value?.debt_scopes ?? []).slice(0, 5)
 })
 
 // Expiring keys (7d) — sorted soonest-first, capped to 5 for the card.
@@ -499,18 +527,18 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
             </h2>
             <router-link :to="{ name: 'budgets', query: { filter: 'has_debt' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
-          <div v-if="overview.debt_scopes.length === 0" class="text-sm muted py-4 text-center">No outstanding debt</div>
+          <div v-if="debtScopesSorted.length === 0" class="text-sm muted py-4 text-center">No outstanding debt</div>
           <div
-            v-for="s in overview.debt_scopes"
+            v-for="s in debtScopesSorted"
             :key="s.scope + s.unit"
-            class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
+            class="flex justify-between items-center py-1.5 border-b border-gray-100 last:border-0 dark:border-gray-700"
           >
             <router-link
               :to="{ name: 'budgets', query: { scope: s.scope, unit: s.unit } }"
               class="text-sm text-blue-600 hover:underline truncate mr-2 dark:text-blue-400"
               :title="s.scope"
             >{{ s.scope }}</router-link>
-            <span class="muted-sm shrink-0">{{ s.debt.toLocaleString() }} / {{ s.overdraft_limit.toLocaleString() }}</span>
+            <span class="muted-sm shrink-0 tabular-nums">{{ s.debt.toLocaleString() }} / {{ s.overdraft_limit.toLocaleString() }}</span>
           </div>
         </div>
 
@@ -528,14 +556,32 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
             </h2>
             <router-link :to="{ name: 'budgets', query: { status: 'FROZEN' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
-          <div v-if="overview.budget_counts.frozen === 0" class="text-sm muted py-4 text-center">No frozen budgets</div>
-          <router-link
-            v-else
-            :to="{ name: 'budgets', query: { status: 'FROZEN' } }"
-            class="text-sm text-blue-600 hover:underline block py-4 text-center dark:text-blue-400"
+          <!-- Empty state prefers the overview count as the source of
+               truth. If the frozen-scopes fetch failed but the overview
+               count is non-zero, we surface the count rather than
+               silently rendering "No frozen budgets" — otherwise the
+               card would contradict the banner badge. -->
+          <div v-if="frozenSorted.length === 0 && overview.budget_counts.frozen === 0" class="text-sm muted py-4 text-center">No frozen budgets</div>
+          <div v-else-if="frozenSorted.length === 0" class="text-sm muted py-4 text-center">
+            {{ overview.budget_counts.frozen }} frozen budget<span v-if="overview.budget_counts.frozen !== 1">s</span> — details unavailable
+          </div>
+          <div
+            v-for="b in frozenSorted"
+            :key="b.scope + b.unit"
+            class="flex justify-between items-center py-1.5 border-b border-gray-100 last:border-0 dark:border-gray-700"
           >
-            View {{ overview.budget_counts.frozen }} frozen budget{{ overview.budget_counts.frozen !== 1 ? 's' : '' }}
-          </router-link>
+            <router-link
+              :to="{ name: 'budgets', query: { scope: b.scope, unit: b.unit } }"
+              class="text-sm text-blue-600 hover:underline truncate mr-2 dark:text-blue-400"
+              :title="b.scope"
+            >{{ b.scope }}</router-link>
+            <!-- Allocated amount as the secondary — tells the operator
+                 how much capacity is frozen at a glance. Debt cards show
+                 debt/limit, at-cap cards show utilization %; this one
+                 leans on allocated since "frozen" is a binary state,
+                 not a magnitude. -->
+            <span class="muted-sm shrink-0 tabular-nums" :title="`${b.allocated?.amount?.toLocaleString() ?? '0'} ${b.unit} allocated`">{{ b.allocated?.amount?.toLocaleString() ?? '0' }} {{ b.unit }}</span>
+          </div>
         </div>
 
         <!-- Failing webhooks -->
