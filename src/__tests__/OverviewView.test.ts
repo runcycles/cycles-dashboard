@@ -4,7 +4,7 @@
 // Keys + Recent Activity cards wired to their respective endpoints.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { h as actualH } from 'vue'
+import { h as actualH, defineComponent } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '../stores/auth'
@@ -119,18 +119,18 @@ async function mountOverview() {
   const w = mount(OverviewView, {
     global: {
       stubs: {
-        RouterLink: {
-          props: ['to'],
+        RouterLink: defineComponent({
+          props: { to: { type: null, required: false, default: null } },
           inheritAttrs: false,
-          setup(props: { to: unknown }, { slots, attrs }: { slots: { default?: () => unknown }; attrs: Record<string, unknown> }) {
+          setup(props, { slots, attrs }) {
             return () => {
               const to = props.to as { name?: string } | string | null | undefined
               const href = typeof to === 'string' ? to : (to?.name ?? '')
               const dataTo = JSON.stringify(to ?? null)
-              return actualH('a', { ...attrs, href, 'data-to': dataTo }, slots.default ? slots.default() : [])
+              return actualH('a', { ...attrs, href, 'data-to': dataTo }, slots.default?.())
             }
           },
-        },
+        }),
       },
     },
   })
@@ -702,6 +702,9 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       getOverviewMock.mockResolvedValue(healthyOverview({
         recent_denials: Array.from({ length: 10 }, (_, i) => ({
           event_id: `evt_${i}`,
+          event_type: 'reservation.denied',
+          category: 'runtime',
+          source: 'cycles-server',
           timestamp: '2026-04-17T11:59:00Z',
           tenant_id: 'acme',
           scope: `acme/scope-${i}`,
