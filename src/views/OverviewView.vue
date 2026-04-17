@@ -1,158 +1,368 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { usePolling } from '../composables/usePolling'
-import { getOverview } from '../api/client'
-import type { AdminOverviewResponse } from '../types'
+import { getOverview, listApiKeys, listAuditLogs } from '../api/client'
+import type { AdminOverviewResponse, ApiKey, AuditLogEntry } from '../types'
 import PageHeader from '../components/PageHeader.vue'
 import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import { formatTime } from '../utils/format'
 import { toMessage } from '../utils/errors'
+import { filterExpiringKeys, type ExpiringKey } from '../utils/expiringKeys'
 
-const data = ref<AdminOverviewResponse | null>(null)
+// I1 (UI/UX P0): Overview is the operator's landing page and, for an
+// admin console, "landing page" means "what needs your attention right
+// now". Pre-fix, the page opened with a row of four counter tiles
+// (Tenants / Budgets / Webhooks / Events) that pushed the actionable
+// cards below the fold. Ops at 2am don't care about totals — they care
+// about *problems*. This rewrite puts alerts at the top, adds an
+// "Expiring API keys (7d)" card and a "Recent operator activity" audit
+// feed (also closes I3), and demotes the counters to a compact strip
+// at the bottom for at-a-glance totals without stealing the top slot.
+
+const overview = ref<AdminOverviewResponse | null>(null)
+const keys = ref<ApiKey[]>([])
+const recentAudit = ref<AuditLogEntry[]>([])
 const error = ref('')
 
+// All three fetches parallelize; any individual failure degrades
+// gracefully (error banner, but other sections keep rendering so a
+// flaky audit endpoint doesn't blank out the whole landing page).
 const { refresh, isLoading } = usePolling(async () => {
-  try { data.value = await getOverview(); error.value = '' }
-  catch (e) { error.value = toMessage(e) }
+  const [ov, apiKeys, audit] = await Promise.allSettled([
+    getOverview(),
+    // Pull one page; client-side filter for 7d window. Fine even for
+    // tenants with thousands of keys — we don't need the full set,
+    // we need the upcoming expiries, and server returns keys ordered.
+    listApiKeys(),
+    // Last 10 audit entries, newest first. Server default sort is
+    // timestamp desc per governance-admin spec, so no sort params needed.
+    listAuditLogs({ limit: '10' }),
+  ])
+  if (ov.status === 'fulfilled') overview.value = ov.value
+  if (apiKeys.status === 'fulfilled') keys.value = apiKeys.value.keys
+  if (audit.status === 'fulfilled') recentAudit.value = audit.value.logs
+  // Surface the first failure so the operator sees *something* wrong —
+  // but only error-banner; cards for the successful fetches still render.
+  const firstFail = [ov, apiKeys, audit].find(r => r.status === 'rejected')
+  error.value = firstFail && firstFail.status === 'rejected' ? toMessage(firstFail.reason) : ''
 }, 30000)
+
+// Expiring keys (7d) — sorted soonest-first, capped to 5 for the card.
+const expiringKeys = computed<ExpiringKey[]>(() => filterExpiringKeys(keys.value).slice(0, 5))
+const expiringTotal = computed<number>(() => filterExpiringKeys(keys.value).length)
+
+// Headline: how many alert axes are currently firing. Drives the
+// top-of-page banner so the operator's first glance answers "is
+// anything on fire?" in < 1 second.
+const alertCount = computed<number>(() => {
+  if (!overview.value) return 0
+  let n = 0
+  if (overview.value.webhook_counts.with_failures > 0) n++
+  if (overview.value.budget_counts.over_limit > 0) n++
+  if (overview.value.budget_counts.with_debt > 0) n++
+  if (overview.value.budget_counts.frozen > 0) n++
+  if (overview.value.recent_denials.length > 0) n++
+  if (expiringTotal.value > 0) n++
+  return n
+})
+
+// Humanize the audit operation for the recent-activity card. Audit
+// operations are stable enums like `tenant.suspended`, `budget.frozen`
+// — the Audit view renders them as-is because operators filter on
+// them; here we want readable verbs.
+function humanizeOperation(op: string): string {
+  return op
+    .replace(/\./g, ' ')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase())
+}
+
+// Map an audit entry to the most useful detail-view link. Falls back
+// to the Audit view with a pre-filled filter so "click through for
+// context" always works.
+function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<string, string>; query?: Record<string, string> } {
+  if (entry.resource_type === 'tenant' && entry.resource_id) {
+    return { name: 'tenant-detail', params: { id: entry.resource_id } }
+  }
+  if (entry.resource_type === 'webhook' && entry.resource_id) {
+    return { name: 'webhook-detail', params: { id: entry.resource_id } }
+  }
+  // Default: jump to audit with the log_id surfaced so the operator
+  // sees the full row including metadata.
+  return { name: 'audit', query: { search: entry.log_id } }
+}
 </script>
 
 <template>
   <div>
     <PageHeader
       title="Overview"
+      subtitle="What needs attention"
       :loading="isLoading"
-      :last-updated="data?.as_of ?? null"
+      :last-updated="overview?.as_of ?? null"
       @refresh="refresh"
     />
 
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
+    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-2 mb-4 dark:bg-red-950 dark:border-red-800 dark:text-red-300">
+      {{ error }}
+    </p>
 
-    <LoadingSkeleton v-if="!data" />
+    <LoadingSkeleton v-if="!overview" />
 
     <template v-else>
-      <!-- Summary counters -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <router-link to="/tenants" class="card p-4 hover:shadow-md transition-shadow block group">
-          <p class="text-sm muted group-hover:text-gray-700">Tenants</p>
-          <p class="text-2xl font-semibold text-gray-900">{{ data.tenant_counts.total }}</p>
-          <p class="muted-sm">{{ data.tenant_counts.active }} active<span v-if="data.tenant_counts.suspended">, {{ data.tenant_counts.suspended }} suspended</span></p>
-        </router-link>
-        <router-link to="/budgets" class="card p-4 hover:shadow-md transition-shadow block group">
-          <p class="text-sm muted group-hover:text-gray-700">Budgets</p>
-          <p class="text-2xl font-semibold text-gray-900">{{ data.budget_counts.total }}</p>
-          <p class="muted-sm">{{ data.budget_counts.active }} active<span v-if="data.budget_counts.frozen">, <span class="text-yellow-600">{{ data.budget_counts.frozen }} frozen</span></span></p>
-        </router-link>
-        <router-link to="/webhooks" class="card p-4 hover:shadow-md transition-shadow block group">
-          <p class="text-sm muted group-hover:text-gray-700">Webhooks</p>
-          <p class="text-2xl font-semibold text-gray-900">{{ data.webhook_counts.total }}</p>
-          <p class="muted-sm">{{ data.webhook_counts.active }} active<span v-if="data.webhook_counts.with_failures">, <span class="text-red-600">{{ data.webhook_counts.with_failures }} failing</span></span></p>
-        </router-link>
-        <router-link to="/events" class="card p-4 hover:shadow-md transition-shadow block group">
-          <p class="text-sm muted group-hover:text-gray-700">Events <span class="muted font-normal">({{ Math.round(data.event_window_seconds / 60) }}m)</span></p>
-          <p class="text-2xl font-semibold text-gray-900">{{ data.event_counts.total_recent }}</p>
-          <p class="muted-sm">
-            <template v-if="Object.keys(data.event_counts.by_category).length">
-              <span v-for="(count, cat) in data.event_counts.by_category" :key="cat" class="mr-2">{{ cat }}: {{ count }}</span>
-            </template>
-            <span v-else>no events</span>
-          </p>
-        </router-link>
+      <!-- Alert headline. Only visible when something is actually firing;
+           collapses quietly when everything's healthy. -->
+      <div
+        v-if="alertCount > 0"
+        role="status"
+        class="mb-4 px-4 py-3 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-800 flex items-center gap-3"
+      >
+        <svg class="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
+        <p class="text-sm text-amber-900 dark:text-amber-200">
+          <strong>{{ alertCount }} {{ alertCount === 1 ? 'area needs' : 'areas need' }} attention</strong>
+          — review the cards below.
+        </p>
+      </div>
+      <div
+        v-else
+        role="status"
+        class="mb-4 px-4 py-3 rounded-lg border border-green-200 bg-green-50 dark:bg-green-950/40 dark:border-green-800 flex items-center gap-3"
+      >
+        <svg class="w-5 h-5 text-green-600 dark:text-green-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" /></svg>
+        <p class="text-sm text-green-900 dark:text-green-200">
+          <strong>All clear.</strong>
+          No webhooks failing, no budgets over limit, no keys near expiry, no denials in the last hour.
+        </p>
       </div>
 
-      <!-- Alerts row -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      <!-- WHAT NEEDS ATTENTION — 6 cards, alerts-first. Each card has a
+           "problems first" orientation: count badge if firing, positive
+           reassurance copy if healthy, and a deep-link to the filtered
+           list view so Click → Context is one hop. -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+        <!-- Failing webhooks -->
         <div class="card p-4">
           <div class="flex justify-between items-center mb-3">
-            <h2 class="text-sm font-medium text-gray-700">
-              Over-limit Budgets
-              <span v-if="data.budget_counts.over_limit > 0" class="ml-1 badge-danger">{{ data.budget_counts.over_limit }}</span>
+            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200">
+              Failing Webhooks
+              <span v-if="overview.webhook_counts.with_failures > 0" class="ml-1 badge-danger">{{ overview.webhook_counts.with_failures }}</span>
             </h2>
-            <router-link :to="{ name: 'budgets', query: { filter: 'over_limit' } }" class="text-xs text-blue-600 hover:underline">View all</router-link>
+            <router-link to="/webhooks" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
-          <div v-if="data.over_limit_scopes.length === 0" class="text-sm muted py-4 text-center">All budgets within limits</div>
-          <div v-for="s in data.over_limit_scopes" :key="s.scope + s.unit" class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0">
-            <router-link :to="{ name: 'budgets', query: { scope: s.scope, unit: s.unit } }" class="text-sm text-blue-600 hover:underline truncate mr-2" :title="s.scope">{{ s.scope }}</router-link>
+          <div v-if="overview.failing_webhooks.length === 0" class="text-sm muted py-4 text-center">All webhooks healthy</div>
+          <div
+            v-for="w in overview.failing_webhooks"
+            :key="w.subscription_id"
+            class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
+          >
+            <router-link
+              :to="{ name: 'webhook-detail', params: { id: w.subscription_id } }"
+              class="text-sm text-blue-600 hover:underline truncate mr-2 dark:text-blue-400"
+              :title="w.url"
+            >{{ w.url }}</router-link>
+            <span class="text-xs text-red-600 dark:text-red-400 shrink-0">{{ w.consecutive_failures }} failures</span>
+          </div>
+        </div>
+
+        <!-- Over-limit budgets -->
+        <div class="card p-4">
+          <div class="flex justify-between items-center mb-3">
+            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200">
+              Over-limit Budgets
+              <span v-if="overview.budget_counts.over_limit > 0" class="ml-1 badge-danger">{{ overview.budget_counts.over_limit }}</span>
+            </h2>
+            <router-link :to="{ name: 'budgets', query: { filter: 'over_limit' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
+          </div>
+          <div v-if="overview.over_limit_scopes.length === 0" class="text-sm muted py-4 text-center">All budgets within limits</div>
+          <div
+            v-for="s in overview.over_limit_scopes"
+            :key="s.scope + s.unit"
+            class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
+          >
+            <router-link
+              :to="{ name: 'budgets', query: { scope: s.scope, unit: s.unit } }"
+              class="text-sm text-blue-600 hover:underline truncate mr-2 dark:text-blue-400"
+              :title="s.scope"
+            >{{ s.scope }}</router-link>
             <span class="muted-sm shrink-0">{{ s.unit }}</span>
           </div>
         </div>
 
+        <!-- Budgets with debt -->
         <div class="card p-4">
           <div class="flex justify-between items-center mb-3">
-            <h2 class="text-sm font-medium text-gray-700">
+            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200">
               Budgets with Debt
-              <span v-if="data.budget_counts.with_debt > 0" class="ml-1 badge-warning">{{ data.budget_counts.with_debt }}</span>
+              <span v-if="overview.budget_counts.with_debt > 0" class="ml-1 badge-warning">{{ overview.budget_counts.with_debt }}</span>
             </h2>
-            <router-link :to="{ name: 'budgets', query: { filter: 'has_debt' } }" class="text-xs text-blue-600 hover:underline">View all</router-link>
+            <router-link :to="{ name: 'budgets', query: { filter: 'has_debt' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
-          <div v-if="data.debt_scopes.length === 0" class="text-sm muted py-4 text-center">No outstanding debt</div>
-          <div v-for="s in data.debt_scopes" :key="s.scope + s.unit" class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0">
-            <router-link :to="{ name: 'budgets', query: { scope: s.scope, unit: s.unit } }" class="text-sm text-blue-600 hover:underline truncate mr-2" :title="s.scope">{{ s.scope }}</router-link>
+          <div v-if="overview.debt_scopes.length === 0" class="text-sm muted py-4 text-center">No outstanding debt</div>
+          <div
+            v-for="s in overview.debt_scopes"
+            :key="s.scope + s.unit"
+            class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
+          >
+            <router-link
+              :to="{ name: 'budgets', query: { scope: s.scope, unit: s.unit } }"
+              class="text-sm text-blue-600 hover:underline truncate mr-2 dark:text-blue-400"
+              :title="s.scope"
+            >{{ s.scope }}</router-link>
             <span class="muted-sm shrink-0">{{ s.debt.toLocaleString() }} / {{ s.overdraft_limit.toLocaleString() }}</span>
           </div>
         </div>
-      </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <div class="card p-4">
+        <!-- Expiring API keys (NEW) -->
+        <div class="card p-4" data-testid="expiring-keys-card">
           <div class="flex justify-between items-center mb-3">
-            <h2 class="text-sm font-medium text-gray-700">
-              Failing Webhooks
-              <span v-if="data.webhook_counts.with_failures > 0" class="ml-1 badge-danger">{{ data.webhook_counts.with_failures }}</span>
+            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200">
+              Expiring API Keys <span class="muted font-normal">(7d)</span>
+              <span v-if="expiringTotal > 0" class="ml-1 badge-warning">{{ expiringTotal }}</span>
             </h2>
-            <router-link to="/webhooks" class="text-xs text-blue-600 hover:underline">View all</router-link>
+            <router-link :to="{ name: 'api-keys' }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
-          <div v-if="data.failing_webhooks.length === 0" class="text-sm muted py-4 text-center">All webhooks healthy</div>
-          <div v-for="w in data.failing_webhooks" :key="w.subscription_id" class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0">
-            <router-link :to="{ name: 'webhook-detail', params: { id: w.subscription_id } }" class="text-sm text-blue-600 hover:underline truncate mr-2">{{ w.url }}</router-link>
-            <span class="text-xs text-red-600 shrink-0">{{ w.consecutive_failures }} failures</span>
+          <div v-if="expiringKeys.length === 0" class="text-sm muted py-4 text-center">No keys expiring in the next 7 days</div>
+          <div
+            v-for="e in expiringKeys"
+            :key="e.key.key_id"
+            class="flex justify-between items-center py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
+          >
+            <router-link
+              :to="{ name: 'api-keys', query: { key_id: e.key.key_id } }"
+              class="text-sm text-blue-600 hover:underline truncate mr-2 dark:text-blue-400"
+              :title="e.key.key_id"
+            >{{ e.key.name || e.key.key_id }}</router-link>
+            <span
+              class="text-xs shrink-0"
+              :class="e.daysUntilExpiry <= 2 ? 'text-red-600 dark:text-red-400' : 'text-yellow-700 dark:text-yellow-400'"
+            >{{ e.daysUntilExpiry }}d</span>
           </div>
         </div>
 
+        <!-- Frozen budgets -->
         <div class="card p-4">
           <div class="flex justify-between items-center mb-3">
-            <h2 class="text-sm font-medium text-gray-700">
+            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200">
               Frozen Budgets
-              <span v-if="data.budget_counts.frozen > 0" class="ml-1 badge-warning">{{ data.budget_counts.frozen }}</span>
+              <span v-if="overview.budget_counts.frozen > 0" class="ml-1 badge-warning">{{ overview.budget_counts.frozen }}</span>
             </h2>
-            <router-link :to="{ name: 'budgets', query: { status: 'FROZEN' } }" class="text-xs text-blue-600 hover:underline">View all</router-link>
+            <router-link :to="{ name: 'budgets', query: { status: 'FROZEN' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
-          <div v-if="data.budget_counts.frozen === 0" class="text-sm muted py-4 text-center">No frozen budgets</div>
-          <router-link v-else :to="{ name: 'budgets', query: { status: 'FROZEN' } }" class="text-sm text-blue-600 hover:underline block py-4 text-center">
-            View {{ data.budget_counts.frozen }} frozen budget{{ data.budget_counts.frozen !== 1 ? 's' : '' }}
+          <div v-if="overview.budget_counts.frozen === 0" class="text-sm muted py-4 text-center">No frozen budgets</div>
+          <router-link
+            v-else
+            :to="{ name: 'budgets', query: { status: 'FROZEN' } }"
+            class="text-sm text-blue-600 hover:underline block py-4 text-center dark:text-blue-400"
+          >
+            View {{ overview.budget_counts.frozen }} frozen budget{{ overview.budget_counts.frozen !== 1 ? 's' : '' }}
           </router-link>
         </div>
-      </div>
 
-      <!-- Recent events -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- Recent denials (runtime plane) -->
         <div class="card p-4">
           <div class="flex justify-between items-center mb-3">
-            <h2 class="text-sm font-medium text-gray-700">Recent Denials</h2>
-            <router-link :to="{ name: 'events', query: { type: 'reservation.denied' } }" class="text-xs text-blue-600 hover:underline">View all</router-link>
+            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200">
+              Recent Denials <span class="muted font-normal">(1h)</span>
+              <span v-if="overview.recent_denials.length > 0" class="ml-1 badge-danger">{{ overview.recent_denials.length }}</span>
+            </h2>
+            <router-link :to="{ name: 'events', query: { type: 'reservation.denied' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
-          <div v-if="data.recent_denials.length === 0" class="text-sm muted py-4 text-center">No denials in the last hour</div>
-          <div v-for="e in data.recent_denials" :key="e.event_id" class="py-2 border-b border-gray-100 last:border-0">
+          <div v-if="overview.recent_denials.length === 0" class="text-sm muted py-4 text-center">No denials in the last hour</div>
+          <div
+            v-for="e in overview.recent_denials"
+            :key="e.event_id"
+            class="py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
+          >
             <div class="flex justify-between">
-              <span class="text-sm text-gray-700 truncate">{{ e.scope || e.tenant_id }}</span>
+              <span class="text-sm text-gray-700 truncate dark:text-gray-200">{{ e.scope || e.tenant_id }}</span>
               <span class="muted-sm shrink-0 ml-2" :title="new Date(e.timestamp).toISOString()">{{ formatTime(e.timestamp) }}</span>
             </div>
             <p class="muted-sm">{{ e.data?.reason_code || 'denied' }}</p>
           </div>
         </div>
+      </div>
+
+      <!-- RECENT OPERATOR ACTIVITY (NEW — also closes I3) + recent expiries.
+           The audit feed is the "who did what in the last hour" read that
+           was missing from the old Overview; Recent Expiries still lives
+           here because reservation expiries are a runtime-plane signal,
+           not an operator-action signal. -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div class="card p-4" data-testid="recent-activity-card">
+          <div class="flex justify-between items-center mb-3">
+            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200">Recent Operator Activity</h2>
+            <router-link :to="{ name: 'audit' }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
+          </div>
+          <div v-if="recentAudit.length === 0" class="text-sm muted py-4 text-center">No operator changes in range</div>
+          <div
+            v-for="a in recentAudit"
+            :key="a.log_id"
+            class="py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
+          >
+            <div class="flex justify-between items-baseline gap-2">
+              <router-link
+                :to="auditLinkFor(a)"
+                class="text-sm text-blue-600 hover:underline truncate dark:text-blue-400"
+                :title="a.operation"
+              >{{ humanizeOperation(a.operation) }}</router-link>
+              <span class="muted-sm shrink-0" :title="new Date(a.timestamp).toISOString()">{{ formatTime(a.timestamp) }}</span>
+            </div>
+            <p class="muted-sm truncate">
+              <span v-if="a.tenant_id" class="font-mono">{{ a.tenant_id }}</span>
+              <span v-if="a.error_code" class="ml-1 text-red-600 dark:text-red-400">· {{ a.error_code }}</span>
+              <span v-else-if="a.status >= 400" class="ml-1 text-red-600 dark:text-red-400">· {{ a.status }}</span>
+            </p>
+          </div>
+        </div>
+
         <div class="card p-4">
           <div class="flex justify-between items-center mb-3">
-            <h2 class="text-sm font-medium text-gray-700">Recent Expiries</h2>
-            <router-link :to="{ name: 'events', query: { type: 'reservation.expired' } }" class="text-xs text-blue-600 hover:underline">View all</router-link>
+            <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200">Recent Reservation Expiries <span class="muted font-normal">(1h)</span></h2>
+            <router-link :to="{ name: 'events', query: { type: 'reservation.expired' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
-          <div v-if="data.recent_expiries.length === 0" class="text-sm muted py-4 text-center">No expiries in the last hour</div>
-          <div v-for="e in data.recent_expiries" :key="e.event_id" class="py-2 border-b border-gray-100 last:border-0">
+          <div v-if="overview.recent_expiries.length === 0" class="text-sm muted py-4 text-center">No expiries in the last hour</div>
+          <div
+            v-for="e in overview.recent_expiries"
+            :key="e.event_id"
+            class="py-2 border-b border-gray-100 last:border-0 dark:border-gray-700"
+          >
             <div class="flex justify-between">
-              <span class="text-sm text-gray-700 truncate">{{ e.scope || e.tenant_id }}</span>
+              <span class="text-sm text-gray-700 truncate dark:text-gray-200">{{ e.scope || e.tenant_id }}</span>
               <span class="muted-sm shrink-0 ml-2" :title="new Date(e.timestamp).toISOString()">{{ formatTime(e.timestamp) }}</span>
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- AT-A-GLANCE TOTALS — compact strip at the bottom. Demoted from
+           the top of the page because totals are context, not a signal.
+           Still clickable, smaller font, single row on desktop. -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3" data-testid="counter-strip">
+        <router-link to="/tenants" class="card p-3 hover:shadow-md transition-shadow block group">
+          <p class="text-xs muted group-hover:text-gray-700 dark:group-hover:text-gray-200">Tenants</p>
+          <p class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ overview.tenant_counts.total }}</p>
+          <p class="muted-sm">{{ overview.tenant_counts.active }} active<span v-if="overview.tenant_counts.suspended">, {{ overview.tenant_counts.suspended }} suspended</span></p>
+        </router-link>
+        <router-link to="/budgets" class="card p-3 hover:shadow-md transition-shadow block group">
+          <p class="text-xs muted group-hover:text-gray-700 dark:group-hover:text-gray-200">Budgets</p>
+          <p class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ overview.budget_counts.total }}</p>
+          <p class="muted-sm">{{ overview.budget_counts.active }} active</p>
+        </router-link>
+        <router-link to="/webhooks" class="card p-3 hover:shadow-md transition-shadow block group">
+          <p class="text-xs muted group-hover:text-gray-700 dark:group-hover:text-gray-200">Webhooks</p>
+          <p class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ overview.webhook_counts.total }}</p>
+          <p class="muted-sm">{{ overview.webhook_counts.active }} active</p>
+        </router-link>
+        <router-link to="/events" class="card p-3 hover:shadow-md transition-shadow block group">
+          <p class="text-xs muted group-hover:text-gray-700 dark:group-hover:text-gray-200">Events <span class="muted font-normal">({{ Math.round(overview.event_window_seconds / 60) }}m)</span></p>
+          <p class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ overview.event_counts.total_recent }}</p>
+          <p class="muted-sm">
+            <template v-if="Object.keys(overview.event_counts.by_category).length">
+              <span v-for="(count, cat) in overview.event_counts.by_category" :key="cat" class="mr-2">{{ cat }}: {{ count }}</span>
+            </template>
+            <span v-else>no events</span>
+          </p>
+        </router-link>
       </div>
     </template>
   </div>
