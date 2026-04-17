@@ -112,6 +112,28 @@
 
 **No version bump.** Pure typographic + micro-color polish with no wire-format or URL-contract change. Same-day consistency sweep following the card-shape + counter-strip-title work earlier in the day. AUDIT entry only.
 
+### 2026-04-17 — TenantLink: treat `<unauthenticated>` (and any angle-bracket sentinel) as non-drillable
+
+**Scope.** Dashboard-only, one-component fix that flows to every caller of `TenantLink` (AuditView, EventsView, BudgetsView, ApiKeysView, WebhooksView, WebhookDetailView, EventTimeline). No spec or server change.
+
+**Why.** `TenantLink.vue` already treated `__`-prefixed strings (`__system__`, `__root__`) as non-drillable italic text — clicking a platform-scoped placeholder would 404 against `/tenants/__system__`. But the admin server emits a second sentinel convention — angle-bracket-wrapped strings like `<unauthenticated>` — for audit rows where a pre-auth request 401'd before the key → tenant resolution ran. Those were slipping through the `isSystem` guard and rendering as live `router-link`s, so an operator clicking an `<unauthenticated>` entry on the Audit view landed on a broken `tenant-detail` route for a literal `<unauthenticated>` id.
+
+**What shipped.**
+
+- **`isSystem` extended** to match either underscore-wrapped (`__x`) OR angle-bracket-wrapped (`<x>`) sentinels. The angle-bracket form is a general convention (Python repr style, common in logs and placeholder values), so any future `<anonymous>` / `<system>` / similar is handled defensively without another change.
+- **Comment block on the sentinel list** so the next reader knows which server convention each form covers (`__x` = platform-scoped; `<x>` = unresolvable-at-the-time).
+- **New `src/__tests__/TenantLink.test.ts` spec file** (5 cases) pinning: real tenant_id drills down / `__system__` renders italic / `__root__` renders italic / `<unauthenticated>` renders italic / arbitrary `<anonymous>` also renders italic. Component had no dedicated test before.
+
+**Files.** `src/components/TenantLink.vue` (isSystem extended + comment). `src/__tests__/TenantLink.test.ts` (new).
+
+**Validation gates.**
+
+- `vue-tsc --noEmit` — clean.
+- `vitest run` — **561 / 561 passing** across 43 files (+5 from 556, all in the new TenantLink spec file).
+- `vite build` — clean, 943ms.
+
+**No version bump.** Bug-fix polish that prevents a broken drill-down from Audit/Events/etc. AUDIT entry only.
+
 ### 2026-04-17 — Overview Budgets At or Near Cap card: cap display at 5 rows + tighten row padding
 
 **Scope.** Dashboard-only, density polish on the just-widened at-or-near-cap card. No spec or server change.
