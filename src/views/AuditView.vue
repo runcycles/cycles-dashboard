@@ -314,101 +314,98 @@ function measureRow(el: Element | { $el?: Element } | null) {
 
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
-    <!-- Filter form: three semantic rows mirror the operator's mental
-         model when triaging an incident.
-           1. Header — Search (the wide wildcard) + From/To window +
-              quick-range chips. Time + freeform live together because
-              "what happened in the last hour" is the most common
-              entry point.
-           2. Identity — who/what (tenant, key, resource type, resource
-              id). 4-col grid since these fields read together as one
-              "who did this on what" tuple.
-           3. Outcome — operation, error_code, and a segmented Status
-              chip control. Status as chips (rather than a select)
-              because operators flip between bands constantly during
-              triage; one click vs. open-pick-close. Run Query lives
-              at the right edge of this row so the band you just
-              clicked is right next to the submit. -->
-    <form @submit.prevent="query" class="card p-4 mb-4 space-y-4">
+    <!-- Filter form: three rows on a shared 4-column grid so vertical
+         field edges line up across rows. Section labels (Identity /
+         Outcome) were dropped because they each consumed a row of
+         vertical space without doing more grouping than the row
+         spacing already does — and the field labels self-identify.
+         Quick-range chips live as a thin right-aligned strip under
+         the date pair so they don't break the From/To column edges.
+           Row 1: Search (cols 1-2) | From (col 3) | To (col 4)
+           Row 2: Tenant | Key | Resource Type | Resource ID
+           Row 3: Operation | Error Code | [Status chips … Run Query] -->
+    <form @submit.prevent="query" class="card p-4 mb-4 space-y-3">
       <!-- Row 1: header (Search + time window) -->
-      <div class="flex flex-wrap items-end gap-3">
-        <div class="flex-1 min-w-[240px]">
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-end">
+        <div class="md:col-span-2">
           <label for="audit-search" class="form-label">Search</label>
           <input id="audit-search" v-model="search" type="search" class="form-input" placeholder="resource_id, log_id, error_code, operation" aria-label="Free-text substring search across resource_id, log_id, error_code, and operation" />
         </div>
-        <div class="w-44">
+        <div>
           <label for="audit-from" class="form-label">From</label>
           <input id="audit-from" v-model="fromDate" type="datetime-local" class="form-input" />
         </div>
-        <div class="w-44">
+        <div>
           <label for="audit-to" class="form-label">To</label>
           <input id="audit-to" v-model="toDate" type="datetime-local" class="form-input" />
         </div>
-        <div class="flex items-center gap-1 pb-1.5">
-          <span class="muted-sm mr-1">Quick:</span>
-          <button v-for="h in [1, 6, 24, 168]" :key="h" type="button" @click="setTimeRange(h)"
-            class="muted-sm hover:text-gray-700 dark:hover:text-gray-200 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer">
-            {{ h < 24 ? `${h}h` : `${h / 24}d` }}
-          </button>
-        </div>
+      </div>
+
+      <!-- Quick range: thin right-aligned strip under the date pair.
+           Lives outside the 4-col grid so the From/To column edges
+           stay aligned with Resource Type / Resource ID below. -->
+      <div class="flex justify-end items-center gap-1 -mt-1 mb-1">
+        <span class="muted-xs mr-1">Quick:</span>
+        <button v-for="h in [1, 6, 24, 168]" :key="h" type="button" @click="setTimeRange(h)"
+          class="muted-xs hover:text-gray-700 dark:hover:text-gray-200 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer">
+          {{ h < 24 ? `${h}h` : `${h / 24}d` }}
+        </button>
       </div>
 
       <!-- Row 2: Identity (who/what) -->
-      <div>
-        <div class="muted-xs uppercase tracking-wider mb-2">Identity</div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-          <div>
-            <label for="audit-tenant" class="form-label">Tenant ID</label>
-            <input id="audit-tenant" v-model="tenantId" class="form-input" placeholder="acme" />
-          </div>
-          <div>
-            <label for="audit-key" class="form-label">Key ID</label>
-            <input id="audit-key" v-model="keyId" class="form-input" placeholder="key_..." />
-          </div>
-          <div>
-            <label for="audit-resource" class="form-label">Resource Type</label>
-            <select id="audit-resource" v-model="resourceType" class="form-select w-full">
-              <option value="">All</option>
-              <option>tenant</option><option>budget</option><option>api_key</option>
-              <option>policy</option><option>webhook</option><option>config</option>
-            </select>
-          </div>
-          <div>
-            <label for="audit-resource-id" class="form-label">Resource ID</label>
-            <input id="audit-resource-id" v-model="resourceId" class="form-input" placeholder="key_abc123..." />
-          </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+        <div>
+          <label for="audit-tenant" class="form-label">Tenant ID</label>
+          <input id="audit-tenant" v-model="tenantId" class="form-input" placeholder="acme" />
+        </div>
+        <div>
+          <label for="audit-key" class="form-label">Key ID</label>
+          <input id="audit-key" v-model="keyId" class="form-input" placeholder="key_..." />
+        </div>
+        <div>
+          <label for="audit-resource" class="form-label">Resource Type</label>
+          <select id="audit-resource" v-model="resourceType" class="form-select w-full">
+            <option value="">All</option>
+            <option>tenant</option><option>budget</option><option>api_key</option>
+            <option>policy</option><option>webhook</option><option>config</option>
+          </select>
+        </div>
+        <div>
+          <label for="audit-resource-id" class="form-label">Resource ID</label>
+          <input id="audit-resource-id" v-model="resourceId" class="form-input" placeholder="key_abc123..." />
         </div>
       </div>
 
-      <!-- Row 3: Outcome (what happened) + submit -->
-      <div>
-        <div class="muted-xs uppercase tracking-wider mb-2">Outcome</div>
-        <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-          <div class="md:col-span-3">
-            <label for="audit-operation" class="form-label">Operation</label>
-            <input id="audit-operation" v-model="operation" class="form-input" placeholder="createBudget" />
-          </div>
-          <div class="md:col-span-3">
-            <label for="audit-error-code" class="form-label">Error Code</label>
-            <input
-              id="audit-error-code"
-              v-model="errorCode"
-              list="audit-error-code-options"
-              class="form-input"
-              placeholder="BUDGET_EXCEEDED"
-              aria-label="Filter by error_code. Comma-separated for IN-list (e.g. BUDGET_EXCEEDED, POLICY_VIOLATION)."
-            />
-            <datalist id="audit-error-code-options">
-              <option v-for="c in ERROR_CODES" :key="c" :value="c" />
-            </datalist>
-          </div>
-          <div class="md:col-span-4">
+      <!-- Row 3: Outcome (what happened) + submit. Status chips +
+           Run Query share cols 3-4 (right half) — Status sits on the
+           Resource Type column edge, Run Query right-aligns to the
+           Resource ID column edge via ml-auto. -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-end">
+        <div>
+          <label for="audit-operation" class="form-label">Operation</label>
+          <input id="audit-operation" v-model="operation" class="form-input" placeholder="createBudget" />
+        </div>
+        <div>
+          <label for="audit-error-code" class="form-label">Error Code</label>
+          <input
+            id="audit-error-code"
+            v-model="errorCode"
+            list="audit-error-code-options"
+            class="form-input"
+            placeholder="BUDGET_EXCEEDED"
+            aria-label="Filter by error_code. Comma-separated for IN-list (e.g. BUDGET_EXCEEDED, POLICY_VIOLATION)."
+          />
+          <datalist id="audit-error-code-options">
+            <option v-for="c in ERROR_CODES" :key="c" :value="c" />
+          </datalist>
+        </div>
+        <div class="sm:col-span-2 flex flex-wrap items-end gap-3">
+          <div class="min-w-0">
             <span class="form-label">Status</span>
             <!-- Segmented chip control. role=radiogroup + role=radio +
                  aria-checked make this a screen-reader-equivalent of
                  the prior <select>. data-band stays stable so tests
-                 (and any downstream e2e) can target by semantic value
-                 rather than label, which we may shorten further. -->
+                 target by semantic value rather than label. -->
             <div
               id="audit-status"
               role="radiogroup"
@@ -430,11 +427,9 @@ function measureRow(el: Element | { $el?: Element } | null) {
               >{{ b.label }}</button>
             </div>
           </div>
-          <div class="md:col-span-2 flex md:justify-end">
-            <button type="submit" :disabled="loading" class="bg-gray-900 text-white px-4 py-1.5 rounded text-sm hover:bg-gray-800 disabled:opacity-50 cursor-pointer w-full md:w-auto">
-              {{ loading ? 'Querying...' : 'Run Query' }}
-            </button>
-          </div>
+          <button type="submit" :disabled="loading" class="ml-auto bg-gray-900 text-white px-4 py-1.5 rounded text-sm hover:bg-gray-800 disabled:opacity-50 cursor-pointer">
+            {{ loading ? 'Querying...' : 'Run Query' }}
+          </button>
         </div>
       </div>
     </form>
