@@ -67,6 +67,23 @@ const webhookPausedCount = computed<number>(() => {
   return Math.max(0, wc.total - wc.active - wc.disabled)
 })
 
+// Denial breakdown by reason_code (v0.1.25.8+ server). The per-row
+// display is capped at 10 but the breakdown aggregates the full window,
+// so it's the honest "why are things getting denied" read when the
+// denial volume exceeds the row cap. Sorted desc by count so the
+// dominant reason leads. Clickable deep-link to events filtered by
+// reason is deferred — `listEvents` server-side search matches only
+// correlation_id + scope, not data.reason_code; would require a spec
+// addition to the search field set.
+interface DenialReason { code: string; count: number }
+const denialReasons = computed<DenialReason[]>(() => {
+  const map = overview.value?.recent_denials_by_reason
+  if (!map) return []
+  return Object.entries(map)
+    .map(([code, count]) => ({ code, count }))
+    .sort((a, b) => b.count - a.count)
+})
+
 // Headline: how many alert axes are currently firing. Drives the
 // top-of-page banner so the operator's first glance answers "is
 // anything on fire?" in < 1 second.
@@ -424,6 +441,22 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
             <router-link :to="{ name: 'events', query: { type: 'reservation.denied' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
           <div v-if="overview.recent_denials.length === 0" class="text-sm muted py-4 text-center">No denials in the last hour</div>
+          <!-- Reason breakdown across the full window (v0.1.25.8+ server).
+               Shown when populated — server omits the field when no
+               denial has a reason_code set, so absence is meaningful
+               (denials exist but upstream hasn't filled reason_code). -->
+          <div
+            v-if="denialReasons.length > 0"
+            data-testid="denial-reasons"
+            class="flex flex-wrap gap-1.5 pb-2 mb-2 border-b border-gray-100 dark:border-gray-700"
+          >
+            <span
+              v-for="r in denialReasons"
+              :key="r.code"
+              class="chip chip-danger"
+              :title="`${r.count} denial${r.count === 1 ? '' : 's'} with reason ${r.code} in the last ${Math.round((overview.event_window_seconds || 3600) / 60)}m`"
+            >{{ r.code }} <span class="ml-1 tabular-nums">×{{ r.count }}</span></span>
+          </div>
           <div
             v-for="e in overview.recent_denials"
             :key="e.event_id"

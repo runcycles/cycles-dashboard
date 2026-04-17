@@ -76,6 +76,11 @@ export interface AdminOverviewResponse {
   event_counts: EventCounts
   recent_denials: Event[]
   recent_expiries: Event[]
+  // v0.1.25.8+ server computes a denial breakdown by reason_code across
+  // the event window. Optional because the field is only populated when
+  // the denial sample has at least one row with reason_code set — the
+  // admin server omits the key entirely on an empty/null result.
+  recent_denials_by_reason?: Record<string, number>
 }
 
 // Budget types

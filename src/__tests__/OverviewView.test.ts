@@ -257,6 +257,39 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
     })
   })
 
+  // v0.1.25.8+ server populates recent_denials_by_reason. Admin server
+  // omits the field entirely when the denial sample has no reason_code,
+  // so absence is meaningful — the breakdown shouldn't render empty UI.
+  describe('Recent Denials reason breakdown (v0.1.25.8+)', () => {
+    it('renders reason pills sorted desc by count when field is populated', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        recent_denials_by_reason: { BUDGET_EXCEEDED: 12, ACTION_QUOTA_EXCEEDED: 7, POLICY_BLOCKED: 3 },
+      }))
+      const w = await mountOverview()
+      const pills = w.find('[data-testid="denial-reasons"]')
+      expect(pills.exists()).toBe(true)
+      const html = pills.html()
+      // Order: BUDGET_EXCEEDED (12) → ACTION_QUOTA_EXCEEDED (7) → POLICY_BLOCKED (3)
+      expect(html.indexOf('BUDGET_EXCEEDED')).toBeLessThan(html.indexOf('ACTION_QUOTA_EXCEEDED'))
+      expect(html.indexOf('ACTION_QUOTA_EXCEEDED')).toBeLessThan(html.indexOf('POLICY_BLOCKED'))
+      expect(pills.text()).toContain('×12')
+      expect(pills.text()).toContain('×7')
+      expect(pills.text()).toContain('×3')
+    })
+
+    it('does not render pills when field is absent (pre-v0.1.25.8 server)', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview()) // no recent_denials_by_reason key
+      const w = await mountOverview()
+      expect(w.find('[data-testid="denial-reasons"]').exists()).toBe(false)
+    })
+
+    it('does not render pills when field is an empty object', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({ recent_denials_by_reason: {} }))
+      const w = await mountOverview()
+      expect(w.find('[data-testid="denial-reasons"]').exists()).toBe(false)
+    })
+  })
+
   describe('counter strip (quick-jump nav, top of page)', () => {
     it('renders the 4-counter strip with data-testid hook', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview())
