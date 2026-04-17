@@ -346,9 +346,11 @@ const {
   exporting,
   exportFetched,
   exportError,
+  exportCancellable,
   maxRows: EXPORT_MAX_ROWS,
   confirmExport,
   cancelExport,
+  cancelRunningExport,
   executeExport,
 } = useListExport<WebhookSubscription>({
   itemNoun: 'subscription',
@@ -690,7 +692,9 @@ const gridTemplate = computed(() =>
     <ExportProgressOverlay
       :open="exporting"
       :fetched="exportFetched"
+      :cancellable="exportCancellable"
       item-noun-plural="webhooks"
+      @cancel="cancelRunningExport"
     />
   </div>
 </template>

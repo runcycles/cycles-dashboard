@@ -434,9 +434,11 @@ const {
   exporting,
   exportFetched,
   exportError,
+  exportCancellable,
   maxRows: EXPORT_MAX_ROWS,
   confirmExport,
   cancelExport,
+  cancelRunningExport,
   executeExport,
 } = useListExport<BudgetLedger>({
   itemNoun: 'budget',
@@ -826,7 +828,9 @@ function rowTenantId(b: BudgetLedger): string {
     <ExportProgressOverlay
       :open="exporting"
       :fetched="exportFetched"
+      :cancellable="exportCancellable"
       item-noun-plural="budgets"
+      @cancel="cancelRunningExport"
     />
   </div>
 </template>

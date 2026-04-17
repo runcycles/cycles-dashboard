@@ -166,9 +166,11 @@ const {
   exporting,
   exportFetched,
   exportError,
+  exportCancellable,
   maxRows: EXPORT_MAX_ROWS,
   confirmExport,
   cancelExport,
+  cancelRunningExport,
   executeExport,
 } = useListExport<ReservationSummary>({
   itemNoun: 'reservation',
@@ -533,7 +535,9 @@ const gridTemplate = computed(() =>
     <ExportProgressOverlay
       :open="exporting"
       :fetched="exportFetched"
+      :cancellable="exportCancellable"
       item-noun-plural="reservations"
+      @cancel="cancelRunningExport"
     />
   </div>
 </template>

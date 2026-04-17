@@ -83,9 +83,11 @@ const {
   exporting,
   exportFetched,
   exportError,
+  exportCancellable,
   maxRows: EXPORT_MAX_ROWS,
   confirmExport,
   cancelExport,
+  cancelRunningExport,
   executeExport,
 } = useListExport<AuditLogEntry>({
   itemNoun: 'log entry',
@@ -236,15 +238,15 @@ function measureRow(el: Element | { $el?: Element } | null) {
       <div class="flex gap-3 flex-wrap items-end">
         <div>
           <label for="audit-tenant" class="form-label">Tenant ID</label>
-          <input id="audit-tenant" v-model="tenantId" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-32" placeholder="acme" />
+          <input id="audit-tenant" v-model="tenantId" class="form-input w-32" placeholder="acme" />
         </div>
         <div>
           <label for="audit-key" class="form-label">Key ID</label>
-          <input id="audit-key" v-model="keyId" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-32" placeholder="key_..." />
+          <input id="audit-key" v-model="keyId" class="form-input w-32" placeholder="key_..." />
         </div>
         <div>
           <label for="audit-operation" class="form-label">Operation</label>
-          <input id="audit-operation" v-model="operation" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-32" placeholder="createBudget" />
+          <input id="audit-operation" v-model="operation" class="form-input w-32" placeholder="createBudget" />
         </div>
         <div>
           <label for="audit-resource" class="form-label">Resource Type</label>
@@ -256,24 +258,24 @@ function measureRow(el: Element | { $el?: Element } | null) {
         </div>
         <div>
           <label for="audit-resource-id" class="form-label">Resource ID</label>
-          <input id="audit-resource-id" v-model="resourceId" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-36" placeholder="key_abc123..." />
+          <input id="audit-resource-id" v-model="resourceId" class="form-input w-36" placeholder="key_abc123..." />
         </div>
         <div>
           <label for="audit-from" class="form-label">From</label>
-          <input id="audit-from" v-model="fromDate" type="datetime-local" class="border border-gray-300 rounded px-2 py-1.5 text-sm" />
+          <input id="audit-from" v-model="fromDate" type="datetime-local" class="form-input" />
         </div>
         <div>
           <label for="audit-to" class="form-label">To</label>
-          <input id="audit-to" v-model="toDate" type="datetime-local" class="border border-gray-300 rounded px-2 py-1.5 text-sm" />
+          <input id="audit-to" v-model="toDate" type="datetime-local" class="form-input" />
         </div>
         <button type="submit" :disabled="loading" class="bg-gray-900 text-white px-4 py-1.5 rounded text-sm hover:bg-gray-800 disabled:opacity-50 cursor-pointer">
           {{ loading ? 'Querying...' : 'Run Query' }}
         </button>
       </div>
-      <div class="flex gap-2 mt-3 pt-3 border-t border-gray-100">
+      <div class="flex gap-2 mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
         <span class="muted-sm py-1">Quick range:</span>
         <button v-for="h in [1, 6, 24, 168]" :key="h" type="button" @click="setTimeRange(h)"
-          class="muted-sm hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 cursor-pointer">
+          class="muted-sm hover:text-gray-700 dark:hover:text-gray-200 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer">
           {{ h < 24 ? `${h}h` : `${h / 24}d` }}
         </button>
       </div>
@@ -283,11 +285,11 @@ function measureRow(el: Element | { $el?: Element } | null) {
          PageHeader's V6 count line; keeping them inline was a
          duplicate display. -->
     <div v-if="!loading && entries.length > 0" class="flex justify-end gap-2 mb-2">
-      <button @click="confirmExport('csv')" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100">
+      <button @click="confirmExport('csv')" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 dark:hover:text-gray-200 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800">
         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
         Export CSV
       </button>
-      <button @click="confirmExport('json')" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100">
+      <button @click="confirmExport('json')" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 dark:hover:text-gray-200 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800">
         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
         Export JSON
       </button>
@@ -363,7 +365,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
               <div role="cell" class="table-cell muted whitespace-nowrap text-xs" :title="new Date(sortedEntries[v.index].timestamp).toISOString()">{{ formatDateTime(sortedEntries[v.index].timestamp) }}</div>
               <div role="cell" class="table-cell font-mono text-xs truncate" :title="sortedEntries[v.index].operation">{{ sortedEntries[v.index].operation }}</div>
               <div role="cell" class="table-cell text-xs truncate">
-                <span v-if="sortedEntries[v.index].resource_type" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{{ sortedEntries[v.index].resource_type }}</span>
+                <span v-if="sortedEntries[v.index].resource_type" class="bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 px-1.5 py-0.5 rounded">{{ sortedEntries[v.index].resource_type }}</span>
                 <span v-if="sortedEntries[v.index].resource_id" class="ml-1 font-mono muted" :title="sortedEntries[v.index].resource_id">{{ sortedEntries[v.index].resource_id }}</span>
                 <span v-if="!sortedEntries[v.index].resource_type && !sortedEntries[v.index].resource_id" class="muted">-</span>
               </div>
@@ -385,7 +387,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
                  in the `expanded` set. Multi-row open so reviewers can
                  compare entries (e.g. before/after of a permission
                  change). Adds ~160-280px depending on metadata. -->
-            <div v-if="expanded.has(sortedEntries[v.index].log_id)" class="bg-gray-50/70 px-4 py-3 border-t border-gray-100">
+            <div v-if="expanded.has(sortedEntries[v.index].log_id)" class="bg-gray-50/70 dark:bg-gray-800/40 px-4 py-3 border-t border-gray-100 dark:border-gray-700">
               <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3">
                 <div v-if="sortedEntries[v.index].request_id"><span class="muted">Request ID:</span> <span class="font-mono">{{ sortedEntries[v.index].request_id }}</span></div>
                 <div v-if="sortedEntries[v.index].source_ip"><span class="muted">Source IP:</span> <span class="font-mono">{{ sortedEntries[v.index].source_ip }}</span></div>
@@ -434,7 +436,9 @@ function measureRow(el: Element | { $el?: Element } | null) {
     <ExportProgressOverlay
       :open="exporting"
       :fetched="exportFetched"
+      :cancellable="exportCancellable"
       item-noun-plural="log entries"
+      @cancel="cancelRunningExport"
     />
   </div>
 </template>

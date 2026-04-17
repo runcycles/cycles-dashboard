@@ -295,9 +295,11 @@ const {
   exporting,
   exportFetched,
   exportError,
+  exportCancellable,
   maxRows: EXPORT_MAX_ROWS,
   confirmExport,
   cancelExport,
+  cancelRunningExport,
   executeExport,
 } = useListExport<KeyWithTenant>({
   itemNoun: 'api key',
@@ -706,7 +708,9 @@ function closePermsViewer() { viewingPermsFor.value = null }
     <ExportProgressOverlay
       :open="exporting"
       :fetched="exportFetched"
+      :cancellable="exportCancellable"
       item-noun-plural="API keys"
+      @cancel="cancelRunningExport"
     />
   </div>
 </template>
