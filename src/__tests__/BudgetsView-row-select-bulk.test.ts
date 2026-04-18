@@ -323,12 +323,11 @@ describe('BudgetsView — row-select bulk (v0.1.25.36)', () => {
     expect(listBudgetsMock.mock.calls.length).toBeGreaterThan(listCallsBefore)
   })
 
-  it('surfaces a failed-count summary when some per-row freezes fail', async () => {
+  it('opens per-row result dialog when some per-row freezes fail', async () => {
     const rows = [ledger('a'), ledger('b'), ledger('c')]
     listBudgetsMock.mockResolvedValue({ ledgers: rows, has_more: false })
     // First + third succeed, middle fails.
     freezeBudgetMock.mockResolvedValueOnce({}).mockRejectedValueOnce(new Error('boom')).mockResolvedValueOnce({})
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     const { default: BudgetsView } = await import('../views/BudgetsView.vue')
     const w = mount(BudgetsView, { global: stdMounts() })
@@ -342,10 +341,11 @@ describe('BudgetsView — row-select bulk (v0.1.25.36)', () => {
     await flushPromises()
 
     expect(freezeBudgetMock).toHaveBeenCalledTimes(3)
-    // Per-row failure must land in the console for post-mortem triage.
-    expect(warn).toHaveBeenCalled()
-    const warnMsg = warn.mock.calls.map(c => String(c[0])).join(' ')
-    expect(warnMsg).toMatch(/bulk freeze failed on tenant:acme\/b/)
-    warn.mockRestore()
+    // v0.1.25.37 (slice B): per-row failures open the BulkActionResultDialog
+    // rather than logging to console. The dialog renders the failed row's
+    // id + scope label so operators can triage in-app.
+    const dialog = w.find('[role="dialog"][aria-label="Freeze budgets — results"]')
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.text()).toContain('tenant:acme/b')
   })
 })

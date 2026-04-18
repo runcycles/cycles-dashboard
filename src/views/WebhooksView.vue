@@ -8,6 +8,8 @@ import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useListExport } from '../composables/useListExport'
 import { listWebhooks, listTenants, createWebhook, updateWebhook, getWebhookSecurityConfig, updateWebhookSecurityConfig, bulkActionWebhooks, ApiError } from '../api/client'
 import { rateLimitedBatch } from '../utils/rateLimitedBatch'
+import { synthesizeRowSelectBulkResult } from '../utils/rowSelectBulkResult'
+import type { RowSelectBulkResponse } from '../utils/rowSelectBulkResult'
 import { generateIdempotencyKey } from '../utils/idempotencyKey'
 import type { WebhookBulkAction, WebhookBulkFilter } from '../types'
 import { useAuthStore } from '../stores/auth'
@@ -210,25 +212,27 @@ async function executeBulk() {
   bulkProgress.value = { done: 0, total: targets.length, failed: 0 }
   bulkRunning.value = true
   bulkAbort = new AbortController()
+  // Capture settled-successful indices for synthesizeRowSelectBulkResult —
+  // rateLimitedBatch only tracks failures natively.
+  const settledSucceeded: number[] = []
   const result = await rateLimitedBatch(
     targets,
-    async (w) => { await updateWebhook(w.subscription_id, { status: action }) },
+    async (w, i) => {
+      await updateWebhook(w.subscription_id, { status: action })
+      settledSucceeded.push(i)
+    },
     {
       signal: bulkAbort.signal,
       onProgress: (done, total, failed) => { bulkProgress.value = { done, total, failed } },
     },
   )
-  for (const err of result.errors) {
-    const w = targets[err.index]
-    console.warn(`bulk ${action} failed on ${w.subscription_id}:`, toMessage(err.error))
-  }
   bulkRunning.value = false
   bulkAbort = null
   const verb = action === 'PAUSED' ? 'paused' : 'enabled'
   const succeeded = result.done - result.failed
   const summary = `${succeeded}/${bulkProgress.value.total} webhooks ${verb}`
   if (result.failed > 0) {
-    toast.error(`${summary}, ${result.failed} failed — check console for details`)
+    toast.error(`${summary}, ${result.failed} failed — see details`)
   } else if (result.cancelled) {
     toast.success(`${summary} (cancelled by user)`)
   } else {
@@ -236,6 +240,17 @@ async function executeBulk() {
   }
   bulkAction.value = null
   selected.value = new Set()
+  if (result.failed > 0 || result.cancelled) {
+    bulkResult.value = {
+      actionVerb: action === 'PAUSED' ? 'Pause' : 'Resume',
+      response: synthesizeRowSelectBulkResult({
+        targets,
+        result,
+        succeededIndices: settledSucceeded,
+        idOf: w => w.subscription_id,
+      }),
+    }
+  }
   await refresh()
 }
 function cancelBulk() {
@@ -271,7 +286,7 @@ const filterBulkSubmitError = ref('')
 // Per-row result dialog (BulkActionResultDialog). Opens with the server
 // response whenever failed[] or skipped[] is non-empty — surfaces per-row
 // error_code + message for triage without tailing the browser console.
-const bulkResult = ref<{ actionVerb: string; response: WebhookBulkActionResponse } | null>(null)
+const bulkResult = ref<{ actionVerb: string; response: WebhookBulkActionResponse | RowSelectBulkResponse } | null>(null)
 
 // O1: cursor-walk preview before commit. Walks listWebhooks with the
 // same `search` server-side filter as the bulk action, then filters

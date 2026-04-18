@@ -8,6 +8,8 @@
 
 Operational admin dashboard for the [Cycles Budget Governance System](https://github.com/runcycles/cycles-server-admin), aligned with [governance spec v0.1.25.26](https://github.com/runcycles/cycles-protocol/blob/main/cycles-governance-admin-v0.1.25.yaml).
 
+**Documentation:** [CHANGELOG](CHANGELOG.md) (downstream release notes) · [OPERATIONS](OPERATIONS.md) (production runbook) · [AUDIT](AUDIT.md) (engineering narrative).
+
 <p align="center">
   <img src="docs/runcycles-demo.gif" alt="Dashboard walkthrough — tenants, budgets, reservations, webhooks" width="800"/><br/>
   <em>End-to-end walkthrough of the main operator flows</em>
@@ -271,7 +273,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.36
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.37
     restart: unless-stopped
     # No exposed ports — only accessible through Caddy
     depends_on:
@@ -281,7 +283,7 @@ services:
       - cycles
 
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.28
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.30
     restart: unless-stopped
     environment:
       REDIS_HOST: redis

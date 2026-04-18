@@ -20,6 +20,9 @@ import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 import { rateLimitedBatch } from '../utils/rateLimitedBatch'
+import { synthesizeRowSelectBulkResult } from '../utils/rowSelectBulkResult'
+import type { RowSelectBulkResponse } from '../utils/rowSelectBulkResult'
+import BulkActionResultDialog from '../components/BulkActionResultDialog.vue'
 
 const toast = useToast()
 
@@ -514,6 +517,17 @@ const activeBudgets = computed(() => budgets.value.filter(b => b.status === 'ACT
 // retrying past rate limits rather than silently failing half the batch.
 let emergencyFreezeAbort: AbortController | null = null
 
+// Per-row result dialog — opens after emergency freeze if any budget
+// failed or was skipped (cancelled). Replaces pre-fix console.warn so
+// operators can triage which budgets didn't freeze and why without
+// tailing the browser console.
+const emergencyFreezeResult = ref<{
+  actionVerb: string
+  response: RowSelectBulkResponse
+  labelById: Record<string, string>
+  tenantId: string
+} | null>(null)
+
 function openEmergencyFreeze() { pendingEmergencyFreeze.value = true }
 async function executeEmergencyFreeze() {
   if (emergencyFreezeRunning.value) return
@@ -525,26 +539,41 @@ async function executeEmergencyFreeze() {
   // [EMERGENCY_FREEZE] tag lets ops surface every emergency-freeze
   // action with a single regex against the audit log. Free-text
   // suffix preserves human-readable context.
+  const settledSucceeded: number[] = []
   const result = await rateLimitedBatch(
     targets,
-    async (b) => { await freezeBudget(b.scope, b.unit, '[EMERGENCY_FREEZE] Tenant lockdown via admin dashboard') },
+    async (b, i) => {
+      await freezeBudget(b.scope, b.unit, '[EMERGENCY_FREEZE] Tenant lockdown via admin dashboard')
+      settledSucceeded.push(i)
+    },
     {
       signal: emergencyFreezeAbort.signal,
       onProgress: (done, total, failed) => { emergencyFreezeProgress.value = { done, total, failed } },
     },
   )
-  for (const err of result.errors) {
-    const b = targets[err.index]
-    console.warn(`emergency freeze failed on ${b.scope}:${b.unit}:`, toMessage(err.error))
-  }
   emergencyFreezeRunning.value = false
   emergencyFreezeAbort = null
   const succeeded = result.done - result.failed
   const summary = `${succeeded}/${emergencyFreezeProgress.value.total} budgets frozen`
-  if (result.failed > 0) toast.error(`${summary}, ${result.failed} failed — check console`)
+  if (result.failed > 0) toast.error(`${summary}, ${result.failed} failed — see details`)
   else if (result.cancelled) toast.success(`${summary} (cancelled by user)`)
   else toast.success(summary)
   pendingEmergencyFreeze.value = false
+  if (result.failed > 0 || result.cancelled) {
+    const labels: Record<string, string> = {}
+    for (const b of targets) labels[b.ledger_id] = `${b.scope} (${b.unit})`
+    emergencyFreezeResult.value = {
+      actionVerb: 'Emergency Freeze',
+      response: synthesizeRowSelectBulkResult({
+        targets,
+        result,
+        succeededIndices: settledSucceeded,
+        idOf: b => b.ledger_id,
+      }),
+      labelById: labels,
+      tenantId: id,
+    }
+  }
   await refresh()
 }
 function cancelEmergencyFreeze() {
@@ -925,6 +954,19 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
       :loading="emergencyFreezeRunning"
       @confirm="executeEmergencyFreeze"
       @cancel="cancelEmergencyFreeze"
+    />
+
+    <!-- v0.1.25.37 (slice B): per-row result dialog for Emergency Freeze.
+         Surfaces which budgets didn't freeze + why (error_code / message)
+         so ops can retry just the failed tail instead of tailing devtools. -->
+    <BulkActionResultDialog
+      v-if="emergencyFreezeResult"
+      :action-verb="emergencyFreezeResult.actionVerb"
+      item-noun-plural="budgets"
+      :response="emergencyFreezeResult.response"
+      :label-by-id="emergencyFreezeResult.labelById"
+      :tenant-id="emergencyFreezeResult.tenantId"
+      @close="emergencyFreezeResult = null"
     />
 
     <!-- v0.1.25.20: Create Budget (admin-on-behalf-of) -->

@@ -8,6 +8,8 @@ import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useListExport } from '../composables/useListExport'
 import { listTenants, createTenant, updateTenantStatus, bulkActionTenants, ApiError } from '../api/client'
 import { rateLimitedBatch } from '../utils/rateLimitedBatch'
+import { synthesizeRowSelectBulkResult } from '../utils/rowSelectBulkResult'
+import type { RowSelectBulkResponse } from '../utils/rowSelectBulkResult'
 import { generateIdempotencyKey } from '../utils/idempotencyKey'
 import type { TenantBulkAction, TenantBulkFilter } from '../types'
 import { useAuthStore } from '../stores/auth'
@@ -223,24 +225,27 @@ async function executeBulk() {
   bulkProgress.value = { done: 0, total: targets.length, failed: 0 }
   bulkRunning.value = true
   bulkAbort = new AbortController()
+  // Capture settled-successful indices so synthesizeRowSelectBulkResult
+  // can enumerate succeeded + skipped (unreached on cancel) rows for the
+  // result dialog — rateLimitedBatch only tracks failures natively.
+  const settledSucceeded: number[] = []
   const result = await rateLimitedBatch(
     targets,
-    async (t) => { await updateTenantStatus(t.tenant_id, action) },
+    async (t, i) => {
+      await updateTenantStatus(t.tenant_id, action)
+      settledSucceeded.push(i)
+    },
     {
       signal: bulkAbort.signal,
       onProgress: (done, total, failed) => { bulkProgress.value = { done, total, failed } },
     },
   )
-  for (const err of result.errors) {
-    const t = targets[err.index]
-    console.warn(`bulk ${action} failed on ${t.tenant_id}:`, toMessage(err.error))
-  }
   bulkRunning.value = false
   bulkAbort = null
   const succeeded = result.done - result.failed
   const summary = `${succeeded}/${bulkProgress.value.total} tenants ${action === 'SUSPENDED' ? 'suspended' : 'reactivated'}`
   if (result.failed > 0) {
-    toast.error(`${summary}, ${result.failed} failed — check console for details`)
+    toast.error(`${summary}, ${result.failed} failed — see details`)
   } else if (result.cancelled) {
     toast.success(`${summary} (cancelled by user)`)
   } else {
@@ -248,6 +253,20 @@ async function executeBulk() {
   }
   bulkAction.value = null
   selected.value = new Set()
+  // Open the per-row dialog whenever there's anything to triage — failures
+  // or unreached-on-cancel rows. Replaces the pre-fix console.warn loop
+  // so operators can see which tenants failed and why without tailing devtools.
+  if (result.failed > 0 || result.cancelled) {
+    bulkResult.value = {
+      actionVerb: action === 'SUSPENDED' ? 'Suspend' : 'Reactivate',
+      response: synthesizeRowSelectBulkResult({
+        targets,
+        result,
+        succeededIndices: settledSucceeded,
+        idOf: t => t.tenant_id,
+      }),
+    }
+  }
   await refresh()
 }
 function cancelBulk() {
@@ -285,7 +304,7 @@ const filterBulkSubmitError = ref('')
 // Per-row result dialog (BulkActionResultDialog). Opens with the server
 // response whenever failed[] or skipped[] is non-empty, so the operator
 // can triage per-row error_code + message beyond the toast summary.
-const bulkResult = ref<{ actionVerb: string; response: TenantBulkActionResponse } | null>(null)
+const bulkResult = ref<{ actionVerb: string; response: TenantBulkActionResponse | RowSelectBulkResponse } | null>(null)
 
 // O1: cursor-walk preview before commit. Walks listTenants with the
 // same `search` server-side filter as the bulk action, then filters

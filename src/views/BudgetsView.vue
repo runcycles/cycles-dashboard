@@ -29,6 +29,8 @@ import { useBulkActionPreview } from '../composables/useBulkActionPreview'
 import { formatBulkRequestError } from '../utils/errorCodeMessages'
 import { generateIdempotencyKey } from '../utils/idempotencyKey'
 import { rateLimitedBatch } from '../utils/rateLimitedBatch'
+import { synthesizeRowSelectBulkResult } from '../utils/rowSelectBulkResult'
+import type { RowSelectBulkResponse } from '../utils/rowSelectBulkResult'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 
@@ -522,10 +524,13 @@ const filterBulkSubmitError = ref('')
 // is non-empty.
 const bulkResult = ref<{
   actionVerb: string
-  response: BudgetBulkActionResponse
+  response: BudgetBulkActionResponse | RowSelectBulkResponse
   labelById: Record<string, string>
   // Tenant the bulk ran on — forwarded to BulkActionResultDialog so
   // each enumerated row can deep-link "View budget" / "View audit".
+  // Empty string when the row-select path spans multiple tenants
+  // (cross-tenant listings like over_limit / has_debt); the dialog
+  // suppresses triage links when tenantId is falsy.
   tenantId: string
 } | null>(null)
 
@@ -598,31 +603,31 @@ async function executeBulkStatus() {
   bulkStatusProgress.value = { done: 0, total: targets.length, failed: 0 }
   bulkStatusRunning.value = true
   bulkStatusAbort = new AbortController()
+  // Capture settled-successful indices for synthesizeRowSelectBulkResult —
+  // rateLimitedBatch only tracks failures natively.
+  const settledSucceeded: number[] = []
   const result = await rateLimitedBatch(
     targets,
-    async (b) => {
+    async (b, i) => {
       if (action === 'freeze') {
         await freezeBudget(b.scope, b.unit, 'Frozen via admin dashboard (bulk)')
       } else {
         await unfreezeBudget(b.scope, b.unit, 'Unfrozen via admin dashboard (bulk)')
       }
+      settledSucceeded.push(i)
     },
     {
       signal: bulkStatusAbort.signal,
       onProgress: (done, total, failed) => { bulkStatusProgress.value = { done, total, failed } },
     },
   )
-  for (const err of result.errors) {
-    const b = targets[err.index]
-    console.warn(`bulk ${action} failed on ${b.scope} (${b.unit}):`, toMessage(err.error))
-  }
   bulkStatusRunning.value = false
   bulkStatusAbort = null
   const succeeded = result.done - result.failed
   const verb = action === 'freeze' ? 'frozen' : 'unfrozen'
   const summary = `${succeeded}/${bulkStatusProgress.value.total} budgets ${verb}`
   if (result.failed > 0) {
-    toast.error(`${summary}, ${result.failed} failed — check console for details`)
+    toast.error(`${summary}, ${result.failed} failed — see details`)
   } else if (result.cancelled) {
     toast.success(`${summary} (cancelled by user)`)
   } else {
@@ -630,6 +635,30 @@ async function executeBulkStatus() {
   }
   bulkStatusAction.value = null
   selected.value = new Set()
+  if (result.failed > 0 || result.cancelled) {
+    // Row-select budgets can span multiple tenants (over_limit / has_debt
+    // cross-tenant listings), so each row's id is ledger_id and the
+    // dialog's "View budget" triage link uses search by scope — supply
+    // a per-row label map keyed by ledger_id. Set tenantId only when
+    // the selection came from a tenant-scoped list; otherwise the
+    // dialog suppresses triage links (showTriageLinks requires tenantId).
+    const labels: Record<string, string> = {}
+    for (const b of targets) labels[b.ledger_id] = `${b.scope} (${b.unit})`
+    const singleTenant = new Set(targets.map(t => t.tenant_id)).size === 1
+      ? targets[0]?.tenant_id ?? ''
+      : ''
+    bulkResult.value = {
+      actionVerb: action === 'freeze' ? 'Freeze' : 'Unfreeze',
+      response: synthesizeRowSelectBulkResult({
+        targets,
+        result,
+        succeededIndices: settledSucceeded,
+        idOf: b => b.ledger_id,
+      }),
+      labelById: labels,
+      tenantId: singleTenant,
+    }
+  }
   await loadList()
 }
 

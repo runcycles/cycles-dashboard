@@ -31,6 +31,28 @@ function toggleExpanded(id: string) {
   if (expanded.value.has(id)) expanded.value.delete(id)
   else expanded.value.add(id)
 }
+
+// Copy the full audit entry as JSON. Row-level triage affordance —
+// metadata carries per-row bulk outcomes (succeeded/failed/skipped
+// arrays for bulk-action calls) that aren't reachable from any
+// search filter; copying the whole entry is the cleanest way to
+// pull that payload into a ticket or pipe through jq.
+const copiedLogId = ref<string | null>(null)
+let copiedResetTimer: ReturnType<typeof setTimeout> | null = null
+async function copyLogJson(entry: AuditLogEntry) {
+  try {
+    await navigator.clipboard.writeText(safeJsonStringify(entry))
+    copiedLogId.value = entry.log_id
+    if (copiedResetTimer) clearTimeout(copiedResetTimer)
+    copiedResetTimer = setTimeout(() => {
+      if (copiedLogId.value === entry.log_id) copiedLogId.value = null
+    }, 2000)
+  } catch {
+    // Clipboard permission denied or insecure context — silently
+    // fail rather than toast. The operator can still select-and-copy
+    // from the metadata pre element.
+  }
+}
 // V4 stage 2: server-side sort. Columns (timestamp, operation,
 // resource_type, tenant_id, key_id, status) map directly onto the
 // listAuditLogs sort_by enum. onChange re-runs query() which resets
@@ -585,6 +607,16 @@ function measureRow(el: Element | { $el?: Element } | null) {
                  cite in reports and the only field the `search` filter
                  hits that isn't otherwise visible in the row. -->
             <div v-if="expanded.has(sortedEntries[v.index].log_id)" class="bg-gray-50/70 dark:bg-gray-800/40 px-4 py-3 border-t border-gray-100 dark:border-gray-700">
+              <div class="flex items-center justify-end mb-2">
+                <button
+                  type="button"
+                  @click.stop="copyLogJson(sortedEntries[v.index])"
+                  class="muted-sm hover:text-gray-700 cursor-pointer px-2 py-0.5 rounded hover:bg-gray-100 text-xs"
+                  :aria-label="`Copy full JSON for audit log ${sortedEntries[v.index].log_id}`"
+                >
+                  {{ copiedLogId === sortedEntries[v.index].log_id ? 'Copied!' : 'Copy JSON' }}
+                </button>
+              </div>
               <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3">
                 <div><span class="muted">Log ID:</span> <span class="font-mono">{{ sortedEntries[v.index].log_id }}</span></div>
                 <div v-if="sortedEntries[v.index].request_id"><span class="muted">Request ID:</span> <span class="font-mono">{{ sortedEntries[v.index].request_id }}</span></div>
