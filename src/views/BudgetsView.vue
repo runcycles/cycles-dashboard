@@ -28,6 +28,7 @@ import BulkActionResultDialog from '../components/BulkActionResultDialog.vue'
 import { useBulkActionPreview } from '../composables/useBulkActionPreview'
 import { formatBulkRequestError } from '../utils/errorCodeMessages'
 import { generateIdempotencyKey } from '../utils/idempotencyKey'
+import { rateLimitedBatch } from '../utils/rateLimitedBatch'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 
@@ -507,6 +508,118 @@ const filterBulkSubmitError = ref('')
 // is non-empty.
 const bulkResult = ref<{ actionVerb: string; response: BudgetBulkActionResponse } | null>(null)
 
+// ─── Row-select bulk path (v0.1.25.36). Sibling of the filter-apply
+//     path above. Freeze / Unfreeze aren't in the server-side
+//     BUDGET_BULK_ACTIONS enum (spec v0.1.25.26 limits that enum to
+//     the 5 balance-mutation actions), so bulk freeze/unfreeze fans out
+//     over the per-row freezeBudget / unfreezeBudget wrappers via
+//     rateLimitedBatch (bounded concurrency + 429 backoff). Pattern
+//     mirrors TenantsView / WebhooksView row-select exactly.
+const selected = ref<Set<string>>(new Set())
+// Clear selection when any filter changes so a now-hidden row can't
+// stay selected and get bulk-acted on. Watch the RAW (non-debounced)
+// refs so the selection clears the instant the operator types, not
+// after the 300ms debounce.
+watch(
+  [selectedTenant, filterStatus, filterUnit, filterScope, search, filterUtilMin, filterUtilMax],
+  () => { selected.value = new Set() },
+)
+watch(() => route.query.filter, () => { selected.value = new Set() })
+
+function toggleSelect(ledgerId: string) {
+  const next = new Set(selected.value)
+  next.has(ledgerId) ? next.delete(ledgerId) : next.add(ledgerId)
+  selected.value = next
+}
+function toggleSelectAll() {
+  if (selectedVisibleAll.value) {
+    selected.value = new Set()
+  } else {
+    selected.value = new Set(sortedBudgets.value.map(b => b.ledger_id))
+  }
+}
+const selectedVisibleAll = computed(() =>
+  sortedBudgets.value.length > 0 &&
+  sortedBudgets.value.every(b => selected.value.has(b.ledger_id)),
+)
+const selectedVisibleCount = computed(() =>
+  sortedBudgets.value.filter(b => selected.value.has(b.ledger_id)).length,
+)
+
+// Bulk freeze / unfreeze state machine. Same shape as TenantsView's
+// bulkAction/bulkProgress/bulkRunning.
+const bulkStatusAction = ref<'freeze' | 'unfreeze' | null>(null)
+const bulkStatusProgress = ref({ done: 0, total: 0, failed: 0 })
+const bulkStatusRunning = ref(false)
+let bulkStatusAbort: AbortController | null = null
+
+function openBulkStatus(action: 'freeze' | 'unfreeze') {
+  bulkStatusAction.value = action
+}
+
+// Filter the selection to rows whose current status allows the transition
+// BEFORE arming the confirm dialog. Freeze needs ACTIVE, unfreeze needs
+// FROZEN. Anything else (already in the target state, or CLOSED terminal)
+// is skipped — avoids noisy 409s and keeps the progress count honest.
+// Used by the confirm dialog's count AND by executeBulkStatus.
+function bulkStatusTargets(): BudgetLedger[] {
+  if (!bulkStatusAction.value) return []
+  const required = bulkStatusAction.value === 'freeze' ? 'ACTIVE' : 'FROZEN'
+  return budgets.value.filter(b =>
+    selected.value.has(b.ledger_id) && b.status === required,
+  )
+}
+
+async function executeBulkStatus() {
+  if (!bulkStatusAction.value || bulkStatusRunning.value) return
+  const action = bulkStatusAction.value
+  const targets = bulkStatusTargets()
+  bulkStatusProgress.value = { done: 0, total: targets.length, failed: 0 }
+  bulkStatusRunning.value = true
+  bulkStatusAbort = new AbortController()
+  const result = await rateLimitedBatch(
+    targets,
+    async (b) => {
+      if (action === 'freeze') {
+        await freezeBudget(b.scope, b.unit, 'Frozen via admin dashboard (bulk)')
+      } else {
+        await unfreezeBudget(b.scope, b.unit, 'Unfrozen via admin dashboard (bulk)')
+      }
+    },
+    {
+      signal: bulkStatusAbort.signal,
+      onProgress: (done, total, failed) => { bulkStatusProgress.value = { done, total, failed } },
+    },
+  )
+  for (const err of result.errors) {
+    const b = targets[err.index]
+    console.warn(`bulk ${action} failed on ${b.scope} (${b.unit}):`, toMessage(err.error))
+  }
+  bulkStatusRunning.value = false
+  bulkStatusAbort = null
+  const succeeded = result.done - result.failed
+  const verb = action === 'freeze' ? 'frozen' : 'unfrozen'
+  const summary = `${succeeded}/${bulkStatusProgress.value.total} budgets ${verb}`
+  if (result.failed > 0) {
+    toast.error(`${summary}, ${result.failed} failed — check console for details`)
+  } else if (result.cancelled) {
+    toast.success(`${summary} (cancelled by user)`)
+  } else {
+    toast.success(summary)
+  }
+  bulkStatusAction.value = null
+  selected.value = new Set()
+  await loadList()
+}
+
+function cancelBulkStatus() {
+  if (bulkStatusRunning.value) {
+    bulkStatusAbort?.abort()
+  } else {
+    bulkStatusAction.value = null
+  }
+}
+
 // Spec v0.1.25.26: BudgetBulkFilter.tenant_id is REQUIRED. Cross-tenant
 // list modes (`?filter=over_limit`, `?filter=has_debt`) show budgets
 // across every tenant, so a bulk action from that mode would have no
@@ -804,7 +917,7 @@ const totalHeight = computed(() => virtualizer.value.getTotalSize())
 // fleet" need per-row tenant context to act.
 const gridTemplate = computed(() =>
   canManage.value
-    ? 'minmax(140px,1fr) minmax(220px,2fr) 130px 110px 150px minmax(180px,1fr) 140px 96px'
+    ? '40px minmax(140px,1fr) minmax(220px,2fr) 130px 110px 150px minmax(180px,1fr) 140px 96px'
     : 'minmax(140px,1fr) minmax(220px,2fr) 130px 110px 150px minmax(180px,1fr) 140px',
 )
 
@@ -1013,10 +1126,13 @@ function rowTenantId(b: BudgetLedger): string {
         class="bg-white rounded-lg shadow overflow-hidden text-sm flex-1 min-h-0 flex flex-col"
         role="table"
         :aria-rowcount="sortedBudgets.length + 1"
-        :aria-colcount="canManage ? 8 : 7"
+        :aria-colcount="canManage ? 9 : 7"
       >
         <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
           <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
+            <div v-if="canManage" role="columnheader" class="table-cell">
+              <input type="checkbox" :checked="selectedVisibleAll" @change="toggleSelectAll" aria-label="Select all visible budgets" />
+            </div>
             <SortHeader as="div" label="Tenant" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader as="div" label="Scope" column="scope" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader as="div" label="Unit" column="unit" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
@@ -1043,6 +1159,14 @@ function rowTenantId(b: BudgetLedger): string {
               class="grid table-row-hover border-b border-gray-100 absolute left-0 right-0 items-center"
               :style="{ gridTemplateColumns: gridTemplate, transform: `translateY(${v.start}px)`, height: ROW_HEIGHT_ESTIMATE + 'px' }"
             >
+              <div v-if="canManage" role="cell" class="table-cell">
+                <input
+                  type="checkbox"
+                  :checked="selected.has(sortedBudgets[v.index].ledger_id)"
+                  @change="toggleSelect(sortedBudgets[v.index].ledger_id)"
+                  :aria-label="`Select budget ${sortedBudgets[v.index].scope}`"
+                />
+              </div>
               <div role="cell" class="table-cell min-w-0">
                 <TenantLink v-if="rowTenantId(sortedBudgets[v.index])" :tenant-id="rowTenantId(sortedBudgets[v.index])" />
                 <span v-else class="muted-sm">—</span>
@@ -1097,6 +1221,67 @@ function rowTenantId(b: BudgetLedger): string {
         </button>
       </div>
     </div>
+
+    <!-- Row-select bulk toolbar (v0.1.25.36). Floating, teleported to
+         body so it stays pinned to the viewport while the virtualized
+         table scrolls. Mirrors TenantsView / WebhooksView pattern:
+         pill-shaped, top-center, visible only when selectedVisibleCount
+         > 0, Transition on mount/unmount. Actions are Freeze / Unfreeze
+         via rateLimitedBatch over per-row endpoints (no server-side
+         BUDGET_BULK_ACTIONS entry for these verbs in spec v0.1.25.26). -->
+    <Teleport to="body">
+      <Transition
+        enter-active-class="transition duration-200 ease-out"
+        enter-from-class="opacity-0 -translate-y-4"
+        enter-to-class="opacity-100 translate-y-0"
+        leave-active-class="transition duration-150 ease-in"
+        leave-from-class="opacity-100 translate-y-0"
+        leave-to-class="opacity-0 -translate-y-4"
+      >
+        <div
+          v-if="canManage && selectedVisibleCount > 0"
+          role="toolbar"
+          aria-label="Bulk budget actions"
+          class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-gray-900 dark:border dark:border-gray-700 border-2 border-blue-400 shadow-2xl rounded-lg px-4 py-2.5 flex items-center gap-3 max-w-[90vw]"
+        >
+          <span class="text-sm font-semibold text-blue-900 dark:text-blue-300 tabular-nums">{{ selectedVisibleCount }} selected</span>
+          <div class="w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
+          <button @click="openBulkStatus('freeze')" class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer">Freeze</button>
+          <button @click="openBulkStatus('unfreeze')" class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer">Unfreeze</button>
+          <button
+            @click="selected = new Set()"
+            aria-label="Clear selection"
+            class="muted hover:text-gray-700 cursor-pointer p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- Bulk freeze/unfreeze confirm. Reuses the pattern from
+         TenantsView's bulkAction ConfirmAction: during execution the
+         message slot shows live progress (done/total/failed), cancel
+         mid-run aborts at the next rateLimitedBatch iteration
+         boundary. Targets are filtered to the eligible status before
+         the count is shown so operators see the real row count that
+         will be acted on. -->
+    <ConfirmAction
+      v-if="bulkStatusAction"
+      :title="bulkStatusAction === 'freeze'
+        ? `Freeze ${bulkStatusRunning ? bulkStatusProgress.total : bulkStatusTargets().length} budgets?`
+        : `Unfreeze ${bulkStatusRunning ? bulkStatusProgress.total : bulkStatusTargets().length} budgets?`"
+      :message="bulkStatusRunning
+        ? `Working… ${bulkStatusProgress.done}/${bulkStatusProgress.total} processed${bulkStatusProgress.failed ? ` (${bulkStatusProgress.failed} failed)` : ''}.`
+        : bulkStatusAction === 'freeze'
+          ? `This will block all reservations, commits, and fund operations against each selected ACTIVE budget. Already-FROZEN and CLOSED budgets in the selection will be skipped. Reversible by unfreezing.`
+          : `This will re-enable reservations, commits, and fund operations against each selected FROZEN budget. Already-ACTIVE and CLOSED budgets in the selection will be skipped.`"
+      :confirm-label="bulkStatusRunning ? 'Working…' : bulkStatusAction === 'freeze' ? 'Freeze all' : 'Unfreeze all'"
+      :danger="bulkStatusAction === 'freeze'"
+      :loading="bulkStatusRunning"
+      @confirm="executeBulkStatus"
+      @cancel="cancelBulkStatus"
+    />
 
     <ConfirmAction
       v-if="pendingAction"
