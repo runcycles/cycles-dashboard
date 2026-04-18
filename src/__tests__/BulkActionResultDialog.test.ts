@@ -1,0 +1,188 @@
+// Per-row outcome dialog. Opens after a filter-apply bulk submit returns
+// any failed[] or skipped[] rows; renders a succeeded summary badge plus
+// collapsible failed/skipped sections with copy-to-clipboard on each row.
+//
+// Covers:
+//   - succeeded summary count
+//   - failed rows show id, error_code → human prose, Copy ID button
+//   - skipped rows show id + reason
+//   - failed defaults open, skipped defaults closed when failures exist
+//   - Escape + overlay click + Close button all emit 'close'
+//   - unknown error_code forward-compat (renders `code: message`)
+
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
+import BulkActionResultDialog from '../components/BulkActionResultDialog.vue'
+import type { BulkActionRowOutcome } from '../types'
+
+function outcome(id: string, extras: Partial<BulkActionRowOutcome> = {}): BulkActionRowOutcome {
+  return { id, ...extras }
+}
+
+const baseResponse = {
+  succeeded: [outcome('t-ok-1'), outcome('t-ok-2')],
+  failed: [],
+  skipped: [],
+  total_matched: 2,
+}
+
+describe('BulkActionResultDialog', () => {
+  beforeEach(() => {
+    // Global clipboard stub — jsdom ships it undefined.
+    Object.assign(navigator, {
+      clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
+    })
+  })
+
+  it('renders succeeded-count summary', () => {
+    const w = mount(BulkActionResultDialog, {
+      props: { actionVerb: 'Suspend', itemNounPlural: 'tenants', response: baseResponse },
+    })
+    expect(w.text()).toContain('Suspend tenants — results')
+    expect(w.text()).toContain('2 succeeded')
+    expect(w.text()).toContain('2 rows processed')
+  })
+
+  it('renders failed rows with canonical prose for known error_codes', () => {
+    const response = {
+      succeeded: [],
+      failed: [
+        outcome('t-bad', { error_code: 'BUDGET_EXCEEDED', message: 'requested 100, remaining 42' }),
+      ],
+      skipped: [],
+      total_matched: 1,
+    }
+    const w = mount(BulkActionResultDialog, {
+      props: { actionVerb: 'Debit', itemNounPlural: 'budgets', response },
+    })
+    expect(w.text()).toMatch(/1\s*failed/)
+    expect(w.text()).toContain('t-bad')
+    expect(w.text()).toContain('Budget exceeded — requested 100, remaining 42')
+  })
+
+  it('renders unknown error_codes verbatim for forward-compat', () => {
+    const response = {
+      succeeded: [],
+      failed: [outcome('x', { error_code: 'FUTURE_CODE', message: 'new spec' })],
+      skipped: [],
+      total_matched: 1,
+    }
+    const w = mount(BulkActionResultDialog, {
+      props: { actionVerb: 'Pause', itemNounPlural: 'webhooks', response },
+    })
+    expect(w.text()).toContain('FUTURE_CODE: new spec')
+  })
+
+  it('renders skipped rows with their reason', () => {
+    const response = {
+      succeeded: [],
+      failed: [],
+      skipped: [outcome('t-skip', { reason: 'already SUSPENDED' })],
+      total_matched: 1,
+    }
+    const w = mount(BulkActionResultDialog, {
+      props: { actionVerb: 'Suspend', itemNounPlural: 'tenants', response },
+    })
+    expect(w.text()).toMatch(/1\s*skipped/)
+    expect(w.text()).toContain('t-skip')
+    expect(w.text()).toContain('already SUSPENDED')
+  })
+
+  it('failed section opens by default when both failed and skipped rows exist', () => {
+    const response = {
+      succeeded: [],
+      failed: [outcome('f1', { error_code: 'INTERNAL_ERROR' })],
+      skipped: [outcome('s1', { reason: 'no-op' })],
+      total_matched: 2,
+    }
+    const w = mount(BulkActionResultDialog, {
+      props: { actionVerb: 'Suspend', itemNounPlural: 'tenants', response },
+    })
+    const details = w.findAll('details')
+    expect(details.length).toBe(2)
+    // First details is failed (open); second is skipped (closed).
+    expect(details[0].attributes('open')).toBeDefined()
+    expect(details[1].attributes('open')).toBeUndefined()
+  })
+
+  it('skipped section opens by default when no failures exist', () => {
+    const response = {
+      succeeded: [],
+      failed: [],
+      skipped: [outcome('s1', { reason: 'no-op' })],
+      total_matched: 1,
+    }
+    const w = mount(BulkActionResultDialog, {
+      props: { actionVerb: 'Suspend', itemNounPlural: 'tenants', response },
+    })
+    const details = w.findAll('details')
+    expect(details.length).toBe(1)
+    expect(details[0].attributes('open')).toBeDefined()
+  })
+
+  it('Copy ID button writes the row id to the clipboard', async () => {
+    const response = {
+      succeeded: [],
+      failed: [outcome('tenant-alpha', { error_code: 'INTERNAL_ERROR' })],
+      skipped: [],
+      total_matched: 1,
+    }
+    const w = mount(BulkActionResultDialog, {
+      props: { actionVerb: 'Suspend', itemNounPlural: 'tenants', response },
+    })
+    const copyBtn = w.find('button[aria-label="Copy ID tenant-alpha"]')
+    expect(copyBtn.exists()).toBe(true)
+    await copyBtn.trigger('click')
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('tenant-alpha')
+    await nextTick()
+    // Await the resolved writeText promise flush.
+    await Promise.resolve()
+    await nextTick()
+    expect(copyBtn.text()).toBe('Copied')
+  })
+
+  it('emits close on Close button click', async () => {
+    const w = mount(BulkActionResultDialog, {
+      props: { actionVerb: 'Suspend', itemNounPlural: 'tenants', response: baseResponse },
+    })
+    // Close is the last button in the footer.
+    const buttons = w.findAll('button')
+    await buttons[buttons.length - 1].trigger('click')
+    expect(w.emitted('close')).toBeTruthy()
+  })
+
+  it('emits close on Escape key', async () => {
+    const w = mount(BulkActionResultDialog, {
+      props: { actionVerb: 'Suspend', itemNounPlural: 'tenants', response: baseResponse },
+      attachTo: document.body,
+    })
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await nextTick()
+    expect(w.emitted('close')).toBeTruthy()
+    w.unmount()
+  })
+
+  it('emits close on overlay click (outside dialog)', async () => {
+    const w = mount(BulkActionResultDialog, {
+      props: { actionVerb: 'Suspend', itemNounPlural: 'tenants', response: baseResponse },
+    })
+    // Overlay is the root; click.self fires only when the click target IS
+    // the overlay — trigger on the outer div directly.
+    await w.trigger('click')
+    expect(w.emitted('close')).toBeTruthy()
+  })
+
+  it('embeds total_matched in the header when rows are truncated', () => {
+    const response = {
+      succeeded: [outcome('a')],
+      failed: [],
+      skipped: [],
+      total_matched: 500,
+    }
+    const w = mount(BulkActionResultDialog, {
+      props: { actionVerb: 'Suspend', itemNounPlural: 'tenants', response },
+    })
+    expect(w.text()).toContain('1 row processed of 500 matched')
+  })
+})

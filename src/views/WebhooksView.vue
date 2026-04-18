@@ -22,12 +22,15 @@ import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import BulkActionPreviewDialog from '../components/BulkActionPreviewDialog.vue'
+import BulkActionResultDialog from '../components/BulkActionResultDialog.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { useToast } from '../composables/useToast'
 import { useBulkActionPreview } from '../composables/useBulkActionPreview'
 import { toMessage } from '../utils/errors'
+import { formatBulkRequestError } from '../utils/errorCodeMessages'
+import type { WebhookBulkActionResponse } from '../types'
 
 const toast = useToast()
 
@@ -265,6 +268,10 @@ function cancelBulk() {
 const filterBulkAction = ref<WebhookBulkAction | null>(null)
 const filterBulkRunning = ref(false)
 const filterBulkSubmitError = ref('')
+// Per-row result dialog (BulkActionResultDialog). Opens with the server
+// response whenever failed[] or skipped[] is non-empty — surfaces per-row
+// error_code + message for triage without tailing the browser console.
+const bulkResult = ref<{ actionVerb: string; response: WebhookBulkActionResponse } | null>(null)
 
 // O1: cursor-walk preview before commit. Walks listWebhooks with the
 // same `search` server-side filter as the bulk action, then filters
@@ -356,22 +363,19 @@ async function executeFilterBulk() {
     if (res.skipped.length) parts.push(`${res.skipped.length} skipped (already in target state)`)
     if (res.failed.length) parts.push(`${res.failed.length} failed`)
     const summary = parts.join(', ')
-    if (res.failed.length) toast.error(`${summary} — check console for details`)
+    if (res.failed.length) toast.error(`${summary} — see details`)
     else toast.success(summary)
-    for (const f of res.failed) {
-      console.warn(`bulk-action ${action} failed on ${f.id}: ${f.error_code ?? 'INTERNAL_ERROR'} — ${f.message ?? ''}`)
-    }
     filterBulkAction.value = null
     filterBulkPreview.resetPreview()
+    if (res.failed.length || res.skipped.length) {
+      bulkResult.value = { actionVerb: action === 'PAUSE' ? 'Pause' : 'Resume', response: res }
+    }
   } catch (e) {
     // Humanize bulk-action safety-gate codes (governance spec v0.1.25.23
     // ErrorCode enum widening; v0.1.25.21 prose). See TenantsView
     // executeFilterBulk for the full rationale.
-    if (e instanceof ApiError && e.errorCode === 'LIMIT_EXCEEDED') {
-      const matched = typeof e.details?.total_matched === 'number' ? ` (server matched ${e.details.total_matched.toLocaleString()})` : ''
-      filterBulkSubmitError.value = `Filter matches more than 500 webhooks${matched} — narrow the filter before retrying.`
-    } else if (e instanceof ApiError && e.errorCode === 'COUNT_MISMATCH') {
-      filterBulkSubmitError.value = 'Subscription list changed between preview and submit — close and reopen the preview to retry.'
+    if (e instanceof ApiError && (e.errorCode === 'LIMIT_EXCEEDED' || e.errorCode === 'COUNT_MISMATCH')) {
+      filterBulkSubmitError.value = formatBulkRequestError(e.errorCode, 'webhooks', 500, e.details as Record<string, unknown> | undefined) ?? `Bulk ${action} failed: ${toMessage(e)}`
     } else {
       filterBulkSubmitError.value = `Bulk ${action} failed: ${toMessage(e)}`
     }
@@ -886,6 +890,15 @@ const gridTemplate = computed(() =>
       :confirm-danger="filterBulkAction === 'PAUSE'"
       @confirm="executeFilterBulk"
       @cancel="cancelFilterBulk"
+    />
+
+    <!-- Per-row result dialog (see TenantsView for rationale). -->
+    <BulkActionResultDialog
+      v-if="bulkResult"
+      :action-verb="bulkResult.actionVerb"
+      item-noun-plural="webhooks"
+      :response="bulkResult.response"
+      @close="bulkResult = null"
     />
 
     <FormDialog v-if="showCreate" title="Create Webhook" submit-label="Create Webhook" :loading="createLoading" :error="createError" @submit="submitCreate" @cancel="showCreate = false" :wide="true">
