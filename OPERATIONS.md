@@ -198,3 +198,11 @@ Tenants/Webhooks/Budgets pre-filter the selection to only rows whose state
 would actually change (drops already-in-target-state rows silently to avoid
 noisy 409s). If you need to exercise the dialog during testing, use DevTools
 Network → Block request URL for the PATCH endpoint.
+
+**Triaging a bulk action from the audit trail.** Open AuditView, filter by
+`operation=bulkActionTenants` (or `…Webhooks` / `…Budgets`), and expand the
+row. With admin-server **v0.1.25.30+** the entry renders a structured summary
+(header + filter echo + succeeded/failed/skipped sections with per-row error
+codes). The raw metadata JSON is available under the "Raw metadata" collapse
+for wire-level inspection. Earlier admin versions fall back to the legacy
+inline JSON block — upgrade admin to `.30` for the scannable view.

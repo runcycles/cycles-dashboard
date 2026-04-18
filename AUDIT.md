@@ -1,13 +1,13 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.37 (2026-04-18)
+**Current release:** v0.1.25.38 (2026-04-18)
 
 ## Baseline requirements
 
 | Component | Minimum | Shipped (compose) | Notes |
 |---|---|---|---|
 | cycles-server (runtime plane) | v0.1.25.8+ | v0.1.25.13 | `.13` bounds `listReservationsSorted` at `SORTED_HYDRATE_CAP=2000`. Pre-`.13` may OOM on tenants with >~2000 matching reservations. Wire shape unchanged. |
-| cycles-admin (governance plane) | v0.1.25.17+ | v0.1.25.30 | `.18+` for `RESET_SPENT` funding. `.26+` for tenant/webhook filter-apply bulk. `.27+` for AuditView error_code / status_band / DSL-completeness filters (pre-`.27` ignores unknown params). `.28+` for audit sentinel split (`__unauth__` / `__admin__`). `.29+` for `POST /v1/admin/budgets/bulk-action`. |
+| cycles-admin (governance plane) | v0.1.25.17+ | v0.1.25.30 | `.18+` for `RESET_SPENT` funding. `.26+` for tenant/webhook filter-apply bulk. `.27+` for AuditView error_code / status_band / DSL-completeness filters (pre-`.27` ignores unknown params). `.28+` for audit sentinel split (`__unauth__` / `__admin__`). `.29+` for `POST /v1/admin/budgets/bulk-action`. `.30+` enriches bulk-action audit entries with structured outcome arrays + filter echo + duration — dashboard renders those as a scannable summary; pre-`.30` entries fall back to raw JSON. |
 | Spec alignment | — | v0.1.25.26 | Pin moves on end-to-end support. |
 
 **Pre-baseline compatibility:** dashboard `TenantLink.isSystem` accepts both legacy `<unauthenticated>` and new `__`-prefixed sentinels (shipped v0.1.25.31). Row-select bulk paths (Tenants/Webhooks suspend, Budgets freeze, Emergency-freeze) fan out per-row and work against any admin version.
@@ -15,6 +15,43 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-18 — v0.1.25.38: structured bulk-action audit detail (spec v0.1.25.30)
+
+Closes the last pre-existing gap between dashboard and admin-server `.30`. Slices A–D of the prior integration plan (spec v0.1.25.23–.26) shipped across `.33`–`.37`; `.30`'s audit-metadata enrichment was the only remaining dashboard-side follow-up.
+
+**Motivation.** Admin-server v0.1.25.30 writes structured per-row outcomes into `AuditLogEntry.metadata` for `bulkActionTenants` / `bulkActionWebhooks` / `bulkActionBudgets`. The dashboard already accepts the new keys (metadata is typed `Record<string, unknown>`), so *correctness* was never at risk — but the legacy `<pre>{{ safeJsonStringify(metadata) }}</pre>` block inside a 48-unit-tall scroll container turned a 500-row bulk into a multi-kilobyte JSON blob that was hostile to triage. An operator hunting "which specific row failed?" had to scroll through succeeded ids first. Structured rendering unblocks the triage flow the server enrichment was designed for.
+
+**Scope**
+- New component `src/components/BulkActionAuditDetail.vue` for the structured summary.
+- Shape guard `src/utils/auditMetadata.ts` — shared between AuditView's conditional render and the component's own no-op fallback so pre-.30 entries render consistently.
+- AuditView expansion panel: conditional structured card + collapsed "Raw metadata" `<details>`; non-bulk rows unchanged.
+
+**Not in scope**
+- Cross-linking `succeeded_ids` / `failed_rows` entries to live list views (nice-to-have, defer).
+- Virtualized row tables (500-row cap makes this unnecessary).
+- Spec-badge bump — `cycles-governance-admin-v0.1.25.yaml` `info.version` is still `0.1.25.26`; all v0.1.25.27–.30 changes are additive and don't bump OpenAPI.
+
+**Changes**
+
+| File | Change |
+|---|---|
+| `src/components/BulkActionAuditDetail.vue` | NEW. Header + filter-echo grid (with `TenantLink` for tenant keys) + three collapsibles (succeeded / failed open by default / skipped). Reuses `formatErrorCode` for per-row prose, mirrors `BulkActionResultDialog`'s copy-id affordance. |
+| `src/utils/auditMetadata.ts` | NEW. `BULK_ACTION_OPERATIONS` + `isBulkActionOperation` + `hasBulkAuditShape`. |
+| `src/views/AuditView.vue` | Import + conditional `<BulkActionAuditDetail>` + raw JSON inside `<details>` fallback when shape matches; legacy inline `<pre>` preserved for non-bulk rows. |
+
+**Reuse (no re-invention)**
+- `formatErrorCode()` from `src/utils/errorCodeMessages.ts` — already used by `BulkActionResultDialog`.
+- `TenantLink` for tenant-ish filter keys (`tenant_id`, `parent_tenant_id`).
+- `safeJsonStringify()` behind the Raw-metadata collapse.
+- Filter-echo grid pattern cribbed from `BulkActionPreviewDialog`'s filter summary without introducing a shared primitive — a third caller would justify extraction.
+
+**Tests**
+- NEW `auditMetadata.test.ts` — 10 specs covering `isBulkActionOperation` + `hasBulkAuditShape` guard (non-bulk op, missing metadata, each of the five keys, filter-as-array negative case).
+- NEW `BulkActionAuditDetail.test.ts` — 13 specs: pre-.30 fallback (empty render), non-bulk op fallback, header + duration formatting (both `Xms` and `X.XXs` branches), filter echo (TenantLink drill-through, falsy-but-meaningful values kept, empty/null stripped), per-row error_code chip + formatted prose, unknown code forward-compat, skipped reasons, Copy-all + per-row Copy affordance, filter-only minimal shape.
+- Full suite: 719 / 719 pass (up from 696 / 696 — 23 new specs, no regressions).
+
+**Gates** typecheck clean • vitest 719 / 719 across 57 files • build clean (1.02 s).
 
 ### 2026-04-18 — v0.1.25.37 (extension): row-select bulk → BulkActionResultDialog + EventTimeline correlation_id pivot
 
