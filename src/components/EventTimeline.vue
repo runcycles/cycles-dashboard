@@ -118,7 +118,18 @@ function measureRow(el: Element | { $el?: Element } | null) {
             <div v-if="events[v.index].scope"><span class="muted">Scope:</span> <span class="font-mono">{{ events[v.index].scope }}</span></div>
             <div v-if="events[v.index].tenant_id"><span class="muted">Tenant:</span> <TenantLink :tenant-id="events[v.index].tenant_id!" /></div>
             <div v-if="events[v.index].request_id"><span class="muted">Request ID:</span> <span class="font-mono">{{ events[v.index].request_id }}</span></div>
-            <div v-if="events[v.index].correlation_id"><span class="muted">Correlation ID:</span> <span class="font-mono">{{ events[v.index].correlation_id }}</span></div>
+            <div v-if="events[v.index].correlation_id"><span class="muted">Correlation ID:</span>
+              <!-- v0.1.25.37 (slice B): cross-view pivot. Click correlation_id
+                   to open EventsView scoped to the whole chain of events
+                   that share this correlation — the canonical triage move
+                   for "what else happened in this request". listEvents
+                   supports correlation_id as a server-side filter. -->
+              <router-link
+                :to="{ path: '/events', query: { correlation_id: events[v.index].correlation_id } }"
+                class="font-mono text-blue-600 hover:underline ml-1"
+                :aria-label="`View all events with correlation ${events[v.index].correlation_id}`"
+              >{{ events[v.index].correlation_id }}</router-link>
+            </div>
             <div v-if="events[v.index].actor"><span class="muted">Actor:</span> {{ events[v.index].actor!.type }}<span v-if="events[v.index].actor!.key_id" class="font-mono"> {{ events[v.index].actor!.key_id }}</span></div>
           </div>
           <!-- max-h-48 matches AuditView's cap so typical 8-12 field
