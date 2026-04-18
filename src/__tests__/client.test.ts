@@ -630,6 +630,105 @@ describe('endpoint wrappers — smoke', () => {
         api.bulkActionTenants({ action: 'SUSPEND', filter: {}, idempotency_key: 'k' }),
       ).rejects.toMatchObject({ status: 400, errorCode: 'INVALID_REQUEST' })
     })
+
+    // cycles-governance-admin v0.1.25.26 (admin-server v0.1.25.29+).
+    // Same wire-contract properties as the tenants/webhooks wrappers,
+    // plus the tenant_id-required structural constraint specific to
+    // BudgetBulkFilter.
+    it('bulkActionBudgets → POST /v1/admin/budgets/bulk-action with body verbatim', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+        action: 'CREDIT',
+        total_matched: 0,
+        succeeded: [], failed: [], skipped: [],
+        idempotency_key: 'idem-b-1',
+      })))
+      await api.bulkActionBudgets({
+        action: 'CREDIT',
+        filter: { tenant_id: 'acme', status: 'ACTIVE', unit: 'USD_MICROCENTS' },
+        amount: 1000,
+        reason: 'Monthly top-up',
+        expected_count: 42,
+        idempotency_key: 'idem-b-1',
+      })
+      const [url, init] = lastCall()
+      expect(String(url)).toContain('/v1/admin/budgets/bulk-action')
+      expect(init.method).toBe('POST')
+      const body = JSON.parse(init.body)
+      expect(body.action).toBe('CREDIT')
+      expect(body.filter).toEqual({ tenant_id: 'acme', status: 'ACTIVE', unit: 'USD_MICROCENTS' })
+      expect(body.amount).toBe(1000)
+      expect(body.reason).toBe('Monthly top-up')
+      expect(body.expected_count).toBe(42)
+      expect(body.idempotency_key).toBe('idem-b-1')
+    })
+
+    it('bulkActionBudgets → RESET_SPENT omits amount, includes optional spent', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+        action: 'RESET_SPENT',
+        total_matched: 0,
+        succeeded: [], failed: [], skipped: [],
+        idempotency_key: 'idem-b-2',
+      })))
+      await api.bulkActionBudgets({
+        action: 'RESET_SPENT',
+        filter: { tenant_id: 'acme' },
+        spent: 0,
+        idempotency_key: 'idem-b-2',
+      })
+      const body = JSON.parse(lastCall()[1].body)
+      expect(body.action).toBe('RESET_SPENT')
+      expect(body.spent).toBe(0)
+      expect('amount' in body).toBe(false)
+    })
+
+    it('bulkActionBudgets → 400 LIMIT_EXCEEDED surfaces errorCode + details.total_matched', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: () => Promise.resolve({
+          error: 'LIMIT_EXCEEDED',
+          message: 'Filter matches more than 500 budgets',
+          request_id: 'req_lim_b',
+          details: { total_matched: 613 },
+        }),
+      } as unknown as Response))
+      try {
+        await api.bulkActionBudgets({
+          action: 'CREDIT',
+          filter: { tenant_id: 'acme' },
+          amount: 100,
+          idempotency_key: 'k',
+        })
+        throw new Error('expected to throw')
+      } catch (e) {
+        expect(e).toBeInstanceOf(ApiError)
+        const err = e as ApiError
+        expect(err.status).toBe(400)
+        expect(err.errorCode).toBe('LIMIT_EXCEEDED')
+        expect(err.details?.total_matched).toBe(613)
+      }
+    })
+
+    it('bulkActionBudgets → 409 COUNT_MISMATCH surfaces errorCode', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: false,
+        status: 409,
+        json: () => Promise.resolve({
+          error: 'COUNT_MISMATCH',
+          message: 'Budget list changed since preview',
+          request_id: 'req_cm_b',
+        }),
+      } as unknown as Response))
+      await expect(
+        api.bulkActionBudgets({
+          action: 'CREDIT',
+          filter: { tenant_id: 'acme' },
+          amount: 100,
+          expected_count: 10,
+          idempotency_key: 'k',
+        }),
+      ).rejects.toMatchObject({ status: 409, errorCode: 'COUNT_MISMATCH' })
+    })
   })
 
   it('rotateWebhookSecret → generates whsec_ secret, PATCHes it, and returns it alongside subscription', async () => {
