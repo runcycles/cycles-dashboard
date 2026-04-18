@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 import { listAuditLogs } from '../api/client'
 import { useSort } from '../composables/useSort'
 import { useListExport } from '../composables/useListExport'
+import { ERROR_CODES } from '../types'
 import type { AuditLogEntry } from '../types'
 import PageHeader from '../components/PageHeader.vue'
 import MaskedValue from '../components/MaskedValue.vue'
@@ -13,6 +14,7 @@ import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
+import TimeRangePicker from '../components/TimeRangePicker.vue'
 import { formatDateTime } from '../utils/format'
 import { toMessage } from '../utils/errors'
 import { safeJsonStringify } from '../utils/safe'
@@ -54,15 +56,44 @@ const operation = ref('')
 const resourceType = ref('')
 const resourceId = ref('')
 // cycles-governance-admin v0.1.25.21: free-text `search` query param
-// on listAuditLogs (case-insensitive substring match on resource_id +
-// log_id). Sits alongside the existing Resource ID form field, which
-// is already an exact-match pass-through — the search field is what
-// an operator reaches for when they have only a partial ID or want
-// to cover log_id too. Form-submit rather than debounced because this
-// view uses explicit-submit for its whole filter surface.
+// on listAuditLogs. Starting v0.1.25.24 the server-side match set
+// extends to resource_id OR log_id OR error_code OR operation (case-
+// insensitive substring) — closes the gap where `?search=budget`
+// missed BUDGET_EXCEEDED and createBudget. Form-submit rather than
+// debounced because this view uses explicit-submit for its whole
+// filter surface.
 const search = ref('')
+// cycles-governance-admin v0.1.25.24: IN-list on AuditLogEntry.error_code.
+// The field is a comma-separated string in the form; buildFilterParams
+// normalizes (trim, split, drop empties) and passes through as a single
+// comma-joined value for the explode=false wire format.
+const errorCode = ref('')
+// cycles-governance-admin v0.1.25.24: status_min/status_max range filter.
+// Dashboard exposes five preset bands rather than raw min/max inputs —
+// operators rarely care about specific HTTP statuses, they want either
+// "just errors" / "just successes" / a class. Mutex with exact `status`
+// is sidestepped entirely because the dashboard never sends exact status.
+const statusBand = ref<'' | 'success' | 'errors' | '4xx' | '5xx'>('')
+// Five preset bands rendered as a segmented chip control. Order matches
+// triage flow: All → 2xx (clear) → 4xx+5xx (quick "all errors") → 4xx /
+// 5xx (split for client-vs-server triage). Labels stay short so the
+// whole strip fits on one line above 1024px.
+const STATUS_BANDS: { value: typeof statusBand.value; label: string }[] = [
+  { value: '',        label: 'All' },
+  { value: 'success', label: '2xx' },
+  { value: 'errors',  label: '4xx+5xx' },
+  { value: '4xx',     label: '4xx' },
+  { value: '5xx',     label: '5xx' },
+]
 const fromDate = ref('')
 const toDate = ref('')
+// TimeRangePicker wants a { from, to } object as v-model. Use a
+// computed passthrough over the existing fromDate / toDate refs so
+// buildFilterParams / applyQueryParams / URL wiring stay untouched.
+const timeRange = computed({
+  get: () => ({ from: fromDate.value, to: toDate.value }),
+  set: (v: { from: string; to: string }) => { fromDate.value = v.from; toDate.value = v.to },
+})
 
 // Pulls the non-cursor filter params out of the form. Shared between
 // query() and the export loop so both see identical filter semantics —
@@ -75,6 +106,25 @@ function buildFilterParams(): Record<string, string> {
   if (operation.value) params.operation = operation.value
   if (resourceType.value) params.resource_type = resourceType.value
   if (resourceId.value) params.resource_id = resourceId.value
+  // Error code is an IN-list (array, explode=false). Accept comma or
+  // whitespace separation in the form, normalize to trimmed comma-join.
+  // Empty / whitespace-only entries dropped; dedupe preserves order.
+  const codes = errorCode.value
+    .split(/[,\s]+/)
+    .map(s => s.trim())
+    .filter(Boolean)
+  if (codes.length > 0) params.error_code = Array.from(new Set(codes)).join(',')
+  // Status band → status_min / status_max pair.
+  if (statusBand.value) {
+    const range: Record<string, [number, number]> = {
+      success: [200, 299],
+      errors:  [400, 599],
+      '4xx':   [400, 499],
+      '5xx':   [500, 599],
+    }
+    const r = range[statusBand.value]
+    if (r) { params.status_min = String(r[0]); params.status_max = String(r[1]) }
+  }
   // Trim before sending — a search of spaces is semantically empty on
   // the server (case-insensitive substring ILIKE), and the spec
   // requires empty → absent.
@@ -162,15 +212,6 @@ async function loadMore() {
   finally { loadingMore.value = false }
 }
 
-function setTimeRange(hours: number) {
-  const now = new Date()
-  const from = new Date(now.getTime() - hours * 3600_000)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-  fromDate.value = fmt(from)
-  toDate.value = fmt(now)
-}
-
 // Every audit entry carries a log_id (the compliance-grade identifier
 // that the search filter explicitly covers). Since the expand block
 // surfaces log_id, every row is expandable — no conditional gate.
@@ -190,6 +231,11 @@ function applyQueryParams() {
   if (route.query.resource_type) resourceType.value = String(route.query.resource_type)
   if (route.query.resource_id) resourceId.value = String(route.query.resource_id)
   if (route.query.search) search.value = String(route.query.search)
+  // v0.1.25.24: deep-links can pre-fill error_code (comma-list) + status
+  // band. Used by OverviewView's Recent Denials pill → /audit?error_code=X.
+  if (route.query.error_code) errorCode.value = String(route.query.error_code)
+  const sb = route.query.status_band
+  if (sb === 'success' || sb === 'errors' || sb === '4xx' || sb === '5xx') statusBand.value = sb
 }
 onMounted(() => {
   applyQueryParams()
@@ -267,12 +313,31 @@ function measureRow(el: Element | { $el?: Element } | null) {
 
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
-    <!-- Filter form: 8 fields in a 4-column responsive grid so the
-         whole form is 2 field-rows on md+ (Scope/Event type on row 1,
-         Identity/Time on row 2) plus a compact footer. Collapses to
-         2-col and 1-col on smaller viewports without fieldset chrome. -->
-    <form @submit.prevent="query" class="card p-4 mb-4">
-      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-end">
+    <!-- Filter form: two rows on a shared 5-column grid. TimeRangePicker
+         collapses From+To+Quick-chips into a single control, so we can
+         fit 5 primary filters in Row 1 + 3 detail filters + Status
+         chips + Run Query in Row 2 without losing alignment.
+           Row 1: Search | Time | Tenant | Key | Resource Type
+           Row 2: Resource ID | Operation | Error Code | [Status … Run Query]
+         Status + Run Query share Row 2 cols 4-5 via an internal flex
+         (Status left, Run Query right-aligned via ml-auto) so chips
+         have room without wrapping, and Run Query's right edge lines
+         up with Resource Type's right edge from Row 1. -->
+    <form @submit.prevent="query" class="card p-4 mb-4 space-y-3">
+      <!-- Row 1: primary filters -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 items-end">
+        <div>
+          <label for="audit-search" class="form-label">Search</label>
+          <input id="audit-search" v-model="search" type="search" class="form-input" placeholder="resource_id, log_id, error_code, operation" aria-label="Free-text substring search across resource_id, log_id, error_code, and operation" />
+        </div>
+        <div>
+          <label for="audit-time-range" class="form-label">Time range</label>
+          <TimeRangePicker
+            id="audit-time-range"
+            v-model="timeRange"
+            aria-label="Audit log time range"
+          />
+        </div>
         <div>
           <label for="audit-tenant" class="form-label">Tenant ID</label>
           <input id="audit-tenant" v-model="tenantId" class="form-input" placeholder="acme" />
@@ -282,10 +347,6 @@ function measureRow(el: Element | { $el?: Element } | null) {
           <input id="audit-key" v-model="keyId" class="form-input" placeholder="key_..." />
         </div>
         <div>
-          <label for="audit-operation" class="form-label">Operation</label>
-          <input id="audit-operation" v-model="operation" class="form-input" placeholder="createBudget" />
-        </div>
-        <div>
           <label for="audit-resource" class="form-label">Resource Type</label>
           <select id="audit-resource" v-model="resourceType" class="form-select w-full">
             <option value="">All</option>
@@ -293,34 +354,64 @@ function measureRow(el: Element | { $el?: Element } | null) {
             <option>policy</option><option>webhook</option><option>config</option>
           </select>
         </div>
+      </div>
+
+      <!-- Row 2: detail filters + Status + submit -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 items-end">
         <div>
           <label for="audit-resource-id" class="form-label">Resource ID</label>
           <input id="audit-resource-id" v-model="resourceId" class="form-input" placeholder="key_abc123..." />
         </div>
         <div>
-          <label for="audit-search" class="form-label">Search</label>
-          <input id="audit-search" v-model="search" type="search" class="form-input" placeholder="resource_id or log_id" aria-label="Search by resource_id or log_id substring" />
+          <label for="audit-operation" class="form-label">Operation</label>
+          <input id="audit-operation" v-model="operation" class="form-input" placeholder="createBudget" />
         </div>
         <div>
-          <label for="audit-from" class="form-label">From</label>
-          <input id="audit-from" v-model="fromDate" type="datetime-local" class="form-input" />
+          <label for="audit-error-code" class="form-label">Error Code</label>
+          <input
+            id="audit-error-code"
+            v-model="errorCode"
+            list="audit-error-code-options"
+            class="form-input"
+            placeholder="BUDGET_EXCEEDED"
+            aria-label="Filter by error_code. Comma-separated for IN-list (e.g. BUDGET_EXCEEDED, POLICY_VIOLATION)."
+          />
+          <datalist id="audit-error-code-options">
+            <option v-for="c in ERROR_CODES" :key="c" :value="c" />
+          </datalist>
         </div>
-        <div>
-          <label for="audit-to" class="form-label">To</label>
-          <input id="audit-to" v-model="toDate" type="datetime-local" class="form-input" />
-        </div>
-      </div>
-      <div class="flex items-center justify-between gap-3 mt-3 flex-wrap">
-        <div class="flex items-center gap-2 flex-wrap">
-          <span class="muted-sm">Quick range:</span>
-          <button v-for="h in [1, 6, 24, 168]" :key="h" type="button" @click="setTimeRange(h)"
-            class="muted-sm hover:text-gray-700 dark:hover:text-gray-200 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer">
-            {{ h < 24 ? `${h}h` : `${h / 24}d` }}
+        <div class="sm:col-span-2 flex flex-wrap items-end gap-3">
+          <div class="min-w-0">
+            <span class="form-label">Status</span>
+            <!-- Segmented chip control. role=radiogroup + role=radio +
+                 aria-checked make this a screen-reader-equivalent of
+                 the prior <select>. data-band stays stable so tests
+                 target by semantic value rather than label. -->
+            <div
+              id="audit-status"
+              role="radiogroup"
+              aria-label="Filter by HTTP status band"
+              class="inline-flex flex-wrap gap-0.5 rounded border border-gray-300 dark:border-gray-700 p-0.5 bg-gray-50 dark:bg-gray-800/40"
+            >
+              <button
+                v-for="b in STATUS_BANDS"
+                :key="b.value || 'all'"
+                type="button"
+                role="radio"
+                :data-band="b.value"
+                :aria-checked="statusBand === b.value"
+                @click="statusBand = b.value"
+                class="px-2.5 py-1 text-xs rounded cursor-pointer transition-colors"
+                :class="statusBand === b.value
+                  ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                  : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'"
+              >{{ b.label }}</button>
+            </div>
+          </div>
+          <button type="submit" :disabled="loading" class="ml-auto bg-gray-900 text-white px-4 py-1.5 rounded text-sm hover:bg-gray-800 disabled:opacity-50 cursor-pointer">
+            {{ loading ? 'Querying...' : 'Run Query' }}
           </button>
         </div>
-        <button type="submit" :disabled="loading" class="bg-gray-900 text-white px-4 py-1.5 rounded text-sm hover:bg-gray-800 disabled:opacity-50 cursor-pointer">
-          {{ loading ? 'Querying...' : 'Run Query' }}
-        </button>
       </div>
     </form>
 

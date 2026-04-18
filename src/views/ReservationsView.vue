@@ -13,6 +13,7 @@
  * reservation is stuck).
  */
 import { ref, computed, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
@@ -34,6 +35,7 @@ import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 
 const toast = useToast()
+const route = useRoute()
 const auth = useAuthStore()
 // No `manage_reservations` capability flag in the current introspect
 // response — default to allow. Older admin servers surface 401/403 at
@@ -47,7 +49,19 @@ const canManage = computed(() => auth.capabilities?.manage_reservations !== fals
 // are loaded so the view has something to show without manual picking.
 const tenants = ref<Tenant[]>([])
 const tenantFilter = ref('')
-const statusFilter = ref<string>('ACTIVE') // operationally-interesting default
+// Accept ?status= from the URL so Overview-style drill-downs and shared
+// links land on the right filter. Falls back to 'ACTIVE' when absent or
+// invalid (the operationally-interesting default — active reservations
+// past grace are the "stuck" ones that ops force-releases).
+const statusFromQuery = computed<string | null>(() => {
+  const s = route.query.status
+  if (typeof s !== 'string') return null
+  return (RESERVATION_STATUSES as readonly string[]).includes(s) ? s : null
+})
+const statusFilter = ref<string>(statusFromQuery.value ?? 'ACTIVE')
+watch(statusFromQuery, s => {
+  if (s && statusFilter.value !== s) statusFilter.value = s
+})
 const reservations = ref<ReservationSummary[]>([])
 const error = ref('')
 const loadingList = ref(false)

@@ -192,6 +192,22 @@
   .badge-danger   { @apply bg-red-100 text-red-700 px-1.5 py-0.5 rounded text-xs; }
   .badge-warning  { @apply bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded text-xs; }
   .badge-success  { @apply bg-green-100 text-green-700 px-1.5 py-0.5 rounded text-xs; }
+
+  /* ── Chip pills (used in Overview tile drill-downs) ─────────────
+     Same color taxonomy as badges but sized for inline rows of links
+     with hover affordance — they ARE clickable, badges are usually not.
+     Color convention is shared across the app:
+       success = healthy/active/within-limits
+       warning = paused/frozen/disabled/has-debt/expiring
+       danger  = failing/over-limit/critical
+       neutral = closed/terminal/no-signal
+       category = events.by_category and other unbounded enum chips */
+  .chip            { @apply inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium transition-colors; }
+  .chip-success    { @apply bg-green-100 text-green-800 hover:bg-green-200; }
+  .chip-warning    { @apply bg-yellow-100 text-yellow-800 hover:bg-yellow-200; }
+  .chip-danger     { @apply bg-red-100 text-red-800 hover:bg-red-200; }
+  .chip-neutral    { @apply bg-gray-100 text-gray-700 hover:bg-gray-200; }
+  .chip-category   { @apply bg-blue-100 text-blue-800 hover:bg-blue-200; }
 }
 
 /* ── Dark overrides for component classes ────────────────────────────
@@ -326,6 +342,43 @@
 .dark .badge-success {
   background-color: color-mix(in oklab, var(--color-green-800) 30%, transparent);
   color: var(--color-green-500);
+}
+
+/* Chip pills — translucent tints on dark; brighter hover for clickable feel */
+.dark .chip-success {
+  background-color: color-mix(in oklab, var(--color-green-800) 30%, transparent);
+  color: var(--color-green-400);
+}
+.dark .chip-success:hover {
+  background-color: color-mix(in oklab, var(--color-green-700) 45%, transparent);
+}
+.dark .chip-warning {
+  background-color: color-mix(in oklab, var(--color-yellow-800) 30%, transparent);
+  color: var(--color-yellow-400);
+}
+.dark .chip-warning:hover {
+  background-color: color-mix(in oklab, var(--color-yellow-700) 45%, transparent);
+}
+.dark .chip-danger {
+  background-color: color-mix(in oklab, var(--color-red-800) 30%, transparent);
+  color: var(--color-red-400);
+}
+.dark .chip-danger:hover {
+  background-color: color-mix(in oklab, var(--color-red-700) 45%, transparent);
+}
+.dark .chip-neutral {
+  background-color: color-mix(in oklab, var(--color-gray-700) 50%, transparent);
+  color: var(--color-gray-300);
+}
+.dark .chip-neutral:hover {
+  background-color: color-mix(in oklab, var(--color-gray-600) 60%, transparent);
+}
+.dark .chip-category {
+  background-color: color-mix(in oklab, var(--color-blue-800) 35%, transparent);
+  color: oklch(78% 0.13 255);
+}
+.dark .chip-category:hover {
+  background-color: color-mix(in oklab, var(--color-blue-700) 50%, transparent);
 }
 
 /* ── Dark mode overrides ──────────────────────────────────────────────

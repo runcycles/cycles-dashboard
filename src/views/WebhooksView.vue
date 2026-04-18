@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
@@ -32,6 +32,7 @@ import { toMessage } from '../utils/errors'
 const toast = useToast()
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
 const canManage = computed(() => auth.capabilities?.manage_webhooks !== false)
 
@@ -66,6 +67,29 @@ const tenantFilter = ref('')
 const urlFilter = ref('')
 const debouncedUrlFilter = useDebouncedRef(urlFilter, 200)
 
+// I1: status URL param drives statusFilter on initial mount + back/forward.
+// Used by Overview's symmetrical counter tile drill-downs (e.g.
+// /webhooks?status=DISABLED) so the operator lands on a pre-filtered
+// list. Failing webhooks (with_failures > 0) drill via /webhooks?failing=1
+// because failure-count is a derived attribute, not a status enum.
+const statusFilter = ref('')
+const failingFilter = ref(false)
+const statusFromQuery = computed<string | null>(() => {
+  const s = route.query.status
+  if (typeof s !== 'string') return null
+  return s === 'ACTIVE' || s === 'PAUSED' || s === 'DISABLED' ? s : null
+})
+watch(statusFromQuery, s => {
+  if (s && statusFilter.value !== s) statusFilter.value = s
+}, { immediate: true })
+const failingFromQuery = computed<boolean>(() => {
+  const f = route.query.failing
+  return f === '1' || f === 'true'
+})
+watch(failingFromQuery, f => {
+  if (failingFilter.value !== f) failingFilter.value = f
+}, { immediate: true })
+
 function urlMatches(w: WebhookSubscription, needle: string): boolean {
   const q = needle.trim().toLowerCase()
   if (!q) return true
@@ -85,6 +109,8 @@ function urlMatches(w: WebhookSubscription, needle: string): boolean {
 const filteredWebhooks = computed(() => {
   let out = webhooks.value
   if (tenantFilter.value) out = out.filter(w => w.tenant_id === tenantFilter.value)
+  if (statusFilter.value) out = out.filter(w => w.status === statusFilter.value)
+  if (failingFilter.value) out = out.filter(w => (w.consecutive_failures ?? 0) > 0)
   if (debouncedUrlFilter.value) out = out.filter(w => urlMatches(w, debouncedUrlFilter.value))
   return out
 })
@@ -97,7 +123,7 @@ function isSystemWebhook(w: WebhookSubscription): boolean {
 // reads filtered state) but `selected.value` still holds the 5 hidden
 // ids — clicking "Pause selected" would silently affect tenant A's
 // webhooks even though tenant B is what's on screen.
-watch([tenantFilter, urlFilter], () => { selected.value = new Set() })
+watch([tenantFilter, urlFilter, statusFilter, failingFilter], () => { selected.value = new Set() })
 // V4 stage 2: server-side sort. Columns (url, tenant_id, status,
 // consecutive_failures) map onto listWebhookSubscriptions sort_by.
 // Health + Events columns are NOT sortable — they're derived client-side
@@ -624,6 +650,16 @@ const gridTemplate = computed(() =>
           aria-label="Filter webhooks by URL"
           class="border border-gray-300 rounded px-3 py-1.5 text-sm w-72"
         />
+        <select v-model="statusFilter" aria-label="Filter webhooks by status" class="form-select">
+          <option value="">All statuses</option>
+          <option value="ACTIVE">Active</option>
+          <option value="PAUSED">Paused</option>
+          <option value="DISABLED">Disabled</option>
+        </select>
+        <label class="text-sm flex items-center gap-1.5 text-gray-700 dark:text-gray-200 whitespace-nowrap">
+          <input v-model="failingFilter" type="checkbox" aria-label="Show only failing webhooks" />
+          Failing only
+        </label>
         <!-- Filter-apply bulk actions (see TenantsView for rationale).
              Appears when a filter is set AND no row-select is active.
              Disabled for SYSTEM_TENANT_ID (no server equivalent) and
@@ -631,7 +667,7 @@ const gridTemplate = computed(() =>
              Grouped in inline-flex so label + buttons wrap together
              on narrow viewports. -->
         <div
-          v-if="canManage && (tenantFilter || debouncedUrlFilter.trim()) && selectedVisibleCount === 0"
+          v-if="canManage && (tenantFilter || debouncedUrlFilter.trim() || statusFilter || failingFilter) && selectedVisibleCount === 0"
           role="group"
           aria-label="Apply action to all webhooks matching the current filter"
           class="inline-flex items-center gap-2 flex-wrap"
@@ -771,7 +807,11 @@ const gridTemplate = computed(() =>
       </div>
 
       <div v-else>
-        <EmptyState :message="tenantFilter ? 'No webhooks for this tenant' : 'No webhooks'" hint="Webhooks will appear here once configured" />
+        <EmptyState
+          item-noun="webhook"
+          :has-active-filter="!!(tenantFilter || statusFilter || failingFilter || debouncedUrlFilter.trim())"
+          :hint="tenantFilter || statusFilter || failingFilter || debouncedUrlFilter.trim() ? undefined : 'Webhooks will appear here once configured'"
+        />
       </div>
     </div>
 

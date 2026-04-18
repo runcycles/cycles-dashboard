@@ -270,7 +270,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.29
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.31
     restart: unless-stopped
     # No exposed ports — only accessible through Caddy
     depends_on:
@@ -280,7 +280,7 @@ services:
       - cycles
 
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.26
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.27
     restart: unless-stopped
     environment:
       REDIS_HOST: redis

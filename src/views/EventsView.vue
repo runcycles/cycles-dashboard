@@ -8,12 +8,14 @@ import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useListExport } from '../composables/useListExport'
 import { listEvents } from '../api/client'
 import type { Event } from '../types'
+import { EVENT_TYPES } from '../types'
 import PageHeader from '../components/PageHeader.vue'
 import TenantLink from '../components/TenantLink.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
+import TimeRangePicker from '../components/TimeRangePicker.vue'
 import { formatDateTime } from '../utils/format'
 import { toMessage } from '../utils/errors'
 import { safeJsonStringify } from '../utils/safe'
@@ -93,6 +95,16 @@ const correlationId = ref((route.query.correlation_id as string) || '')
 // exact/prefix filters for the case where the operator has only a
 // partial id. Debounced via the shared 300ms cadence.
 const search = ref((route.query.search as string) || '')
+// Spec: listEvents accepts `from` / `to` as RFC 3339 date-time.
+// TimeRangePicker emits datetime-local strings (YYYY-MM-DDTHH:MM,
+// local tz) which the server normalizes — matches what AuditView
+// already sends.
+const fromDate = ref((route.query.from as string) || '')
+const toDate = ref((route.query.to as string) || '')
+const timeRange = computed({
+  get: () => ({ from: fromDate.value, to: toDate.value }),
+  set: (v: { from: string; to: string }) => { fromDate.value = v.from; toDate.value = v.to },
+})
 
 function buildFilterParams(): Record<string, string> {
   const params: Record<string, string> = {}
@@ -105,6 +117,12 @@ function buildFilterParams(): Record<string, string> {
   // the server, and the spec requires empty → absent.
   const q = search.value.trim()
   if (q) params.search = q
+  // datetime-local emits 'YYYY-MM-DDTHH:MM' with no seconds or tz;
+  // the spec's `from`/`to` are RFC 3339 date-time, which the server
+  // validates strictly. new Date(...).toISOString() normalizes the
+  // local-time input to UTC ISO 8601 — matches AuditView's wire format.
+  if (fromDate.value) params.from = new Date(fromDate.value).toISOString()
+  if (toDate.value) params.to = new Date(toDate.value).toISOString()
   if (sortKey.value) {
     params.sort_by = sortKey.value
     params.sort_dir = sortDir.value
@@ -146,6 +164,8 @@ function applyFilters() {
     ...(scope.value && { scope: scope.value }),
     ...(correlationId.value && { correlation_id: correlationId.value }),
     ...(search.value.trim() && { search: search.value.trim() }),
+    ...(fromDate.value && { from: fromDate.value }),
+    ...(toDate.value && { to: toDate.value }),
   }})
   // Filter change resets the extended state — a new filter means the
   // previously-loaded tail is stale (events matching the OLD filter).
@@ -176,6 +196,7 @@ async function loadMore() {
 
 function clearFilters() {
   category.value = ''; eventType.value = ''; tenantId.value = ''; scope.value = ''; correlationId.value = ''; search.value = ''
+  fromDate.value = ''; toDate.value = ''
   loadedMorePages.value = false
   applyFilters()
 }
@@ -202,6 +223,11 @@ watch(debouncedTenantId, () => applyFilters())
 watch(debouncedScope, () => applyFilters())
 watch(debouncedCorrelationId, () => applyFilters())
 watch(debouncedSearch, () => applyFilters())
+// TimeRangePicker: emits only on explicit preset-click or custom
+// Apply, so no debounce is needed — each change is already a
+// committed intent.
+watch(fromDate, () => applyFilters())
+watch(toDate, () => applyFilters())
 
 // Shared export (useListExport). CSV column spec + fetchPage adapter
 // + filename stem is all that's view-specific.
@@ -244,7 +270,7 @@ const {
 
 watch(exportError, (v) => { if (v) error.value = v })
 
-const hasActiveFilters = computed(() => !!(category.value || eventType.value || tenantId.value || scope.value || correlationId.value || search.value))
+const hasActiveFilters = computed(() => !!(category.value || eventType.value || tenantId.value || scope.value || correlationId.value || search.value || fromDate.value || toDate.value))
 
 const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
 
@@ -329,6 +355,28 @@ function measureRow(el: Element | { $el?: Element } | null) {
           </select>
         </div>
         <div>
+          <!-- Type filter. Surfaces the `?type=` URL param (e.g. set by
+               Overview "Recent Denials → View all" deep-link) as a
+               visible, clearable input. Without this, the URL param
+               silently filters the list with no operator-visible cue.
+               Datalist typeahead offers all 40 spec enum values per
+               cycles-governance-admin v0.1.25 EventType schema
+               (types.ts:EVENT_TYPES); free-text entry is still
+               accepted so `custom.*` prefixed types (per spec
+               extensibility rule) remain filterable. -->
+          <label for="ev-type" class="form-label">Type</label>
+          <input
+            id="ev-type"
+            v-model="eventType"
+            list="ev-type-options"
+            placeholder="reservation.denied"
+            class="form-input w-44"
+          />
+          <datalist id="ev-type-options">
+            <option v-for="t in EVENT_TYPES" :key="t" :value="t" />
+          </datalist>
+        </div>
+        <div>
           <label for="ev-tenant" class="form-label">Tenant ID</label>
           <input id="ev-tenant" v-model="tenantId" placeholder="tenant id" class="form-input w-32" />
         </div>
@@ -343,6 +391,14 @@ function measureRow(el: Element | { $el?: Element } | null) {
         <div>
           <label for="ev-search" class="form-label">Search</label>
           <input id="ev-search" v-model="search" type="search" placeholder="correlation_id or scope" class="form-input w-40" aria-label="Search by correlation_id or scope substring" />
+        </div>
+        <div class="w-52">
+          <label for="ev-time-range" class="form-label">Time range</label>
+          <TimeRangePicker
+            id="ev-time-range"
+            v-model="timeRange"
+            aria-label="Event stream time range"
+          />
         </div>
         <button v-if="hasActiveFilters" type="button" @click="clearFilters" class="text-sm muted hover:text-gray-700 cursor-pointer ml-auto">Clear filters</button>
       </div>

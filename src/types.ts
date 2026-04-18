@@ -76,6 +76,11 @@ export interface AdminOverviewResponse {
   event_counts: EventCounts
   recent_denials: Event[]
   recent_expiries: Event[]
+  // v0.1.25.8+ server computes a denial breakdown by reason_code across
+  // the event window. Optional because the field is only populated when
+  // the denial sample has at least one row with reason_code set — the
+  // admin server omits the key entirely on an empty/null result.
+  recent_denials_by_reason?: Record<string, number>
 }
 
 // Budget types
@@ -424,6 +429,26 @@ export const EVENT_TYPES = [
 ] as const
 
 export const EVENT_CATEGORIES = ['budget', 'tenant', 'api_key', 'policy', 'reservation', 'system'] as const
+
+// cycles-governance-admin v0.1.25.yaml ErrorCode enum. Used as the suggestion
+// set for the AuditView error_code filter datalist (v0.1.25.24 listAuditLogs
+// filter DSL). Free-text entry still accepted — values are NOT validated
+// against the enum on the server per the spec's forward-compat rule: unknown
+// codes match nothing at the filter layer, but newer clients sending a
+// newly-added enum value MUST NOT cause a 400 against an older server.
+export const ERROR_CODES = [
+  'INVALID_REQUEST', 'UNAUTHORIZED', 'FORBIDDEN', 'NOT_FOUND',
+  'BUDGET_EXCEEDED', 'RESERVATION_EXPIRED', 'RESERVATION_FINALIZED',
+  'IDEMPOTENCY_MISMATCH', 'UNIT_MISMATCH', 'OVERDRAFT_LIMIT_EXCEEDED',
+  'DEBT_OUTSTANDING', 'INTERNAL_ERROR',
+  'TENANT_NOT_FOUND', 'TENANT_SUSPENDED', 'TENANT_CLOSED',
+  'BUDGET_NOT_FOUND', 'BUDGET_FROZEN', 'POLICY_VIOLATION',
+  'INSUFFICIENT_PERMISSIONS', 'KEY_REVOKED', 'KEY_EXPIRED',
+  'DUPLICATE_RESOURCE', 'BUDGET_CLOSED',
+  'WEBHOOK_NOT_FOUND', 'WEBHOOK_URL_INVALID', 'EVENT_NOT_FOUND',
+  'REPLAY_IN_PROGRESS',
+  'COUNT_MISMATCH', 'LIMIT_EXCEEDED',
+] as const
 
 export const COMMIT_OVERAGE_POLICIES = ['REJECT', 'ALLOW_IF_AVAILABLE', 'ALLOW_WITH_OVERDRAFT'] as const
 
