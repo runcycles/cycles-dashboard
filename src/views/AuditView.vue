@@ -343,22 +343,22 @@ function measureRow(el: Element | { $el?: Element } | null) {
 
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
-    <!-- Filter form: two rows on a shared 6-column grid. Pre-v0.1.25.33
-         the form used a 5-col grid in 2 rows; adding error_code_exclude
-         in Slice A (v0.1.25.33) overflowed Row 2 into a third spillover
-         row with Status + Run Query. Rebalanced now to 6 cols so all
-         9 primary filters + Status + Run Query fit in exactly 2 rows.
-           Row 1 (6 cols): Search [span 2] | Time | Tenant | Key | Resource Type
-           Row 2 (6 cols): Resource ID | Operation | Error Code | Exclude codes | Status+Run Query [span 2]
-         Search spans 2 because its placeholder enumerates 4 search
-         targets (resource_id, log_id, error_code, operation) and needs
-         breathing room at typical 1280–1440 desktop widths. Status +
-         Run Query share cols 5-6 in Row 2 via an internal flex (Status
-         left, Run Query right-aligned via ml-auto). -->
+    <!-- Filter form: 6-col wide layout at xl+, stacks to 2 cols below.
+         The 6-col grid would previously kick in at md (768px), but the
+         Status chip group (5 bands) + Run Query need ~370px of room;
+         at md the col-span-2 cell only got ~225-320px so the chips
+         flex-wrapped to 2-3 rows within the cell and the whole layout
+         jittered as the viewport resized through the 768-1280px range.
+         Bumping the wide layout to xl (1280px) eliminates that jitter —
+         below 1280px the filters stack cleanly in a 2-col grid, above
+         1280px the row 2 col-span-2 cell gets ~408px and the chips fit
+         on one line. One clean breakpoint jump instead of a cascade.
+           Row 1 (xl, 6 cols): Search [span 2] | Time | Tenant | Key | Resource Type
+           Row 2 (xl, 6 cols): Resource ID | Operation | Error Code | Exclude codes | Status+Run Query [span 2] -->
     <form @submit.prevent="query" class="card p-4 mb-4 space-y-3">
       <!-- Row 1: primary filters -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-3 items-end">
-        <div class="md:col-span-2">
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-3 items-end">
+        <div class="xl:col-span-2">
           <label for="audit-search" class="form-label">Search</label>
           <input id="audit-search" v-model="search" type="search" class="form-input" placeholder="resource_id, log_id, error_code, operation" aria-label="Free-text substring search across resource_id, log_id, error_code, and operation" />
         </div>
@@ -395,7 +395,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
       </div>
 
       <!-- Row 2: detail filters + Status + submit -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-3 items-end">
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-3 items-end">
         <div>
           <label for="audit-resource-id" class="form-label">Resource ID</label>
           <input id="audit-resource-id" v-model="resourceId" class="form-input" placeholder="key_abc123..." />
@@ -435,10 +435,12 @@ function measureRow(el: Element | { $el?: Element } | null) {
             aria-label="Hide these error codes. Comma-separated (e.g. INTERNAL_ERROR, TIMEOUT). Success rows (no error_code) always pass this filter."
           />
         </div>
-        <!-- Status + Run Query share the last 2 cols via internal flex.
-             Status chips flex-wrap on narrow viewports without forcing
-             Run Query below a phantom empty cell. -->
-        <div class="md:col-span-2 flex flex-wrap items-end gap-3">
+        <!-- Status + Run Query share the last 2 cols at xl+ via internal
+             flex. Below xl the filters stack in 2 cols and this cell
+             gets a full half-width row to itself; chips still flex-wrap
+             if the cell is narrow. Run Query stays right-aligned via
+             ml-auto at every breakpoint. -->
+        <div class="xl:col-span-2 flex flex-wrap items-end gap-3">
           <div class="min-w-0">
             <span class="form-label">Status</span>
             <!-- Segmented chip control. role=radiogroup + role=radio +
