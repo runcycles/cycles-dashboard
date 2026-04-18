@@ -621,3 +621,64 @@ export interface WebhookBulkActionResponse {
   skipped: BulkActionRowOutcome[]
   idempotency_key: string
 }
+
+// cycles-governance-admin v0.1.25.26 (admin-server v0.1.25.29+):
+// POST /v1/admin/budgets/bulk-action — filter-driven bulk balance
+// mutation. Same 500-row cap / expected_count / idempotency contract
+// as the tenants + webhooks endpoints, with one structural difference:
+// BudgetBulkFilter.tenant_id is REQUIRED (no cross-tenant fan-out).
+// The operator must choose a single tenant before arming a bulk action
+// — the dashboard's cross-tenant listing modes (over_limit, has_debt)
+// continue to work for list-only use (scanning an incident), but the
+// Bulk-action button is disabled until a tenant is selected.
+//
+// One audit log entry per invocation with actor_type=ADMIN_ON_BEHALF_OF.
+export const BUDGET_BULK_ACTIONS = ['CREDIT', 'DEBIT', 'RESET', 'RESET_SPENT', 'REPAY_DEBT'] as const
+export type BudgetBulkAction = typeof BUDGET_BULK_ACTIONS[number]
+
+// Filter selecting target budgets. `tenant_id` is required by the
+// server (spec v0.1.25.26) — enforced client-side so the UI never
+// sends an empty/missing value (would 400 VALIDATION_FAILED).
+export interface BudgetBulkFilter {
+  tenant_id: string
+  scope_prefix?: string
+  unit?: string
+  // Mirrors BudgetLedger.status — server-side enum is ACTIVE / FROZEN /
+  // CLOSED, string-typed in this codebase to stay forward-compatible
+  // with future status additions without forcing a client release.
+  status?: string
+  over_limit?: boolean
+  has_debt?: boolean
+  utilization_min?: number   // 0–1 ratio, matches listBudgets wire shape
+  utilization_max?: number   // 0–1 ratio
+  search?: string
+}
+
+export interface BudgetBulkActionRequest {
+  filter: BudgetBulkFilter
+  action: BudgetBulkAction
+  // Required for CREDIT / DEBIT / RESET / REPAY_DEBT. Ignored for
+  // RESET_SPENT (that action's amount comes from `spent`).
+  amount?: number
+  // Required for RESET_SPENT only. Sets each matching ledger's
+  // `spent` counter to this value (idempotent rewind of accumulated
+  // spend, not a deposit).
+  spent?: number
+  // Optional operator-supplied note recorded on the audit entry.
+  reason?: string
+  // Preflight count-gate — when present, server counts first and
+  // rejects 409 COUNT_MISMATCH if the actual count differs; no writes.
+  expected_count?: number
+  // Required. UUID v4 replay key; server remembers the first response
+  // for 15 minutes and returns it verbatim on repeat submits.
+  idempotency_key: string
+}
+
+export interface BudgetBulkActionResponse {
+  action: BudgetBulkAction
+  total_matched: number
+  succeeded: BulkActionRowOutcome[]
+  failed: BulkActionRowOutcome[]
+  skipped: BulkActionRowOutcome[]
+  idempotency_key: string
+}

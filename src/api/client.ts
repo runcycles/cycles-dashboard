@@ -352,6 +352,20 @@ export const freezeBudget = (scope: string, unit: string, reason?: string) =>
 export const unfreezeBudget = (scope: string, unit: string, reason?: string) =>
   post<import('../types').BudgetLedger>(`${BASE}/admin/budgets/unfreeze`, reason ? { reason } : {}, { scope, unit })
 
+// cycles-governance-admin v0.1.25.26 (admin-server v0.1.25.29+):
+// POST /v1/admin/budgets/bulk-action. Mirrors bulkActionTenants +
+// bulkActionWebhooks — single request applies an action (CREDIT /
+// DEBIT / RESET / RESET_SPENT / REPAY_DEBT) to every budget matching
+// the filter. Same 500-row cap + idempotency_key + expected_count +
+// 409 COUNT_MISMATCH safety semantics. Distinct from those endpoints
+// in one respect: BudgetBulkFilter.tenant_id is REQUIRED (spec-level
+// enforcement — no cross-tenant fan-out), enforced client-side in
+// BudgetsView so the dashboard never sends a request guaranteed to
+// 400. One audit-log entry per invocation with
+// actor_type=ADMIN_ON_BEHALF_OF.
+export const bulkActionBudgets = (body: import('../types').BudgetBulkActionRequest) =>
+  post<import('../types').BudgetBulkActionResponse>(`${BASE}/admin/budgets/bulk-action`, body as unknown as Record<string, unknown>)
+
 // v0.1.25.27: adds optional `spent` for the RESET_SPENT operation introduced
 // in cycles-server-admin 0.1.25.18 (billing-period rollover). Server
 // semantics (per FUND_LUA in admin BudgetRepository): RESET_SPENT sets

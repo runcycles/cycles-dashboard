@@ -1,12 +1,12 @@
 [![CI](https://github.com/runcycles/cycles-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/runcycles/cycles-dashboard/actions)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Spec](https://img.shields.io/badge/spec-v0.1.25.25-blue)](https://github.com/runcycles/cycles-protocol/blob/main/cycles-governance-admin-v0.1.25.yaml)
+[![Spec](https://img.shields.io/badge/spec-v0.1.25.26-blue)](https://github.com/runcycles/cycles-protocol/blob/main/cycles-governance-admin-v0.1.25.yaml)
 [![Vue](https://img.shields.io/badge/vue-3-brightgreen)](https://vuejs.org)
 [![TypeScript](https://img.shields.io/badge/typescript-strict-blue)](https://www.typescriptlang.org)
 
 # Runcycles Admin Dashboard
 
-Operational admin dashboard for the [Cycles Budget Governance System](https://github.com/runcycles/cycles-server-admin), aligned with [governance spec v0.1.25.25](https://github.com/runcycles/cycles-protocol/blob/main/cycles-governance-admin-v0.1.25.yaml).
+Operational admin dashboard for the [Cycles Budget Governance System](https://github.com/runcycles/cycles-server-admin), aligned with [governance spec v0.1.25.26](https://github.com/runcycles/cycles-protocol/blob/main/cycles-governance-admin-v0.1.25.yaml).
 
 <p align="center">
   <img src="docs/runcycles-demo.gif" alt="Dashboard walkthrough — tenants, budgets, reservations, webhooks" width="800"/><br/>
@@ -39,6 +39,7 @@ Tier 1 incident-response actions available directly from the dashboard (capabili
 | **Create budget** | Budgets list, Tenant detail | Admin-on-behalf-of (dual-auth) — modal with ScopeBuilder + tenant selector |
 | **Adjust budget allocation** | Budget detail | Inline form — uses fund endpoint with RESET operation |
 | **Rollover billing period (RESET_SPENT)** | Budget detail → Fund → RESET_SPENT | Resets `spent` tally without touching `allocated`; optional exact-spent override (blank = zero). Requires cycles-server-admin v0.1.25.18+ |
+| **Bulk budget action (CREDIT / DEBIT / RESET / RESET_SPENT / REPAY_DEBT)** | Budgets list | Filter-apply — single tenant required (spec constraint); preview walk + expected_count gate + per-row result dialog for failed/skipped rows. Requires cycles-server-admin v0.1.25.29+ |
 | **Emergency Freeze (tenant-wide)** | Tenant detail | Sequential freeze across all ACTIVE budgets — one-click lockdown with confirm + blast-radius summary |
 | **Create policy** | Policies tab (Tenant detail) | Admin-on-behalf-of — modal form, tenant-scoped |
 | **Edit policy** | Policies tab | Admin-on-behalf-of — patch policy_id, server resolves owning tenant |
