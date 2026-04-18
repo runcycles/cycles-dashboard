@@ -352,4 +352,85 @@ describe('BulkActionResultDialog', () => {
     })
     expect(w.findAll('a[data-to]').length).toBe(0)
   })
+
+  it('emits close when a triage router-link is clicked — prevents the dialog from overlaying the filtered list', async () => {
+    const response = {
+      succeeded: [],
+      failed: [outcome('uuid-bad', { error_code: 'BUDGET_EXCEEDED', message: 'over' })],
+      skipped: [],
+      total_matched: 1,
+    }
+    const w = mount(BulkActionResultDialog, {
+      props: {
+        actionVerb: 'Debit',
+        itemNounPlural: 'budgets',
+        response,
+        labelById: { 'uuid-bad': 'tenant:acme/app:batch' },
+        tenantId: 'acme',
+      },
+      global: { stubs: { RouterLink: RouterLinkStub } },
+    })
+    const viewBudget = w.find('a[data-to]')
+    expect(viewBudget.exists()).toBe(true)
+    await viewBudget.trigger('click')
+    expect(w.emitted('close')).toBeTruthy()
+  })
+
+  // Save JSON — operators need to retain triage context after the
+  // dialog closes (enumerated rows, per-row error codes, scope labels
+  // aren't reconstructable from the toast summary or refreshed list).
+  it('Save JSON button creates a downloadable blob with the full response + context', async () => {
+    // jsdom doesn't implement URL.createObjectURL / revokeObjectURL —
+    // stub them so the button click doesn't throw. The returned value
+    // is opaque; we assert the Blob payload via createObjectURL's arg.
+    let capturedBlob: Blob | null = null
+    const createSpy = vi.fn((b: Blob) => {
+      capturedBlob = b
+      return 'blob:test-url'
+    })
+    const revokeSpy = vi.fn()
+    globalThis.URL.createObjectURL = createSpy
+    globalThis.URL.revokeObjectURL = revokeSpy
+
+    const response = {
+      succeeded: [outcome('uuid-ok')],
+      failed: [outcome('uuid-bad', { error_code: 'BUDGET_EXCEEDED', message: 'over' })],
+      skipped: [outcome('uuid-skip', { reason: 'no-op' })],
+      total_matched: 3,
+    }
+    const labelById = {
+      'uuid-ok': 'tenant:acme/app:batch',
+      'uuid-bad': 'tenant:acme/agent:reviewer',
+      'uuid-skip': 'tenant:acme/workspace:prod',
+    }
+    const w = mount(BulkActionResultDialog, {
+      props: {
+        actionVerb: 'Credit',
+        itemNounPlural: 'budgets',
+        response,
+        labelById,
+        tenantId: 'acme',
+      },
+      global: { stubs: { RouterLink: RouterLinkStub } },
+    })
+
+    const saveBtn = w.find('button[aria-label="Save results as JSON"]')
+    expect(saveBtn.exists()).toBe(true)
+    await saveBtn.trigger('click')
+
+    expect(createSpy).toHaveBeenCalledOnce()
+    expect(revokeSpy).toHaveBeenCalledOnce()
+    expect(capturedBlob).toBeInstanceOf(Blob)
+    expect((capturedBlob as unknown as Blob | null)?.type).toBe('application/json')
+    const text = await (capturedBlob as unknown as Blob).text()
+    const payload = JSON.parse(text)
+    expect(payload.actionVerb).toBe('Credit')
+    expect(payload.itemNounPlural).toBe('budgets')
+    expect(payload.tenantId).toBe('acme')
+    expect(payload.labelById).toEqual(labelById)
+    expect(payload.response).toEqual(response)
+    expect(typeof payload.exportedAt).toBe('string')
+    // ISO timestamp — parsable as a date.
+    expect(Number.isNaN(Date.parse(payload.exportedAt))).toBe(false)
+  })
 })

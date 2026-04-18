@@ -84,6 +84,31 @@ function auditTriageLink() {
   }
 }
 
+// Download the full response as JSON so operators can retain triage
+// context after the dialog closes (the enumerated rows + per-row
+// error codes + scope labels are not reconstructable from the toast
+// summary or the refreshed list view). Filename carries verb + noun
+// + ISO timestamp for easy correlation with incident tickets.
+function downloadJson() {
+  const payload = {
+    actionVerb: props.actionVerb,
+    itemNounPlural: props.itemNounPlural,
+    tenantId: props.tenantId,
+    exportedAt: new Date().toISOString(),
+    labelById: props.labelById,
+    response: props.response,
+  }
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `bulk-${props.itemNounPlural}-${props.actionVerb.toLowerCase().replace(/\s+/g, '-')}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
 const emit = defineEmits<{ close: [] }>()
 
 const dialogRef = ref<HTMLElement | null>(null)
@@ -194,11 +219,13 @@ onUnmounted(() => {
                 :to="budgetTriageLink(s.id)"
                 class="text-[10px] text-blue-700 dark:text-blue-300 hover:underline"
                 :aria-label="`View budget ${labelFor(s.id) ?? s.id}`"
+                @click="$emit('close')"
               >View budget</router-link>
               <router-link
                 :to="auditTriageLink()"
                 class="text-[10px] text-blue-700 dark:text-blue-300 hover:underline"
                 :aria-label="`View audit for bulk action on tenant ${tenantId}`"
+                @click="$emit('close')"
               >View audit</router-link>
             </div>
           </li>
@@ -250,11 +277,13 @@ onUnmounted(() => {
                 :to="budgetTriageLink(f.id)"
                 class="text-[10px] text-blue-700 dark:text-blue-300 hover:underline"
                 :aria-label="`View budget ${labelFor(f.id) ?? f.id}`"
+                @click="$emit('close')"
               >View budget</router-link>
               <router-link
                 :to="auditTriageLink()"
                 class="text-[10px] text-blue-700 dark:text-blue-300 hover:underline"
                 :aria-label="`View audit for bulk action on tenant ${tenantId}`"
+                @click="$emit('close')"
               >View audit</router-link>
             </div>
           </li>
@@ -307,18 +336,27 @@ onUnmounted(() => {
                 :to="budgetTriageLink(s.id)"
                 class="text-[10px] text-blue-700 dark:text-blue-300 hover:underline"
                 :aria-label="`View budget ${labelFor(s.id) ?? s.id}`"
+                @click="$emit('close')"
               >View budget</router-link>
               <router-link
                 :to="auditTriageLink()"
                 class="text-[10px] text-blue-700 dark:text-blue-300 hover:underline"
                 :aria-label="`View audit for bulk action on tenant ${tenantId}`"
+                @click="$emit('close')"
               >View audit</router-link>
             </div>
           </li>
         </ul>
       </details>
 
-      <div class="flex justify-end">
+      <div class="flex justify-end gap-2">
+        <button
+          type="button"
+          @click="downloadJson"
+          class="px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer"
+          aria-label="Save results as JSON"
+          title="Download full response as JSON for triage after dialog closes"
+        >Save JSON</button>
         <button
           type="button"
           @click="$emit('close')"
