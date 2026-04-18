@@ -44,7 +44,11 @@ const activeFilter = computed(() => (route.query.filter as string) || '')
 const isCrossTenantFilter = computed(() => activeFilter.value === 'over_limit' || activeFilter.value === 'has_debt')
 
 const tenants = ref<Tenant[]>([])
-const selectedTenant = ref('')
+// Hydrate from ?tenant_id=<id> so deep-links from BulkActionResultDialog's
+// "View budget" link land on the right tenant's budget list (per-row
+// triage from a bulk-action result → specific ledger row). Query key
+// is `tenant_id` for consistency with AuditView's filter deep-links.
+const selectedTenant = ref((route.query.tenant_id as string) || '')
 const budgets = ref<BudgetLedger[]>([])
 const hasMore = ref(false)
 const nextCursor = ref('')
@@ -103,7 +107,13 @@ const filterUtilMax = ref<number | string>('')
 // across tenant_id + scope together. Both combine with AND on the
 // server when set. Debounced with the existing 300ms cadence so a
 // 20-char filter doesn't fire 20 fetches.
-const search = ref('')
+//
+// Hydrate from ?search=<scope> so BulkActionResultDialog's "View
+// budget" deep-link lands on the matching row. The server's search
+// matches tenant_id + scope only (NOT ledger_id — verified against
+// BudgetListFilters.java#search), so the dialog passes the scope
+// label from labelById as the search term, not the opaque UUID.
+const search = ref((route.query.search as string) || '')
 
 // V5 (Phase 3): debounced refs so filter auto-applies 300ms after
 // the operator stops typing. Pre-fix, the form relied on @change
@@ -510,7 +520,14 @@ const filterBulkRunning = ref(false)
 const filterBulkSubmitError = ref('')
 // Per-row result dialog — opens after submit iff failed[] or skipped[]
 // is non-empty.
-const bulkResult = ref<{ actionVerb: string; response: BudgetBulkActionResponse; labelById: Record<string, string> } | null>(null)
+const bulkResult = ref<{
+  actionVerb: string
+  response: BudgetBulkActionResponse
+  labelById: Record<string, string>
+  // Tenant the bulk ran on — forwarded to BulkActionResultDialog so
+  // each enumerated row can deep-link "View budget" / "View audit".
+  tenantId: string
+} | null>(null)
 
 // ─── Row-select bulk path (v0.1.25.36). Sibling of the filter-apply
 //     path above. Freeze / Unfreeze aren't in the server-side
@@ -852,7 +869,7 @@ async function executeFilterBulk() {
     filterBulkReason.value = ''
     filterBulkPreview.resetPreview()
     if (res.failed.length || res.skipped.length) {
-      bulkResult.value = { actionVerb: actionVerb(action), response: res, labelById: labels }
+      bulkResult.value = { actionVerb: actionVerb(action), response: res, labelById: labels, tenantId }
     }
   } catch (e) {
     if (e instanceof ApiError && (e.errorCode === 'LIMIT_EXCEEDED' || e.errorCode === 'COUNT_MISMATCH')) {
@@ -1495,6 +1512,7 @@ function rowTenantId(b: BudgetLedger): string {
       item-noun-plural="budgets"
       :response="bulkResult.response"
       :label-by-id="bulkResult.labelById"
+      :tenant-id="bulkResult.tenantId"
       @close="bulkResult = null"
     />
   </div>

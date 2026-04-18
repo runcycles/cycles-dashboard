@@ -255,4 +255,101 @@ describe('BulkActionResultDialog', () => {
     // no extra scope line above it.
     expect(w.text()).toContain('acme-corp')
   })
+
+  // Triage deep-links — budgets-only. Ledger ids are opaque UUIDs the
+  // operator can't search for anywhere (server's audit search doesn't
+  // match on ledger_id, and BudgetsView's list search matches only
+  // tenant_id + scope). The dialog must therefore offer a pair of
+  // router-links per row: View budget lands on the specific ledger
+  // row in BudgetsView (via scope-based search), View audit lands on
+  // the bulk invocation audit entry (whose metadata expands to the
+  // per-row outcome list).
+  const RouterLinkStub = {
+    props: ['to'],
+    template: '<a :data-to="JSON.stringify(to)" :aria-label="$attrs[\'aria-label\']"><slot /></a>',
+  }
+
+  it('renders View budget + View audit links per row when itemNounPlural=budgets and tenantId is provided', () => {
+    const response = {
+      succeeded: [outcome('uuid-ok')],
+      failed: [outcome('uuid-bad', { error_code: 'BUDGET_EXCEEDED', message: 'over limit' })],
+      skipped: [outcome('uuid-skip', { reason: 'no-op' })],
+      total_matched: 3,
+    }
+    const labelById = {
+      'uuid-ok': 'tenant:acme/app:batch',
+      'uuid-bad': 'tenant:acme/agent:reviewer',
+      'uuid-skip': 'tenant:acme/workspace:prod',
+    }
+    const w = mount(BulkActionResultDialog, {
+      props: {
+        actionVerb: 'Credit',
+        itemNounPlural: 'budgets',
+        response,
+        labelById,
+        tenantId: 'acme',
+      },
+      global: { stubs: { RouterLink: RouterLinkStub } },
+    })
+    // Three router-links in each row × 2 (View budget + View audit) = 6 links.
+    const links = w.findAll('a[data-to]')
+    expect(links.length).toBe(6)
+    // Failed row's View budget target carries the scope — not the UUID —
+    // because the server's search endpoint matches tenant_id + scope.
+    const targets = links.map((l) => JSON.parse(l.attributes('data-to')!))
+    const viewBudgetFailed = targets.find(
+      (t) => t.path === '/budgets' && t.query.search === 'tenant:acme/agent:reviewer',
+    )
+    expect(viewBudgetFailed).toBeDefined()
+    expect(viewBudgetFailed.query.tenant_id).toBe('acme')
+    // Every View audit link targets the same invocation entry (filter
+    // by tenant + operation, since the bulk endpoint writes one audit
+    // row with resource_id='bulk-action').
+    const viewAudit = targets.filter(
+      (t) => t.path === '/audit' && t.query.operation === 'bulkActionBudgets',
+    )
+    expect(viewAudit.length).toBe(3)
+    expect(viewAudit.every((t) => t.query.tenant_id === 'acme')).toBe(true)
+  })
+
+  it('omits triage links when tenantId is absent — guards against cross-tenant deep-links that would 400', () => {
+    const response = {
+      succeeded: [],
+      failed: [outcome('uuid-bad', { error_code: 'BUDGET_EXCEEDED', message: 'over limit' })],
+      skipped: [],
+      total_matched: 1,
+    }
+    const w = mount(BulkActionResultDialog, {
+      props: {
+        actionVerb: 'Debit',
+        itemNounPlural: 'budgets',
+        response,
+        labelById: { 'uuid-bad': 'tenant:acme/app:batch' },
+        // No tenantId.
+      },
+      global: { stubs: { RouterLink: RouterLinkStub } },
+    })
+    expect(w.findAll('a[data-to]').length).toBe(0)
+    // Copy ID still available as the fallback triage path.
+    expect(w.find('button[aria-label="Copy ID uuid-bad"]').exists()).toBe(true)
+  })
+
+  it('omits triage links when itemNounPlural is not budgets — tenants/webhooks ids are already human-readable and searchable', () => {
+    const response = {
+      succeeded: [],
+      failed: [outcome('acme-corp', { error_code: 'INVALID_TRANSITION', message: 'already SUSPENDED' })],
+      skipped: [],
+      total_matched: 1,
+    }
+    const w = mount(BulkActionResultDialog, {
+      props: {
+        actionVerb: 'Suspend',
+        itemNounPlural: 'tenants',
+        response,
+        tenantId: 'acme',
+      },
+      global: { stubs: { RouterLink: RouterLinkStub } },
+    })
+    expect(w.findAll('a[data-to]').length).toBe(0)
+  })
 })

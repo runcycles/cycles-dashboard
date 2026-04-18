@@ -37,10 +37,51 @@ const props = defineProps<{
    * WebhooksView behaviour where ids are already human-readable.
    */
   labelById?: Record<string, string>
+  /**
+   * Tenant id the bulk was scoped to. Required by spec for budget
+   * bulk-action (BudgetBulkFilter.tenant_id is mandatory) — when
+   * supplied alongside `itemNounPlural === 'budgets'`, each enumerated
+   * row renders a pair of triage router-links:
+   *   • View budget → /budgets?tenant_id=<t>&search=<scope> (scope from
+   *     labelById; the server's search matches tenant_id + scope, NOT
+   *     the opaque ledger_id, so we pass the human-readable scope).
+   *   • View audit  → /audit?tenant_id=<t>&operation=bulkActionBudgets
+   *     (the bulk invocation writes a single audit entry with
+   *     resource_id='bulk-action' and per-row outcomes in metadata;
+   *     operation is the only searchable hook to that entry).
+   * Suppressed when absent — tenants/webhooks surfaces don't need
+   * per-row routing (ids are already human-readable and the audit
+   * trail is already searchable by those ids).
+   */
+  tenantId?: string
 }>()
 
 function labelFor(id: string): string | undefined {
   return props.labelById?.[id]
+}
+
+// Only budgets rows benefit from triage links — tenants/webhooks
+// surfaces have readable ids and per-row audit rows searchable by id.
+const showTriageLinks = computed(() =>
+  props.itemNounPlural === 'budgets' && !!props.tenantId,
+)
+
+function budgetTriageLink(id: string) {
+  const scope = labelFor(id)
+  // Fall back to the id when labelById wasn't supplied for this row —
+  // the server search won't match on id, but the operator at least
+  // lands on the correct tenant's list rather than a 404.
+  return {
+    path: '/budgets',
+    query: { tenant_id: props.tenantId, search: scope ?? id },
+  }
+}
+
+function auditTriageLink() {
+  return {
+    path: '/audit',
+    query: { tenant_id: props.tenantId, operation: 'bulkActionBudgets' },
+  }
 }
 
 const emit = defineEmits<{ close: [] }>()
@@ -148,6 +189,18 @@ onUnmounted(() => {
                 :aria-label="`Copy ID ${s.id}`"
               >{{ copiedId === s.id ? 'Copied' : 'Copy ID' }}</button>
             </div>
+            <div v-if="showTriageLinks" class="mt-1 flex items-center gap-3">
+              <router-link
+                :to="budgetTriageLink(s.id)"
+                class="text-[10px] text-blue-700 dark:text-blue-300 hover:underline"
+                :aria-label="`View budget ${labelFor(s.id) ?? s.id}`"
+              >View budget</router-link>
+              <router-link
+                :to="auditTriageLink()"
+                class="text-[10px] text-blue-700 dark:text-blue-300 hover:underline"
+                :aria-label="`View audit for bulk action on tenant ${tenantId}`"
+              >View audit</router-link>
+            </div>
           </li>
         </ul>
       </details>
@@ -192,6 +245,18 @@ onUnmounted(() => {
             <p class="mt-0.5 text-red-700 dark:text-red-300 break-words">
               {{ formatErrorCode(f.error_code, f.message) }}
             </p>
+            <div v-if="showTriageLinks" class="mt-1 flex items-center gap-3">
+              <router-link
+                :to="budgetTriageLink(f.id)"
+                class="text-[10px] text-blue-700 dark:text-blue-300 hover:underline"
+                :aria-label="`View budget ${labelFor(f.id) ?? f.id}`"
+              >View budget</router-link>
+              <router-link
+                :to="auditTriageLink()"
+                class="text-[10px] text-blue-700 dark:text-blue-300 hover:underline"
+                :aria-label="`View audit for bulk action on tenant ${tenantId}`"
+              >View audit</router-link>
+            </div>
           </li>
         </ul>
       </details>
@@ -237,6 +302,18 @@ onUnmounted(() => {
             <p v-if="s.reason" class="mt-0.5 text-gray-600 dark:text-gray-300 break-words">
               {{ s.reason }}
             </p>
+            <div v-if="showTriageLinks" class="mt-1 flex items-center gap-3">
+              <router-link
+                :to="budgetTriageLink(s.id)"
+                class="text-[10px] text-blue-700 dark:text-blue-300 hover:underline"
+                :aria-label="`View budget ${labelFor(s.id) ?? s.id}`"
+              >View budget</router-link>
+              <router-link
+                :to="auditTriageLink()"
+                class="text-[10px] text-blue-700 dark:text-blue-300 hover:underline"
+                :aria-label="`View audit for bulk action on tenant ${tenantId}`"
+              >View audit</router-link>
+            </div>
           </li>
         </ul>
       </details>
