@@ -21,11 +21,14 @@ import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import FormDialog from '../components/FormDialog.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import BulkActionPreviewDialog from '../components/BulkActionPreviewDialog.vue'
+import BulkActionResultDialog from '../components/BulkActionResultDialog.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { useBulkActionPreview } from '../composables/useBulkActionPreview'
 import { formatDate } from '../utils/format'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
+import { formatBulkRequestError } from '../utils/errorCodeMessages'
+import type { TenantBulkActionResponse } from '../types'
 
 const toast = useToast()
 
@@ -279,6 +282,10 @@ const filterBulkRunning = ref(false)
 // Submit-time error surfaced inside the preview dialog (kept open on
 // error so the operator sees what failed instead of a disjoint toast).
 const filterBulkSubmitError = ref('')
+// Per-row result dialog (BulkActionResultDialog). Opens with the server
+// response whenever failed[] or skipped[] is non-empty, so the operator
+// can triage per-row error_code + message beyond the toast summary.
+const bulkResult = ref<{ actionVerb: string; response: TenantBulkActionResponse } | null>(null)
 
 // O1: cursor-walk preview before commit. Walks listTenants with the
 // same `search` server-side filter as the bulk action, then filters
@@ -375,14 +382,17 @@ async function executeFilterBulk() {
     if (res.skipped.length) parts.push(`${res.skipped.length} skipped (already in target state)`)
     if (res.failed.length) parts.push(`${res.failed.length} failed`)
     const summary = parts.join(', ')
-    if (res.failed.length) toast.error(`${summary} — check console for details`)
+    if (res.failed.length) toast.error(`${summary} — see details`)
     else toast.success(summary)
-    for (const f of res.failed) {
-      console.warn(`bulk-action ${action} failed on ${f.id}: ${f.error_code ?? 'INTERNAL_ERROR'} — ${f.message ?? ''}`)
-    }
-    // Success path: close the dialog.
+    // Always close the preview dialog first; the result dialog (if any)
+    // renders as a separate overlay and has its own focus trap.
     filterBulkAction.value = null
     filterBulkPreview.resetPreview()
+    // Open the per-row result dialog whenever any row is not a plain
+    // success — operators need codes + ids to triage without re-running.
+    if (res.failed.length || res.skipped.length) {
+      bulkResult.value = { actionVerb: action === 'SUSPEND' ? 'Suspend' : 'Reactivate', response: res }
+    }
   } catch (e) {
     // Humanize the two bulk-action safety gates (governance spec v0.1.25.23
     // added these to the ErrorCode enum; prose was already in v0.1.25.21):
@@ -394,11 +404,8 @@ async function executeFilterBulk() {
     //     interval. Surface inline so the operator can refresh the
     //     preview and retry.
     // Other errors fall through to the generic toMessage formatter.
-    if (e instanceof ApiError && e.errorCode === 'LIMIT_EXCEEDED') {
-      const matched = typeof e.details?.total_matched === 'number' ? ` (server matched ${e.details.total_matched.toLocaleString()})` : ''
-      filterBulkSubmitError.value = `Filter matches more than 500 tenants${matched} — narrow the filter before retrying.`
-    } else if (e instanceof ApiError && e.errorCode === 'COUNT_MISMATCH') {
-      filterBulkSubmitError.value = 'Tenant list changed between preview and submit — close and reopen the preview to retry.'
+    if (e instanceof ApiError && (e.errorCode === 'LIMIT_EXCEEDED' || e.errorCode === 'COUNT_MISMATCH')) {
+      filterBulkSubmitError.value = formatBulkRequestError(e.errorCode, 'tenants', 500, e.details as Record<string, unknown> | undefined) ?? `Bulk ${action} failed: ${toMessage(e)}`
     } else {
       filterBulkSubmitError.value = `Bulk ${action} failed: ${toMessage(e)}`
     }
@@ -910,6 +917,17 @@ const gridTemplate = computed(() =>
       :confirm-danger="filterBulkAction === 'SUSPEND'"
       @confirm="executeFilterBulk"
       @cancel="cancelFilterBulk"
+    />
+
+    <!-- Per-row result dialog. Opens after a bulk-action submit if any
+         row failed or was skipped — surfaces error_code + message per row
+         so operators can triage without tailing the browser console. -->
+    <BulkActionResultDialog
+      v-if="bulkResult"
+      :action-verb="bulkResult.actionVerb"
+      item-noun-plural="tenants"
+      :response="bulkResult.response"
+      @close="bulkResult = null"
     />
 
     <FormDialog v-if="showCreate" title="Create Tenant" submit-label="Create Tenant" :loading="createLoading" :error="createError" @submit="submitCreate" @cancel="showCreate = false">
