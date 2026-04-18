@@ -785,6 +785,56 @@ describe('endpoint wrappers — smoke', () => {
     expect(logoutSpy).toHaveBeenCalled()
   })
 
+  // Regression for the v0.1.25.36 footgun: a dashboard calling an endpoint
+  // that exists in a newer admin-server than the one actually running
+  // (e.g. POST /v1/admin/budgets/bulk-action on pre-`.29` admin) receives
+  // a 401 because the interceptor falls through to tenant-key validation
+  // and complains about a missing `X-Cycles-API-Key` header. Our admin
+  // session is still valid — preserve it and surface the server message
+  // as an ApiError so the view can render an actionable error.
+  it('401 that mentions X-Cycles-API-Key preserves the session (endpoint-routing mismatch)', async () => {
+    const logoutSpy = vi.spyOn(useAuthStore(), 'logout')
+    currentRoute.value = { name: 'budgets', fullPath: '/budgets' }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: () => Promise.resolve({
+        error: 'UNAUTHORIZED',
+        message: 'Missing X-Cycles-API-Key header',
+      }),
+    } as unknown as Response))
+    await expect(api.getOverview()).rejects.toMatchObject({
+      status: 401,
+      errorCode: 'UNAUTHORIZED',
+      message: expect.stringContaining('X-Cycles-API-Key'),
+    })
+    expect(logoutSpy).not.toHaveBeenCalled()
+    expect(routerPush).not.toHaveBeenCalled()
+  })
+
+  it('401 endpoint-mismatch carve-out also applies to POST mutations (e.g. bulkActionBudgets)', async () => {
+    const logoutSpy = vi.spyOn(useAuthStore(), 'logout')
+    currentRoute.value = { name: 'budgets', fullPath: '/budgets' }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: () => Promise.resolve({
+        error: 'UNAUTHORIZED',
+        message: 'Missing X-Cycles-API-Key header',
+      }),
+    } as unknown as Response))
+    await expect(
+      api.bulkActionBudgets({
+        filter: { tenant_id: 'acme' },
+        action: 'RESET',
+        amount: 100,
+        idempotency_key: '00000000-0000-4000-8000-000000000000',
+      }),
+    ).rejects.toMatchObject({ status: 401, errorCode: 'UNAUTHORIZED' })
+    expect(logoutSpy).not.toHaveBeenCalled()
+    expect(routerPush).not.toHaveBeenCalled()
+  })
+
   it('propagates non-2xx as thrown ApiError with fallback message when body is not JSON', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
