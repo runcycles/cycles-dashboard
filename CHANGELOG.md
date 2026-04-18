@@ -15,6 +15,43 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.38] — 2026-04-18
+
+### Added
+
+- **Structured bulk-action audit detail** (`AuditView` expanded row).
+  cycles-governance-admin **v0.1.25.30** enriches `AuditLogEntry.metadata`
+  for the three bulk-action ops (`bulkActionTenants`, `bulkActionWebhooks`,
+  `bulkActionBudgets`) with `succeeded_ids`, `failed_rows`, `skipped_rows`,
+  `filter` (filter echo), and `duration_ms`. The dashboard now maps those
+  keys to a scannable summary instead of a raw JSON `<pre>`:
+
+  - Header strip: action verb + noun + formatted duration + three-count
+    summary (succeeded / failed / skipped).
+  - Filter echo: 2-column key/value grid. `tenant_id` / `parent_tenant_id`
+    drill through via `TenantLink`.
+  - Succeeded: collapsed, with `Copy all` for the id list.
+  - Failed: open by default; each row shows `error_code` chip + humanized
+    prose via `formatErrorCode()`.
+  - Skipped: collapsed; each row shows `reason`.
+
+  The raw JSON remains available as a "Raw metadata" `<details>` collapse
+  so power-users can still inspect the wire payload. Non-bulk rows and
+  pre-v0.1.25.30 bulk rows (no enriched keys in `metadata`) continue to
+  render the existing inline `<pre>` block — no regression for older admin
+  deployments.
+
+### Version bumps
+
+- `package.json` `0.1.25.37 → 0.1.25.38`
+- Compose pins unchanged (admin `.30`, server `.13`).
+
+### Unchanged
+
+- Spec badge remains **v0.1.25.26**. `cycles-governance-admin-v0.1.25.yaml`
+  `info.version` has not bumped — v0.1.25.27 through v0.1.25.30 are all
+  additive changes that don't require an OpenAPI version bump.
+
 ## [0.1.25.37] — 2026-04-18
 
 ### Added

@@ -15,9 +15,11 @@ import EmptyState from '../components/EmptyState.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import TimeRangePicker from '../components/TimeRangePicker.vue'
+import BulkActionAuditDetail from '../components/BulkActionAuditDetail.vue'
 import { formatDateTime } from '../utils/format'
 import { toMessage } from '../utils/errors'
 import { safeJsonStringify } from '../utils/safe'
+import { hasBulkAuditShape } from '../utils/auditMetadata'
 
 const entries = ref<AuditLogEntry[]>([])
 const error = ref('')
@@ -626,10 +628,34 @@ function measureRow(el: Element | { $el?: Element } | null) {
                 <div v-if="sortedEntries[v.index].resource_type"><span class="muted">Resource Type:</span> {{ sortedEntries[v.index].resource_type }}</div>
                 <div v-if="sortedEntries[v.index].resource_id"><span class="muted">Resource ID:</span> <span class="font-mono">{{ sortedEntries[v.index].resource_id }}</span></div>
               </div>
-              <div v-if="sortedEntries[v.index].metadata && Object.keys(sortedEntries[v.index].metadata!).length > 0" class="bg-white border border-gray-200 rounded p-3 text-xs font-mono overflow-auto max-h-48">
-                <div class="muted mb-1 font-sans text-xs">Metadata</div>
-                <pre class="whitespace-pre-wrap">{{ safeJsonStringify(sortedEntries[v.index].metadata) }}</pre>
-              </div>
+              <!-- cycles-governance-admin v0.1.25.30: bulk-action audit
+                   entries carry structured succeeded/failed/skipped
+                   arrays + filter echo + duration. Render as a scannable
+                   summary when present; collapse the raw JSON beneath
+                   it. Non-bulk rows (and pre-.30 bulk rows that don't
+                   carry the enriched keys) fall through to the raw
+                   <pre> block so nothing regresses. -->
+              <template v-if="sortedEntries[v.index].metadata && Object.keys(sortedEntries[v.index].metadata!).length > 0">
+                <BulkActionAuditDetail
+                  v-if="hasBulkAuditShape(sortedEntries[v.index].operation, sortedEntries[v.index].metadata)"
+                  :operation="sortedEntries[v.index].operation"
+                  :metadata="sortedEntries[v.index].metadata!"
+                />
+                <details
+                  v-if="hasBulkAuditShape(sortedEntries[v.index].operation, sortedEntries[v.index].metadata)"
+                  class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded p-3 text-xs"
+                >
+                  <summary class="muted font-sans cursor-pointer">Raw metadata</summary>
+                  <pre class="whitespace-pre-wrap font-mono mt-2 overflow-auto max-h-48">{{ safeJsonStringify(sortedEntries[v.index].metadata) }}</pre>
+                </details>
+                <div
+                  v-else
+                  class="bg-white border border-gray-200 rounded p-3 text-xs font-mono overflow-auto max-h-48"
+                >
+                  <div class="muted mb-1 font-sans text-xs">Metadata</div>
+                  <pre class="whitespace-pre-wrap">{{ safeJsonStringify(sortedEntries[v.index].metadata) }}</pre>
+                </div>
+              </template>
             </div>
           </div>
         </div>
