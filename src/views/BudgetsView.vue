@@ -884,7 +884,16 @@ async function executeFilterBulk() {
 }
 
 watch(selectedTenant, () => { if (!isCrossTenantFilter.value && !isDetail.value) loadList() })
-watch(() => route.query, () => {
+watch(() => route.query, (q) => {
+  // BulkActionResultDialog's View-budget link navigates to the same
+  // /budgets route with different query params — Vue Router keeps the
+  // component mounted, so the setup-time hydration above doesn't
+  // re-run. Sync the refs explicitly when tenant_id / search change in
+  // the URL so the deep-link actually filters the list.
+  const nextTenant = (q.tenant_id as string) || ''
+  if (nextTenant !== selectedTenant.value) selectedTenant.value = nextTenant
+  const nextSearch = (q.search as string) || ''
+  if (nextSearch !== search.value) search.value = nextSearch
   if (isDetail.value) loadDetail()
   else loadList()
 })
