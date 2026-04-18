@@ -270,7 +270,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.32
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.33
     restart: unless-stopped
     # No exposed ports — only accessible through Caddy
     depends_on:

@@ -178,6 +178,100 @@ describe('AuditView — search field advertises the v0.1.25.24 widened match set
   })
 })
 
+describe('AuditView — v0.1.25.24 error_code_exclude (NOT-IN-list) filter', () => {
+  it('does not send error_code_exclude when the input is empty', async () => {
+    const { lastCall } = await mountAndSubmit(async () => {})
+    expect(lastCall.error_code_exclude).toBeUndefined()
+  })
+
+  it('sends a single exclude code verbatim', async () => {
+    const { lastCall } = await mountAndSubmit(async w => {
+      await w.find('#audit-error-code-exclude').setValue('INTERNAL_ERROR')
+    })
+    expect(lastCall.error_code_exclude).toBe('INTERNAL_ERROR')
+  })
+
+  it('normalizes comma-separated list: trim, drop empties, dedupe', async () => {
+    const { lastCall } = await mountAndSubmit(async w => {
+      await w.find('#audit-error-code-exclude').setValue(' INTERNAL_ERROR , TIMEOUT , INTERNAL_ERROR ')
+    })
+    expect(lastCall.error_code_exclude).toBe('INTERNAL_ERROR,TIMEOUT')
+  })
+
+  it('can combine with error_code (AND-composed narrow-then-exclude)', async () => {
+    const { lastCall } = await mountAndSubmit(async w => {
+      await w.find('#audit-error-code').setValue('BUDGET_EXCEEDED,POLICY_VIOLATION')
+      await w.find('#audit-error-code-exclude').setValue('INTERNAL_ERROR')
+    })
+    expect(lastCall.error_code).toBe('BUDGET_EXCEEDED,POLICY_VIOLATION')
+    expect(lastCall.error_code_exclude).toBe('INTERNAL_ERROR')
+  })
+
+  it('reuses the error_code datalist for typeahead', () => {
+    const wrapper = mount(AuditView)
+    // Both error_code and error_code_exclude inputs point at the same datalist id
+    expect(wrapper.find('#audit-error-code').attributes('list')).toBe('audit-error-code-options')
+    expect(wrapper.find('#audit-error-code-exclude').attributes('list')).toBe('audit-error-code-options')
+  })
+})
+
+describe('AuditView — v0.1.25.24 operation array<string>', () => {
+  it('sends a single operation verbatim (one-element list, scalar back-compat)', async () => {
+    const { lastCall } = await mountAndSubmit(async w => {
+      await w.find('#audit-operation').setValue('createBudget')
+    })
+    expect(lastCall.operation).toBe('createBudget')
+  })
+
+  it('normalizes comma-separated operations', async () => {
+    const { lastCall } = await mountAndSubmit(async w => {
+      await w.find('#audit-operation').setValue('createBudget, updatePolicy, createBudget')
+    })
+    expect(lastCall.operation).toBe('createBudget,updatePolicy')
+  })
+
+  it('accepts whitespace separation (pasted from logs)', async () => {
+    const { lastCall } = await mountAndSubmit(async w => {
+      await w.find('#audit-operation').setValue('createBudget  updatePolicy')
+    })
+    expect(lastCall.operation).toBe('createBudget,updatePolicy')
+  })
+})
+
+describe('AuditView — v0.1.25.24 resource_type array<string>', () => {
+  it('resource_type input offers a datalist of known types', () => {
+    const wrapper = mount(AuditView)
+    expect(wrapper.find('#audit-resource').attributes('list')).toBe('audit-resource-type-options')
+    const options = wrapper.findAll('#audit-resource-type-options option')
+    const values = options.map(o => o.attributes('value'))
+    expect(values).toContain('tenant')
+    expect(values).toContain('budget')
+    expect(values).toContain('api_key')
+    expect(values).toContain('policy')
+    expect(values).toContain('webhook')
+    expect(values).toContain('config')
+  })
+
+  it('sends a single resource_type verbatim (scalar back-compat)', async () => {
+    const { lastCall } = await mountAndSubmit(async w => {
+      await w.find('#audit-resource').setValue('tenant')
+    })
+    expect(lastCall.resource_type).toBe('tenant')
+  })
+
+  it('normalizes comma-separated resource_types', async () => {
+    const { lastCall } = await mountAndSubmit(async w => {
+      await w.find('#audit-resource').setValue('tenant, budget, tenant')
+    })
+    expect(lastCall.resource_type).toBe('tenant,budget')
+  })
+
+  it('does not send resource_type when the input is empty', async () => {
+    const { lastCall } = await mountAndSubmit(async () => {})
+    expect(lastCall.resource_type).toBeUndefined()
+  })
+})
+
 describe('AuditView — URL param wiring (deep-link from Overview)', () => {
   it('pre-fills error_code from ?error_code= on mount', async () => {
     routeQuery.error_code = 'BUDGET_EXCEEDED'
@@ -218,5 +312,14 @@ describe('AuditView — URL param wiring (deep-link from Overview)', () => {
     expect(firstCall.error_code).toBe('BUDGET_EXCEEDED')
     expect(firstCall.status_min).toBe('400')
     expect(firstCall.status_max).toBe('599')
+  })
+
+  it('pre-fills error_code_exclude from ?error_code_exclude= on mount', async () => {
+    routeQuery.error_code_exclude = 'INTERNAL_ERROR,TIMEOUT'
+    const wrapper = mount(AuditView)
+    await flushPromises()
+    expect((wrapper.find('#audit-error-code-exclude').element as HTMLInputElement).value).toBe('INTERNAL_ERROR,TIMEOUT')
+    const firstCall = listAuditLogsMock.mock.calls[0]?.[0] ?? {}
+    expect(firstCall.error_code_exclude).toBe('INTERNAL_ERROR,TIMEOUT')
   })
 })
