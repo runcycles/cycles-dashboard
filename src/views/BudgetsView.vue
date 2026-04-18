@@ -467,8 +467,9 @@ async function submitEditBudget() {
 // submits the request and, on any non-succeeded rows, opens
 // BulkActionResultDialog with the per-row codes + messages.
 const showBulkSetup = ref(false)
-const bulkSetupForm = ref<{ action: BudgetBulkAction; amount: number | string; spent: number | string; reason: string }>({
+const bulkSetupForm = ref<{ action: BudgetBulkAction; unit: string; amount: number | string; spent: number | string; reason: string }>({
   action: 'CREDIT',
+  unit: 'USD_MICROCENTS',
   amount: '',
   spent: '',
   reason: '',
@@ -499,8 +500,11 @@ function bulkActionEligibleStatus(action: BudgetBulkAction): string | null {
 // opens. Kept on separate refs (not a single object) so the FormDialog
 // can close and release its props cleanly before the PreviewDialog renders.
 const filterBulkAction = ref<BudgetBulkAction | null>(null)
+// Scalar magnitudes captured from the setup form. Wrapped as
+// {unit, amount} Amount objects at send-time per spec v0.1.25.26.
 const filterBulkAmount = ref<number | undefined>(undefined)
 const filterBulkSpent = ref<number | undefined>(undefined)
+const filterBulkUnit = ref<string>('')
 const filterBulkReason = ref<string>('')
 const filterBulkRunning = ref(false)
 const filterBulkSubmitError = ref('')
@@ -655,7 +659,16 @@ const filterBulkPreview = useBulkActionPreview<BudgetLedger>({
 
 function openBulkSetup() {
   if (!canBulkAct()) return
-  bulkSetupForm.value = { action: 'CREDIT', amount: '', spent: '', reason: '' }
+  // Seed unit from the list filter when set — the operator already
+  // scoped their filter to that unit, so we default to the same.
+  // Otherwise fall back to the most common admin unit.
+  bulkSetupForm.value = {
+    action: 'CREDIT',
+    unit: filterUnit.value || 'USD_MICROCENTS',
+    amount: '',
+    spent: '',
+    reason: '',
+  }
   bulkSetupError.value = ''
   showBulkSetup.value = true
 }
@@ -668,30 +681,35 @@ function cancelBulkSetup() {
 function submitBulkSetup() {
   bulkSetupError.value = ''
   const action = bulkSetupForm.value.action
-  // amount is required for CREDIT / DEBIT / RESET / REPAY_DEBT. RESET_SPENT
-  // does not use amount (server preserves allocated); `spent` is optional
-  // there and defaults to 0 when blank.
-  if (action !== 'RESET_SPENT') {
-    const n = Number(bulkSetupForm.value.amount)
-    if (!Number.isFinite(n) || n <= 0) {
-      bulkSetupError.value = 'Amount must be a positive number'
-      return
-    }
-    filterBulkAmount.value = n
-    filterBulkSpent.value = undefined
-  } else {
-    filterBulkAmount.value = undefined
+  const unit = bulkSetupForm.value.unit
+  if (!unit) {
+    bulkSetupError.value = 'Unit is required'
+    return
+  }
+  // Spec v0.1.25.26: amount is required for ALL five actions including
+  // RESET_SPENT (that action sets allocated to `amount`; `spent` is the
+  // optional counter override that defaults to 0).
+  const n = Number(bulkSetupForm.value.amount)
+  if (!Number.isFinite(n) || n <= 0) {
+    bulkSetupError.value = 'Amount must be a positive number'
+    return
+  }
+  filterBulkAmount.value = n
+  if (action === 'RESET_SPENT') {
     if (bulkSetupForm.value.spent === '' || bulkSetupForm.value.spent === null) {
       filterBulkSpent.value = undefined
     } else {
-      const n = Number(bulkSetupForm.value.spent)
-      if (!Number.isFinite(n) || n < 0) {
+      const s = Number(bulkSetupForm.value.spent)
+      if (!Number.isFinite(s) || s < 0) {
         bulkSetupError.value = 'Spent override must be zero or a positive number'
         return
       }
-      filterBulkSpent.value = n
+      filterBulkSpent.value = s
     }
+  } else {
+    filterBulkSpent.value = undefined
   }
+  filterBulkUnit.value = unit
   filterBulkReason.value = bulkSetupForm.value.reason.trim()
   filterBulkAction.value = action
   filterBulkSubmitError.value = ''
@@ -736,6 +754,7 @@ function cancelFilterBulk() {
   filterBulkAction.value = null
   filterBulkAmount.value = undefined
   filterBulkSpent.value = undefined
+  filterBulkUnit.value = ''
   filterBulkReason.value = ''
   filterBulkSubmitError.value = ''
 }
@@ -784,8 +803,15 @@ async function executeFilterBulk() {
       action,
       idempotency_key: generateIdempotencyKey(),
     }
-    if (filterBulkAmount.value !== undefined) body.amount = filterBulkAmount.value
-    if (filterBulkSpent.value !== undefined) body.spent = filterBulkSpent.value
+    // Spec v0.1.25.26: amount and spent are Amount objects ({unit, amount}),
+    // not scalar numbers. Scalar send ⇒ server 400 INVALID_REQUEST.
+    const unit = filterBulkUnit.value
+    if (filterBulkAmount.value !== undefined) {
+      body.amount = { unit, amount: filterBulkAmount.value }
+    }
+    if (filterBulkSpent.value !== undefined) {
+      body.spent = { unit, amount: filterBulkSpent.value }
+    }
     if (filterBulkReason.value) body.reason = filterBulkReason.value
     // Only send expected_count when the preview walk completed naturally.
     // A partial (capped) count would guarantee COUNT_MISMATCH against the
@@ -811,6 +837,7 @@ async function executeFilterBulk() {
     filterBulkAction.value = null
     filterBulkAmount.value = undefined
     filterBulkSpent.value = undefined
+    filterBulkUnit.value = ''
     filterBulkReason.value = ''
     filterBulkPreview.resetPreview()
     if (res.failed.length || res.skipped.length) {
@@ -1389,15 +1416,31 @@ function rowTenantId(b: BudgetLedger): string {
         </select>
         <p class="muted-sm mt-0.5">{{ bulkActionHints[bulkSetupForm.action] }}</p>
       </div>
-      <div v-if="bulkSetupForm.action !== 'RESET_SPENT'">
-        <label for="bulk-amount" class="form-label">Amount</label>
+      <div>
+        <label for="bulk-unit" class="form-label">Unit</label>
+        <select id="bulk-unit" v-model="bulkSetupForm.unit" required class="form-select w-full">
+          <option>USD_MICROCENTS</option>
+          <option>TOKENS</option>
+          <option>CREDITS</option>
+          <option>RISK_POINTS</option>
+        </select>
+        <p class="muted-sm mt-0.5">Rows whose budget unit differs fail per-row with INVALID_TRANSITION — the bulk op does not abort.</p>
+      </div>
+      <div>
+        <label for="bulk-amount" class="form-label">
+          {{ bulkSetupForm.action === 'RESET_SPENT' ? 'Amount (new allocated)' : 'Amount' }}
+        </label>
         <input id="bulk-amount" v-model="bulkSetupForm.amount" type="number" min="0" step="1" required class="form-input-mono" />
-        <p class="muted-sm mt-0.5">Applied to every matching budget in the configured unit.</p>
+        <p class="muted-sm mt-0.5">
+          {{ bulkSetupForm.action === 'RESET_SPENT'
+              ? 'Sets each matching budget\'s allocated to this value. Spec requires amount for RESET_SPENT.'
+              : 'Applied to every matching budget in the configured unit.' }}
+        </p>
       </div>
       <div v-if="bulkSetupForm.action === 'RESET_SPENT'">
         <label for="bulk-spent" class="form-label">Spent override (optional)</label>
         <input id="bulk-spent" v-model="bulkSetupForm.spent" type="number" min="0" step="1" class="form-input-mono" placeholder="Leave blank to reset to zero" />
-        <p class="muted-sm mt-0.5">Blank = reset spent to 0 on every matching budget. Allocated is preserved.</p>
+        <p class="muted-sm mt-0.5">Blank = reset spent to 0 on every matching budget.</p>
       </div>
       <div>
         <label for="bulk-reason" class="form-label">Reason (optional, for audit trail)</label>

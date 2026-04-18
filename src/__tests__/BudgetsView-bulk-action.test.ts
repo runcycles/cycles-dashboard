@@ -221,13 +221,16 @@ describe('BudgetsView — bulk-action (Slice C, v0.1.25.26)', () => {
     expect(body.action).toBe('CREDIT')
     expect(body.filter.tenant_id).toBe('acme')
     expect(body.filter.status).toBe('ACTIVE')
-    expect(body.amount).toBe(250)
+    // Spec v0.1.25.26 — amount must be an Amount object {unit, amount},
+    // not a scalar number. The server rejects scalar numbers with 400
+    // INVALID_REQUEST.
+    expect(body.amount).toEqual({ unit: 'USD_MICROCENTS', amount: 250 })
     expect(body.expected_count).toBe(3)
     expect(typeof body.idempotency_key).toBe('string')
     expect(body.idempotency_key.length).toBeGreaterThan(0)
   })
 
-  it('shows "Spent override" input only when RESET_SPENT is selected and omits amount in the body', async () => {
+  it('RESET_SPENT sends amount (new allocated) and omits spent when left blank', async () => {
     const rows = [ledger('a'), ledger('b', { status: 'FROZEN' })]
     listBudgetsMock.mockResolvedValue({ ledgers: rows, has_more: false })
     bulkActionBudgetsMock.mockResolvedValue({
@@ -246,19 +249,21 @@ describe('BudgetsView — bulk-action (Slice C, v0.1.25.26)', () => {
     await selectTenant(w, 'acme')
     await openBulkSetup(w)
 
-    // Default action is CREDIT → amount input visible, spent not.
+    // Default action is CREDIT → amount visible, spent hidden.
     expect(w.find('input#bulk-amount').exists()).toBe(true)
     expect(w.find('input#bulk-spent').exists()).toBe(false)
 
-    // Switch to RESET_SPENT → amount hidden, spent visible.
+    // Switch to RESET_SPENT → spec v0.1.25.26 requires amount for ALL five
+    // actions, so amount stays visible; spent input is revealed alongside it.
     await w.find<HTMLSelectElement>('select#bulk-op').setValue('RESET_SPENT')
-    expect(w.find('input#bulk-amount').exists()).toBe(false)
+    expect(w.find('input#bulk-amount').exists()).toBe(true)
     expect(w.find('input#bulk-spent').exists()).toBe(true)
 
-    // Leave spent blank → server resets to zero; we should NOT send it.
+    // Fill amount (required), leave spent blank (defaults to 0 server-side).
+    await w.find<HTMLInputElement>('input#bulk-amount').setValue('1000')
     await clickPreview(w)
 
-    // RESET_SPENT runs on all statuses — both rows should match in preview.
+    // RESET_SPENT runs on all statuses — both rows match in preview.
     expect(w.text()).toContain('2 budgets will be affected')
 
     const confirmBtn = w.findAll('button').find(b => b.text().includes('Reset spent 2 budgets'))!
@@ -269,8 +274,43 @@ describe('BudgetsView — bulk-action (Slice C, v0.1.25.26)', () => {
     expect(body.action).toBe('RESET_SPENT')
     // RESET_SPENT doesn't gate by status → filter omits status.
     expect(body.filter.status).toBeUndefined()
-    expect('amount' in body).toBe(false)
+    // amount wrapped as Amount object; spent omitted (server defaults to 0).
+    expect(body.amount).toEqual({ unit: 'USD_MICROCENTS', amount: 1000 })
     expect('spent' in body).toBe(false)
+  })
+
+  it('RESET_SPENT sends both amount and spent (each wrapped as Amount) when spent is filled in', async () => {
+    const rows = [ledger('a')]
+    listBudgetsMock.mockResolvedValue({ ledgers: rows, has_more: false })
+    bulkActionBudgetsMock.mockResolvedValue({
+      action: 'RESET_SPENT',
+      total_matched: 1,
+      succeeded: [{ id: 'a' }],
+      failed: [],
+      skipped: [],
+      idempotency_key: 'kk',
+    })
+
+    const { default: BudgetsView } = await import('../views/BudgetsView.vue')
+    const w = mount(BudgetsView, { global: stdMounts() })
+    await flushPromises()
+
+    await selectTenant(w, 'acme')
+    await openBulkSetup(w)
+
+    // Pick a non-default unit to verify the selector plumbs through.
+    await w.find<HTMLSelectElement>('select#bulk-unit').setValue('TOKENS')
+    await w.find<HTMLSelectElement>('select#bulk-op').setValue('RESET_SPENT')
+    await w.find<HTMLInputElement>('input#bulk-amount').setValue('2000')
+    await w.find<HTMLInputElement>('input#bulk-spent').setValue('150')
+    await clickPreview(w)
+
+    await w.findAll('button').find(b => b.text().includes('Reset spent 1 budgets'))!.trigger('click')
+    await flushPromises()
+
+    const body = bulkActionBudgetsMock.mock.calls[0][0]
+    expect(body.amount).toEqual({ unit: 'TOKENS', amount: 2000 })
+    expect(body.spent).toEqual({ unit: 'TOKENS', amount: 150 })
   })
 
   it('surfaces LIMIT_EXCEEDED as humanized prose inside the preview dialog', async () => {

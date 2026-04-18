@@ -657,13 +657,16 @@ export interface BudgetBulkFilter {
 export interface BudgetBulkActionRequest {
   filter: BudgetBulkFilter
   action: BudgetBulkAction
-  // Required for CREDIT / DEBIT / RESET / REPAY_DEBT. Ignored for
-  // RESET_SPENT (that action's amount comes from `spent`).
-  amount?: number
-  // Required for RESET_SPENT only. Sets each matching ledger's
-  // `spent` counter to this value (idempotent rewind of accumulated
-  // spend, not a deposit).
-  spent?: number
+  // Required for all five actions (CREDIT / DEBIT / RESET /
+  // RESET_SPENT / REPAY_DEBT). Spec v0.1.25.26 wraps this as an
+  // Amount object — the server rejects scalar numbers with 400
+  // INVALID_REQUEST. For RESET_SPENT, `amount` is the new allocated
+  // value; `spent` (below) is what the spent counter resets to.
+  amount?: Amount
+  // Only honoured for RESET_SPENT; server ignores it for other
+  // actions. Optional even there — server defaults to 0 when omitted
+  // (fresh billing period). Also wrapped as Amount per spec.
+  spent?: Amount
   // Optional operator-supplied note recorded on the audit entry.
   reason?: string
   // Preflight count-gate — when present, server counts first and

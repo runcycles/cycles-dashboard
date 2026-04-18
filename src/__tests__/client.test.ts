@@ -645,7 +645,7 @@ describe('endpoint wrappers — smoke', () => {
       await api.bulkActionBudgets({
         action: 'CREDIT',
         filter: { tenant_id: 'acme', status: 'ACTIVE', unit: 'USD_MICROCENTS' },
-        amount: 1000,
+        amount: { unit: 'USD_MICROCENTS', amount: 1000 },
         reason: 'Monthly top-up',
         expected_count: 42,
         idempotency_key: 'idem-b-1',
@@ -656,13 +656,17 @@ describe('endpoint wrappers — smoke', () => {
       const body = JSON.parse(init.body)
       expect(body.action).toBe('CREDIT')
       expect(body.filter).toEqual({ tenant_id: 'acme', status: 'ACTIVE', unit: 'USD_MICROCENTS' })
-      expect(body.amount).toBe(1000)
+      // Spec v0.1.25.26 — amount is an Amount object, not scalar.
+      expect(body.amount).toEqual({ unit: 'USD_MICROCENTS', amount: 1000 })
       expect(body.reason).toBe('Monthly top-up')
       expect(body.expected_count).toBe(42)
       expect(body.idempotency_key).toBe('idem-b-1')
     })
 
-    it('bulkActionBudgets → RESET_SPENT omits amount, includes optional spent', async () => {
+    // Per spec v0.1.25.26 RESET_SPENT requires `amount` (the new allocated)
+    // and accepts an optional `spent` (the counter reset target). Both are
+    // Amount objects. Omitted `spent` lets the server default to 0.
+    it('bulkActionBudgets → RESET_SPENT includes amount (Amount) and optional spent (Amount)', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
         action: 'RESET_SPENT',
         total_matched: 0,
@@ -672,13 +676,14 @@ describe('endpoint wrappers — smoke', () => {
       await api.bulkActionBudgets({
         action: 'RESET_SPENT',
         filter: { tenant_id: 'acme' },
-        spent: 0,
+        amount: { unit: 'USD_MICROCENTS', amount: 5000 },
+        spent: { unit: 'USD_MICROCENTS', amount: 0 },
         idempotency_key: 'idem-b-2',
       })
       const body = JSON.parse(lastCall()[1].body)
       expect(body.action).toBe('RESET_SPENT')
-      expect(body.spent).toBe(0)
-      expect('amount' in body).toBe(false)
+      expect(body.amount).toEqual({ unit: 'USD_MICROCENTS', amount: 5000 })
+      expect(body.spent).toEqual({ unit: 'USD_MICROCENTS', amount: 0 })
     })
 
     it('bulkActionBudgets → 400 LIMIT_EXCEEDED surfaces errorCode + details.total_matched', async () => {
@@ -696,7 +701,7 @@ describe('endpoint wrappers — smoke', () => {
         await api.bulkActionBudgets({
           action: 'CREDIT',
           filter: { tenant_id: 'acme' },
-          amount: 100,
+          amount: { unit: 'USD_MICROCENTS', amount: 100 },
           idempotency_key: 'k',
         })
         throw new Error('expected to throw')
@@ -723,7 +728,7 @@ describe('endpoint wrappers — smoke', () => {
         api.bulkActionBudgets({
           action: 'CREDIT',
           filter: { tenant_id: 'acme' },
-          amount: 100,
+          amount: { unit: 'USD_MICROCENTS', amount: 100 },
           expected_count: 10,
           idempotency_key: 'k',
         }),
@@ -827,7 +832,7 @@ describe('endpoint wrappers — smoke', () => {
       api.bulkActionBudgets({
         filter: { tenant_id: 'acme' },
         action: 'RESET',
-        amount: 100,
+        amount: { unit: 'USD_MICROCENTS', amount: 100 },
         idempotency_key: '00000000-0000-4000-8000-000000000000',
       }),
     ).rejects.toMatchObject({ status: 401, errorCode: 'UNAUTHORIZED' })
