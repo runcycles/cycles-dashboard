@@ -163,10 +163,12 @@ describe('BudgetsView — bulk-action (Slice C, v0.1.25.26)', () => {
     const w = mount(BudgetsView, { global: stdMounts() })
     await flushPromises()
 
-    const bulkBtn = w.findAll('button').find(b => b.text() === 'Bulk action…')
+    // Button label swaps to the blocker reason when disabled, so the
+    // precondition is visible without hovering for a tooltip (Stripe/
+    // Linear pattern — state-aware button text beats hover-only signals).
+    const bulkBtn = w.findAll('button').find(b => b.text() === 'Select a tenant to bulk-act')
     expect(bulkBtn).toBeDefined()
     expect(bulkBtn!.attributes('disabled')).toBeDefined()
-    expect(bulkBtn!.attributes('title')).toContain('Select a tenant')
   })
 
   it('enables Bulk action once a tenant is selected', async () => {

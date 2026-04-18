@@ -1107,9 +1107,9 @@ function rowTenantId(b: BudgetLedger): string {
             <button
               @click="openBulkSetup"
               :disabled="!canBulkAct() || filterBulkRunning"
-              :title="canBulkAct() ? 'Apply an action to every budget matching the current filter' : 'Select a tenant to bulk-act on budgets'"
+              :title="canBulkAct() ? 'Apply an action to every budget matching the current filter' : ''"
               class="text-xs text-gray-800 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded px-2.5 py-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-            >Bulk action…</button>
+            >{{ canBulkAct() ? 'Bulk action…' : 'Select a tenant to bulk-act' }}</button>
           </div>
         </div>
       </div>
