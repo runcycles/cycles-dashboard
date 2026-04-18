@@ -20,14 +20,28 @@ const props = defineProps<{
   actionVerb: string
   /** Plural noun for the rows ("tenants", "webhooks", "budgets"). */
   itemNounPlural: string
-  /** Bulk response body. Succeeded[] is summary-only; failed[] and skipped[] are enumerated. */
+  /** Bulk response body. All three arrays are enumerated when operator expands them. */
   response: {
     succeeded: BulkActionRowOutcome[]
     failed: BulkActionRowOutcome[]
     skipped: BulkActionRowOutcome[]
     total_matched?: number
   }
+  /**
+   * Optional id→label lookup, typically the scope for BudgetsView (whose
+   * row ids are opaque UUIDs) or any other surface where the id alone
+   * doesn't identify the row to an operator. When provided, each
+   * enumerated row renders the label as the primary line and the id as
+   * a smaller secondary mono line. When omitted, the id is the only
+   * identifier rendered — preserves the existing TenantsView /
+   * WebhooksView behaviour where ids are already human-readable.
+   */
+  labelById?: Record<string, string>
 }>()
+
+function labelFor(id: string): string | undefined {
+  return props.labelById?.[id]
+}
 
 const emit = defineEmits<{ close: [] }>()
 
@@ -36,9 +50,12 @@ useFocusTrap(dialogRef)
 
 // Open the section with rows first (failed takes precedence since it's
 // the most actionable; skipped only opens by default when there are no
-// failures to look at).
+// failures to look at). Succeeded stays collapsed by default — the list
+// view refresh reflects the new state, and keeping it collapsed signals
+// that attention belongs on failed rows. Operator can click to verify.
 const failedOpen = ref(props.response.failed.length > 0)
 const skippedOpen = ref(props.response.failed.length === 0 && props.response.skipped.length > 0)
+const succeededOpen = ref(false)
 
 // Clipboard button state: brief "Copied" flash per row id. Keyed by
 // row id so two adjacent Copy clicks don't race.
@@ -90,14 +107,50 @@ onUnmounted(() => {
         {{ totalRows.toLocaleString() }} row{{ totalRows === 1 ? '' : 's' }} processed<span v-if="typeof response.total_matched === 'number' && response.total_matched !== totalRows"> of {{ response.total_matched.toLocaleString() }} matched</span>.
       </p>
 
-      <!-- Succeeded: summary only. Enumerating successes is noise; the
-           list view refresh already shows them in their new state. -->
-      <div class="mb-2 px-3 py-2 rounded text-xs bg-green-50 border border-green-200 text-green-800 dark:bg-green-950 dark:border-green-800 dark:text-green-200 flex items-center gap-2">
-        <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-        <span><strong class="tabular-nums">{{ response.succeeded.length.toLocaleString() }}</strong> succeeded</span>
-      </div>
+      <!-- Succeeded: collapsed by default. When there are any failures
+           the operator's attention belongs on the failed block, not on
+           verifying successes; but for partial-failure runs the operator
+           often wants to know which specific rows did succeed so they
+           can plan the retry on just the failed ones. -->
+      <details
+        v-if="response.succeeded.length"
+        :open="succeededOpen"
+        @toggle="succeededOpen = ($event.target as HTMLDetailsElement).open"
+        class="mb-2 rounded border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/40"
+      >
+        <summary class="px-3 py-2 text-xs text-green-800 dark:text-green-200 cursor-pointer flex items-center gap-2 list-none">
+          <span
+            class="inline-block transition-transform shrink-0"
+            :class="succeededOpen ? 'rotate-90' : ''"
+            aria-hidden="true"
+          >▶</span>
+          <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <strong class="tabular-nums">{{ response.succeeded.length.toLocaleString() }}</strong>
+          <span>succeeded</span>
+        </summary>
+        <ul class="divide-y divide-green-100 dark:divide-green-900/60 max-h-64 overflow-auto">
+          <li
+            v-for="s in response.succeeded"
+            :key="s.id"
+            class="px-3 py-2 text-xs"
+          >
+            <div class="flex items-center gap-2 min-w-0">
+              <div class="min-w-0 flex-1">
+                <span v-if="labelFor(s.id)" class="block text-gray-900 dark:text-gray-100 break-all">{{ labelFor(s.id) }}</span>
+                <span class="block font-mono text-gray-500 dark:text-gray-400 truncate" :class="labelFor(s.id) ? 'text-[10px] mt-0.5' : ''" :title="s.id">{{ s.id }}</span>
+              </div>
+              <button
+                type="button"
+                @click="copyId(s.id)"
+                class="shrink-0 px-1.5 py-0.5 text-[10px] rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer"
+                :aria-label="`Copy ID ${s.id}`"
+              >{{ copiedId === s.id ? 'Copied' : 'Copy ID' }}</button>
+            </div>
+          </li>
+        </ul>
+      </details>
 
       <!-- Failed: per-row error_code + message, each with a copy button. -->
       <details
@@ -124,12 +177,15 @@ onUnmounted(() => {
             :key="f.id"
             class="px-3 py-2 text-xs"
           >
-            <div class="flex items-center gap-2">
-              <span class="font-mono text-gray-900 dark:text-gray-100 truncate" :title="f.id">{{ f.id }}</span>
+            <div class="flex items-center gap-2 min-w-0">
+              <div class="min-w-0 flex-1">
+                <span v-if="labelFor(f.id)" class="block text-gray-900 dark:text-gray-100 break-all">{{ labelFor(f.id) }}</span>
+                <span class="block font-mono text-gray-500 dark:text-gray-400 truncate" :class="labelFor(f.id) ? 'text-[10px] mt-0.5' : 'text-gray-900 dark:text-gray-100'" :title="f.id">{{ f.id }}</span>
+              </div>
               <button
                 type="button"
                 @click="copyId(f.id)"
-                class="ml-auto shrink-0 px-1.5 py-0.5 text-[10px] rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer"
+                class="shrink-0 px-1.5 py-0.5 text-[10px] rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer"
                 :aria-label="`Copy ID ${f.id}`"
               >{{ copiedId === f.id ? 'Copied' : 'Copy ID' }}</button>
             </div>
@@ -166,12 +222,15 @@ onUnmounted(() => {
             :key="s.id"
             class="px-3 py-2 text-xs"
           >
-            <div class="flex items-center gap-2">
-              <span class="font-mono text-gray-900 dark:text-gray-100 truncate" :title="s.id">{{ s.id }}</span>
+            <div class="flex items-center gap-2 min-w-0">
+              <div class="min-w-0 flex-1">
+                <span v-if="labelFor(s.id)" class="block text-gray-900 dark:text-gray-100 break-all">{{ labelFor(s.id) }}</span>
+                <span class="block font-mono text-gray-500 dark:text-gray-400 truncate" :class="labelFor(s.id) ? 'text-[10px] mt-0.5' : 'text-gray-900 dark:text-gray-100'" :title="s.id">{{ s.id }}</span>
+              </div>
               <button
                 type="button"
                 @click="copyId(s.id)"
-                class="ml-auto shrink-0 px-1.5 py-0.5 text-[10px] rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer"
+                class="shrink-0 px-1.5 py-0.5 text-[10px] rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer"
                 :aria-label="`Copy ID ${s.id}`"
               >{{ copiedId === s.id ? 'Copied' : 'Copy ID' }}</button>
             </div>

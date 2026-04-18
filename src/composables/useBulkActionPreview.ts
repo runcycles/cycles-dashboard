@@ -51,6 +51,16 @@ export interface UseBulkActionPreviewOptions<T> {
   /** Map a matching item to a sample row for the preview UI. */
   toSample: (item: T) => PreviewSample
   /**
+   * Optional: map a matching item to an `{ id, label }` pair captured
+   * into a full id→label lookup for post-submit result rendering. Unlike
+   * `toSample` (which caps at SAMPLE_LIMIT for the preview UI), this runs
+   * for EVERY matched row so the post-submit `BulkActionResultDialog`
+   * can render the server's succeeded/failed/skipped rows with a
+   * human-readable label next to the opaque id. Primary use case:
+   * BudgetsView, where ids are UUIDs and scopes are the meaningful name.
+   */
+  labelFn?: (item: T) => { id: string; label: string }
+  /**
    * Hard ceiling on collected matches. Default 501 — one above the bulk
    * endpoint's 500-row cap. Hitting this means the bulk submit will
    * fail LIMIT_EXCEEDED, so the preview button should disable.
@@ -73,6 +83,12 @@ export function useBulkActionPreview<T>(options: UseBulkActionPreviewOptions<T>)
   const previewLoading = ref(false)
   const previewCount = ref(0)
   const previewSamples = ref<PreviewSample[]>([])
+  // Full id→label lookup of every matched row, populated when the caller
+  // supplies labelFn. Used by BulkActionResultDialog to render scope
+  // alongside the opaque ledger-id on succeeded/failed/skipped rows.
+  // Ref stores the reactive snapshot; the live Map is mutated during the
+  // walk and the ref is replaced each page so consumers see updates.
+  const previewLabels = ref<Record<string, string>>({})
   const previewError = ref('')
   // When the walk hits maxMatches: count is a lower bound; bulk submit
   // must not pass expected_count.
@@ -97,6 +113,7 @@ export function useBulkActionPreview<T>(options: UseBulkActionPreviewOptions<T>)
     previewError.value = ''
     previewCount.value = 0
     previewSamples.value = []
+    previewLabels.value = {}
     cappedAtMax.value = false
     cappedAtPages.value = false
     reachedEnd.value = false
@@ -105,6 +122,7 @@ export function useBulkActionPreview<T>(options: UseBulkActionPreviewOptions<T>)
     let pages = 0
     let count = 0
     const samples: PreviewSample[] = []
+    const labels: Record<string, string> = {}
     let hasMore = true
 
     try {
@@ -127,11 +145,16 @@ export function useBulkActionPreview<T>(options: UseBulkActionPreviewOptions<T>)
           if (options.filterFn(it)) {
             count++
             if (samples.length < SAMPLE_LIMIT) samples.push(options.toSample(it))
+            if (options.labelFn) {
+              const { id, label } = options.labelFn(it)
+              labels[id] = label
+            }
             if (count >= maxMatches) break
           }
         }
         previewCount.value = count
         previewSamples.value = [...samples]
+        if (options.labelFn) previewLabels.value = { ...labels }
         hasMore = page.hasMore
         cursor = page.nextCursor
         if (!cursor) break
@@ -159,6 +182,7 @@ export function useBulkActionPreview<T>(options: UseBulkActionPreviewOptions<T>)
     cancelPreview()
     previewCount.value = 0
     previewSamples.value = []
+    previewLabels.value = {}
     previewError.value = ''
     cappedAtMax.value = false
     cappedAtPages.value = false
@@ -169,6 +193,7 @@ export function useBulkActionPreview<T>(options: UseBulkActionPreviewOptions<T>)
     previewLoading,
     previewCount,
     previewSamples,
+    previewLabels,
     previewError,
     cappedAtMax,
     cappedAtPages,

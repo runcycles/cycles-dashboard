@@ -40,7 +40,9 @@ describe('BulkActionResultDialog', () => {
       props: { actionVerb: 'Suspend', itemNounPlural: 'tenants', response: baseResponse },
     })
     expect(w.text()).toContain('Suspend tenants — results')
-    expect(w.text()).toContain('2 succeeded')
+    // Count + noun are in adjacent spans inside a <summary>; w.text() flattens the
+    // whitespace between them. Match the same pattern the failed/skipped specs use.
+    expect(w.text()).toMatch(/2\s*succeeded/)
     expect(w.text()).toContain('2 rows processed')
   })
 
@@ -184,5 +186,73 @@ describe('BulkActionResultDialog', () => {
       props: { actionVerb: 'Suspend', itemNounPlural: 'tenants', response },
     })
     expect(w.text()).toContain('1 row processed of 500 matched')
+  })
+
+  it('succeeded rows render behind a collapsed <details> so the default view stays focused on failed rows', () => {
+    const response = {
+      succeeded: [outcome('budget-a'), outcome('budget-b')],
+      failed: [outcome('budget-c', { error_code: 'BUDGET_EXCEEDED', message: 'over limit' })],
+      skipped: [],
+      total_matched: 3,
+    }
+    const w = mount(BulkActionResultDialog, {
+      props: { actionVerb: 'Debit', itemNounPlural: 'budgets', response },
+    })
+    // Two <details>: succeeded (closed) + failed (open).
+    const details = w.findAll('details')
+    expect(details.length).toBe(2)
+    // succeeded is rendered first in the template; defaults closed so
+    // the operator's attention lands on the failed block below.
+    const succeeded = details[0]
+    expect(succeeded.attributes('open')).toBeUndefined()
+    expect(succeeded.text()).toContain('2')
+    expect(succeeded.text()).toContain('succeeded')
+    // The succeeded ids are still in the DOM (collapsed), so operator
+    // can expand to see exactly which rows went through.
+    expect(succeeded.text()).toContain('budget-a')
+    expect(succeeded.text()).toContain('budget-b')
+    // Second details is failed, opened by default.
+    expect(details[1].attributes('open')).toBeDefined()
+  })
+
+  it('labelById renders scope as primary and the id as a secondary mono line on every enumerated row', () => {
+    const response = {
+      succeeded: [outcome('uuid-1')],
+      failed: [outcome('uuid-2', { error_code: 'INVALID_TRANSITION', message: 'unit mismatch' })],
+      skipped: [outcome('uuid-3', { reason: 'no-op' })],
+      total_matched: 3,
+    }
+    const labelById = {
+      'uuid-1': 'tenant:acme/app:batch',
+      'uuid-2': 'tenant:acme/agent:reviewer',
+      'uuid-3': 'tenant:acme/workspace:prod',
+    }
+    const w = mount(BulkActionResultDialog, {
+      props: { actionVerb: 'Credit', itemNounPlural: 'budgets', response, labelById },
+    })
+    const text = w.text()
+    // Every row's scope is rendered alongside its id.
+    expect(text).toContain('tenant:acme/app:batch')
+    expect(text).toContain('uuid-1')
+    expect(text).toContain('tenant:acme/agent:reviewer')
+    expect(text).toContain('uuid-2')
+    expect(text).toContain('tenant:acme/workspace:prod')
+    expect(text).toContain('uuid-3')
+  })
+
+  it('omits scope lines when labelById is absent — preserves the tenants/webhooks behaviour where ids are human-readable', () => {
+    const response = {
+      succeeded: [],
+      failed: [outcome('acme-corp', { error_code: 'INVALID_TRANSITION', message: 'already SUSPENDED' })],
+      skipped: [],
+      total_matched: 1,
+    }
+    const w = mount(BulkActionResultDialog, {
+      // No labelById prop.
+      props: { actionVerb: 'Suspend', itemNounPlural: 'tenants', response },
+    })
+    // The failed row still renders — id is the only identifier, and there's
+    // no extra scope line above it.
+    expect(w.text()).toContain('acme-corp')
   })
 })

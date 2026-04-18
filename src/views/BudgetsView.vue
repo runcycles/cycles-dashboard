@@ -510,7 +510,7 @@ const filterBulkRunning = ref(false)
 const filterBulkSubmitError = ref('')
 // Per-row result dialog — opens after submit iff failed[] or skipped[]
 // is non-empty.
-const bulkResult = ref<{ actionVerb: string; response: BudgetBulkActionResponse } | null>(null)
+const bulkResult = ref<{ actionVerb: string; response: BudgetBulkActionResponse; labelById: Record<string, string> } | null>(null)
 
 // ─── Row-select bulk path (v0.1.25.36). Sibling of the filter-apply
 //     path above. Freeze / Unfreeze aren't in the server-side
@@ -655,6 +655,13 @@ const filterBulkPreview = useBulkActionPreview<BudgetLedger>({
     sublabel: b.unit,
     status: b.status,
   }),
+  // Budget ledger_ids are opaque UUIDs — scope is what operators
+  // recognize. Collect a full id→scope map during the preview walk so
+  // BulkActionResultDialog can render scope alongside the UUID on every
+  // succeeded/failed/skipped row. Without this, a partial-failure result
+  // shows only UUIDs and the operator has to cross-reference back to
+  // the preview to identify which budget failed.
+  labelFn: (b) => ({ id: b.ledger_id, label: b.scope }),
 })
 
 function openBulkSetup() {
@@ -833,6 +840,10 @@ async function executeFilterBulk() {
     const summary = summaryParts.join(', ')
     if (res.failed.length) toast.error(`${summary} — see details`)
     else toast.success(summary)
+    // Snapshot the label map BEFORE resetPreview() clears it — the
+    // result dialog needs it to render scope alongside each row's
+    // ledger-id (opaque UUID on its own).
+    const labels = { ...filterBulkPreview.previewLabels.value }
     // Close the preview first; the result dialog opens as a separate overlay.
     filterBulkAction.value = null
     filterBulkAmount.value = undefined
@@ -841,7 +852,7 @@ async function executeFilterBulk() {
     filterBulkReason.value = ''
     filterBulkPreview.resetPreview()
     if (res.failed.length || res.skipped.length) {
-      bulkResult.value = { actionVerb: actionVerb(action), response: res }
+      bulkResult.value = { actionVerb: actionVerb(action), response: res, labelById: labels }
     }
   } catch (e) {
     if (e instanceof ApiError && (e.errorCode === 'LIMIT_EXCEEDED' || e.errorCode === 'COUNT_MISMATCH')) {
@@ -1483,6 +1494,7 @@ function rowTenantId(b: BudgetLedger): string {
       :action-verb="bulkResult.actionVerb"
       item-noun-plural="budgets"
       :response="bulkResult.response"
+      :label-by-id="bulkResult.labelById"
       @close="bulkResult = null"
     />
   </div>
