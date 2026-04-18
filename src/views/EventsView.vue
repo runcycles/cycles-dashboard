@@ -63,15 +63,15 @@ const { sortKey, sortDir, toggle, sorted: sortedEvents } = useSort(
 // loaded tail. Filter changes or an explicit Clear reset this flag.
 const loadedMorePages = ref(false)
 
-// V2 (scale-hardening): Copy JSON from expanded event detail. Complements
-// the max-h-40 scroll cap by making the truncated view useful for triage
-// — operators can pull the full data blob into their clipboard for
-// grep/diff/pipe through jq rather than squinting at a capped viewport.
+// Copy the full event as JSON. Row-level triage affordance — operators
+// grab the whole entry (metadata, actor, request_id, correlation_id, data)
+// in one click to paste into a ticket or pipe through jq. Copies the
+// full Event object, not just the `data` field.
 const copiedEventId = ref<string | null>(null)
 let copiedResetTimer: ReturnType<typeof setTimeout> | null = null
-async function copyEventData(e: Event) {
+async function copyEventJson(e: Event) {
   try {
-    await navigator.clipboard.writeText(safeJsonStringify(e.data))
+    await navigator.clipboard.writeText(safeJsonStringify(e))
     copiedEventId.value = e.event_id
     if (copiedResetTimer) clearTimeout(copiedResetTimer)
     copiedResetTimer = setTimeout(() => {
@@ -484,6 +484,16 @@ function measureRow(el: Element | { $el?: Element } | null) {
                  the virtualizer re-lays out sibling rows below on
                  the next tick. -->
             <div v-if="expanded.has(sortedEvents[v.index].event_id)" class="bg-gray-50/70 dark:bg-gray-800/40 px-4 py-3 border-t border-gray-100 dark:border-gray-700">
+              <div class="flex items-center justify-end mb-2">
+                <button
+                  type="button"
+                  @click.stop="copyEventJson(sortedEvents[v.index])"
+                  class="muted-sm hover:text-gray-700 cursor-pointer px-2 py-0.5 rounded hover:bg-gray-100 text-xs"
+                  :aria-label="`Copy full JSON for event ${sortedEvents[v.index].event_id}`"
+                >
+                  {{ copiedEventId === sortedEvents[v.index].event_id ? 'Copied!' : 'Copy JSON' }}
+                </button>
+              </div>
               <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3">
                 <div><span class="muted">Event ID:</span> <span class="font-mono">{{ sortedEvents[v.index].event_id }}</span></div>
                 <div><span class="muted">Source:</span> {{ sortedEvents[v.index].source }}</div>
@@ -497,14 +507,6 @@ function measureRow(el: Element | { $el?: Element } | null) {
               <div v-if="sortedEvents[v.index].data" class="bg-white border border-gray-200 rounded text-xs font-mono">
                 <div class="flex items-center justify-between px-3 py-1.5 border-b border-gray-100">
                   <span class="muted text-xs font-sans">Data</span>
-                  <button
-                    type="button"
-                    @click.stop="copyEventData(sortedEvents[v.index])"
-                    class="muted-sm hover:text-gray-700 cursor-pointer px-2 py-0.5 rounded hover:bg-gray-100"
-                    :aria-label="`Copy data for event ${sortedEvents[v.index].event_id}`"
-                  >
-                    {{ copiedEventId === sortedEvents[v.index].event_id ? 'Copied!' : 'Copy' }}
-                  </button>
                 </div>
                 <pre class="whitespace-pre-wrap p-3 overflow-auto max-h-40">{{ safeJsonStringify(sortedEvents[v.index].data) }}</pre>
               </div>
