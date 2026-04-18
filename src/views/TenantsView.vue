@@ -33,47 +33,47 @@ const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
 
-// Breadcrumb back-link origin. TenantDetailView's "+N more" affordance
-// (child list) deep-links here with ?parent=XXX. Pre-fix, the query was
-// ignored — the operator landed on an unfiltered list with no way back
-// to the parent they came from. Now we (a) drive parentFilter from the
-// URL on initial load + browser back/forward, and (b) render a back
-// arrow in PageHeader's #back slot that returns to the parent's detail
-// view. Kept as a computed off route.query so Vue Router's reactive
-// navigation (back/forward) refreshes both bits of state automatically.
-const parentFromQuery = computed<string | null>(() => {
-  const p = route.query.parent
-  return typeof p === 'string' && p ? p : null
-})
-// immediate:true applies the URL parent on initial mount; subsequent
-// fires handle browser back/forward. Only writes when it differs from
-// the current filter so the operator's dropdown changes aren't clobbered
-// on unrelated re-renders.
-watch(parentFromQuery, p => {
-  if (p && parentFilter.value !== p) parentFilter.value = p
-}, { immediate: true })
-
-// I1: status URL param drives statusFilter on initial mount + back/forward.
-// Same pattern as parent above. Used by Overview's symmetrical counter
-// tile drill-downs (e.g. /tenants?status=SUSPENDED) so a click on the
-// "N suspended" chip lands the operator on a pre-filtered list.
-const statusFromQuery = computed<string | null>(() => {
-  const s = route.query.status
-  if (typeof s !== 'string') return null
-  // Only honor known tenant status values; ignore garbage so a stale
-  // URL doesn't put the dropdown into an invalid state.
-  return s === 'ACTIVE' || s === 'SUSPENDED' || s === 'CLOSED' ? s : null
-})
-watch(statusFromQuery, s => {
-  if (s && statusFilter.value !== s) statusFilter.value = s
-}, { immediate: true })
 const canManage = computed(() => auth.capabilities?.manage_tenants !== false)
 
 const tenants = ref<Tenant[]>([])
 const error = ref('')
 const search = ref('')
-const parentFilter = ref('')
-const statusFilter = ref('')
+
+// Initialize filters from the URL so deep-links like /tenants?status=ACTIVE
+// (Overview tile chip drill-downs) and /tenants?parent=foo (breadcrumb
+// back-link from TenantDetailView "+N more") land pre-filtered on first
+// render, before any watcher fires. The `watch(..., { immediate: true })`
+// pattern used previously ran synchronously during setup — and since the
+// callback accessed the ref, it triggered a TDZ ReferenceError whenever
+// the URL carried a valid status on mount (blank page, then blank every
+// subsequent navigation since the router was in a thrown-handler state).
+function readStatusFromQuery(): '' | 'ACTIVE' | 'SUSPENDED' | 'CLOSED' {
+  const s = route.query.status
+  if (typeof s !== 'string') return ''
+  return s === 'ACTIVE' || s === 'SUSPENDED' || s === 'CLOSED' ? s : ''
+}
+function readParentFromQuery(): string {
+  const p = route.query.parent
+  return typeof p === 'string' && p ? p : ''
+}
+const parentFilter = ref<string>(readParentFromQuery())
+const statusFilter = ref<string>(readStatusFromQuery())
+
+// Template uses this to decide whether to render the PageHeader back-arrow
+// (only when we arrived via a breadcrumb deep-link, not when the operator
+// picked a parent in the dropdown).
+const parentFromQuery = computed<string>(() => readParentFromQuery())
+
+// Browser back/forward: sync filters when the URL changes without a
+// re-mount. Not `immediate: true` — initial values are set above.
+watch(() => route.query.parent, () => {
+  const p = readParentFromQuery()
+  if (parentFilter.value !== p) parentFilter.value = p
+})
+watch(() => route.query.status, () => {
+  const s = readStatusFromQuery()
+  if (statusFilter.value !== s) statusFilter.value = s
+})
 
 // V5 (Phase 3): debounce the search input so filter re-computation
 // runs 200ms AFTER the last keystroke instead of on every character.
