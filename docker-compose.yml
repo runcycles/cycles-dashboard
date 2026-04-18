@@ -14,7 +14,7 @@ services:
   cycles-server:
     # Runtime-plane server. Independent release cadence from dashboard +
     # cycles-server-admin — keep in sync with docker-compose.prod.yml.
-    image: ghcr.io/runcycles/cycles-server:0.1.25.12
+    image: ghcr.io/runcycles/cycles-server:0.1.25.13
     restart: unless-stopped
     ports:
       - "7878:7878"
@@ -40,7 +40,7 @@ services:
       - cycles
 
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.27
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.28
     restart: unless-stopped
     ports:
       - "7979:7979"
