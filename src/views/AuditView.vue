@@ -52,9 +52,21 @@ const nextCursor = ref('')
 
 const tenantId = ref('')
 const keyId = ref('')
+// cycles-governance-admin v0.1.25.24: `operation` and `resource_type`
+// promoted from scalar to array<string> (explode=false, maxItems 25).
+// Accepts comma-separated input in the form; buildFilterParams runs the
+// same normalizer as error_code (trim/split/drop-empties/dedupe). Server
+// still accepts a one-element list, so single-token input is wire-
+// compatible with the pre-v0.1.25.24 scalar shape.
 const operation = ref('')
 const resourceType = ref('')
 const resourceId = ref('')
+// Known resource types for resource_type datalist typeahead. Matches
+// the six values the pre-v0.1.25.24 <select> offered. Kept in-file
+// rather than importing from types.ts because the spec doesn't enum
+// this field — servers may add new resource types without a spec
+// bump, and the datalist is a hint, not a whitelist.
+const KNOWN_RESOURCE_TYPES = ['tenant', 'budget', 'api_key', 'policy', 'webhook', 'config'] as const
 // cycles-governance-admin v0.1.25.21: free-text `search` query param
 // on listAuditLogs. Starting v0.1.25.24 the server-side match set
 // extends to resource_id OR log_id OR error_code OR operation (case-
@@ -68,6 +80,21 @@ const search = ref('')
 // normalizes (trim, split, drop empties) and passes through as a single
 // comma-joined value for the explode=false wire format.
 const errorCode = ref('')
+// cycles-governance-admin v0.1.25.24: NOT-IN-list (error_code_exclude).
+// Auditors use this to hide noisy codes (e.g. expected TIMEOUTs) while
+// keeping all other rows — including successes. Per spec, NULL entry
+// error_code MUST always pass this predicate, so adding an exclude list
+// never silently hides success rows.
+const errorCodeExclude = ref('')
+// Shared comma/whitespace-separated list normalizer for the four array
+// filters (error_code, error_code_exclude, operation, resource_type).
+// Trim each token, drop empties, dedupe preserving first-occurrence
+// order. Returns a comma-joined string ready for the explode=false
+// wire format. Empty input → empty string → caller omits the param.
+function normalizeList(raw: string): string {
+  const tokens = raw.split(/[,\s]+/).map(s => s.trim()).filter(Boolean)
+  return Array.from(new Set(tokens)).join(',')
+}
 // cycles-governance-admin v0.1.25.24: status_min/status_max range filter.
 // Dashboard exposes five preset bands rather than raw min/max inputs —
 // operators rarely care about specific HTTP statuses, they want either
@@ -103,17 +130,18 @@ function buildFilterParams(): Record<string, string> {
   const params: Record<string, string> = {}
   if (tenantId.value) params.tenant_id = tenantId.value
   if (keyId.value) params.key_id = keyId.value
-  if (operation.value) params.operation = operation.value
-  if (resourceType.value) params.resource_type = resourceType.value
+  // operation + resource_type: v0.1.25.24 array<string> with explode=false.
+  // Share the comma-sep normalizer with error_code / error_code_exclude so
+  // all four array filters have identical token semantics.
+  const ops = normalizeList(operation.value)
+  if (ops) params.operation = ops
+  const resTypes = normalizeList(resourceType.value)
+  if (resTypes) params.resource_type = resTypes
   if (resourceId.value) params.resource_id = resourceId.value
-  // Error code is an IN-list (array, explode=false). Accept comma or
-  // whitespace separation in the form, normalize to trimmed comma-join.
-  // Empty / whitespace-only entries dropped; dedupe preserves order.
-  const codes = errorCode.value
-    .split(/[,\s]+/)
-    .map(s => s.trim())
-    .filter(Boolean)
-  if (codes.length > 0) params.error_code = Array.from(new Set(codes)).join(',')
+  const codes = normalizeList(errorCode.value)
+  if (codes) params.error_code = codes
+  const excludes = normalizeList(errorCodeExclude.value)
+  if (excludes) params.error_code_exclude = excludes
   // Status band → status_min / status_max pair.
   if (statusBand.value) {
     const range: Record<string, [number, number]> = {
@@ -231,9 +259,11 @@ function applyQueryParams() {
   if (route.query.resource_type) resourceType.value = String(route.query.resource_type)
   if (route.query.resource_id) resourceId.value = String(route.query.resource_id)
   if (route.query.search) search.value = String(route.query.search)
-  // v0.1.25.24: deep-links can pre-fill error_code (comma-list) + status
-  // band. Used by OverviewView's Recent Denials pill → /audit?error_code=X.
+  // v0.1.25.24: deep-links can pre-fill error_code / error_code_exclude
+  // (both comma-lists) and status band. Used by OverviewView's Recent
+  // Denials pill → /audit?error_code=X.
   if (route.query.error_code) errorCode.value = String(route.query.error_code)
+  if (route.query.error_code_exclude) errorCodeExclude.value = String(route.query.error_code_exclude)
   const sb = route.query.status_band
   if (sb === 'success' || sb === 'errors' || sb === '4xx' || sb === '5xx') statusBand.value = sb
 }
@@ -348,11 +378,17 @@ function measureRow(el: Element | { $el?: Element } | null) {
         </div>
         <div>
           <label for="audit-resource" class="form-label">Resource Type</label>
-          <select id="audit-resource" v-model="resourceType" class="form-select w-full">
-            <option value="">All</option>
-            <option>tenant</option><option>budget</option><option>api_key</option>
-            <option>policy</option><option>webhook</option><option>config</option>
-          </select>
+          <input
+            id="audit-resource"
+            v-model="resourceType"
+            list="audit-resource-type-options"
+            class="form-input"
+            placeholder="tenant, budget"
+            aria-label="Filter by resource_type. Comma-separated for IN-list (e.g. tenant, budget)."
+          />
+          <datalist id="audit-resource-type-options">
+            <option v-for="r in KNOWN_RESOURCE_TYPES" :key="r" :value="r" />
+          </datalist>
         </div>
       </div>
 
@@ -364,7 +400,13 @@ function measureRow(el: Element | { $el?: Element } | null) {
         </div>
         <div>
           <label for="audit-operation" class="form-label">Operation</label>
-          <input id="audit-operation" v-model="operation" class="form-input" placeholder="createBudget" />
+          <input
+            id="audit-operation"
+            v-model="operation"
+            class="form-input"
+            placeholder="createBudget, updatePolicy"
+            aria-label="Filter by operation. Comma-separated for IN-list (e.g. createBudget, updatePolicy)."
+          />
         </div>
         <div>
           <label for="audit-error-code" class="form-label">Error Code</label>
@@ -380,38 +422,59 @@ function measureRow(el: Element | { $el?: Element } | null) {
             <option v-for="c in ERROR_CODES" :key="c" :value="c" />
           </datalist>
         </div>
-        <div class="sm:col-span-2 flex flex-wrap items-end gap-3">
-          <div class="min-w-0">
-            <span class="form-label">Status</span>
-            <!-- Segmented chip control. role=radiogroup + role=radio +
-                 aria-checked make this a screen-reader-equivalent of
-                 the prior <select>. data-band stays stable so tests
-                 target by semantic value rather than label. -->
-            <div
-              id="audit-status"
-              role="radiogroup"
-              aria-label="Filter by HTTP status band"
-              class="inline-flex flex-wrap gap-0.5 rounded border border-gray-300 dark:border-gray-700 p-0.5 bg-gray-50 dark:bg-gray-800/40"
-            >
-              <button
-                v-for="b in STATUS_BANDS"
-                :key="b.value || 'all'"
-                type="button"
-                role="radio"
-                :data-band="b.value"
-                :aria-checked="statusBand === b.value"
-                @click="statusBand = b.value"
-                class="px-2.5 py-1 text-xs rounded cursor-pointer transition-colors"
-                :class="statusBand === b.value
-                  ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
-                  : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'"
-              >{{ b.label }}</button>
-            </div>
-          </div>
-          <button type="submit" :disabled="loading" class="ml-auto bg-gray-900 text-white px-4 py-1.5 rounded text-sm hover:bg-gray-800 disabled:opacity-50 cursor-pointer">
-            {{ loading ? 'Querying...' : 'Run Query' }}
-          </button>
+        <div>
+          <label for="audit-error-code-exclude" class="form-label">Error Code (exclude)</label>
+          <input
+            id="audit-error-code-exclude"
+            v-model="errorCodeExclude"
+            list="audit-error-code-options"
+            class="form-input"
+            placeholder="INTERNAL_ERROR, TIMEOUT"
+            aria-label="Hide these error codes. Comma-separated (e.g. INTERNAL_ERROR, TIMEOUT). Success rows (no error_code) always pass this filter."
+          />
         </div>
+        <!-- Spacer column keeps row 2 aligned to the 5-col grid from
+             row 1. Empty by design — Status + Run Query moved to row 3
+             so the error_code / error_code_exclude pair has room. -->
+        <div class="hidden md:block" aria-hidden="true"></div>
+      </div>
+
+      <!-- Row 3: Status band (left) + Run Query (right). Flex rather
+           than 5-col grid so the chip group can flex-wrap on narrow
+           viewports without forcing Run Query below a phantom empty
+           cell. Run Query's right edge still aligns with row 1's
+           Resource Type via the form's p-4 padding. -->
+      <div class="flex flex-wrap items-end gap-3">
+        <div class="min-w-0">
+          <span class="form-label">Status</span>
+          <!-- Segmented chip control. role=radiogroup + role=radio +
+               aria-checked make this a screen-reader-equivalent of
+               the prior <select>. data-band stays stable so tests
+               target by semantic value rather than label. -->
+          <div
+            id="audit-status"
+            role="radiogroup"
+            aria-label="Filter by HTTP status band"
+            class="inline-flex flex-wrap gap-0.5 rounded border border-gray-300 dark:border-gray-700 p-0.5 bg-gray-50 dark:bg-gray-800/40"
+          >
+            <button
+              v-for="b in STATUS_BANDS"
+              :key="b.value || 'all'"
+              type="button"
+              role="radio"
+              :data-band="b.value"
+              :aria-checked="statusBand === b.value"
+              @click="statusBand = b.value"
+              class="px-2.5 py-1 text-xs rounded cursor-pointer transition-colors"
+              :class="statusBand === b.value
+                ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'"
+            >{{ b.label }}</button>
+          </div>
+        </div>
+        <button type="submit" :disabled="loading" class="ml-auto bg-gray-900 text-white px-4 py-1.5 rounded text-sm hover:bg-gray-800 disabled:opacity-50 cursor-pointer">
+          {{ loading ? 'Querying...' : 'Run Query' }}
+        </button>
       </div>
     </form>
 
