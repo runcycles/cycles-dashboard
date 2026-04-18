@@ -60,6 +60,26 @@ async function toApiError(res: Response): Promise<ApiError> {
   return new ApiError(res.status, `API error: ${res.status}`)
 }
 
+// A 401 from admin that mentions `X-Cycles-API-Key` (the tenant-key header)
+// is NOT a session failure. It means the admin-server's AuthInterceptor
+// has no admin-scoped rule for the path we POSTed to, so it fell through
+// to the tenant-key validation branch and rejected us because we sent
+// `X-Admin-API-Key` instead. That happens when the dashboard calls an
+// endpoint introduced in a newer admin-server than the one actually
+// running (e.g. dashboard on v0.1.25.36 hitting admin-server pre-`.29`
+// for POST /v1/admin/budgets/bulk-action). Our admin key is still valid —
+// other admin endpoints continue to work. Preserving the session in this
+// case turns an opaque "redirect to /login" into a visible in-view error
+// the operator can act on (usually: pull a newer admin image).
+//
+// We match on the tenant-header name rather than a specific phrase so
+// the heuristic survives copy changes in the admin's 401 message.
+export function is401EndpointMismatch(err: ApiError): boolean {
+  if (err.status !== 401) return false
+  const hay = `${err.message ?? ''} ${err.errorCode ?? ''}`.toLowerCase()
+  return hay.includes('cycles-api-key')
+}
+
 // Wraps `fetch` with an AbortController-backed timeout. A hung backend should
 // fail after `timeoutMs` rather than spin the UI forever. Translates the
 // timeout-triggered AbortError into a clear error message so callers don't
@@ -125,16 +145,22 @@ async function request<T>(
     headers: { 'X-Admin-API-Key': auth.apiKey, 'Content-Type': 'application/json' },
     signal,
   })
-  // 401 = key missing/invalid → end session.
+  // 401 = key missing/invalid → end session, EXCEPT when the 401 is really
+  // an endpoint-routing mismatch (see `is401EndpointMismatch`). That case
+  // surfaces as a normal ApiError so the calling view can show an
+  // actionable message instead of logging the operator out.
   // 403 = authenticated but not permitted for THIS op → keep session,
   // surface an ApiError so the view shows the error (logging out on 403
   // destroyed the session on e.g. webhook-security PUT attempts where
   // the key lacked admin:webhooks:write but the rest of the app worked).
-  if (res.status === 401) {
-    handleUnauthorized()
-    throw new Error('Unauthorized')
+  if (!res.ok) {
+    const err = await toApiError(res)
+    if (res.status === 401 && !is401EndpointMismatch(err)) {
+      handleUnauthorized()
+      throw new Error('Unauthorized')
+    }
+    throw err
   }
-  if (!res.ok) throw await toApiError(res)
   try {
     return await res.json()
   } catch {
@@ -177,16 +203,20 @@ async function mutate<T>(method: string, path: string, body?: Record<string, unk
     headers: { 'X-Admin-API-Key': auth.apiKey, 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
   })
-  // 401 = key missing/invalid → end session.
+  // 401 = key missing/invalid → end session, with the same endpoint-
+  // mismatch carve-out as `request()` above.
   // 403 = authenticated but not permitted for THIS op → keep session,
   // surface an ApiError so the view shows the error (logging out on 403
   // destroyed the session on e.g. webhook-security PUT attempts where
   // the key lacked admin:webhooks:write but the rest of the app worked).
-  if (res.status === 401) {
-    handleUnauthorized()
-    throw new Error('Unauthorized')
+  if (!res.ok) {
+    const err = await toApiError(res)
+    if (res.status === 401 && !is401EndpointMismatch(err)) {
+      handleUnauthorized()
+      throw new Error('Unauthorized')
+    }
+    throw err
   }
-  if (!res.ok) throw await toApiError(res)
   if (res.status === 204) return undefined as T
   try { return await res.json() } catch { throw new Error('Invalid response from server') }
 }

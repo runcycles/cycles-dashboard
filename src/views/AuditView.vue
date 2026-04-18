@@ -343,20 +343,22 @@ function measureRow(el: Element | { $el?: Element } | null) {
 
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
-    <!-- Filter form: two rows on a shared 5-column grid. TimeRangePicker
-         collapses From+To+Quick-chips into a single control, so we can
-         fit 5 primary filters in Row 1 + 3 detail filters + Status
-         chips + Run Query in Row 2 without losing alignment.
-           Row 1: Search | Time | Tenant | Key | Resource Type
-           Row 2: Resource ID | Operation | Error Code | [Status … Run Query]
-         Status + Run Query share Row 2 cols 4-5 via an internal flex
-         (Status left, Run Query right-aligned via ml-auto) so chips
-         have room without wrapping, and Run Query's right edge lines
-         up with Resource Type's right edge from Row 1. -->
+    <!-- Filter form: 6-col wide layout at xl+, stacks to 2 cols below.
+         The 6-col grid would previously kick in at md (768px), but the
+         Status chip group (5 bands) + Run Query need ~370px of room;
+         at md the col-span-2 cell only got ~225-320px so the chips
+         flex-wrapped to 2-3 rows within the cell and the whole layout
+         jittered as the viewport resized through the 768-1280px range.
+         Bumping the wide layout to xl (1280px) eliminates that jitter —
+         below 1280px the filters stack cleanly in a 2-col grid, above
+         1280px the row 2 col-span-2 cell gets ~408px and the chips fit
+         on one line. One clean breakpoint jump instead of a cascade.
+           Row 1 (xl, 6 cols): Search [span 2] | Time | Tenant | Key | Resource Type
+           Row 2 (xl, 6 cols): Resource ID | Operation | Error Code | Exclude codes | Status+Run Query [span 2] -->
     <form @submit.prevent="query" class="card p-4 mb-4 space-y-3">
       <!-- Row 1: primary filters -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 items-end">
-        <div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-3 items-end">
+        <div class="xl:col-span-2">
           <label for="audit-search" class="form-label">Search</label>
           <input id="audit-search" v-model="search" type="search" class="form-input" placeholder="resource_id, log_id, error_code, operation" aria-label="Free-text substring search across resource_id, log_id, error_code, and operation" />
         </div>
@@ -393,7 +395,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
       </div>
 
       <!-- Row 2: detail filters + Status + submit -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 items-end">
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-3 items-end">
         <div>
           <label for="audit-resource-id" class="form-label">Resource ID</label>
           <input id="audit-resource-id" v-model="resourceId" class="form-input" placeholder="key_abc123..." />
@@ -423,7 +425,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
           </datalist>
         </div>
         <div>
-          <label for="audit-error-code-exclude" class="form-label">Error Code (exclude)</label>
+          <label for="audit-error-code-exclude" class="form-label">Exclude codes</label>
           <input
             id="audit-error-code-exclude"
             v-model="errorCodeExclude"
@@ -433,48 +435,43 @@ function measureRow(el: Element | { $el?: Element } | null) {
             aria-label="Hide these error codes. Comma-separated (e.g. INTERNAL_ERROR, TIMEOUT). Success rows (no error_code) always pass this filter."
           />
         </div>
-        <!-- Spacer column keeps row 2 aligned to the 5-col grid from
-             row 1. Empty by design — Status + Run Query moved to row 3
-             so the error_code / error_code_exclude pair has room. -->
-        <div class="hidden md:block" aria-hidden="true"></div>
-      </div>
-
-      <!-- Row 3: Status band (left) + Run Query (right). Flex rather
-           than 5-col grid so the chip group can flex-wrap on narrow
-           viewports without forcing Run Query below a phantom empty
-           cell. Run Query's right edge still aligns with row 1's
-           Resource Type via the form's p-4 padding. -->
-      <div class="flex flex-wrap items-end gap-3">
-        <div class="min-w-0">
-          <span class="form-label">Status</span>
-          <!-- Segmented chip control. role=radiogroup + role=radio +
-               aria-checked make this a screen-reader-equivalent of
-               the prior <select>. data-band stays stable so tests
-               target by semantic value rather than label. -->
-          <div
-            id="audit-status"
-            role="radiogroup"
-            aria-label="Filter by HTTP status band"
-            class="inline-flex flex-wrap gap-0.5 rounded border border-gray-300 dark:border-gray-700 p-0.5 bg-gray-50 dark:bg-gray-800/40"
-          >
-            <button
-              v-for="b in STATUS_BANDS"
-              :key="b.value || 'all'"
-              type="button"
-              role="radio"
-              :data-band="b.value"
-              :aria-checked="statusBand === b.value"
-              @click="statusBand = b.value"
-              class="px-2.5 py-1 text-xs rounded cursor-pointer transition-colors"
-              :class="statusBand === b.value
-                ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
-                : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'"
-            >{{ b.label }}</button>
+        <!-- Status + Run Query share the last 2 cols at xl+ via internal
+             flex. Below xl the filters stack in 2 cols and this cell
+             gets a full half-width row to itself; chips still flex-wrap
+             if the cell is narrow. Run Query stays right-aligned via
+             ml-auto at every breakpoint. -->
+        <div class="xl:col-span-2 flex flex-wrap items-end gap-3">
+          <div class="min-w-0">
+            <span class="form-label">Status</span>
+            <!-- Segmented chip control. role=radiogroup + role=radio +
+                 aria-checked make this a screen-reader-equivalent of
+                 the prior <select>. data-band stays stable so tests
+                 target by semantic value rather than label. -->
+            <div
+              id="audit-status"
+              role="radiogroup"
+              aria-label="Filter by HTTP status band"
+              class="inline-flex flex-wrap gap-0.5 rounded border border-gray-300 dark:border-gray-700 p-0.5 bg-gray-50 dark:bg-gray-800/40"
+            >
+              <button
+                v-for="b in STATUS_BANDS"
+                :key="b.value || 'all'"
+                type="button"
+                role="radio"
+                :data-band="b.value"
+                :aria-checked="statusBand === b.value"
+                @click="statusBand = b.value"
+                class="px-2.5 py-1 text-xs rounded cursor-pointer transition-colors"
+                :class="statusBand === b.value
+                  ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                  : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'"
+              >{{ b.label }}</button>
+            </div>
           </div>
+          <button type="submit" :disabled="loading" class="ml-auto bg-gray-900 text-white px-4 py-1.5 rounded text-sm hover:bg-gray-800 disabled:opacity-50 cursor-pointer">
+            {{ loading ? 'Querying...' : 'Run Query' }}
+          </button>
         </div>
-        <button type="submit" :disabled="loading" class="ml-auto bg-gray-900 text-white px-4 py-1.5 rounded text-sm hover:bg-gray-800 disabled:opacity-50 cursor-pointer">
-          {{ loading ? 'Querying...' : 'Run Query' }}
-        </button>
       </div>
     </form>
 
