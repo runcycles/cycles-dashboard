@@ -4,6 +4,7 @@ import { useVirtualizer } from '@tanstack/vue-virtual'
 import type { Event } from '../types'
 import TenantLink from './TenantLink.vue'
 import { formatDateTime } from '../utils/format'
+import { safeJsonStringify } from '../utils/safe'
 
 // Phase 5 polish — virtualization parity with EventsView.
 //
@@ -25,6 +26,25 @@ const expanded = ref(new Set<string>())
 function toggle(id: string) {
   if (expanded.value.has(id)) expanded.value.delete(id)
   else expanded.value.add(id)
+}
+
+// Copy the full event as JSON — triage affordance matching EventsView's
+// expanded-panel button. Copies the whole Event object (including
+// metadata like actor, request_id, correlation_id) rather than just
+// the data blob which is already select-and-copyable from the <pre>.
+const copiedEventId = ref<string | null>(null)
+let copiedResetTimer: ReturnType<typeof setTimeout> | null = null
+async function copyEventJson(e: Event) {
+  try {
+    await navigator.clipboard.writeText(safeJsonStringify(e))
+    copiedEventId.value = e.event_id
+    if (copiedResetTimer) clearTimeout(copiedResetTimer)
+    copiedResetTimer = setTimeout(() => {
+      if (copiedEventId.value === e.event_id) copiedEventId.value = null
+    }, 2000)
+  } catch {
+    // Clipboard permission denied or insecure context — silent fallback.
+  }
 }
 
 // Virtualization. Collapsed rows are ~36px; expanded grow with the
@@ -82,6 +102,16 @@ function measureRow(el: Element | { $el?: Element } | null) {
           <span class="muted-sm shrink-0 whitespace-nowrap" :title="new Date(events[v.index].timestamp).toISOString()">{{ formatDateTime(events[v.index].timestamp) }}</span>
         </div>
         <div v-if="expanded.has(events[v.index].event_id)" class="pl-6 pb-2 text-xs">
+          <div class="flex items-center justify-end mb-1">
+            <button
+              type="button"
+              @click.stop="copyEventJson(events[v.index])"
+              class="muted-sm hover:text-gray-700 cursor-pointer px-2 py-0.5 rounded hover:bg-gray-100 text-xs"
+              :aria-label="`Copy full JSON for event ${events[v.index].event_id}`"
+            >
+              {{ copiedEventId === events[v.index].event_id ? 'Copied!' : 'Copy JSON' }}
+            </button>
+          </div>
           <div class="grid grid-cols-2 gap-x-6 gap-y-1 mb-2">
             <div><span class="muted">Event ID:</span> <span class="font-mono">{{ events[v.index].event_id }}</span></div>
             <div><span class="muted">Source:</span> {{ events[v.index].source }}</div>

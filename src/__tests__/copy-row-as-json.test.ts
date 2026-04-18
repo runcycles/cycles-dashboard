@@ -1,16 +1,16 @@
-// Per-row "Copy JSON" button for Events + Audit views (v0.1.25.37).
+// Per-row "Copy JSON" button for triage surfaces (v0.1.25.37).
 //
-// EventsView previously had a Copy button inside the Data sub-box that
-// copied only e.data. Widened + promoted to a row-level action that
-// copies the full Event object. AuditView had no copy button; a matching
-// Copy JSON button is added to the expanded-row panel and copies the
-// full AuditLogEntry (including metadata — where bulk-action per-row
-// outcomes live and which isn't reachable via any search filter).
+// Covers four surfaces:
+//   - EventsView (list) — full-event Copy JSON replaces data-only Copy
+//   - AuditView (list) — new Copy JSON on every expanded row
+//   - EventTimeline (BudgetDetail + TenantDetail) — Copy JSON on
+//     expanded rows (parity with EventsView)
+//   - WebhookDetailView delivery history — inline trailing-column
+//     Copy JSON button (flat rows, no expand)
 //
-// These specs mount each view with a single row, expand it, click Copy
-// JSON, and assert (a) navigator.clipboard.writeText was called with
-// the full row serialized via safeJsonStringify, and (b) the button
-// label toggles to "Copied!" for ~2s.
+// Every spec asserts (a) navigator.clipboard.writeText was called
+// with the full row serialized via safeJsonStringify, and (b) the
+// button label toggles to "Copied!" for ~2s.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -228,5 +228,120 @@ describe('AuditView — Copy JSON copies full entry including metadata', () => {
     await expect(
       w.find(`button[aria-label="Copy full JSON for audit log ${sampleEntry.log_id}"]`).trigger('click')
     ).resolves.not.toThrow()
+  })
+})
+
+describe('EventTimeline — Copy JSON copies full event from expanded row', () => {
+  const sampleEvent = {
+    event_id: 'evt_timeline',
+    event_type: 'budget.funded',
+    category: 'governance',
+    scope: 'tenant:acme/agent:reviewer',
+    tenant_id: 'acme',
+    source: 'cycles-server-admin',
+    timestamp: '2026-04-18T12:00:00Z',
+    data: { delta: 500, unit: 'USD_MICROCENTS' },
+  }
+
+  it('renders Copy JSON in the expanded row and copies the full event', async () => {
+    const { default: EventTimeline } = await import('../components/EventTimeline.vue')
+    const w = mount(EventTimeline, {
+      props: { events: [sampleEvent] },
+      global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+    })
+    await flushPromises()
+
+    // Expand the row.
+    const expandBtn = w.find('div[role="button"][aria-expanded]')
+    expect(expandBtn.exists()).toBe(true)
+    await expandBtn.trigger('click')
+    await flushPromises()
+
+    const copyBtn = w.find(`button[aria-label="Copy full JSON for event ${sampleEvent.event_id}"]`)
+    expect(copyBtn.exists()).toBe(true)
+    expect(copyBtn.text()).toBe('Copy JSON')
+
+    await copyBtn.trigger('click')
+    await flushPromises()
+
+    expect(writeTextMock).toHaveBeenCalledTimes(1)
+    const payload = JSON.parse(writeTextMock.mock.calls[0][0])
+    expect(payload.event_id).toBe('evt_timeline')
+    expect(payload.event_type).toBe('budget.funded')
+    expect(payload.scope).toBe('tenant:acme/agent:reviewer')
+    expect(payload.data).toEqual({ delta: 500, unit: 'USD_MICROCENTS' })
+
+    expect(copyBtn.text()).toBe('Copied!')
+    vi.advanceTimersByTime(2100)
+    await flushPromises()
+    expect(w.find(`button[aria-label="Copy full JSON for event ${sampleEvent.event_id}"]`).text()).toBe('Copy JSON')
+  })
+})
+
+describe('WebhookDetailView — Copy JSON on delivery rows (flat, no expand)', () => {
+  const listDeliveriesMock = vi.fn()
+  const getWebhookMock = vi.fn()
+
+  beforeEach(() => {
+    listDeliveriesMock.mockReset()
+    getWebhookMock.mockReset()
+  })
+
+  const sampleDelivery = {
+    delivery_id: 'del_abc',
+    subscription_id: 'sub_xyz',
+    event_id: 'evt_xyz',
+    event_type: 'reservation.denied',
+    status: 'FAILED',
+    http_status: 503,
+    attempts: 3,
+    attempted_at: '2026-04-18T12:00:00Z',
+    created_at: '2026-04-18T11:55:00Z',
+  }
+
+  it('renders an inline Copy JSON button on every delivery row and copies the full delivery', async () => {
+    // Override the api-client mock to also include listDeliveries +
+    // getWebhook for this suite.
+    vi.doMock('../api/client', async () => {
+      const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
+      return {
+        ...actual,
+        listDeliveries: (...args: unknown[]) => listDeliveriesMock(...args),
+        getWebhook: (...args: unknown[]) => getWebhookMock(...args),
+      }
+    })
+    getWebhookMock.mockResolvedValue({
+      id: 'sub_xyz',
+      tenant_id: 'acme',
+      url: 'https://example.test/hook',
+      active: true,
+      created_at: '2026-04-18T00:00:00Z',
+      status: 'ACTIVE',
+      event_types: ['*'],
+    })
+    listDeliveriesMock.mockResolvedValue({ deliveries: [sampleDelivery], has_more: false, next_cursor: undefined })
+    routeRef.params = { id: 'sub_xyz' }
+
+    const { default: WebhookDetailView } = await import('../views/WebhookDetailView.vue')
+    const w = mount(WebhookDetailView, stdMount())
+    await flushPromises()
+    await flushPromises()
+
+    const copyBtn = w.find(`button[aria-label="Copy full JSON for delivery ${sampleDelivery.delivery_id}"]`)
+    expect(copyBtn.exists()).toBe(true)
+    expect(copyBtn.text()).toBe('Copy JSON')
+
+    await copyBtn.trigger('click')
+    await flushPromises()
+
+    expect(writeTextMock).toHaveBeenCalledTimes(1)
+    const payload = JSON.parse(writeTextMock.mock.calls[0][0])
+    expect(payload.delivery_id).toBe('del_abc')
+    expect(payload.event_id).toBe('evt_xyz')
+    expect(payload.status).toBe('FAILED')
+    expect(payload.http_status).toBe(503)
+    expect(payload.attempts).toBe(3)
+
+    expect(copyBtn.text()).toBe('Copied!')
   })
 })

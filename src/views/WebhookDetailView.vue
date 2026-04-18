@@ -22,6 +22,7 @@ import SecretReveal from '../components/SecretReveal.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
+import { safeJsonStringify } from '../utils/safe'
 
 const toast = useToast()
 import { formatDateTime } from '../utils/format'
@@ -366,7 +367,26 @@ const deliveryVirt = useVirtualizer(computed(() => ({
 })))
 const deliveryVirtualRows = computed(() => deliveryVirt.value.getVirtualItems())
 const deliveryTotalHeight = computed(() => deliveryVirt.value.getTotalSize())
-const deliveryGridTemplate = '120px 120px 100px minmax(220px,1fr) 160px'
+const deliveryGridTemplate = '120px 120px 100px minmax(220px,1fr) 160px 88px'
+
+// Copy the full delivery row as JSON. Useful for cross-referencing a
+// failing delivery into /events or the receiver's server logs without
+// hand-assembling the payload. Copies the whole WebhookDelivery
+// (delivery_id, event_id, status, http_status, attempts, timestamps).
+const copiedDeliveryId = ref<string | null>(null)
+let copiedDeliveryTimer: ReturnType<typeof setTimeout> | null = null
+async function copyDeliveryJson(d: WebhookDelivery) {
+  try {
+    await navigator.clipboard.writeText(safeJsonStringify(d))
+    copiedDeliveryId.value = d.delivery_id
+    if (copiedDeliveryTimer) clearTimeout(copiedDeliveryTimer)
+    copiedDeliveryTimer = setTimeout(() => {
+      if (copiedDeliveryId.value === d.delivery_id) copiedDeliveryId.value = null
+    }, 2000)
+  } catch {
+    // Clipboard permission denied or insecure context — silent fallback.
+  }
+}
 
 // Status filter refetches page 1 so the filter is server-enforced
 // (not just client-side filtering of already-loaded data — that
@@ -568,6 +588,7 @@ watch(exportError, (v) => { if (v) error.value = v })
             <SortHeader as="div" label="Attempts" column="attempts" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" align="right" />
             <SortHeader as="div" label="Event ID" column="event_id" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" />
             <SortHeader as="div" label="Time" column="time" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" />
+            <div role="columnheader" class="table-cell muted-sm">Actions</div>
           </div>
         </div>
 
@@ -591,6 +612,16 @@ watch(exportError, (v) => { if (v) error.value = v })
               <div role="cell" class="table-cell text-right muted tabular-nums">{{ sortedDeliveries[v.index].attempts }}</div>
               <div role="cell" class="table-cell font-mono muted-sm truncate" :title="sortedDeliveries[v.index].event_id">{{ sortedDeliveries[v.index].event_id }}</div>
               <div role="cell" class="table-cell muted-sm">{{ sortedDeliveries[v.index].attempted_at ? formatDateTime(sortedDeliveries[v.index].attempted_at!) : sortedDeliveries[v.index].created_at ? formatDateTime(sortedDeliveries[v.index].created_at!) : '-' }}</div>
+              <div role="cell" class="table-cell">
+                <button
+                  type="button"
+                  @click.stop="copyDeliveryJson(sortedDeliveries[v.index])"
+                  class="muted-sm hover:text-gray-700 cursor-pointer px-2 py-0.5 rounded hover:bg-gray-100 text-xs"
+                  :aria-label="`Copy full JSON for delivery ${sortedDeliveries[v.index].delivery_id}`"
+                >
+                  {{ copiedDeliveryId === sortedDeliveries[v.index].delivery_id ? 'Copied!' : 'Copy JSON' }}
+                </button>
+              </div>
             </div>
           </div>
         </div>
