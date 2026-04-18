@@ -8,6 +8,8 @@
 
 Operational admin dashboard for the [Cycles Budget Governance System](https://github.com/runcycles/cycles-server-admin), aligned with [governance spec v0.1.25.26](https://github.com/runcycles/cycles-protocol/blob/main/cycles-governance-admin-v0.1.25.yaml).
 
+**Documentation:** [CHANGELOG](CHANGELOG.md) (downstream release notes) · [OPERATIONS](OPERATIONS.md) (production runbook) · [AUDIT](AUDIT.md) (engineering narrative).
+
 <p align="center">
   <img src="docs/runcycles-demo.gif" alt="Dashboard walkthrough — tenants, budgets, reservations, webhooks" width="800"/><br/>
   <em>End-to-end walkthrough of the main operator flows</em>
