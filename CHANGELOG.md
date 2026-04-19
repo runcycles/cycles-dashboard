@@ -15,6 +15,38 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.40] — 2026-04-19
+
+### Changed
+
+- **Copy JSON no longer claims a dedicated row or column.** Pre-fix,
+  Copy JSON consumed a full-width ~50px footer row inside every
+  expanded event / audit / timeline panel and a trailing ~88px column
+  on every always-visible delivery row in WebhookDetailView —
+  substantial chrome for a secondary action.
+  - **WebhookDetailView delivery rows** now use a row kebab (⋮)
+    with three items: **Copy as JSON**, **Copy delivery ID**, **Copy
+    event ID**. Trailing column shrinks from 88px to 40px. Toast
+    confirms each copy (menu closes on click).
+  - **EventsView**, **AuditView**, and **EventTimeline** expanded
+    panels now anchor a compact clipboard icon at the top-right of
+    the panel body (no new collapsed-row affordance, no footer row).
+    Payload and 2-second check-mark confirmation unchanged. Same
+    `aria-label="Copy full JSON for …"` selectors — screen-reader
+    behavior preserved.
+
+### Reclaimed footprint
+
+| Surface | Before | After |
+|---|---|---|
+| WebhookDetailView delivery row | 88px trailing column × every row | 40px kebab column × every row |
+| EventsView expanded panel | ~50px dedicated footer row | 0 (icon overlays panel corner) |
+| AuditView expanded panel | ~50px dedicated footer row | 0 |
+| EventTimeline expanded item | ~35px dedicated footer row | 0 |
+
+No protocol, admin, server, or events-server version change. Pure
+dashboard UI slice.
+
 ## [0.1.25.39] — 2026-04-18
 
 ### Fixed

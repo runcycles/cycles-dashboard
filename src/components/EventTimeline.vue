@@ -102,18 +102,19 @@ function measureRow(el: Element | { $el?: Element } | null) {
           <span class="bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 px-1.5 py-0.5 rounded text-xs shrink-0">{{ events[v.index].category }}</span>
           <span class="muted-sm shrink-0 whitespace-nowrap" :title="new Date(events[v.index].timestamp).toISOString()">{{ formatDateTime(events[v.index].timestamp) }}</span>
         </div>
-        <div v-if="expanded.has(events[v.index].event_id)" class="pl-6 pb-2 text-xs">
-          <div class="flex items-center justify-end mb-1">
-            <button
-              type="button"
-              @click.stop="copyEventJson(events[v.index])"
-              class="muted-sm hover:text-gray-700 cursor-pointer px-2 py-0.5 rounded hover:bg-gray-100 text-xs"
-              :aria-label="`Copy full JSON for event ${events[v.index].event_id}`"
-            >
-              {{ copiedEventId === events[v.index].event_id ? 'Copied!' : 'Copy JSON' }}
-            </button>
-          </div>
-          <div class="grid grid-cols-2 gap-x-6 gap-y-1 mb-2">
+        <div v-if="expanded.has(events[v.index].event_id)" class="relative pl-6 pb-2 text-xs">
+          <button
+            type="button"
+            @click.stop="copyEventJson(events[v.index])"
+            class="absolute top-0 right-1 p-1.5 rounded muted hover:text-gray-700 hover:bg-gray-200/70 dark:hover:bg-gray-700 cursor-pointer focus:outline-none focus:ring-2 focus:ring-gray-400"
+            :aria-label="`Copy full JSON for event ${events[v.index].event_id}`"
+            :title="copiedEventId === events[v.index].event_id ? 'Copied!' : 'Copy row as JSON'"
+          >
+            <svg v-if="copiedEventId === events[v.index].event_id" aria-hidden="true" class="w-4 h-4 text-green-600" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10l4 4 8-8" /></svg>
+            <svg v-else aria-hidden="true" class="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="3" width="10" height="13" rx="1.5" /><path d="M4 6v9a2 2 0 0 0 2 2h7" /></svg>
+            <span class="sr-only">{{ copiedEventId === events[v.index].event_id ? 'Copied!' : 'Copy JSON' }}</span>
+          </button>
+          <div class="grid grid-cols-2 gap-x-6 gap-y-1 mb-2 pr-8">
             <div><span class="muted">Event ID:</span> <span class="font-mono">{{ events[v.index].event_id }}</span></div>
             <div><span class="muted">Source:</span> {{ events[v.index].source }}</div>
             <div v-if="events[v.index].scope"><span class="muted">Scope:</span> <span class="font-mono">{{ events[v.index].scope }}</span></div>

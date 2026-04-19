@@ -278,7 +278,7 @@ describe('EventTimeline — Copy JSON copies full event from expanded row', () =
   })
 })
 
-describe('WebhookDetailView — Copy JSON on delivery rows (flat, no expand)', () => {
+describe('WebhookDetailView — Copy actions on delivery rows (kebab, v0.1.25.40+)', () => {
   const listDeliveriesMock = vi.fn()
   const getWebhookMock = vi.fn()
 
@@ -302,9 +302,7 @@ describe('WebhookDetailView — Copy JSON on delivery rows (flat, no expand)', (
     created_at: '2026-04-18T11:55:00Z',
   }
 
-  it('renders an inline Copy JSON button on every delivery row and copies the full delivery', async () => {
-    // Override the api-client mock to also include listDeliveries +
-    // getWebhook for this suite.
+  it('exposes Copy as JSON / Copy delivery ID / Copy event ID via the row kebab and copies the right payload for each', async () => {
     vi.doMock('../api/client', async () => {
       const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
       return {
@@ -330,13 +328,21 @@ describe('WebhookDetailView — Copy JSON on delivery rows (flat, no expand)', (
     await flushPromises()
     await flushPromises()
 
-    const copyBtn = w.find(`button[aria-label="Copy full JSON for delivery ${sampleDelivery.delivery_id}"]`)
-    expect(copyBtn.exists()).toBe(true)
-    expect(copyBtn.text()).toBe('Copy JSON')
-
-    await copyBtn.trigger('click')
+    // The per-delivery kebab is labeled with the delivery id so it's
+    // distinguishable from any other kebabs on the page (e.g. the
+    // subscription-level kebab in the header).
+    const kebab = w.find(`button[aria-label="Actions for delivery ${sampleDelivery.delivery_id}"]`)
+    expect(kebab.exists()).toBe(true)
+    await kebab.trigger('click')
     await flushPromises()
 
+    const menuItems = w.findAll('button[role="menuitem"]')
+    const labels = menuItems.map(b => b.text())
+    expect(labels).toEqual(['Copy as JSON', 'Copy delivery ID', 'Copy event ID'])
+
+    // Copy as JSON → full delivery object.
+    await menuItems[0].trigger('click')
+    await flushPromises()
     expect(writeTextMock).toHaveBeenCalledTimes(1)
     const payload = JSON.parse(writeTextMock.mock.calls[0][0])
     expect(payload.delivery_id).toBe('del_abc')
@@ -346,7 +352,23 @@ describe('WebhookDetailView — Copy JSON on delivery rows (flat, no expand)', (
     expect(payload.error_message).toBe('Receiver returned 503 Service Unavailable')
     expect(payload.attempts).toBe(3)
 
-    expect(copyBtn.text()).toBe('Copied!')
+    // Re-open kebab and click Copy delivery ID.
+    await kebab.trigger('click')
+    await flushPromises()
+    const menu2 = w.findAll('button[role="menuitem"]')
+    await menu2[1].trigger('click')
+    await flushPromises()
+    expect(writeTextMock).toHaveBeenCalledTimes(2)
+    expect(writeTextMock.mock.calls[1][0]).toBe('del_abc')
+
+    // Re-open kebab and click Copy event ID.
+    await kebab.trigger('click')
+    await flushPromises()
+    const menu3 = w.findAll('button[role="menuitem"]')
+    await menu3[2].trigger('click')
+    await flushPromises()
+    expect(writeTextMock).toHaveBeenCalledTimes(3)
+    expect(writeTextMock.mock.calls[2][0]).toBe('evt_xyz')
   })
 
   // v0.1.25.39 field-name fix: dashboard types had `http_status` +

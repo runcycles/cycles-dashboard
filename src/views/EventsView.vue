@@ -537,18 +537,19 @@ function measureRow(el: Element | { $el?: Element } | null) {
                  height; measureElement reports the new height and
                  the virtualizer re-lays out sibling rows below on
                  the next tick. -->
-            <div v-if="expanded.has(sortedEvents[v.index].event_id)" class="bg-gray-50/70 dark:bg-gray-800/40 px-4 py-3 border-t border-gray-100 dark:border-gray-700">
-              <div class="flex items-center justify-end mb-2">
-                <button
-                  type="button"
-                  @click.stop="copyEventJson(sortedEvents[v.index])"
-                  class="muted-sm hover:text-gray-700 cursor-pointer px-2 py-0.5 rounded hover:bg-gray-100 text-xs"
-                  :aria-label="`Copy full JSON for event ${sortedEvents[v.index].event_id}`"
-                >
-                  {{ copiedEventId === sortedEvents[v.index].event_id ? 'Copied!' : 'Copy JSON' }}
-                </button>
-              </div>
-              <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3">
+            <div v-if="expanded.has(sortedEvents[v.index].event_id)" class="relative bg-gray-50/70 dark:bg-gray-800/40 px-4 py-3 border-t border-gray-100 dark:border-gray-700">
+              <button
+                type="button"
+                @click.stop="copyEventJson(sortedEvents[v.index])"
+                class="absolute top-2 right-2 p-1.5 rounded muted hover:text-gray-700 hover:bg-gray-200/70 dark:hover:bg-gray-700 cursor-pointer focus:outline-none focus:ring-2 focus:ring-gray-400"
+                :aria-label="`Copy full JSON for event ${sortedEvents[v.index].event_id}`"
+                :title="copiedEventId === sortedEvents[v.index].event_id ? 'Copied!' : 'Copy row as JSON'"
+              >
+                <svg v-if="copiedEventId === sortedEvents[v.index].event_id" aria-hidden="true" class="w-4 h-4 text-green-600" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10l4 4 8-8" /></svg>
+                <svg v-else aria-hidden="true" class="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="3" width="10" height="13" rx="1.5" /><path d="M4 6v9a2 2 0 0 0 2 2h7" /></svg>
+                <span class="sr-only">{{ copiedEventId === sortedEvents[v.index].event_id ? 'Copied!' : 'Copy JSON' }}</span>
+              </button>
+              <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3 pr-8">
                 <div><span class="muted">Event ID:</span> <span class="font-mono">{{ sortedEvents[v.index].event_id }}</span></div>
                 <div><span class="muted">Source:</span> {{ sortedEvents[v.index].source }}</div>
                 <div v-if="sortedEvents[v.index].trace_id">

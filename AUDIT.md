@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.39 (2026-04-18)
+**Current release:** v0.1.25.40 (2026-04-19)
 
 ## Baseline requirements
 
@@ -16,6 +16,36 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-19 — v0.1.25.40: Copy JSON two-track relocation (kebab for flat rows, icon for expanded panels)
+
+**Trigger.** Operator feedback: *"Copy JSON placement takes a whole row, wasting space."* Audit confirmed: one dedicated ~50px footer row on every expanded EventsView / AuditView / EventTimeline panel, plus a dedicated ~88px trailing column on every always-visible WebhookDetailView delivery row.
+
+**Two-track relocation — one size does not fit.**
+
+| Track | Views | Placement | Why |
+|---|---|---|---|
+| 1 (kebab) | WebhookDetailView delivery rows | Row kebab (⋮), 3 items: Copy as JSON / Copy delivery ID / Copy event ID | Flat table, no expansion. Delivery row has ≥2 legitimately-distinct copy targets, so the v0.1.25.29 ≥2-actions-per-kebab rule is satisfied without filler. Toast confirms on click (menu closes). |
+| 2 (panel icon) | EventsView, AuditView, EventTimeline expanded panels | Clipboard icon absolutely-positioned at top-right of the panel body | A row-level kebab on these views would be single-purpose (no natural sibling actions besides the pivot chips already rendered inline) and would add a collapsed-row affordance to save a footer visible only on expand — net regression for scan-heavy usage. The icon costs zero vertical space. |
+
+**Rejected alternatives (for the record).**
+
+| Alternative | Why not |
+|---|---|
+| One kebab per row on every view | Violates ≥2-actions rule on EventsView / AuditView / EventTimeline unless filler actions are fabricated. |
+| Hover-reveal button | Invisible on touch + keyboard-only; v0.1.25.29 moved away from hover-only row actions. |
+| Icon + label in panel header | Competes with Request / Correlation / Trace ID chips on narrow viewports. Icon-only + tooltip + `aria-label` + `sr-only` text wins for density while preserving screen-reader and test-selector fidelity. |
+
+**Footprint reclaimed.** 48px per delivery row on WebhookDetailView × N visible rows; one ~50px footer row per expansion on three other views.
+
+**Implementation notes.**
+
+- Reused `RowActionsMenu.vue` (v0.1.25.29) on WebhookDetailView — zero API change. Discriminated-union `RowActionItem[]` accepts the three `onClick` entries as-is.
+- Track 2 icon button is inline SVG (clipboard / checkmark swap) with `<span class="sr-only">Copy JSON</span>` so `.text()` selector asserts still work — no test-structure churn on EventsView/AuditView/EventTimeline.
+- WebhookDetailView dropped the `copiedDeliveryId` ref + timer (dead code once the label swap goes to a toast).
+- `deliveryGridTemplate`: trailing column `88px → 40px`. Actions header collapsed to `sr-only` since a 40px cell can't hold the word "Actions".
+
+**Validation gates.** `npm run typecheck` / `npm run test` (735 passed) / `npm run build` clean. New WebhookDetailView kebab test exercises all three kebab items and asserts the correct payload per item.
 
 ### 2026-04-18 — v0.1.25.39 follow-up: ecosystem baseline rollup (admin `.31 → .32`, server `.13 → .15`, events `:latest → .8`)
 
