@@ -98,6 +98,9 @@ const QUERIES: Array<[string, Record<string, string>]> = [
   ['?search=stuck', { search: 'stuck' }],
   ['?from=...&to=... (time range)', { from: '2026-04-01T00:00', to: '2026-04-17T00:00' }],
   ['?category=runtime&tenant_id=acme (combo)', { category: 'runtime', tenant_id: 'acme' }],
+  // v0.1.25.39 — W3C Trace Context deep-link (admin v0.1.25.31 / protocol v0.1.25.28)
+  ['?trace_id=0123456789abcdef0123456789abcdef', { trace_id: '0123456789abcdef0123456789abcdef' }],
+  ['?request_id=req_abc123', { request_id: 'req_abc123' }],
 ]
 
 describe('EventsView — URL deep-link smoke', () => {

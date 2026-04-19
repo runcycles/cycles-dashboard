@@ -15,6 +15,75 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.39] — 2026-04-18
+
+### Fixed
+
+- **Webhook delivery history rendered "HTTP -" on every row and hid
+  the failure reason.** The `WebhookDelivery` TypeScript interface
+  used `http_status` and `delivered_at`, but the governance spec
+  (and the server) emit `response_status` and `completed_at` — so
+  the HTTP Code column was always empty and the `error_message`
+  field (e.g. `"Subscription not active: DISABLED"` once a webhook
+  auto-disables after 10 consecutive failures) was never rendered
+  at all. Fixed by renaming the type fields to match the spec,
+  adding `error_message` / `response_time_ms` / `next_retry_at`,
+  and adding an **Error** column to the delivery-history grid with
+  tooltip + red-tint for `FAILED` rows.
+- **Delivery status filter matched zero `SUCCESS` rows.** The
+  dropdown offered `DELIVERED` but the server's enum is
+  `PENDING | SUCCESS | FAILED | RETRYING`. Replaced the option.
+- **StatusBadge lacked delivery-status colors.** `SUCCESS` /
+  `FAILED` / `PENDING` / `RETRYING` all rendered gray. Mapped to
+  green / red / yellow / yellow to match the rest of the badge
+  vocabulary.
+- CSV export now includes `response_status`, `response_time_ms`,
+  `error_message`, `completed_at`, `next_retry_at`, and
+  `trace_id` — previously it shipped only the empty `http_status`.
+
+### Added
+
+- **Cross-surface trace / request correlation.** cycles-server-admin
+  **v0.1.25.31** (protocol **v0.1.25.28**) auto-populates W3C Trace
+  Context `trace_id` (32-hex) on every HTTP-originated `Event` and
+  `AuditLogEntry`, and captures `trace_id` + `trace_flags` +
+  `traceparent_inbound_valid` on every `WebhookDelivery`. The dashboard
+  surfaces and filters on the new fields:
+
+  - **Shared chip** (`CorrelationIdChip`) renders `trace_id` /
+    `request_id` / `correlation_id` with consistent truncation
+    (`first8…last4`, full value in tooltip), copy-to-clipboard, and
+    one-click pivot into the filtered target view.
+  - **EventsView + AuditView**: new `Trace ID` and `Request ID` filter
+    inputs, wired to the matching server query params with deep-link
+    query-param ingest (`?trace_id=…`, `?request_id=…`) and CSV export
+    column echo.
+  - **Pivots**: click `trace_id` on an AuditView row → EventsView
+    filtered to the same trace (audit → all events in that request).
+    Click `trace_id` on an EventsView row → AuditView filtered to the
+    originating entry. `request_id` refilters in place on the current
+    view (primary diagnostic lookup, typically 0–1 row).
+  - **EventTimeline** (BudgetsView embed) renders the full correlation
+    triplet using the shared chip.
+
+### Required
+
+- **cycles-server-admin v0.1.25.31+** for the new `trace_id` /
+  `request_id` server-side filters. Against a pre-`.31` admin the
+  params are silently ignored (additive-parameter guarantee), so older
+  stacks keep working — the chips render nothing when the field is
+  absent on the row, and the filter inputs behave like unfiltered
+  queries.
+
+### Baseline bumps (compose + README)
+
+- `cycles-server-admin` → **v0.1.25.32** (cross-plane read tolerance
+  hardening — no wire change).
+- `cycles-server` → **v0.1.25.15** (rolls up `.14` runtime-plane W3C
+  Trace Context + `.15` audit-log retention TTL; both additive).
+- `cycles-server-events` pinned to **v0.1.25.8** (was `:latest`);
+  matches protocol v0.1.25.28 WebhookDelivery trace fields.
+
 ## [0.1.25.38] — 2026-04-18
 
 ### Added

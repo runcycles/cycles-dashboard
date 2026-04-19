@@ -1,20 +1,81 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.38 (2026-04-18)
+**Current release:** v0.1.25.39 (2026-04-18)
 
 ## Baseline requirements
 
 | Component | Minimum | Shipped (compose) | Notes |
 |---|---|---|---|
-| cycles-server (runtime plane) | v0.1.25.8+ | v0.1.25.13 | `.13` bounds `listReservationsSorted` at `SORTED_HYDRATE_CAP=2000`. Pre-`.13` may OOM on tenants with >~2000 matching reservations. Wire shape unchanged. |
-| cycles-admin (governance plane) | v0.1.25.17+ | v0.1.25.30 | `.18+` for `RESET_SPENT` funding. `.26+` for tenant/webhook filter-apply bulk. `.27+` for AuditView error_code / status_band / DSL-completeness filters (pre-`.27` ignores unknown params). `.28+` for audit sentinel split (`__unauth__` / `__admin__`). `.29+` for `POST /v1/admin/budgets/bulk-action`. `.30+` enriches bulk-action audit entries with structured outcome arrays + filter echo + duration — dashboard renders those as a scannable summary; pre-`.30` entries fall back to raw JSON. |
-| Spec alignment | — | v0.1.25.26 | Pin moves on end-to-end support. |
+| cycles-server (runtime plane) | v0.1.25.8+ | v0.1.25.15 | `.13` bounds `listReservationsSorted` at `SORTED_HYDRATE_CAP=2000`. `.14` adds W3C Trace Context on the runtime plane (`X-Cycles-Trace-Id` response header, `trace_id` on runtime events + audit entries, MDC `traceId`). `.15` adds audit-log retention TTL (default 400 days, matches admin). All additive — no wire breakage. Pre-`.14` runtime rows carry no trace chip; dashboard tolerates the absence. |
+| cycles-admin (governance plane) | v0.1.25.17+ | v0.1.25.32 | `.18+` for `RESET_SPENT` funding. `.26+` for tenant/webhook filter-apply bulk. `.27+` for AuditView error_code / status_band / DSL-completeness filters. `.28+` for audit sentinel split. `.29+` for budgets bulk-action. `.30+` for structured bulk-action audit detail. `.31+` for W3C Trace Context cross-surface correlation (`trace_id` on Event/AuditLogEntry/WebhookDelivery; `trace_id` + `request_id` filter params on audit + events list endpoints). `.32` hardens cross-plane deserialization (`@JsonIgnoreProperties(ignoreUnknown=true)` on `Event` + `WebhookDelivery`) so runtime can ship additive fields without forcing an admin lockstep release — no wire change. Pre-`.31` silently ignores the new filter params; rows simply render no trace chip. |
+| cycles-events (dispatch worker) | v0.1.25.6+ | v0.1.25.8 | `.8` matches protocol v0.1.25.28 — captures `trace_id` / `trace_flags` / `traceparent_inbound_valid` on `WebhookDelivery` and threads them into the outbound `traceparent` header on HTTP delivery. Dashboard renders the captured `trace_id` in the WebhookDetailView delivery row JSON and CSV export. |
+| Spec alignment | — | v0.1.25.28 | Pin moves on end-to-end support. |
 
 **Pre-baseline compatibility:** dashboard `TenantLink.isSystem` accepts both legacy `<unauthenticated>` and new `__`-prefixed sentinels (shipped v0.1.25.31). Row-select bulk paths (Tenants/Webhooks suspend, Budgets freeze, Emergency-freeze) fan out per-row and work against any admin version.
 
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-18 — v0.1.25.39 follow-up: ecosystem baseline rollup (admin `.31 → .32`, server `.13 → .15`, events `:latest → .8`)
+
+All three server-side components shipped additive patch releases on the same day. Rolling them into the v0.1.25.39 compose baseline to keep the dashboard's shipped stack coherent with the trace-context feature this release introduces.
+
+| Component | Old pin | New pin | What changed |
+|---|---|---|---|
+| cycles-server-admin | `.31` | `.32` | `@JsonIgnoreProperties(ignoreUnknown=true)` on `Event` + `WebhookDelivery` so runtime can add wire-additive fields without forcing admin re-release. No wire change. |
+| cycles-server | `.13` | `.15` | `.14` W3C Trace Context on runtime plane (`X-Cycles-Trace-Id`, `trace_id` on runtime events/audit, MDC `traceId`); `.15` audit-log retention TTL (400-day default). Both additive. |
+| cycles-server-events | `:latest` | `.8` | Explicit pin. `.8` captures `trace_id` / `trace_flags` / `traceparent_inbound_valid` at dispatch time per protocol `.28`. |
+
+**Why pin `events` explicitly instead of `:latest`.** The previous `:latest` was fine while protocol wire was stable, but `v0.1.25.39` is the first dashboard release that actively reads `trace_id` off delivery rows. Pinning ensures a downgrade or compose copy-paste lands on a known-good combination. Release-process memory: pins are for reproducibility.
+
+**Why roll into `.39` instead of cutting `.40`.** Zero dashboard source change — compose + README + AUDIT + CHANGELOG only. The feature tested end-to-end in this session ran against the new baseline (admin `.32` + server `.15` + events `.8`). Cutting a fourth-segment bump for a compose-only change would fragment the changelog narrative.
+
+### 2026-04-18 — v0.1.25.39 follow-up: WebhookDelivery field-name + status enum alignment with the spec
+
+**Symptom.** After starting `cycles-server-events:latest` against the seeded dataset every delivery row rendered `HTTP -` and gave no failure reason. Operators could see a flood of `FAILED` rows but not tell which were 405 Method-Not-Allowed on the receiver vs "Subscription not active: DISABLED" after auto-disable kicked in.
+
+**Root cause.** `src/types.ts` `WebhookDelivery` diverged from `cycles-governance-admin-v0.1.25.yaml` §WebhookDelivery:
+
+| Dashboard (pre-fix) | Spec / server | Effect |
+|---|---|---|
+| `http_status` | `response_status` | HTTP Code column read from a key that does not exist → always `-` |
+| `delivered_at` | `completed_at` | Time column fell back to `created_at` even for completed deliveries |
+| — (absent) | `error_message` | Failure reason never surfaced — the whole payoff of the column |
+| — | `response_time_ms` | Not round-tripped through CSV export |
+| — | `next_retry_at` | Retry schedule invisible |
+
+The `DELIVERED` option in the status filter was never a valid enum value (spec is `PENDING | SUCCESS | FAILED | RETRYING`) — selecting it silently returned zero rows.
+
+**Fix**
+- Rename `http_status` → `response_status`, `delivered_at` → `completed_at`; add `error_message`, `response_time_ms`, `next_retry_at` to `WebhookDelivery`.
+- WebhookDetailView: add a 7th **Error** column (`minmax(240px,1fr)`) rendering `error_message` with a full-text `title` tooltip, red-tinted for `FAILED` rows only. Time column now prefers `completed_at`. Status filter replaces `DELIVERED` with `SUCCESS`. CSV columns extended to the full spec field set.
+- StatusBadge maps `SUCCESS`/`FAILED`/`PENDING`/`RETRYING` to green/red/yellow/yellow — previously all gray.
+
+**Discipline.** The "spec is the authority" rule from CLAUDE.md caught this one late — the types file had drifted at least one minor back (never matched the wire). Added explicit spec-reference comments on the renamed fields so future edits stay anchored.
+
+### 2026-04-18 — v0.1.25.39: W3C Trace Context cross-surface correlation (spec v0.1.25.28 / admin v0.1.25.31)
+
+**Motivation.** Admin-server `.31` + protocol `.28` shipped end-to-end `trace_id` propagation: every HTTP-originated event and audit entry is auto-populated from `RequestContextHolder`, webhook deliveries capture the dispatch-time trace, and both list endpoints accept `trace_id` + `request_id` exact-match filters. The dashboard already rendered `request_id` / `correlation_id` in expanded panels and had an inline `correlation_id` pivot (v0.1.25.37), but there was no way to follow a single HTTP request across AuditView → EventsView → WebhookDetailView — the core UX payoff of the server work.
+
+**Scope**
+- New `src/components/CorrelationIdChip.vue` — one chip, three kinds (`trace` / `request` / `correlation`), truncation (`first8…last4`, tooltip for full value), copy-to-clipboard with insecure-context guard, one-click pivot per `kind × pivot` destination.
+- `src/types.ts` adds optional `trace_id` on Event + AuditLogEntry; `trace_id` / `trace_flags` / `traceparent_inbound_valid` on WebhookDelivery.
+- AuditView + EventsView: new `Trace ID` + `Request ID` filter inputs, `applyQueryParams` ingest of `?trace_id=…` / `?request_id=…` deep-links, CSV export column echo, and CorrelationIdChip render in expanded panels. EventsView gets a route-query watcher so in-place chip pivots (same view, new filter) re-sync the form.
+- EventTimeline (BudgetsView embed) renders the full correlation triplet via the shared chip.
+
+**Not in scope**
+- WebhookDetailView delivery-row `trace_id` rendering. The delivery list is a 6-column fixed-height virtualized grid (88px trailing cell); adding a chip without disrupting row height / measurement warrants its own slice. Typing round-trips correctly today via `Record<string, unknown>` forward-compat — no wire regression.
+- `ErrorResponse.trace_id` surfacing in toasts. `extractErrorInfo` flattens errors to strings; trace id in toasts requires a ToastBanner redesign.
+- `trace_flags` / `traceparent_inbound_valid` UI render (dispatch-internal bookkeeping).
+
+**Rejected alternatives**
+- *Inline `<router-link>` per field, matching the v0.1.25.37 `correlation_id` pattern.* The inline approach already wasn't scaling — three fields × four surfaces = twelve near-duplicate blocks with diverging classes / aria-labels. The chip is one file; the consistency is free thereafter.
+- *Making `CorrelationIdChip` emit a `pivot` event for the caller to handle.* Adds boilerplate in every caller and loses the "chip is self-contained" property. The in-place same-view pivot case (EventsView → EventsView with a different `request_id` query) is solved with a `watch(() => route.query, …)` sync, which is seven lines and only in EventsView.
+
+**Operator surface**
+- Copy-to-clipboard on every chip (trace, request, correlation) — the copy button flips to "Copied" for 1.5s and is keyboard-focusable.
+- Chip truncates at 16 chars (32-hex trace ids become `01234567…cdef`; 12-char request ids render in full). Full value in the `title` attribute so select-and-copy from the tooltip works even when the clipboard API is blocked (insecure-context fallback).
 
 ### 2026-04-18 — v0.1.25.38: structured bulk-action audit detail (spec v0.1.25.30)
 

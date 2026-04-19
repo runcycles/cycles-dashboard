@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import type { Event } from '../types'
 import TenantLink from './TenantLink.vue'
+import CorrelationIdChip from './CorrelationIdChip.vue'
 import { formatDateTime } from '../utils/format'
 import { safeJsonStringify } from '../utils/safe'
 
@@ -117,18 +118,14 @@ function measureRow(el: Element | { $el?: Element } | null) {
             <div><span class="muted">Source:</span> {{ events[v.index].source }}</div>
             <div v-if="events[v.index].scope"><span class="muted">Scope:</span> <span class="font-mono">{{ events[v.index].scope }}</span></div>
             <div v-if="events[v.index].tenant_id"><span class="muted">Tenant:</span> <TenantLink :tenant-id="events[v.index].tenant_id!" /></div>
-            <div v-if="events[v.index].request_id"><span class="muted">Request ID:</span> <span class="font-mono">{{ events[v.index].request_id }}</span></div>
+            <div v-if="events[v.index].trace_id"><span class="muted">Trace ID:</span>
+              <CorrelationIdChip kind="trace" :value="events[v.index].trace_id!" pivot="events" class="ml-1" />
+            </div>
+            <div v-if="events[v.index].request_id"><span class="muted">Request ID:</span>
+              <CorrelationIdChip kind="request" :value="events[v.index].request_id!" pivot="events" class="ml-1" />
+            </div>
             <div v-if="events[v.index].correlation_id"><span class="muted">Correlation ID:</span>
-              <!-- v0.1.25.37 (slice B): cross-view pivot. Click correlation_id
-                   to open EventsView scoped to the whole chain of events
-                   that share this correlation — the canonical triage move
-                   for "what else happened in this request". listEvents
-                   supports correlation_id as a server-side filter. -->
-              <router-link
-                :to="{ path: '/events', query: { correlation_id: events[v.index].correlation_id } }"
-                class="font-mono text-blue-600 hover:underline ml-1"
-                :aria-label="`View all events with correlation ${events[v.index].correlation_id}`"
-              >{{ events[v.index].correlation_id }}</router-link>
+              <CorrelationIdChip kind="correlation" :value="events[v.index].correlation_id!" pivot="events" class="ml-1" />
             </div>
             <div v-if="events[v.index].actor"><span class="muted">Actor:</span> {{ events[v.index].actor!.type }}<span v-if="events[v.index].actor!.key_id" class="font-mono"> {{ events[v.index].actor!.key_id }}</span></div>
           </div>

@@ -293,9 +293,12 @@ describe('WebhookDetailView — Copy JSON on delivery rows (flat, no expand)', (
     event_id: 'evt_xyz',
     event_type: 'reservation.denied',
     status: 'FAILED',
-    http_status: 503,
+    response_status: 503,
+    response_time_ms: 42,
+    error_message: 'Receiver returned 503 Service Unavailable',
     attempts: 3,
     attempted_at: '2026-04-18T12:00:00Z',
+    completed_at: '2026-04-18T12:00:02Z',
     created_at: '2026-04-18T11:55:00Z',
   }
 
@@ -339,9 +342,64 @@ describe('WebhookDetailView — Copy JSON on delivery rows (flat, no expand)', (
     expect(payload.delivery_id).toBe('del_abc')
     expect(payload.event_id).toBe('evt_xyz')
     expect(payload.status).toBe('FAILED')
-    expect(payload.http_status).toBe(503)
+    expect(payload.response_status).toBe(503)
+    expect(payload.error_message).toBe('Receiver returned 503 Service Unavailable')
     expect(payload.attempts).toBe(3)
 
     expect(copyBtn.text()).toBe('Copied!')
+  })
+
+  // v0.1.25.39 field-name fix: dashboard types had `http_status` +
+  // `delivered_at` but the governance spec emits `response_status` +
+  // `completed_at`; `error_message` wasn't typed at all so the whole
+  // failure-reason column was invisible. Guard the rendered output
+  // against regressing back to the unaligned field names.
+  it('renders spec-aligned delivery fields (response_status, error_message) and the SUCCESS filter option', async () => {
+    vi.doMock('../api/client', async () => {
+      const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
+      return {
+        ...actual,
+        listDeliveries: (...args: unknown[]) => listDeliveriesMock(...args),
+        getWebhook: (...args: unknown[]) => getWebhookMock(...args),
+      }
+    })
+    getWebhookMock.mockResolvedValue({
+      id: 'sub_xyz', tenant_id: 'acme', url: 'https://example.test/hook',
+      active: true, created_at: '2026-04-18T00:00:00Z', status: 'ACTIVE', event_types: ['*'],
+    })
+    const failedDelivery = {
+      delivery_id: 'del_failed',
+      subscription_id: 'sub_xyz',
+      event_id: 'evt_failed',
+      event_type: 'tenant.created',
+      status: 'FAILED',
+      response_status: 405,
+      response_time_ms: 13,
+      error_message: 'Subscription not active: DISABLED',
+      attempts: 5,
+      attempted_at: '2026-04-18T12:00:00Z',
+      completed_at: '2026-04-18T12:00:01Z',
+    }
+    listDeliveriesMock.mockResolvedValue({ deliveries: [failedDelivery], has_more: false, next_cursor: undefined })
+    routeRef.params = { id: 'sub_xyz' }
+
+    const { default: WebhookDetailView } = await import('../views/WebhookDetailView.vue')
+    const w = mount(WebhookDetailView, stdMount())
+    await flushPromises()
+    await flushPromises()
+
+    const html = w.html()
+    // response_status (405) renders in the HTTP cell — pre-fix this
+    // was always '-' because the view read `http_status`.
+    expect(html).toContain('405')
+    // error_message renders in the Error column — pre-fix the column
+    // didn't exist and the field wasn't typed.
+    expect(html).toContain('Subscription not active: DISABLED')
+    // Status filter uses spec enum (SUCCESS), not the pre-fix DELIVERED.
+    const filterSelect = w.find('select[aria-label="Filter deliveries by status"]')
+    expect(filterSelect.exists()).toBe(true)
+    const options = filterSelect.findAll('option').map(o => o.text())
+    expect(options).toContain('SUCCESS')
+    expect(options).not.toContain('DELIVERED')
   })
 })

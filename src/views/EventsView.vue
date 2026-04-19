@@ -16,6 +16,7 @@ import EmptyState from '../components/EmptyState.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import TimeRangePicker from '../components/TimeRangePicker.vue'
+import CorrelationIdChip from '../components/CorrelationIdChip.vue'
 import { formatDateTime } from '../utils/format'
 import { toMessage } from '../utils/errors'
 import { safeJsonStringify } from '../utils/safe'
@@ -89,6 +90,12 @@ const eventType = ref((route.query.type as string) || '')
 const tenantId = ref((route.query.tenant_id as string) || '')
 const scope = ref((route.query.scope as string) || '')
 const correlationId = ref((route.query.correlation_id as string) || '')
+// cycles-server-admin v0.1.25.31 / protocol v0.1.25.28: W3C Trace Context
+// cross-surface correlation. `trace_id` (32-hex) is auto-populated on
+// every HTTP-originated event; `request_id` is the per-request id.
+// Exact-match server-side filters on listEvents.
+const traceId = ref((route.query.trace_id as string) || '')
+const requestId = ref((route.query.request_id as string) || '')
 // cycles-governance-admin v0.1.25.21: free-text `search` query param
 // on listEvents (case-insensitive substring match on correlation_id +
 // scope). Sits alongside the existing correlation_id and scope
@@ -113,6 +120,8 @@ function buildFilterParams(): Record<string, string> {
   if (tenantId.value) params.tenant_id = tenantId.value
   if (scope.value) params.scope = scope.value
   if (correlationId.value) params.correlation_id = correlationId.value
+  if (traceId.value) params.trace_id = traceId.value
+  if (requestId.value) params.request_id = requestId.value
   // Trim before sending — a search of spaces is semantically empty on
   // the server, and the spec requires empty → absent.
   const q = search.value.trim()
@@ -163,6 +172,8 @@ function applyFilters() {
     ...(tenantId.value && { tenant_id: tenantId.value }),
     ...(scope.value && { scope: scope.value }),
     ...(correlationId.value && { correlation_id: correlationId.value }),
+    ...(traceId.value && { trace_id: traceId.value }),
+    ...(requestId.value && { request_id: requestId.value }),
     ...(search.value.trim() && { search: search.value.trim() }),
     ...(fromDate.value && { from: fromDate.value }),
     ...(toDate.value && { to: toDate.value }),
@@ -171,11 +182,6 @@ function applyFilters() {
   // previously-loaded tail is stale (events matching the OLD filter).
   loadedMorePages.value = false
   load()
-}
-
-function viewCorrelated(cid: string) {
-  correlationId.value = cid
-  applyFilters()
 }
 
 async function loadMore() {
@@ -196,6 +202,7 @@ async function loadMore() {
 
 function clearFilters() {
   category.value = ''; eventType.value = ''; tenantId.value = ''; scope.value = ''; correlationId.value = ''; search.value = ''
+  traceId.value = ''; requestId.value = ''
   fromDate.value = ''; toDate.value = ''
   loadedMorePages.value = false
   applyFilters()
@@ -213,6 +220,8 @@ const DEBOUNCE_MS = 300
 const debouncedTenantId = useDebouncedRef(tenantId, DEBOUNCE_MS)
 const debouncedScope = useDebouncedRef(scope, DEBOUNCE_MS)
 const debouncedCorrelationId = useDebouncedRef(correlationId, DEBOUNCE_MS)
+const debouncedTraceId = useDebouncedRef(traceId, DEBOUNCE_MS)
+const debouncedRequestId = useDebouncedRef(requestId, DEBOUNCE_MS)
 const debouncedSearch = useDebouncedRef(search, DEBOUNCE_MS)
 // Selects: apply instantly (no debounce). A select change is always
 // intentional and finite — debouncing just adds perceived lag.
@@ -222,12 +231,26 @@ watch(eventType, () => applyFilters())
 watch(debouncedTenantId, () => applyFilters())
 watch(debouncedScope, () => applyFilters())
 watch(debouncedCorrelationId, () => applyFilters())
+watch(debouncedTraceId, () => applyFilters())
+watch(debouncedRequestId, () => applyFilters())
 watch(debouncedSearch, () => applyFilters())
 // TimeRangePicker: emits only on explicit preset-click or custom
 // Apply, so no debounce is needed — each change is already a
 // committed intent.
 watch(fromDate, () => applyFilters())
 watch(toDate, () => applyFilters())
+
+// Route-query watcher: CorrelationIdChip pivots that land on /events
+// with a different query (e.g. another EventsView row's request_id chip
+// click, or a back-nav) need to re-sync refs so the filter form reflects
+// the URL. Ref watchers above then fire applyFilters() → load(). The
+// router.replace inside applyFilters() becomes a no-op when the URL
+// already matches, so there's no loop.
+watch(() => route.query, (q) => {
+  if ((q.trace_id as string || '') !== traceId.value) traceId.value = (q.trace_id as string) || ''
+  if ((q.request_id as string || '') !== requestId.value) requestId.value = (q.request_id as string) || ''
+  if ((q.correlation_id as string || '') !== correlationId.value) correlationId.value = (q.correlation_id as string) || ''
+})
 
 // Shared export (useListExport). CSV column spec + fetchPage adapter
 // + filename stem is all that's view-specific.
@@ -262,6 +285,7 @@ const {
     { header: 'source',         value: e => e.source },
     { header: 'request_id',     value: e => e.request_id ?? '' },
     { header: 'correlation_id', value: e => e.correlation_id ?? '' },
+    { header: 'trace_id',       value: e => e.trace_id ?? '' },
     { header: 'actor_type',     value: e => e.actor?.type ?? '' },
     { header: 'actor_key_id',   value: e => e.actor?.key_id ?? '' },
     { header: 'data',           value: e => e.data ? safeJsonStringify(e.data, 0) : '' },
@@ -270,7 +294,7 @@ const {
 
 watch(exportError, (v) => { if (v) error.value = v })
 
-const hasActiveFilters = computed(() => !!(category.value || eventType.value || tenantId.value || scope.value || correlationId.value || search.value || fromDate.value || toDate.value))
+const hasActiveFilters = computed(() => !!(category.value || eventType.value || tenantId.value || scope.value || correlationId.value || traceId.value || requestId.value || search.value || fromDate.value || toDate.value))
 
 const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
 
@@ -343,12 +367,35 @@ function measureRow(el: Element | { $el?: Element } | null) {
     <!-- Filters. Instant-apply on change (selects) or 300ms-debounced
          (text inputs) — no separate "Filter" button to click. Form
          still submits on Enter so pressing return in a text field
-         applies immediately without waiting for the debounce. -->
-    <form @submit.prevent="applyFilters" class="card p-4 mb-4">
-      <div class="flex gap-3 flex-wrap items-end">
+         applies immediately without waiting for the debounce.
+         Two-row grid (xl+: 6 cols, sm: 2 cols) mirrors AuditView's
+         layout so the two list views scan identically. Row 1 carries
+         the primary filters (category/type/tenant/scope/search/time);
+         row 2 groups the three correlation-id filters together with
+         a Clear filters affordance on the right. -->
+    <form @submit.prevent="applyFilters" class="card p-4 mb-4 space-y-3">
+      <!-- Two 5-col rows at xl+, stacks to 2 cols below. Balanced
+           split groups the primary filters (when + what + who) on row
+           1 and the text/id lookup (free-text search + three
+           correlation-id tiers) on row 2. `.form-select` doesn't carry
+           an intrinsic w-full (unlike .form-input), so Category gets
+           an explicit w-full to fill its grid cell — without it the
+           <select> sizes to its longest option and the row looks
+           ragged as neighbours expand/contract on resize. -->
+
+      <!-- Row 1: when + what + who -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 items-end">
+        <div>
+          <label for="ev-time-range" class="form-label">Time range</label>
+          <TimeRangePicker
+            id="ev-time-range"
+            v-model="timeRange"
+            aria-label="Event stream time range"
+          />
+        </div>
         <div>
           <label for="ev-category" class="form-label">Category</label>
-          <select id="ev-category" v-model="category" class="form-select">
+          <select id="ev-category" v-model="category" class="form-select w-full">
             <option value="">All</option>
             <option>budget</option><option>reservation</option><option>tenant</option>
             <option>api_key</option><option>policy</option><option>system</option>
@@ -357,20 +404,17 @@ function measureRow(el: Element | { $el?: Element } | null) {
         <div>
           <!-- Type filter. Surfaces the `?type=` URL param (e.g. set by
                Overview "Recent Denials → View all" deep-link) as a
-               visible, clearable input. Without this, the URL param
-               silently filters the list with no operator-visible cue.
-               Datalist typeahead offers all 40 spec enum values per
-               cycles-governance-admin v0.1.25 EventType schema
-               (types.ts:EVENT_TYPES); free-text entry is still
-               accepted so `custom.*` prefixed types (per spec
-               extensibility rule) remain filterable. -->
+               visible, clearable input. Datalist typeahead offers all
+               spec EventType enum values (types.ts:EVENT_TYPES); free-
+               text entry is still accepted so `custom.*` prefixed
+               types (per spec extensibility rule) remain filterable. -->
           <label for="ev-type" class="form-label">Type</label>
           <input
             id="ev-type"
             v-model="eventType"
             list="ev-type-options"
             placeholder="reservation.denied"
-            class="form-input w-44"
+            class="form-input"
           />
           <datalist id="ev-type-options">
             <option v-for="t in EVENT_TYPES" :key="t" :value="t" />
@@ -378,29 +422,39 @@ function measureRow(el: Element | { $el?: Element } | null) {
         </div>
         <div>
           <label for="ev-tenant" class="form-label">Tenant ID</label>
-          <input id="ev-tenant" v-model="tenantId" placeholder="tenant id" class="form-input w-32" />
+          <input id="ev-tenant" v-model="tenantId" placeholder="tenant id" class="form-input" />
         </div>
         <div>
           <label for="ev-scope" class="form-label">Scope</label>
-          <input id="ev-scope" v-model="scope" placeholder="scope prefix" class="form-input w-40" />
+          <input id="ev-scope" v-model="scope" placeholder="scope prefix" class="form-input" />
+        </div>
+      </div>
+
+      <!-- Row 2: text / id lookup. Search is broad substring; the
+           three W3C Trace Context tiers (correlation_id / trace_id /
+           request_id) are exact-match. Clear filters lives in the
+           last col when any filter is active so it's always right-
+           aligned below the input grid. -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 items-end">
+        <div>
+          <label for="ev-search" class="form-label">Search</label>
+          <input id="ev-search" v-model="search" type="search" placeholder="correlation_id or scope" class="form-input" aria-label="Search by correlation_id or scope substring" />
         </div>
         <div>
           <label for="ev-correlation" class="form-label">Correlation ID</label>
-          <input id="ev-correlation" v-model="correlationId" placeholder="correlation_id" class="form-input w-40" />
+          <input id="ev-correlation" v-model="correlationId" placeholder="correlation_id" class="form-input font-mono text-xs" />
         </div>
         <div>
-          <label for="ev-search" class="form-label">Search</label>
-          <input id="ev-search" v-model="search" type="search" placeholder="correlation_id or scope" class="form-input w-40" aria-label="Search by correlation_id or scope substring" />
+          <label for="ev-trace" class="form-label">Trace ID</label>
+          <input id="ev-trace" v-model="traceId" maxlength="32" placeholder="32 hex chars" class="form-input font-mono text-xs" />
         </div>
-        <div class="w-52">
-          <label for="ev-time-range" class="form-label">Time range</label>
-          <TimeRangePicker
-            id="ev-time-range"
-            v-model="timeRange"
-            aria-label="Event stream time range"
-          />
+        <div>
+          <label for="ev-request" class="form-label">Request ID</label>
+          <input id="ev-request" v-model="requestId" placeholder="request_id" class="form-input font-mono text-xs" />
         </div>
-        <button v-if="hasActiveFilters" type="button" @click="clearFilters" class="text-sm muted hover:text-gray-700 cursor-pointer ml-auto">Clear filters</button>
+        <div v-if="hasActiveFilters" class="flex justify-end">
+          <button type="button" @click="clearFilters" class="text-sm muted hover:text-gray-700 cursor-pointer">Clear filters</button>
+        </div>
       </div>
     </form>
 
@@ -497,10 +551,17 @@ function measureRow(el: Element | { $el?: Element } | null) {
               <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3">
                 <div><span class="muted">Event ID:</span> <span class="font-mono">{{ sortedEvents[v.index].event_id }}</span></div>
                 <div><span class="muted">Source:</span> {{ sortedEvents[v.index].source }}</div>
-                <div v-if="sortedEvents[v.index].request_id"><span class="muted">Request ID:</span> <span class="font-mono">{{ sortedEvents[v.index].request_id }}</span></div>
+                <div v-if="sortedEvents[v.index].trace_id">
+                  <span class="muted">Trace ID:</span>
+                  <CorrelationIdChip kind="trace" :value="sortedEvents[v.index].trace_id!" pivot="audit" class="ml-1" @click.stop />
+                </div>
+                <div v-if="sortedEvents[v.index].request_id">
+                  <span class="muted">Request ID:</span>
+                  <CorrelationIdChip kind="request" :value="sortedEvents[v.index].request_id!" pivot="events" class="ml-1" @click.stop />
+                </div>
                 <div v-if="sortedEvents[v.index].correlation_id">
                   <span class="muted">Correlation ID:</span>
-                  <button @click.stop="viewCorrelated(sortedEvents[v.index].correlation_id!)" class="text-blue-600 hover:underline ml-1 font-mono cursor-pointer">{{ sortedEvents[v.index].correlation_id }}</button>
+                  <CorrelationIdChip kind="correlation" :value="sortedEvents[v.index].correlation_id!" pivot="events" class="ml-1" @click.stop />
                 </div>
                 <div v-if="sortedEvents[v.index].actor"><span class="muted">Actor:</span> {{ sortedEvents[v.index].actor!.type }}<span v-if="sortedEvents[v.index].actor!.key_id" class="font-mono"> {{ sortedEvents[v.index].actor!.key_id }}</span></div>
               </div>

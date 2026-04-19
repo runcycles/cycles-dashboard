@@ -42,7 +42,7 @@ const pendingAction = ref<'ACTIVE' | 'PAUSED' | 'reset' | null>(null)
 // webhook can have thousands of delivery records; pre-fix the view
 // fetched them all and rendered each as a real DOM row. Now:
 //   - cursor pagination via Load more (append)
-//   - status filter (DELIVERED / FAILED / PENDING)
+//   - status filter (PENDING / SUCCESS / FAILED / RETRYING)
 //   - virtualized rows so DOM stays bounded
 // Polling still refreshes page 1 every 30s — operators who Load-
 // more'd will see the tail reset, same trade-off documented on
@@ -65,7 +65,7 @@ const {
   toggle: deliveryToggle,
   sorted: sortedDeliveries,
 } = useSort<WebhookDelivery>(filteredDeliveries as import('vue').Ref<WebhookDelivery[]>, 'time', 'desc', {
-  time: (d) => d.attempted_at ?? d.created_at ?? null,
+  time: (d) => d.completed_at ?? d.attempted_at ?? d.created_at ?? null,
 })
 
 async function executeAction() {
@@ -367,12 +367,21 @@ const deliveryVirt = useVirtualizer(computed(() => ({
 })))
 const deliveryVirtualRows = computed(() => deliveryVirt.value.getVirtualItems())
 const deliveryTotalHeight = computed(() => deliveryVirt.value.getTotalSize())
-const deliveryGridTemplate = '120px 120px 100px minmax(220px,1fr) 160px 88px'
+// 7-column delivery grid. Error column added so operators can see
+// *why* a delivery failed (response_status alone is ambiguous —
+// 405 here is the receiver rejecting POST, but 'Subscription not
+// active: DISABLED' comes from the server after auto-disable and
+// also carries a response_status of 405 from the last real attempt).
+// Error flexes to fill remaining width; other cols are fixed since
+// their contents are bounded (3-digit HTTP, 1-2 digit attempts,
+// 20-char event_id, ISO timestamp).
+const deliveryGridTemplate = '100px 80px 72px 200px minmax(240px,1fr) 150px 88px'
 
 // Copy the full delivery row as JSON. Useful for cross-referencing a
 // failing delivery into /events or the receiver's server logs without
 // hand-assembling the payload. Copies the whole WebhookDelivery
-// (delivery_id, event_id, status, http_status, attempts, timestamps).
+// (delivery_id, event_id, status, response_status, error_message,
+// attempts, timestamps, trace_id).
 const copiedDeliveryId = ref<string | null>(null)
 let copiedDeliveryTimer: ReturnType<typeof setTimeout> | null = null
 async function copyDeliveryJson(d: WebhookDelivery) {
@@ -419,13 +428,19 @@ const {
     return { items: res.deliveries, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
   },
   columns: [
-    { header: 'delivery_id',  value: d => d.delivery_id },
-    { header: 'event_id',     value: d => d.event_id },
-    { header: 'status',       value: d => d.status },
-    { header: 'http_status',  value: d => d.http_status ?? '' },
-    { header: 'attempts',     value: d => d.attempts },
-    { header: 'attempted_at', value: d => d.attempted_at ?? '' },
-    { header: 'created_at',   value: d => d.created_at ?? '' },
+    { header: 'delivery_id',      value: d => d.delivery_id },
+    { header: 'event_id',         value: d => d.event_id },
+    { header: 'event_type',       value: d => d.event_type ?? '' },
+    { header: 'status',           value: d => d.status },
+    { header: 'response_status',  value: d => d.response_status ?? '' },
+    { header: 'response_time_ms', value: d => d.response_time_ms ?? '' },
+    { header: 'error_message',    value: d => d.error_message ?? '' },
+    { header: 'attempts',         value: d => d.attempts },
+    { header: 'attempted_at',     value: d => d.attempted_at ?? '' },
+    { header: 'completed_at',     value: d => d.completed_at ?? '' },
+    { header: 'next_retry_at',    value: d => d.next_retry_at ?? '' },
+    { header: 'created_at',       value: d => d.created_at ?? '' },
+    { header: 'trace_id',         value: d => d.trace_id ?? '' },
   ],
 })
 
@@ -566,7 +581,7 @@ watch(exportError, (v) => { if (v) error.value = v })
             <select v-model="deliveryStatusFilter" aria-label="Filter deliveries by status" class="form-select">
               <option value="">All statuses</option>
               <option>PENDING</option>
-              <option>DELIVERED</option>
+              <option>SUCCESS</option>
               <option>FAILED</option>
               <option>RETRYING</option>
             </select>
@@ -584,9 +599,10 @@ watch(exportError, (v) => { if (v) error.value = v })
         <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
           <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: deliveryGridTemplate }">
             <SortHeader as="div" label="Status" column="status" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" />
-            <SortHeader as="div" label="HTTP Code" column="http_status" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" />
-            <SortHeader as="div" label="Attempts" column="attempts" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" align="right" />
+            <SortHeader as="div" label="HTTP" column="response_status" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" />
+            <SortHeader as="div" label="Tries" column="attempts" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" align="right" />
             <SortHeader as="div" label="Event ID" column="event_id" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" />
+            <SortHeader as="div" label="Error" column="error_message" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" />
             <SortHeader as="div" label="Time" column="time" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" />
             <div role="columnheader" class="table-cell muted-sm">Actions</div>
           </div>
@@ -608,10 +624,22 @@ watch(exportError, (v) => { if (v) error.value = v })
               :style="{ gridTemplateColumns: deliveryGridTemplate, transform: `translateY(${v.start}px)`, height: DELIVERY_ROW_HEIGHT + 'px' }"
             >
               <div role="cell" class="table-cell"><StatusBadge :status="sortedDeliveries[v.index].status" /></div>
-              <div role="cell" class="table-cell font-mono text-xs" :class="sortedDeliveries[v.index].http_status && sortedDeliveries[v.index].http_status! >= 400 ? 'text-red-600' : 'muted'">{{ sortedDeliveries[v.index].http_status || '-' }}</div>
+              <div role="cell" class="table-cell font-mono text-xs" :class="sortedDeliveries[v.index].response_status && sortedDeliveries[v.index].response_status! >= 400 ? 'text-red-600' : 'muted'">{{ sortedDeliveries[v.index].response_status || '-' }}</div>
               <div role="cell" class="table-cell text-right muted tabular-nums">{{ sortedDeliveries[v.index].attempts }}</div>
               <div role="cell" class="table-cell font-mono muted-sm truncate" :title="sortedDeliveries[v.index].event_id">{{ sortedDeliveries[v.index].event_id }}</div>
-              <div role="cell" class="table-cell muted-sm">{{ sortedDeliveries[v.index].attempted_at ? formatDateTime(sortedDeliveries[v.index].attempted_at!) : sortedDeliveries[v.index].created_at ? formatDateTime(sortedDeliveries[v.index].created_at!) : '-' }}</div>
+              <!-- Error cell — the whole point of the column expansion.
+                   Title tooltip shows the full message (can exceed row
+                   width for HTTP body echoes); Copy JSON in the Actions
+                   column also carries the full text. Red-tinted only
+                   for FAILED rows so transient RETRYING errors don't
+                   visually dominate the grid. -->
+              <div
+                role="cell"
+                class="table-cell text-xs truncate"
+                :class="sortedDeliveries[v.index].status === 'FAILED' ? 'text-red-600' : 'muted'"
+                :title="sortedDeliveries[v.index].error_message || ''"
+              >{{ sortedDeliveries[v.index].error_message || '—' }}</div>
+              <div role="cell" class="table-cell muted-sm">{{ sortedDeliveries[v.index].completed_at ? formatDateTime(sortedDeliveries[v.index].completed_at!) : sortedDeliveries[v.index].attempted_at ? formatDateTime(sortedDeliveries[v.index].attempted_at!) : sortedDeliveries[v.index].created_at ? formatDateTime(sortedDeliveries[v.index].created_at!) : '-' }}</div>
               <div role="cell" class="table-cell">
                 <button
                   type="button"

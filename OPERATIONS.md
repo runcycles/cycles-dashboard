@@ -29,7 +29,8 @@ backend planes:
 4. [Admin-server version compatibility](#admin-server-version-compatibility)
 5. [Auth and session](#auth-and-session)
 6. [Capability gating](#capability-gating)
-7. [Troubleshooting](#troubleshooting)
+7. [Cross-surface correlation](#cross-surface-correlation-trace--request--correlation)
+8. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -158,6 +159,37 @@ write actions — kebabs are empty or disabled with a tooltip. This is the
 intended shape; do not "open up" actions client-side if the server will 403
 them anyway.
 
+## Cross-surface correlation (trace / request / correlation)
+
+Every HTTP-originated event and audit entry on admin **v0.1.25.31+**
+carries a W3C Trace Context `trace_id` (32 hex chars). The admin plane
+also emits an `X-Cycles-Trace-Id` response header on every response
+(2xx / 4xx / 5xx), and honors inbound `traceparent` → `X-Cycles-Trace-Id`
+→ server-generated (in that precedence order) so callers can stitch an
+existing distributed trace through the governance plane.
+
+**Operator pivots in the dashboard:**
+
+- AuditView expanded row → **Trace ID** chip → pivots to EventsView
+  filtered by `trace_id` (all events emitted by that single HTTP
+  request). Use when you have an audit entry and want the events it
+  produced.
+- EventsView expanded row → **Trace ID** chip → pivots to AuditView
+  filtered by `trace_id` (the originating audit entry). Use when you
+  have an event and want the operation that caused it.
+- **Request ID** chip on either view refilters the same view by
+  `request_id` (typically 0–1 row — primary diagnostic lookup).
+- All three chips (`trace_id` / `request_id` / `correlation_id`) carry
+  a copy-to-clipboard button; tooltip shows the full untruncated value.
+
+Filter inputs on both views accept a pasted `trace_id` (32 hex chars)
+or `request_id` directly. `?trace_id=…` and `?request_id=…` URL
+deep-links work too — useful for cross-referencing from ticket links.
+
+Against a pre-`v0.1.25.31` admin, the new filter params are silently
+ignored per the additive-parameter guarantee, and rows simply render
+no trace chip (the field is absent). No regression.
+
 ## Troubleshooting
 
 **Login loops back to `/login` on every action.** Idle timeout fired, or the
@@ -198,6 +230,18 @@ Tenants/Webhooks/Budgets pre-filter the selection to only rows whose state
 would actually change (drops already-in-target-state rows silently to avoid
 noisy 409s). If you need to exercise the dialog during testing, use DevTools
 Network → Block request URL for the PATCH endpoint.
+
+**Triaging a failing webhook delivery.** Open WebhookDetailView for the
+subscription. The delivery-history grid shows the last delivery attempts
+with Status / HTTP / Tries / Event ID / **Error** / Time columns. The
+`Error` column carries the server's `error_message` — the two most common
+values are the receiver's response body (e.g. `HTTP 405` when the endpoint
+rejects POST) and `Subscription not active: DISABLED` (emitted after 10
+consecutive failures trigger auto-disable). `RETRYING` is yellow, `FAILED`
+is red; a `FAILED` row with `HTTP -` typically means the receiver never
+responded (timeout / DNS / connection refused) rather than a 2xx. Click
+**Copy JSON** on any row to grab `response_status` + `response_time_ms` +
+`next_retry_at` + `trace_id` for cross-referencing into EventsView.
 
 **Triaging a bulk action from the audit trail.** Open AuditView, filter by
 `operation=bulkActionTenants` (or `…Webhooks` / `…Budgets`), and expand the
