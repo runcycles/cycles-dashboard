@@ -103,7 +103,7 @@ jobs:
       # (e.g. the v0.1.25.22 sort-accessor class). Both layers share
       # the same compose stack — no extra spin-up cost.
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
