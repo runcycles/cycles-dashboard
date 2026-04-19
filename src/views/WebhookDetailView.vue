@@ -326,7 +326,7 @@ function buildDeliveryParams(): Record<string, string> {
 // don't keep re-opening the dialog if the user dismisses it.
 let editIntentApplied = false
 
-const { refresh, isLoading, lastUpdated } = usePolling(async () => {
+const { refresh, isLoading } = usePolling(async () => {
   try {
     webhook.value = await getWebhook(id)
     if (!editIntentApplied && route.query.action === 'edit' && webhook.value) {
@@ -477,7 +477,7 @@ watch(exportError, (v) => { if (v) error.value = v })
 
 <template>
   <div>
-    <PageHeader title="Webhook Detail" :subtitle="webhook?.name || webhook?.subscription_id" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
+    <PageHeader title="Webhook Detail" :subtitle="webhook?.name || webhook?.subscription_id" :loading="isLoading" @refresh="refresh">
       <template #back>
         <button @click="router.push('/webhooks')" aria-label="Back to webhooks" class="muted hover:text-gray-700 cursor-pointer">
           <BackArrowIcon class="w-5 h-5" />

@@ -521,7 +521,7 @@ function withListParams(params: Record<string, string> = {}): Record<string, str
   return params
 }
 
-const { refresh, isLoading, lastUpdated } = usePolling(async () => {
+const { refresh, isLoading } = usePolling(async () => {
   try {
     const res = await listTenants(withListParams())
     tenants.value = res.tenants
@@ -650,7 +650,6 @@ const gridTemplate = computed(() =>
       :loaded="filteredTenants.length"
       :has-more="hasMore"
       :loading="isLoading"
-      :last-updated="lastUpdated"
       @refresh="refresh"
     >
       <template v-if="parentFromQuery" #back>

@@ -264,7 +264,6 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
       title="Overview"
       subtitle="What needs attention"
       :loading="isLoading"
-      :last-updated="overview?.as_of ?? null"
       @refresh="refresh"
     />
 

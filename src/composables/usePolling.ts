@@ -39,7 +39,6 @@ export function usePolling(
 ) {
   const isPolling = ref(true)
   const isLoading = ref(false)
-  const lastUpdated = ref<string | null>(null)
   let timer: ReturnType<typeof setTimeout> | null = null
   let currentInterval = intervalMs
   const maxInterval = 300_000 // 5 min
@@ -87,7 +86,6 @@ export function usePolling(
       await callback(controller.signal)
       if (!mounted) return
       currentInterval = intervalMs
-      lastUpdated.value = new Date().toISOString()
     } catch (e) {
       if (!mounted) return
       // Aborts are intentional (unmount, visibility change). Not a
@@ -142,7 +140,7 @@ export function usePolling(
     stop()
   })
 
-  return { isPolling, isLoading, lastUpdated, refresh }
+  return { isPolling, isLoading, refresh }
 }
 
 // Accepts both DOMException('AbortError') (from fetch) and plain

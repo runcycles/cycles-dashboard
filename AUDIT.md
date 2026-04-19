@@ -72,6 +72,16 @@ Newest at the top. Older entries preserved verbatim.
 
 Future icon edits (stroke-width tweak, dark-mode color adjustment, accessibility label) happen once instead of fan-out across a dozen files. 742 tests green.
 
+**"Updated just now" header strip removed (same-release follow-up).** Operator ask: *"noticed at the top of some views 'Updated just now' but it's never anything else — what's the purpose if it never shows anything other than this text?"* Audit confirmed: every view polls at 15–60s, and `formatRelative` returns `"just now"` for anything under 60s, so the label resets before it can tick to `"1m ago"`.
+
+| Poll interval | View(s) | Observed label |
+|---|---|---|
+| 15s | EventsView | always "just now" |
+| 30s | OverviewView, WebhookDetailView, ReservationsView | always "just now" |
+| 60s | ApiKeysView, BudgetsView, TenantsView, TenantDetailView, WebhooksView | "just now" (resets before ticking) |
+
+Removed the `lastUpdated` prop + span from `PageHeader.vue`, dropped the `lastUpdated` ref/assignment/return from `usePolling.ts`, and stripped the destructuring + prop-passing from all nine call sites. The adjacent `RefreshButton` stays — it already conveys freshness interactively (spinner while polling, click to force a tick). Rejected `stale-only` and `live-ticker` alternatives after operator picked the delete. 742 tests green.
+
 ### 2026-04-18 — v0.1.25.39 follow-up: ecosystem baseline rollup (admin `.31 → .32`, server `.13 → .15`, events `:latest → .8`)
 
 All three server-side components shipped additive patch releases on the same day. Rolling them into the v0.1.25.39 compose baseline to keep the dashboard's shipped stack coherent with the trace-context feature this release introduces.

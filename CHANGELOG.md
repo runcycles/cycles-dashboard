@@ -60,6 +60,16 @@ UX work that does not advance spec alignment.
 No protocol, admin, server, or events-server version change. Pure
 dashboard UI slice.
 
+### Removed
+
+- **"Updated just now" indicator removed from the page header.** Every
+  view polls every 15–60s, and `formatRelative` returns `"just now"`
+  for anything under 60s — so the label effectively never changed and
+  provided no signal. The adjacent `RefreshButton` already conveys
+  freshness interactively (spinner while polling, click to force a
+  tick). Removed the `lastUpdated` prop from `PageHeader` and the
+  return value from `usePolling`. No test regressions.
+
 ### Refactored
 
 - **Shared icon library at `src/components/icons/`.** Nine reusable SVG

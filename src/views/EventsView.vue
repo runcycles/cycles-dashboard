@@ -299,7 +299,7 @@ watch(exportError, (v) => { if (v) error.value = v })
 
 const hasActiveFilters = computed(() => !!(category.value || eventType.value || tenantId.value || scope.value || correlationId.value || traceId.value || requestId.value || search.value || fromDate.value || toDate.value))
 
-const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
+const { refresh, isLoading } = usePolling(load, 15000)
 
 // V1 virtualization (Phase 2c) — variable row heights via measureElement.
 // Collapsed rows are ~52px; expanded rows grow with metadata grid + JSON
@@ -350,7 +350,6 @@ function measureRow(el: Element | { $el?: Element } | null) {
       :loaded="events.length"
       :has-more="hasMore"
       :loading="isLoading"
-      :last-updated="lastUpdated"
       @refresh="refresh"
     >
       <template #actions>

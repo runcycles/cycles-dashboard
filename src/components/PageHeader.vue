@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import RefreshButton from './RefreshButton.vue'
-import { formatRelative } from '../utils/format'
 
 // V6 (Phase 3): optional result-count display. Pre-fix, operators
 // had no header-level readout of "how many rows in the current
@@ -14,7 +13,6 @@ const props = defineProps<{
   title: string
   subtitle?: string
   loading?: boolean
-  lastUpdated?: string | null
   // Count props. Pass whichever subset the view has:
   //   - `loaded` + `total`: renders "Showing X of Y tenants" (best case)
   //   - `loaded` + `hasMore`: renders "X tenants (more available)"
@@ -69,9 +67,6 @@ const countLabel = computed(() => {
       </div>
     </div>
     <div class="flex items-center gap-3">
-      <span v-if="lastUpdated" class="muted-sm" :title="new Date(lastUpdated).toLocaleString()">
-        Updated {{ formatRelative(lastUpdated) }}
-      </span>
       <RefreshButton v-if="loading !== undefined" :loading="loading ?? false" @click="$emit('refresh')" />
       <slot name="actions" />
     </div>

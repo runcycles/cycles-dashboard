@@ -272,7 +272,7 @@ async function tick() {
   else { await loadTenants(); await loadList() }
 }
 
-const { refresh, isLoading, lastUpdated } = usePolling(tick, 60000)
+const { refresh, isLoading } = usePolling(tick, 60000)
 
 // Budget freeze/unfreeze
 const pendingAction = ref<{ action: 'freeze' | 'unfreeze'; scope: string; unit: string } | null>(null)
@@ -1046,7 +1046,6 @@ function rowTenantId(b: BudgetLedger): string {
       :loaded="!isDetail ? sortedBudgets.length : undefined"
       :has-more="!isDetail ? hasMore : undefined"
       :loading="isLoading"
-      :last-updated="lastUpdated"
       @refresh="refresh"
     >
       <template #back>

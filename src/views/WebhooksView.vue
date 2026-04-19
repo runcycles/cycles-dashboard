@@ -519,7 +519,7 @@ async function submitSecurityConfig() {
   finally { securityLoading.value = false }
 }
 
-const { refresh, isLoading, lastUpdated } = usePolling(async () => {
+const { refresh, isLoading } = usePolling(async () => {
   try {
     const [wRes, tRes] = await Promise.all([listWebhooks(withListParams()), listTenants()])
     webhooks.value = wRes.subscriptions
@@ -631,7 +631,6 @@ const gridTemplate = computed(() =>
       :loaded="filteredWebhooks.length"
       :has-more="hasMore"
       :loading="isLoading"
-      :last-updated="lastUpdated"
       @refresh="refresh"
     >
       <template #actions>
