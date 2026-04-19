@@ -10,6 +10,9 @@ import { listEvents } from '../api/client'
 import type { Event } from '../types'
 import { EVENT_TYPES } from '../types'
 import PageHeader from '../components/PageHeader.vue'
+import CopyJsonIcon from '../components/icons/CopyJsonIcon.vue'
+import DownloadIcon from '../components/icons/DownloadIcon.vue'
+import ChevronRightIcon from '../components/icons/ChevronRightIcon.vue'
 import TenantLink from '../components/TenantLink.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
@@ -296,7 +299,7 @@ watch(exportError, (v) => { if (v) error.value = v })
 
 const hasActiveFilters = computed(() => !!(category.value || eventType.value || tenantId.value || scope.value || correlationId.value || traceId.value || requestId.value || search.value || fromDate.value || toDate.value))
 
-const { refresh, isLoading, lastUpdated } = usePolling(load, 15000)
+const { refresh, isLoading } = usePolling(load, 15000)
 
 // V1 virtualization (Phase 2c) — variable row heights via measureElement.
 // Collapsed rows are ~52px; expanded rows grow with metadata grid + JSON
@@ -347,16 +350,15 @@ function measureRow(el: Element | { $el?: Element } | null) {
       :loaded="events.length"
       :has-more="hasMore"
       :loading="isLoading"
-      :last-updated="lastUpdated"
       @refresh="refresh"
     >
       <template #actions>
         <button @click="confirmExport('csv')" :disabled="events.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 dark:hover:text-gray-200 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed">
-          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          <DownloadIcon class="w-3.5 h-3.5" />
           Export CSV
         </button>
         <button @click="confirmExport('json')" :disabled="events.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 dark:hover:text-gray-200 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed">
-          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          <DownloadIcon class="w-3.5 h-3.5" />
           Export JSON
         </button>
       </template>
@@ -516,9 +518,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
                   class="p-0.5 -ml-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-400"
                   @click.stop="toggleExpanded(sortedEvents[v.index].event_id)"
                 >
-                  <svg class="w-3.5 h-3.5 transition-transform" :class="expanded.has(sortedEvents[v.index].event_id) ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-                  </svg>
+                  <ChevronRightIcon class="w-3.5 h-3.5 transition-transform" :class="expanded.has(sortedEvents[v.index].event_id) ? 'rotate-90' : ''" />
                 </button>
               </div>
               <div role="cell" class="table-cell font-mono text-xs truncate" :title="sortedEvents[v.index].event_type">{{ sortedEvents[v.index].event_type }}</div>
@@ -537,18 +537,18 @@ function measureRow(el: Element | { $el?: Element } | null) {
                  height; measureElement reports the new height and
                  the virtualizer re-lays out sibling rows below on
                  the next tick. -->
-            <div v-if="expanded.has(sortedEvents[v.index].event_id)" class="bg-gray-50/70 dark:bg-gray-800/40 px-4 py-3 border-t border-gray-100 dark:border-gray-700">
-              <div class="flex items-center justify-end mb-2">
-                <button
-                  type="button"
-                  @click.stop="copyEventJson(sortedEvents[v.index])"
-                  class="muted-sm hover:text-gray-700 cursor-pointer px-2 py-0.5 rounded hover:bg-gray-100 text-xs"
-                  :aria-label="`Copy full JSON for event ${sortedEvents[v.index].event_id}`"
-                >
-                  {{ copiedEventId === sortedEvents[v.index].event_id ? 'Copied!' : 'Copy JSON' }}
-                </button>
-              </div>
-              <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3">
+            <div v-if="expanded.has(sortedEvents[v.index].event_id)" class="relative bg-gray-50/70 dark:bg-gray-800/40 px-4 py-3 border-t border-gray-100 dark:border-gray-700">
+              <button
+                type="button"
+                @click.stop="copyEventJson(sortedEvents[v.index])"
+                class="absolute top-2 right-2 p-1.5 rounded muted hover:text-gray-700 hover:bg-gray-200/70 dark:hover:bg-gray-700 cursor-pointer focus:outline-none focus:ring-2 focus:ring-gray-400"
+                :aria-label="`Copy full JSON for event ${sortedEvents[v.index].event_id}`"
+                :title="copiedEventId === sortedEvents[v.index].event_id ? 'Copied!' : 'Copy row as JSON'"
+              >
+                <CopyJsonIcon :copied="copiedEventId === sortedEvents[v.index].event_id" />
+                <span class="sr-only">{{ copiedEventId === sortedEvents[v.index].event_id ? 'Copied!' : 'Copy JSON' }}</span>
+              </button>
+              <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3 pr-8">
                 <div><span class="muted">Event ID:</span> <span class="font-mono">{{ sortedEvents[v.index].event_id }}</span></div>
                 <div><span class="muted">Source:</span> {{ sortedEvents[v.index].source }}</div>
                 <div v-if="sortedEvents[v.index].trace_id">

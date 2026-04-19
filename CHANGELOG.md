@@ -15,6 +15,90 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.40] — 2026-04-19
+
+### Changed
+
+- **Copy JSON no longer claims a dedicated row or column.** Pre-fix,
+  Copy JSON consumed a full-width ~50px footer row inside every
+  expanded event / audit / timeline panel and a trailing ~88px column
+  on every always-visible delivery row in WebhookDetailView —
+  substantial chrome for a secondary action.
+  - **WebhookDetailView delivery rows** now use a row kebab (⋮)
+    with three items: **Copy as JSON**, **Copy delivery ID**, **Copy
+    event ID**. Trailing column shrinks from 88px to 40px. Toast
+    confirms each copy (menu closes on click).
+  - **EventsView**, **AuditView**, and **EventTimeline** expanded
+    panels now anchor a compact clipboard icon at the top-right of
+    the panel body (no new collapsed-row affordance, no footer row).
+    Payload and 2-second check-mark confirmation unchanged. Same
+    `aria-label="Copy full JSON for …"` selectors — screen-reader
+    behavior preserved.
+  - **Icon redesign.** The panel-header icon is now a combined
+    copy-plus-JSON glyph (two overlapping document rectangles with
+    `{ }` braces inside the front sheet) instead of a generic
+    single-document clipboard. Signals "copy JSON" without relying
+    on tooltip hover.
+- **Copy as JSON is now available in every kebab-bearing list view.**
+  Common operator workflow is "paste this object definition to a
+  developer"; the kebab is the right home for it. Added to
+  TenantsView, TenantDetailView (API keys, policies), WebhooksView,
+  BudgetsView, ReservationsView, ApiKeysView, and WebhookDetailView's
+  subscription-header kebab. Payload is the full row object serialized
+  via `safeJsonStringify` (cycles- and BigInt-safe); toast confirms.
+  Shared helper at `src/utils/clipboard.ts` DRYs the pattern.
+
+### Reclaimed footprint
+
+| Surface | Before | After |
+|---|---|---|
+| WebhookDetailView delivery row | 88px trailing column × every row | 40px kebab column × every row |
+| EventsView expanded panel | ~50px dedicated footer row | 0 (icon overlays panel corner) |
+| AuditView expanded panel | ~50px dedicated footer row | 0 |
+| EventTimeline expanded item | ~35px dedicated footer row | 0 |
+
+No protocol, admin, server, or events-server version change. Pure
+dashboard UI slice.
+
+### Removed
+
+- **"Updated just now" indicator removed from the page header.** Every
+  view polls every 15–60s, and `formatRelative` returns `"just now"`
+  for anything under 60s — so the label effectively never changed and
+  provided no signal. The adjacent `RefreshButton` already conveys
+  freshness interactively (spinner while polling, click to force a
+  tick). Removed the `lastUpdated` prop from `PageHeader` and the
+  return value from `usePolling`. No test regressions.
+
+### Refactored
+
+- **Shared icon library at `src/components/icons/`.** 24 reusable SVG
+  components — every inline glyph in the app now comes from one source
+  of truth (the only exception is the data-driven Sidebar nav-icon
+  whose `d` path is item-table-driven). Round 1 extracted 9 icons:
+  `CopyJsonIcon`, `DownloadIcon`, `CloseIcon`, `ChevronRightIcon`,
+  `BackArrowIcon`, `SearchIcon`, `CheckIcon`, `Spinner`, `WarningIcon`.
+  Round 2 (full-pass polish) added 15 more: `HamburgerIcon`,
+  `LogoutIcon`, `SunIcon`, `MoonIcon`, `RefreshIcon`, `SortAscIcon`,
+  `SortUnsortedIcon`, `ChevronDownIcon`, `KebabIcon`, `CopyIcon`,
+  `EyeIcon`, `EyeOffIcon`, `InfoCircleIcon`, `EmptyTrayIcon`,
+  `CheckCircleIcon`. Side-effects of the consolidation: the three
+  duplicate Copy glyphs (CorrelationIdChip, MaskedValue, inline copy
+  buttons) collapse to one canonical `CopyIcon`; BulkActionResultDialog's
+  hand-rolled alert triangle and info circle now reuse `WarningIcon` +
+  `InfoCircleIcon`; ApiKeysView's ambiguous "view perms" arrow swaps
+  to `ChevronRightIcon`. Behavior unchanged; 742 tests green.
+- **Icon design-quality pass.** Stroke-width unified to `1.5` across
+  every outline icon (was mixed `1.5` / `2`) — matches modern
+  Heroicons v2 defaults, lighter and more balanced at 16–24px sizes.
+  Four icon paths upgraded to Heroicons v2 geometry: `RefreshIcon`
+  (arrow-path), `EyeIcon` / `EyeOffIcon` (refined curves + slash),
+  `CopyIcon` (document-duplicate). `Spinner` (`3`), `EmptyTrayIcon`
+  (`1`), and the signature `CopyJsonIcon` keep their intentional
+  weights. Three dead assets deleted: `public/icons.svg` (social-icon
+  sprite, never imported), `src/assets/hero.png`, `src/assets/vite.svg`
+  (Vite scaffold leftovers). No behavior change; 742 tests green.
+
 ## [0.1.25.39] — 2026-04-18
 
 ### Fixed

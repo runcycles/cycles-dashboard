@@ -12,6 +12,7 @@
 // `computed({ get, set })` over their existing fromDate / toDate
 // refs so server-side filter builders don't need refactoring.
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import ChevronDownIcon from './icons/ChevronDownIcon.vue'
 
 export type TimeRangePreset = {
   // Stable id. Used as `data-preset="<id>"` for test targeting.
@@ -204,9 +205,7 @@ onBeforeUnmount(() => {
       class="form-input flex items-center justify-between gap-2 cursor-pointer text-left"
     >
       <span class="truncate">{{ triggerLabel }}</span>
-      <svg class="w-4 h-4 shrink-0 muted-sm" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
-      </svg>
+      <ChevronDownIcon class="w-4 h-4 shrink-0 muted-sm" />
     </button>
 
     <div

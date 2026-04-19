@@ -19,10 +19,15 @@ import TenantLink from '../components/TenantLink.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
+import DownloadIcon from '../components/icons/DownloadIcon.vue'
+import CloseIcon from '../components/icons/CloseIcon.vue'
+import BackArrowIcon from '../components/icons/BackArrowIcon.vue'
+import Spinner from '../components/icons/Spinner.vue'
 import EventTimeline from '../components/EventTimeline.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
+import { writeClipboardJson } from '../utils/clipboard'
 import BulkActionPreviewDialog from '../components/BulkActionPreviewDialog.vue'
 import BulkActionResultDialog from '../components/BulkActionResultDialog.vue'
 import { useBulkActionPreview } from '../composables/useBulkActionPreview'
@@ -267,7 +272,7 @@ async function tick() {
   else { await loadTenants(); await loadList() }
 }
 
-const { refresh, isLoading, lastUpdated } = usePolling(tick, 60000)
+const { refresh, isLoading } = usePolling(tick, 60000)
 
 // Budget freeze/unfreeze
 const pendingAction = ref<{ action: 'freeze' | 'unfreeze'; scope: string; unit: string } | null>(null)
@@ -283,6 +288,11 @@ async function copyScope(scope: string) {
   } catch {
     toast.error('Copy failed — clipboard unavailable')
   }
+}
+
+async function copyBudgetJson(b: BudgetLedger) {
+  if (await writeClipboardJson(b)) toast.success('Budget JSON copied')
+  else toast.error('Copy failed — clipboard unavailable')
 }
 
 async function executeBudgetAction() {
@@ -1036,23 +1046,20 @@ function rowTenantId(b: BudgetLedger): string {
       :loaded="!isDetail ? sortedBudgets.length : undefined"
       :has-more="!isDetail ? hasMore : undefined"
       :loading="isLoading"
-      :last-updated="lastUpdated"
       @refresh="refresh"
     >
       <template #back>
         <button v-if="isDetail" @click="router.push('/budgets')" aria-label="Back to budgets" class="muted hover:text-gray-700 cursor-pointer">
-          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-          </svg>
+          <BackArrowIcon class="w-5 h-5" />
         </button>
       </template>
       <template v-if="!isDetail" #actions>
         <button @click="confirmExport('csv')" :disabled="sortedBudgets.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
-          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          <DownloadIcon class="w-3.5 h-3.5" />
           Export CSV
         </button>
         <button @click="confirmExport('json')" :disabled="sortedBudgets.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
-          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          <DownloadIcon class="w-3.5 h-3.5" />
           Export JSON
         </button>
       </template>
@@ -1180,7 +1187,7 @@ function rowTenantId(b: BudgetLedger): string {
             </div>
           </div>
           <div v-if="isLoading" class="flex items-center">
-            <svg class="w-4 h-4 muted animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+            <Spinner class="w-4 h-4 muted" />
           </div>
           <!-- Filter-apply bulk action. BudgetBulkFilter.tenant_id is
                required by spec, so the button is disabled until an
@@ -1290,6 +1297,7 @@ function rowTenantId(b: BudgetLedger): string {
                   :items="[
                     { label: 'Activity', to: { name: 'audit', query: { resource_type: 'budget', resource_id: sortedBudgets[v.index].scope } } },
                     { label: 'Copy scope', onClick: () => copyScope(sortedBudgets[v.index].scope) },
+                    { label: 'Copy as JSON', onClick: () => copyBudgetJson(sortedBudgets[v.index]) },
                     { label: 'Fund', onClick: () => openFund(sortedBudgets[v.index]), hidden: sortedBudgets[v.index].status !== 'ACTIVE' },
                     { label: 'Unfreeze', onClick: () => requestFreeze(sortedBudgets[v.index].scope, sortedBudgets[v.index].unit, 'unfreeze'), hidden: sortedBudgets[v.index].status !== 'FROZEN' },
                     { separator: true },
@@ -1346,7 +1354,7 @@ function rowTenantId(b: BudgetLedger): string {
             aria-label="Clear selection"
             class="muted hover:text-gray-700 cursor-pointer p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
           >
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            <CloseIcon class="w-4 h-4" />
           </button>
         </div>
       </Transition>

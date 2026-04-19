@@ -20,8 +20,13 @@ import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
+import { writeClipboardJson } from '../utils/clipboard'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
+import DownloadIcon from '../components/icons/DownloadIcon.vue'
+import CloseIcon from '../components/icons/CloseIcon.vue'
+import Spinner from '../components/icons/Spinner.vue'
+import ChevronRightIcon from '../components/icons/ChevronRightIcon.vue'
 import { formatDateTime } from '../utils/format'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
@@ -122,6 +127,11 @@ async function copyKeyId(id: string) {
   } catch {
     toast.error('Copy failed — clipboard unavailable')
   }
+}
+
+async function copyApiKeyJson(k: KeyWithTenant) {
+  if (await writeClipboardJson(k)) toast.success('API key JSON copied')
+  else toast.error('Copy failed — clipboard unavailable')
 }
 
 function openEdit(k: KeyWithTenant) {
@@ -285,7 +295,7 @@ async function fetchKeysPage(cursor?: string): Promise<{
   }
 }
 
-const { refresh, isLoading, lastUpdated } = usePolling(async () => {
+const { refresh, isLoading } = usePolling(async () => {
   try {
     const tRes = await listTenants()
     tenants.value = tRes.tenants
@@ -416,16 +426,15 @@ function closePermsViewer() { viewingPermsFor.value = null }
       item-noun="key"
       :loaded="filteredKeys.length"
       :loading="isLoading"
-      :last-updated="lastUpdated"
       @refresh="refresh"
     >
       <template #actions>
         <button @click="confirmExport('csv')" :disabled="filteredKeys.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
-          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          <DownloadIcon class="w-3.5 h-3.5" />
           Export CSV
         </button>
         <button @click="confirmExport('json')" :disabled="filteredKeys.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
-          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          <DownloadIcon class="w-3.5 h-3.5" />
           Export JSON
         </button>
         <button v-if="canManage" @click="openCreate" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create API Key</button>
@@ -467,7 +476,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
         </div>
         <button v-if="hasActiveFilters" @click="clearFilters" class="muted-sm hover:text-gray-700 cursor-pointer">Clear</button>
         <div v-if="isLoading" class="flex items-center">
-          <svg class="w-4 h-4 muted animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+          <Spinner class="w-4 h-4 muted" />
         </div>
       </div>
     </div>
@@ -554,9 +563,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
               >
                 <span class="tabular-nums font-medium">{{ sortedKeys[v.index].permissions!.length }}</span>
                 <span class="text-xs">perm{{ sortedKeys[v.index].permissions!.length === 1 ? '' : 's' }}</span>
-                <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                </svg>
+                <ChevronRightIcon class="w-3 h-3" />
               </button>
               <span v-else class="text-gray-400">—</span>
             </div>
@@ -576,6 +583,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
                 :items="[
                   { label: 'Activity', to: { name: 'audit', query: { key_id: sortedKeys[v.index].key_id } } },
                   { label: 'Copy key ID', onClick: () => copyKeyId(sortedKeys[v.index].key_id) },
+                  { label: 'Copy as JSON', onClick: () => copyApiKeyJson(sortedKeys[v.index]) },
                   { label: 'Edit', onClick: () => openEdit(sortedKeys[v.index]), hidden: sortedKeys[v.index].status !== 'ACTIVE' },
                   { separator: true },
                   { label: 'Revoke', onClick: () => pendingRevoke = sortedKeys[v.index], danger: true, hidden: sortedKeys[v.index].status !== 'ACTIVE' },
@@ -705,7 +713,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
             <p class="muted-sm font-mono break-all">{{ viewingPermsFor.name || viewingPermsFor.key_id }}</p>
           </div>
           <button @click="closePermsViewer" aria-label="Close" class="muted hover:text-gray-700 cursor-pointer p-1 -mt-1 -mr-1 rounded hover:bg-gray-100">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            <CloseIcon class="w-4 h-4" />
           </button>
         </div>
 

@@ -4,6 +4,7 @@ import { useRouter, type Router } from 'vue-router'
 import { useCommandPalette } from '../composables/useCommandPalette'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
 import type { Tenant } from '../types'
+import SearchIcon from './icons/SearchIcon.vue'
 
 // W3: global "Find tenant" palette (Cmd/Ctrl-K). Operator workflow at
 // scale is "I have a tenant_id or name, show me everything" — this
@@ -354,9 +355,7 @@ const placeholder = computed(() => {
           @keydown="onKeydown"
         >
           <div class="flex items-center gap-2 border-b border-gray-200 dark:border-gray-700 px-3">
-            <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 10a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
+            <SearchIcon class="w-4 h-4 text-gray-400 shrink-0" />
             <label id="command-palette-title" class="sr-only" for="command-palette-input">Search tenants or run a command</label>
             <input
               id="command-palette-input"

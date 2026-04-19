@@ -36,7 +36,6 @@ vi.mock('../composables/usePolling', () => ({
     return {
       isPolling: { value: true },
       isLoading: { value: false },
-      lastUpdated: { value: null },
       refresh: () => fn(ctrl.signal),
     }
   },

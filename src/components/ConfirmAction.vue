@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useFocusTrap } from '../composables/useFocusTrap'
+import Spinner from './icons/Spinner.vue'
 
 const props = defineProps<{
   title: string
@@ -82,7 +83,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
             : 'bg-gray-900 hover:bg-gray-800 text-white dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-300'"
           class="px-3 py-1.5 text-sm rounded cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-2"
         >
-          <svg v-if="loading" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-opacity="0.25" /><path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" stroke-width="3" /></svg>
+          <Spinner v-if="loading" class="w-3.5 h-3.5" />
           {{ confirmLabel }}
         </button>
       </div>

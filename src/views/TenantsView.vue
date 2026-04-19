@@ -20,6 +20,9 @@ import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
+import DownloadIcon from '../components/icons/DownloadIcon.vue'
+import CloseIcon from '../components/icons/CloseIcon.vue'
+import BackArrowIcon from '../components/icons/BackArrowIcon.vue'
 import FormDialog from '../components/FormDialog.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import BulkActionPreviewDialog from '../components/BulkActionPreviewDialog.vue'
@@ -27,6 +30,7 @@ import BulkActionResultDialog from '../components/BulkActionResultDialog.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { useBulkActionPreview } from '../composables/useBulkActionPreview'
 import { formatDate } from '../utils/format'
+import { writeClipboardJson } from '../utils/clipboard'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 import { formatBulkRequestError } from '../utils/errorCodeMessages'
@@ -476,6 +480,11 @@ async function copyTenantId(tenantId: string) {
   }
 }
 
+async function copyTenantJson(tenant: Tenant) {
+  if (await writeClipboardJson(tenant)) toast.success('Tenant JSON copied')
+  else toast.error('Copy failed — clipboard unavailable')
+}
+
 async function executeStatusAction() {
   if (!pendingStatusAction.value) return
   const { tenantId, action } = pendingStatusAction.value
@@ -512,7 +521,7 @@ function withListParams(params: Record<string, string> = {}): Record<string, str
   return params
 }
 
-const { refresh, isLoading, lastUpdated } = usePolling(async () => {
+const { refresh, isLoading } = usePolling(async () => {
   try {
     const res = await listTenants(withListParams())
     tenants.value = res.tenants
@@ -641,7 +650,6 @@ const gridTemplate = computed(() =>
       :loaded="filteredTenants.length"
       :has-more="hasMore"
       :loading="isLoading"
-      :last-updated="lastUpdated"
       @refresh="refresh"
     >
       <template v-if="parentFromQuery" #back>
@@ -650,18 +658,16 @@ const gridTemplate = computed(() =>
           :aria-label="`Back to parent tenant ${parentFromQuery}`"
           class="muted hover:text-gray-700 cursor-pointer"
         >
-          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-          </svg>
+          <BackArrowIcon class="w-5 h-5" />
         </button>
       </template>
       <template #actions>
         <button @click="confirmExport('csv')" :disabled="filteredTenants.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
-          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          <DownloadIcon class="w-3.5 h-3.5" />
           Export CSV
         </button>
         <button @click="confirmExport('json')" :disabled="filteredTenants.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
-          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          <DownloadIcon class="w-3.5 h-3.5" />
           Export JSON
         </button>
         <button v-if="canManage" @click="openCreate" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Tenant</button>
@@ -753,7 +759,7 @@ const gridTemplate = computed(() =>
             aria-label="Clear selection"
             class="muted hover:text-gray-700 cursor-pointer p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
           >
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            <CloseIcon class="w-4 h-4" />
           </button>
         </div>
       </Transition>
@@ -839,6 +845,7 @@ const gridTemplate = computed(() =>
                 :items="[
                   { label: 'Activity', to: { name: 'audit', query: { tenant_id: sortedTenants[v.index].tenant_id } } },
                   { label: 'Copy tenant ID', onClick: () => copyTenantId(sortedTenants[v.index].tenant_id) },
+                  { label: 'Copy as JSON', onClick: () => copyTenantJson(sortedTenants[v.index]) },
                   { label: 'Reactivate', onClick: () => pendingStatusAction = { tenantId: sortedTenants[v.index].tenant_id, name: sortedTenants[v.index].name, action: 'ACTIVE' }, hidden: sortedTenants[v.index].status !== 'SUSPENDED' },
                   { separator: true },
                   { label: 'Suspend', onClick: () => pendingStatusAction = { tenantId: sortedTenants[v.index].tenant_id, name: sortedTenants[v.index].name, action: 'SUSPENDED' }, danger: true, hidden: sortedTenants[v.index].status !== 'ACTIVE' },

@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.39 (2026-04-18)
+**Current release:** v0.1.25.40 (2026-04-19)
 
 ## Baseline requirements
 
@@ -16,6 +16,100 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-19 — v0.1.25.40: Copy JSON two-track relocation (kebab for flat rows, icon for expanded panels)
+
+**Trigger.** Operator feedback: *"Copy JSON placement takes a whole row, wasting space."* Audit confirmed: one dedicated ~50px footer row on every expanded EventsView / AuditView / EventTimeline panel, plus a dedicated ~88px trailing column on every always-visible WebhookDetailView delivery row.
+
+**Two-track relocation — one size does not fit.**
+
+| Track | Views | Placement | Why |
+|---|---|---|---|
+| 1 (kebab) | WebhookDetailView delivery rows | Row kebab (⋮), 3 items: Copy as JSON / Copy delivery ID / Copy event ID | Flat table, no expansion. Delivery row has ≥2 legitimately-distinct copy targets, so the v0.1.25.29 ≥2-actions-per-kebab rule is satisfied without filler. Toast confirms on click (menu closes). |
+| 2 (panel icon) | EventsView, AuditView, EventTimeline expanded panels | Clipboard icon absolutely-positioned at top-right of the panel body | A row-level kebab on these views would be single-purpose (no natural sibling actions besides the pivot chips already rendered inline) and would add a collapsed-row affordance to save a footer visible only on expand — net regression for scan-heavy usage. The icon costs zero vertical space. |
+
+**Rejected alternatives (for the record).**
+
+| Alternative | Why not |
+|---|---|
+| One kebab per row on every view | Violates ≥2-actions rule on EventsView / AuditView / EventTimeline unless filler actions are fabricated. |
+| Hover-reveal button | Invisible on touch + keyboard-only; v0.1.25.29 moved away from hover-only row actions. |
+| Icon + label in panel header | Competes with Request / Correlation / Trace ID chips on narrow viewports. Icon-only + tooltip + `aria-label` + `sr-only` text wins for density while preserving screen-reader and test-selector fidelity. |
+
+**Footprint reclaimed.** 48px per delivery row on WebhookDetailView × N visible rows; one ~50px footer row per expansion on three other views.
+
+**Follow-up (same release) — operator feedback mid-review.**
+
+| Ask | Response |
+|---|---|
+| "Icon is generic, requires a tooltip to know what it does" | Redesigned glyph: overlapping document rectangles (universal *copy* visual) with `{ }` curly braces inside the front sheet (universal *JSON* visual). Self-signalling without hover. Applied to all three Track-2 surfaces. |
+| "Every view where we have a kebab should have Copy JSON — common use case is sharing an object definition with a developer" | Added **Copy as JSON** to all seven RowActionsMenu call sites that lacked it: TenantsView, TenantDetailView (API keys + policies), WebhooksView, BudgetsView, ReservationsView, ApiKeysView, and WebhookDetailView's subscription-header kebab. |
+
+**Shared helper.** New `src/utils/clipboard.ts` — `writeClipboardText(value)` and `writeClipboardJson(obj)` both return `Promise<boolean>` (true on success, false on denied permission / missing API). Callers `if (await …) toast.success(…) else toast.error(…)`. DRYs the duplicate try/catch blocks and gives a single test surface for clipboard failure modes.
+
+**Implementation notes.**
+
+- Reused `RowActionsMenu.vue` (v0.1.25.29) on WebhookDetailView — zero API change. Discriminated-union `RowActionItem[]` accepts the three `onClick` entries as-is.
+- Track 2 icon button is inline SVG (copy-plus-JSON glyph / checkmark swap) with `<span class="sr-only">Copy JSON</span>` so `.text()` selector asserts still work — no test-structure churn on EventsView/AuditView/EventTimeline.
+- WebhookDetailView dropped the `copiedDeliveryId` ref + timer (dead code once the label swap goes to a toast).
+- `deliveryGridTemplate`: trailing column `88px → 40px`. Actions header collapsed to `sr-only` since a 40px cell can't hold the word "Actions".
+
+**Validation gates.** `npm run typecheck` / `npm run test` / `npm run build` clean. New `clipboard.test.ts` covers the helper (success, denied, missing API, cycles, BigInt). WebhookDetailView kebab test exercises all three delivery-row items and asserts the correct payload per item.
+
+**Icon library extraction (same-release follow-up).** Operator ask: *"make sure the whole dash uses same approach — all images, icons etc should be sep and shared. no copying."* Created `src/components/icons/` with nine reusable SFCs and replaced 32+ inline SVG duplications.
+
+| Icon | Replaces | Call sites |
+|---|---|---|
+| `CopyJsonIcon` | Composite copy+JSON glyph | EventsView, AuditView, EventTimeline (Track-2 surfaces) |
+| `DownloadIcon` | Export button glyph | 8 list views × 2 states (idle + loading) |
+| `CloseIcon` | Dialog dismiss X | ApiKeys, Budgets, Tenants, Webhooks secrets dialogs |
+| `ChevronRightIcon` | Row expand arrow | Events, Audit, EventTimeline |
+| `BackArrowIcon` | Detail-view back arrow | Tenants, TenantDetail, Budgets, WebhookDetail |
+| `SearchIcon` | Command-palette + sidebar search | Sidebar, CommandPalette |
+| `CheckIcon` | Copied / success checkmark | MaskedValue, BulkActionResultDialog |
+| `Spinner` | Loading indicator | ApiKeys, Budgets, ConfirmAction, BulkActionPreviewDialog (×2) |
+| `WarningIcon` | Alert triangle | OverviewView (×7 alert cards) |
+
+Future icon edits (stroke-width tweak, dark-mode color adjustment, accessibility label) happen once instead of fan-out across a dozen files. 742 tests green.
+
+**Icon library full pass (same-release polish).** Operator ask: *"do a pass on all icons, svgs, etc and review, enhance for look and feel."* Audit surfaced 3 visual inconsistencies: (1) the Copy glyph was duplicated three times with three different drawings (CorrelationIdChip, MaskedValue, plus a variant inside CopyJsonIcon), (2) BulkActionResultDialog rolled its own alert-triangle and info-circle instead of reusing the shared `WarningIcon`, (3) 14 inline SVG glyphs still lived in consumer files. Extracted 15 more components for a total of 24:
+
+| Icon | First call site | Replaces |
+|---|---|---|
+| `HamburgerIcon` | AppLayout mobile header | inline 3-bar menu |
+| `LogoutIcon` | Sidebar logout button | inline arrow-out |
+| `SunIcon` / `MoonIcon` | Sidebar theme toggle | inline sun / moon |
+| `RefreshIcon` | RefreshButton | inline arrow-loop |
+| `SortAscIcon` / `SortUnsortedIcon` | SortHeader (all list views) | inline up-arrow + dual-arrow |
+| `ChevronDownIcon` | TimeRangePicker + RowActionsMenu labeled trigger | two inline chevrons (different viewBoxes) |
+| `KebabIcon` | RowActionsMenu trigger | inline three-circle ⋮ |
+| `CopyIcon` | CorrelationIdChip + MaskedValue | two inline copy glyphs (canonical) |
+| `EyeIcon` / `EyeOffIcon` | MaskedValue reveal/hide | two inline eye variants |
+| `InfoCircleIcon` | BulkActionResultDialog "skipped" | inline info circle |
+| `EmptyTrayIcon` | EmptyState | inline tray/inbox |
+| `CheckCircleIcon` | OverviewView "all clear" banner | inline success circle |
+
+Side-effects: BulkActionResultDialog's "failed" glyph now reuses `WarningIcon` instead of its hand-rolled triangle; ApiKeysView's "view all permissions" button swaps the ambiguous trending-up arrow for `ChevronRightIcon` (semantically correct — it indicates "more detail"). The one remaining inline `<svg>` is Sidebar's nav-icon block, whose `d` path is data-driven from the `navItems` table; a shared component would need a `:d` prop and wouldn't reduce duplication. Documented inline. 742 tests green.
+
+**Icon design-quality pass (same-release polish).** Operator ask: *"can you pass icons, images, svgs and see if you can improve quality, look and feel, style."* Three moves:
+
+| Move | What | Why |
+|---|---|---|
+| Stroke-width unify | 14 outline icons at `2` → `1.5`. `Spinner` (`3`), `EmptyTrayIcon` (`1`), `CopyJsonIcon` (signature, `1.4`) keep intentional weights. | Matches modern Heroicons v2 defaults; lighter and more balanced at 16–24px sizes. Mixed `1.5` / `2` was a visible inconsistency once icons sat next to each other (theme toggle + logout at `1.5` vs refresh + search at `2` in the same chrome). |
+| Path upgrades to v2 geometry | `RefreshIcon` → arrow-path; `EyeIcon` / `EyeOffIcon` → v2 curves + slash; `CopyIcon` → document-duplicate. | v2 paths are more geometrically balanced than the v1 equivalents. Copy glyph specifically reads as "duplicate" (two overlapping sheets) instead of a single document with a folded corner. |
+| Dead asset deletion | `public/icons.svg` (social-icon sprite — bluesky/discord/github/x; never imported), `src/assets/hero.png`, `src/assets/vite.svg` (Vite scaffold leftovers). | `grep -r` confirmed zero references. Shrinks the build surface and the asset-audit surface. |
+
+No behavior change, no API change, no visible shift in glyph *identity*; only line-weight and curvature polish. 742 tests green; `npm run build` clean.
+
+**"Updated just now" header strip removed (same-release follow-up).** Operator ask: *"noticed at the top of some views 'Updated just now' but it's never anything else — what's the purpose if it never shows anything other than this text?"* Audit confirmed: every view polls at 15–60s, and `formatRelative` returns `"just now"` for anything under 60s, so the label resets before it can tick to `"1m ago"`.
+
+| Poll interval | View(s) | Observed label |
+|---|---|---|
+| 15s | EventsView | always "just now" |
+| 30s | OverviewView, WebhookDetailView, ReservationsView | always "just now" |
+| 60s | ApiKeysView, BudgetsView, TenantsView, TenantDetailView, WebhooksView | "just now" (resets before ticking) |
+
+Removed the `lastUpdated` prop + span from `PageHeader.vue`, dropped the `lastUpdated` ref/assignment/return from `usePolling.ts`, and stripped the destructuring + prop-passing from all nine call sites. The adjacent `RefreshButton` stays — it already conveys freshness interactively (spinner while polling, click to force a tick). Rejected `stale-only` and `live-ticker` alternatives after operator picked the delete. 742 tests green.
 
 ### 2026-04-18 — v0.1.25.39 follow-up: ecosystem baseline rollup (admin `.31 → .32`, server `.13 → .15`, events `:latest → .8`)
 

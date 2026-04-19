@@ -17,12 +17,14 @@ import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
 import ScopeBuilder from '../components/ScopeBuilder.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
+import { writeClipboardJson } from '../utils/clipboard'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 import { rateLimitedBatch } from '../utils/rateLimitedBatch'
 import { synthesizeRowSelectBulkResult } from '../utils/rowSelectBulkResult'
 import type { RowSelectBulkResponse } from '../utils/rowSelectBulkResult'
 import BulkActionResultDialog from '../components/BulkActionResultDialog.vue'
+import BackArrowIcon from '../components/icons/BackArrowIcon.vue'
 
 const toast = useToast()
 
@@ -137,6 +139,16 @@ async function copyKeyId(keyId: string) {
   } catch {
     toast.error('Copy failed — clipboard unavailable')
   }
+}
+
+async function copyApiKeyJson(k: ApiKey) {
+  if (await writeClipboardJson(k)) toast.success('API key JSON copied')
+  else toast.error('Copy failed — clipboard unavailable')
+}
+
+async function copyPolicyJson(p: Policy) {
+  if (await writeClipboardJson(p)) toast.success('Policy JSON copied')
+  else toast.error('Copy failed — clipboard unavailable')
 }
 
 async function executeKeyRevoke() {
@@ -590,7 +602,7 @@ function cancelEmergencyFreeze() {
 // poll tick switches to lazy mode: only refreshes the active tab.
 let initialLoadDone = false
 
-const { refresh, isLoading, lastUpdated } = usePolling(async () => {
+const { refresh, isLoading } = usePolling(async () => {
   try {
     if (!initialLoadDone) {
       // Mount-time eager load: fetch everything so badge counts are
@@ -639,12 +651,10 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
 
 <template>
   <div>
-    <PageHeader title="Tenant Detail" :subtitle="tenant?.tenant_id" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
+    <PageHeader title="Tenant Detail" :subtitle="tenant?.tenant_id" :loading="isLoading" @refresh="refresh">
       <template #back>
         <button @click="goBack" :aria-label="parentFromQuery ? `Back to parent tenant ${parentFromQuery}` : 'Back to tenants'" class="muted hover:text-gray-700 cursor-pointer">
-          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-          </svg>
+          <BackArrowIcon class="w-5 h-5" />
         </button>
       </template>
     </PageHeader>
@@ -773,6 +783,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
                   :items="[
                     { label: 'Activity', to: { name: 'audit', query: { key_id: k.key_id } } },
                     { label: 'Copy key ID', onClick: () => copyKeyId(k.key_id) },
+                    { label: 'Copy as JSON', onClick: () => copyApiKeyJson(k) },
                     { label: 'Edit', onClick: () => openEditKey(k), hidden: k.status !== 'ACTIVE' },
                     { separator: true },
                     { label: 'Revoke', onClick: () => pendingKeyRevoke = k, danger: true, hidden: k.status !== 'ACTIVE' },
@@ -802,6 +813,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
                   :aria-label="`Actions for policy ${p.name || p.policy_id}`"
                   :items="[
                     { label: 'Activity', to: { name: 'audit', query: { resource_type: 'policy', resource_id: p.policy_id } } },
+                    { label: 'Copy as JSON', onClick: () => copyPolicyJson(p) },
                     { label: 'Edit', onClick: () => openEditPolicy(p) },
                   ]"
                 />

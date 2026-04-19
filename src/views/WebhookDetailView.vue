@@ -16,6 +16,8 @@ import TenantLink from '../components/TenantLink.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
+import DownloadIcon from '../components/icons/DownloadIcon.vue'
+import BackArrowIcon from '../components/icons/BackArrowIcon.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
@@ -324,7 +326,7 @@ function buildDeliveryParams(): Record<string, string> {
 // don't keep re-opening the dialog if the user dismisses it.
 let editIntentApplied = false
 
-const { refresh, isLoading, lastUpdated } = usePolling(async () => {
+const { refresh, isLoading } = usePolling(async () => {
   try {
     webhook.value = await getWebhook(id)
     if (!editIntentApplied && route.query.action === 'edit' && webhook.value) {
@@ -372,29 +374,55 @@ const deliveryTotalHeight = computed(() => deliveryVirt.value.getTotalSize())
 // 405 here is the receiver rejecting POST, but 'Subscription not
 // active: DISABLED' comes from the server after auto-disable and
 // also carries a response_status of 405 from the last real attempt).
-// Error flexes to fill remaining width; other cols are fixed since
-// their contents are bounded (3-digit HTTP, 1-2 digit attempts,
-// 20-char event_id, ISO timestamp).
-const deliveryGridTemplate = '100px 80px 72px 200px minmax(240px,1fr) 150px 88px'
+// Error flexes to fill remaining width; trailing 40px is the kebab
+// actions column (v0.1.25.40 — was 88px for the inline Copy JSON
+// button, which wasted ~48px×every row for a single action).
+const deliveryGridTemplate = '100px 80px 72px 200px minmax(240px,1fr) 150px 40px'
 
-// Copy the full delivery row as JSON. Useful for cross-referencing a
-// failing delivery into /events or the receiver's server logs without
-// hand-assembling the payload. Copies the whole WebhookDelivery
-// (delivery_id, event_id, status, response_status, error_message,
-// attempts, timestamps, trace_id).
-const copiedDeliveryId = ref<string | null>(null)
-let copiedDeliveryTimer: ReturnType<typeof setTimeout> | null = null
+// Copy actions for the delivery-row kebab. Copy JSON covers the whole
+// WebhookDelivery (for cross-referencing into /events or the receiver's
+// logs); Copy delivery ID / Copy event ID cover the 80% case where the
+// operator only needs the ID to paste elsewhere. Kebab auto-closes
+// on click so confirmation goes to the toast, not a label swap.
 async function copyDeliveryJson(d: WebhookDelivery) {
   try {
     await navigator.clipboard.writeText(safeJsonStringify(d))
-    copiedDeliveryId.value = d.delivery_id
-    if (copiedDeliveryTimer) clearTimeout(copiedDeliveryTimer)
-    copiedDeliveryTimer = setTimeout(() => {
-      if (copiedDeliveryId.value === d.delivery_id) copiedDeliveryId.value = null
-    }, 2000)
+    toast.success('Delivery JSON copied')
   } catch {
-    // Clipboard permission denied or insecure context — silent fallback.
+    toast.error('Copy failed — clipboard permission denied')
   }
+}
+async function copySubscriptionJson() {
+  if (!webhook.value) return
+  try {
+    await navigator.clipboard.writeText(safeJsonStringify(webhook.value))
+    toast.success('Subscription JSON copied')
+  } catch {
+    toast.error('Copy failed — clipboard permission denied')
+  }
+}
+async function copyDeliveryId(d: WebhookDelivery) {
+  try {
+    await navigator.clipboard.writeText(d.delivery_id)
+    toast.success('Delivery ID copied')
+  } catch {
+    toast.error('Copy failed — clipboard permission denied')
+  }
+}
+async function copyEventId(d: WebhookDelivery) {
+  try {
+    await navigator.clipboard.writeText(d.event_id)
+    toast.success('Event ID copied')
+  } catch {
+    toast.error('Copy failed — clipboard permission denied')
+  }
+}
+function deliveryActions(d: WebhookDelivery) {
+  return [
+    { label: 'Copy as JSON', onClick: () => { void copyDeliveryJson(d) } },
+    { label: 'Copy delivery ID', onClick: () => { void copyDeliveryId(d) } },
+    { label: 'Copy event ID', onClick: () => { void copyEventId(d) } },
+  ]
 }
 
 // Status filter refetches page 1 so the filter is server-enforced
@@ -449,12 +477,10 @@ watch(exportError, (v) => { if (v) error.value = v })
 
 <template>
   <div>
-    <PageHeader title="Webhook Detail" :subtitle="webhook?.name || webhook?.subscription_id" :loading="isLoading" :last-updated="lastUpdated" @refresh="refresh">
+    <PageHeader title="Webhook Detail" :subtitle="webhook?.name || webhook?.subscription_id" :loading="isLoading" @refresh="refresh">
       <template #back>
         <button @click="router.push('/webhooks')" aria-label="Back to webhooks" class="muted hover:text-gray-700 cursor-pointer">
-          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-          </svg>
+          <BackArrowIcon class="w-5 h-5" />
         </button>
       </template>
     </PageHeader>
@@ -480,6 +506,7 @@ watch(exportError, (v) => { if (v) error.value = v })
                 { label: 'Edit', onClick: openEdit },
                 { label: 'Rotate Secret', onClick: openRotate },
                 { label: 'Replay', onClick: () => { showReplay = true } },
+                { label: 'Copy as JSON', onClick: () => copySubscriptionJson() },
                 { label: 'Reset & Re-enable', onClick: () => { pendingAction = 'reset' }, hidden: !((webhook.consecutive_failures ?? 0) > 0 && webhook.status !== 'ACTIVE') },
                 { label: 'Enable', onClick: () => { pendingAction = 'ACTIVE' }, hidden: webhook.status !== 'DISABLED' && webhook.status !== 'PAUSED' },
                 { separator: true },
@@ -586,11 +613,11 @@ watch(exportError, (v) => { if (v) error.value = v })
               <option>RETRYING</option>
             </select>
             <button @click="confirmExport('csv')" :disabled="filteredDeliveries.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
-              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              <DownloadIcon class="w-3.5 h-3.5" />
               Export CSV
             </button>
             <button @click="confirmExport('json')" :disabled="filteredDeliveries.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
-              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              <DownloadIcon class="w-3.5 h-3.5" />
               Export JSON
             </button>
           </div>
@@ -604,7 +631,7 @@ watch(exportError, (v) => { if (v) error.value = v })
             <SortHeader as="div" label="Event ID" column="event_id" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" />
             <SortHeader as="div" label="Error" column="error_message" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" />
             <SortHeader as="div" label="Time" column="time" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" />
-            <div role="columnheader" class="table-cell muted-sm">Actions</div>
+            <div role="columnheader" class="table-cell muted-sm text-right"><span class="sr-only">Actions</span></div>
           </div>
         </div>
 
@@ -640,15 +667,11 @@ watch(exportError, (v) => { if (v) error.value = v })
                 :title="sortedDeliveries[v.index].error_message || ''"
               >{{ sortedDeliveries[v.index].error_message || '—' }}</div>
               <div role="cell" class="table-cell muted-sm">{{ sortedDeliveries[v.index].completed_at ? formatDateTime(sortedDeliveries[v.index].completed_at!) : sortedDeliveries[v.index].attempted_at ? formatDateTime(sortedDeliveries[v.index].attempted_at!) : sortedDeliveries[v.index].created_at ? formatDateTime(sortedDeliveries[v.index].created_at!) : '-' }}</div>
-              <div role="cell" class="table-cell">
-                <button
-                  type="button"
-                  @click.stop="copyDeliveryJson(sortedDeliveries[v.index])"
-                  class="muted-sm hover:text-gray-700 cursor-pointer px-2 py-0.5 rounded hover:bg-gray-100 text-xs"
-                  :aria-label="`Copy full JSON for delivery ${sortedDeliveries[v.index].delivery_id}`"
-                >
-                  {{ copiedDeliveryId === sortedDeliveries[v.index].delivery_id ? 'Copied!' : 'Copy JSON' }}
-                </button>
+              <div role="cell" class="table-cell flex justify-end">
+                <RowActionsMenu
+                  :items="deliveryActions(sortedDeliveries[v.index])"
+                  :aria-label="`Actions for delivery ${sortedDeliveries[v.index].delivery_id}`"
+                />
               </div>
             </div>
           </div>

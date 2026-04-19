@@ -58,7 +58,6 @@ vi.mock('../composables/usePolling', () => ({
     return {
       refresh: async () => { void fn() },
       isLoading: { value: false },
-      lastUpdated: { value: null },
     }
   },
 }))
