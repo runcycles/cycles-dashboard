@@ -46,12 +46,11 @@ vi.mock('vue-router', async () => ({
 vi.mock('../composables/usePolling', () => ({
   usePolling: (fn: () => Promise<void> | void) => {
     // Kick once so the view's initial data load runs; return the shape
-    // the views destructure ({ refresh, isLoading, lastUpdated }).
+    // the views destructure ({ refresh, isLoading }).
     void fn()
     return {
       refresh: async () => { void fn() },
       isLoading: { value: false },
-      lastUpdated: { value: null },
     }
   },
 }))

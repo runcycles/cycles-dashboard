@@ -47,7 +47,7 @@ vi.mock('vue-router', () => ({
 }))
 
 // Neutralize the polling schedule — we drive load() explicitly. The view
-// calls usePolling(load, 15000) and expects {refresh, isLoading, lastUpdated}.
+// calls usePolling(load, 15000) and expects {refresh, isLoading}.
 // Kick the callback once on mount (simulating the real composable's initial
 // tick), then expose refresh() for tests to re-trigger.
 vi.mock('../composables/usePolling', () => ({
@@ -58,7 +58,6 @@ vi.mock('../composables/usePolling', () => ({
     return {
       isPolling: { value: true },
       isLoading: { value: false },
-      lastUpdated: { value: null },
       refresh: () => fn(ctrl.signal),
     }
   },
