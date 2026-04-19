@@ -16,6 +16,7 @@ import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import TimeRangePicker from '../components/TimeRangePicker.vue'
 import BulkActionAuditDetail from '../components/BulkActionAuditDetail.vue'
+import CorrelationIdChip from '../components/CorrelationIdChip.vue'
 import { formatDateTime } from '../utils/format'
 import { toMessage } from '../utils/errors'
 import { safeJsonStringify } from '../utils/safe'
@@ -110,6 +111,11 @@ const errorCode = ref('')
 // error_code MUST always pass this predicate, so adding an exclude list
 // never silently hides success rows.
 const errorCodeExclude = ref('')
+// cycles-server-admin v0.1.25.31 / protocol v0.1.25.28: W3C Trace Context
+// cross-surface correlation. `trace_id` (32-hex) + `request_id` are exact-
+// match filters on listAuditLogs. Deep-link supported via applyQueryParams.
+const traceId = ref('')
+const requestId = ref('')
 // Shared comma/whitespace-separated list normalizer for the four array
 // filters (error_code, error_code_exclude, operation, resource_type).
 // Trim each token, drop empties, dedupe preserving first-occurrence
@@ -166,6 +172,8 @@ function buildFilterParams(): Record<string, string> {
   if (codes) params.error_code = codes
   const excludes = normalizeList(errorCodeExclude.value)
   if (excludes) params.error_code_exclude = excludes
+  if (traceId.value) params.trace_id = traceId.value
+  if (requestId.value) params.request_id = requestId.value
   // Status band → status_min / status_max pair.
   if (statusBand.value) {
     const range: Record<string, [number, number]> = {
@@ -224,6 +232,7 @@ const {
     { header: 'status',        value: e => e.status },
     { header: 'error_code',    value: e => e.error_code },
     { header: 'request_id',    value: e => e.request_id },
+    { header: 'trace_id',      value: e => e.trace_id ?? '' },
     { header: 'source_ip',     value: e => e.source_ip },
     { header: 'user_agent',    value: e => e.user_agent },
     { header: 'metadata',      value: e => e.metadata ? safeJsonStringify(e.metadata, 0) : '' },
@@ -288,6 +297,10 @@ function applyQueryParams() {
   // Denials pill → /audit?error_code=X.
   if (route.query.error_code) errorCode.value = String(route.query.error_code)
   if (route.query.error_code_exclude) errorCodeExclude.value = String(route.query.error_code_exclude)
+  // v0.1.25.39: trace_id + request_id deep-link. CorrelationIdChip pivots
+  // from EventsView / WebhookDetailView land here via these params.
+  traceId.value = route.query.trace_id ? String(route.query.trace_id) : ''
+  requestId.value = route.query.request_id ? String(route.query.request_id) : ''
   const sb = route.query.status_band
   if (sb === 'success' || sb === 'errors' || sb === '4xx' || sb === '5xx') statusBand.value = sb
 }
@@ -367,20 +380,21 @@ function measureRow(el: Element | { $el?: Element } | null) {
 
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
 
-    <!-- Filter form: 6-col wide layout at xl+, stacks to 2 cols below.
-         The 6-col grid would previously kick in at md (768px), but the
-         Status chip group (5 bands) + Run Query need ~370px of room;
-         at md the col-span-2 cell only got ~225-320px so the chips
-         flex-wrapped to 2-3 rows within the cell and the whole layout
-         jittered as the viewport resized through the 768-1280px range.
-         Bumping the wide layout to xl (1280px) eliminates that jitter —
-         below 1280px the filters stack cleanly in a 2-col grid, above
-         1280px the row 2 col-span-2 cell gets ~408px and the chips fit
-         on one line. One clean breakpoint jump instead of a cascade.
-           Row 1 (xl, 6 cols): Search [span 2] | Time | Tenant | Key | Resource Type
-           Row 2 (xl, 6 cols): Resource ID | Operation | Error Code | Exclude codes | Status+Run Query [span 2] -->
+    <!-- Filter form: three 6-col rows at xl+, stacks to 2 cols below.
+         Pre-v0.1.25.39 this was two rows, but adding Trace ID + Request
+         ID pushed row 2 to 7 inputs + a span-2 Status cell (= 9 col-
+         units into 6) which wrapped messily on resize. Splitting into
+         three balanced rows of 6 lets the grid stay rigid at xl+ and
+         stack cleanly to 2 cols below the breakpoint, eliminating the
+         mid-width jitter entirely.
+           Row 1 (xl, 6 cols): broad filters + when / who
+             Search [span 2] | Time range | Tenant | Key | Resource Type
+           Row 2 (xl, 6 cols): exact-match lookup — resource + ids + codes
+             Resource ID | Operation | Error Code | Exclude codes | Trace ID | Request ID
+           Row 3 (xl, 6 cols): outcome + submit
+             Status [span 4] | Run Query [span 2, ml-auto] -->
     <form @submit.prevent="query" class="card p-4 mb-4 space-y-3">
-      <!-- Row 1: primary filters -->
+      <!-- Row 1: broad filters + when / who -->
       <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-3 items-end">
         <div class="xl:col-span-2">
           <label for="audit-search" class="form-label">Search</label>
@@ -418,7 +432,11 @@ function measureRow(el: Element | { $el?: Element } | null) {
         </div>
       </div>
 
-      <!-- Row 2: detail filters + Status + submit -->
+      <!-- Row 2: exact-match lookup filters. Six equal cols at xl+.
+           Trace ID + Request ID use form-input-mono so the font-mono
+           rendering of hex ids matches form-input's text-sm height
+           (plain `font-mono text-xs` made the box visibly shorter
+           than its siblings). -->
       <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-3 items-end">
         <div>
           <label for="audit-resource-id" class="form-label">Resource ID</label>
@@ -459,40 +477,65 @@ function measureRow(el: Element | { $el?: Element } | null) {
             aria-label="Hide these error codes. Comma-separated (e.g. INTERNAL_ERROR, TIMEOUT). Success rows (no error_code) always pass this filter."
           />
         </div>
-        <!-- Status + Run Query share the last 2 cols at xl+ via internal
-             flex. Below xl the filters stack in 2 cols and this cell
-             gets a full half-width row to itself; chips still flex-wrap
-             if the cell is narrow. Run Query stays right-aligned via
-             ml-auto at every breakpoint. -->
-        <div class="xl:col-span-2 flex flex-wrap items-end gap-3">
-          <div class="min-w-0">
-            <span class="form-label">Status</span>
-            <!-- Segmented chip control. role=radiogroup + role=radio +
-                 aria-checked make this a screen-reader-equivalent of
-                 the prior <select>. data-band stays stable so tests
-                 target by semantic value rather than label. -->
-            <div
-              id="audit-status"
-              role="radiogroup"
-              aria-label="Filter by HTTP status band"
-              class="inline-flex flex-wrap gap-0.5 rounded border border-gray-300 dark:border-gray-700 p-0.5 bg-gray-50 dark:bg-gray-800/40"
-            >
-              <button
-                v-for="b in STATUS_BANDS"
-                :key="b.value || 'all'"
-                type="button"
-                role="radio"
-                :data-band="b.value"
-                :aria-checked="statusBand === b.value"
-                @click="statusBand = b.value"
-                class="px-2.5 py-1 text-xs rounded cursor-pointer transition-colors"
-                :class="statusBand === b.value
-                  ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
-                  : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'"
-              >{{ b.label }}</button>
-            </div>
+        <div>
+          <label for="audit-trace-id" class="form-label">Trace ID</label>
+          <input
+            id="audit-trace-id"
+            v-model="traceId"
+            maxlength="32"
+            class="form-input-mono"
+            placeholder="32 hex chars"
+            aria-label="Filter by W3C trace_id — 32 hex chars, exact match."
+          />
+        </div>
+        <div>
+          <label for="audit-request-id" class="form-label">Request ID</label>
+          <input
+            id="audit-request-id"
+            v-model="requestId"
+            class="form-input-mono"
+            placeholder="request_id"
+            aria-label="Filter by request_id — exact match."
+          />
+        </div>
+      </div>
+
+      <!-- Row 3: outcome band + submit. Status gets 4 cols (~730px at
+           xl) which fits the 5 segmented chips on one line with room
+           to spare; Run Query takes the trailing 2 cols and stays
+           right-aligned via ml-auto. Below xl the row stacks cleanly
+           in the 2-col grid — Status on its own half, Run Query on
+           the next. -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-3 items-end">
+        <div class="xl:col-span-4 min-w-0">
+          <span class="form-label">Status</span>
+          <!-- Segmented chip control. role=radiogroup + role=radio +
+               aria-checked make this a screen-reader-equivalent of
+               the prior <select>. data-band stays stable so tests
+               target by semantic value rather than label. -->
+          <div
+            id="audit-status"
+            role="radiogroup"
+            aria-label="Filter by HTTP status band"
+            class="inline-flex flex-wrap gap-0.5 rounded border border-gray-300 dark:border-gray-700 p-0.5 bg-gray-50 dark:bg-gray-800/40"
+          >
+            <button
+              v-for="b in STATUS_BANDS"
+              :key="b.value || 'all'"
+              type="button"
+              role="radio"
+              :data-band="b.value"
+              :aria-checked="statusBand === b.value"
+              @click="statusBand = b.value"
+              class="px-2.5 py-1 text-xs rounded cursor-pointer transition-colors"
+              :class="statusBand === b.value
+                ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'"
+            >{{ b.label }}</button>
           </div>
-          <button type="submit" :disabled="loading" class="ml-auto bg-gray-900 text-white px-4 py-1.5 rounded text-sm hover:bg-gray-800 disabled:opacity-50 cursor-pointer">
+        </div>
+        <div class="xl:col-span-2 flex justify-end">
+          <button type="submit" :disabled="loading" class="bg-gray-900 text-white px-4 py-1.5 rounded text-sm hover:bg-gray-800 disabled:opacity-50 cursor-pointer">
             {{ loading ? 'Querying...' : 'Run Query' }}
           </button>
         </div>
@@ -621,7 +664,14 @@ function measureRow(el: Element | { $el?: Element } | null) {
               </div>
               <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-3">
                 <div><span class="muted">Log ID:</span> <span class="font-mono">{{ sortedEntries[v.index].log_id }}</span></div>
-                <div v-if="sortedEntries[v.index].request_id"><span class="muted">Request ID:</span> <span class="font-mono">{{ sortedEntries[v.index].request_id }}</span></div>
+                <div v-if="sortedEntries[v.index].trace_id">
+                  <span class="muted">Trace ID:</span>
+                  <CorrelationIdChip kind="trace" :value="sortedEntries[v.index].trace_id!" pivot="events" class="ml-1" @click.stop />
+                </div>
+                <div v-if="sortedEntries[v.index].request_id">
+                  <span class="muted">Request ID:</span>
+                  <CorrelationIdChip kind="request" :value="sortedEntries[v.index].request_id!" pivot="audit" class="ml-1" @click.stop />
+                </div>
                 <div v-if="sortedEntries[v.index].source_ip"><span class="muted">Source IP:</span> <span class="font-mono">{{ sortedEntries[v.index].source_ip }}</span></div>
                 <div v-if="sortedEntries[v.index].user_agent"><span class="muted">User Agent:</span> {{ sortedEntries[v.index].user_agent }}</div>
                 <div v-if="sortedEntries[v.index].error_code"><span class="muted">Error Code:</span> <span class="font-mono text-red-700">{{ sortedEntries[v.index].error_code }}</span></div>

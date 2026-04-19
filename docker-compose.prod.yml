@@ -14,7 +14,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.38
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.39
     restart: unless-stopped
     depends_on:
       cycles-admin:
@@ -28,7 +28,7 @@ services:
     # Runtime-plane server. Release cadence is independent of dashboard +
     # cycles-server-admin — this tag intentionally lags the others. Only
     # bump when a new runtime-plane feature requires it.
-    image: ghcr.io/runcycles/cycles-server:0.1.25.13
+    image: ghcr.io/runcycles/cycles-server:0.1.25.15
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
@@ -48,8 +48,36 @@ services:
     networks:
       - cycles
 
+  cycles-events:
+    # Event-dispatch / webhook delivery worker. Consumes events from
+    # Redis and fans them out to registered webhook endpoints. Keep
+    # pinned to the version published alongside the current cycles-admin
+    # release — bump in lockstep with protocol revisions that affect
+    # WebhookDelivery. `.8` matches protocol v0.1.25.28 (trace_id /
+    # trace_flags / traceparent_inbound_valid).
+    image: ghcr.io/runcycles/cycles-server-events:0.1.25.8
+    restart: unless-stopped
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:-}
+      EVENT_TTL_DAYS: ${EVENT_TTL_DAYS:-90}
+      DELIVERY_TTL_DAYS: ${DELIVERY_TTL_DAYS:-14}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7980/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - cycles
+
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.30
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.32
     restart: unless-stopped
     environment:
       REDIS_HOST: redis

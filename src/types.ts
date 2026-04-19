@@ -138,6 +138,14 @@ export interface Event {
   data?: Record<string, unknown>
   correlation_id?: string
   request_id?: string
+  // cycles-governance-admin v0.1.25.27 / cycles-server-admin v0.1.25.31:
+  // W3C Trace Context-compatible correlation identifier. Links an event
+  // to the HTTP request that produced it, the audit entry written for
+  // that request, and sibling events. Server auto-populates from
+  // RequestContextHolder so any event emitted inside a servlet request
+  // carries it. Optional — older servers and non-HTTP-originated events
+  // (e.g. scheduled jobs) omit it. 32 lowercase hex chars.
+  trace_id?: string
 }
 
 export interface EventListResponse {
@@ -201,12 +209,31 @@ export interface WebhookDelivery {
   subscription_id?: string
   event_id: string
   event_type?: string
+  // status enum per cycles-governance-admin-v0.1.25 §WebhookDelivery:
+  // PENDING | SUCCESS | FAILED | RETRYING. Pre-fix the dashboard used
+  // 'DELIVERED' in its filter dropdown — that value was never emitted
+  // by the server so the filter silently matched zero rows.
   status: string
-  http_status?: number
+  // Spec field names. Pre-fix the dashboard read http_status /
+  // delivered_at which do not exist on the wire — HTTP Code column
+  // rendered '-' for every row and the failure reason was invisible.
+  response_status?: number
+  response_time_ms?: number
+  error_message?: string
+  next_retry_at?: string
   attempts: number
   attempted_at?: string
   created_at?: string
-  delivered_at?: string
+  completed_at?: string
+  // cycles-governance-admin v0.1.25.28 / cycles-server-admin v0.1.25.31:
+  // W3C Trace Context fields captured at dispatch time from the
+  // originating event. The sidecar reuses these when constructing the
+  // outbound `traceparent` header: trace_flags preserves inbound
+  // sampling when traceparent_inbound_valid is true, otherwise defaults
+  // to `01`. All three optional — pre-`.31` servers omit them.
+  trace_id?: string
+  trace_flags?: string
+  traceparent_inbound_valid?: boolean
 }
 
 export interface WebhookDeliveryListResponse {
@@ -502,6 +529,11 @@ export interface AuditLogEntry {
   resource_type?: string
   resource_id?: string
   metadata?: Record<string, unknown>
+  // cycles-governance-admin v0.1.25.27 / cycles-server-admin v0.1.25.31:
+  // W3C Trace Context correlation identifier. One trace_id per HTTP
+  // request — groups this audit entry with every event the request
+  // emitted and any outbound webhook deliveries. 32 lowercase hex chars.
+  trace_id?: string
 }
 
 export interface AuditLogListResponse {

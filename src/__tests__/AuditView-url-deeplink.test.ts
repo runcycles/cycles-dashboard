@@ -106,6 +106,10 @@ const QUERIES: Array<[string, Record<string, string>]> = [
   ['?status_band=5xx', { status_band: '5xx' }],
   ['?status_band=BOGUS (unknown value ignored)', { status_band: 'BOGUS' }],
   ['?tenant_id=acme&resource_type=tenant&status_band=errors (combo)', { tenant_id: 'acme', resource_type: 'tenant', status_band: 'errors' }],
+  // v0.1.25.39 — W3C Trace Context deep-link (admin v0.1.25.31 / protocol v0.1.25.28)
+  ['?trace_id=0123456789abcdef0123456789abcdef', { trace_id: '0123456789abcdef0123456789abcdef' }],
+  ['?request_id=req_abc123', { request_id: 'req_abc123' }],
+  ['?trace_id=abc...&tenant_id=acme (combo)', { trace_id: '0123456789abcdef0123456789abcdef', tenant_id: 'acme' }],
 ]
 
 describe('AuditView — URL deep-link smoke', () => {
