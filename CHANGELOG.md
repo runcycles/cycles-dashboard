@@ -88,6 +88,16 @@ dashboard UI slice.
   hand-rolled alert triangle and info circle now reuse `WarningIcon` +
   `InfoCircleIcon`; ApiKeysView's ambiguous "view perms" arrow swaps
   to `ChevronRightIcon`. Behavior unchanged; 742 tests green.
+- **Icon design-quality pass.** Stroke-width unified to `1.5` across
+  every outline icon (was mixed `1.5` / `2`) — matches modern
+  Heroicons v2 defaults, lighter and more balanced at 16–24px sizes.
+  Four icon paths upgraded to Heroicons v2 geometry: `RefreshIcon`
+  (arrow-path), `EyeIcon` / `EyeOffIcon` (refined curves + slash),
+  `CopyIcon` (document-duplicate). `Spinner` (`3`), `EmptyTrayIcon`
+  (`1`), and the signature `CopyJsonIcon` keep their intentional
+  weights. Three dead assets deleted: `public/icons.svg` (social-icon
+  sprite, never imported), `src/assets/hero.png`, `src/assets/vite.svg`
+  (Vite scaffold leftovers). No behavior change; 742 tests green.
 
 ## [0.1.25.39] — 2026-04-18
 

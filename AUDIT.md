@@ -91,6 +91,16 @@ Future icon edits (stroke-width tweak, dark-mode color adjustment, accessibility
 
 Side-effects: BulkActionResultDialog's "failed" glyph now reuses `WarningIcon` instead of its hand-rolled triangle; ApiKeysView's "view all permissions" button swaps the ambiguous trending-up arrow for `ChevronRightIcon` (semantically correct — it indicates "more detail"). The one remaining inline `<svg>` is Sidebar's nav-icon block, whose `d` path is data-driven from the `navItems` table; a shared component would need a `:d` prop and wouldn't reduce duplication. Documented inline. 742 tests green.
 
+**Icon design-quality pass (same-release polish).** Operator ask: *"can you pass icons, images, svgs and see if you can improve quality, look and feel, style."* Three moves:
+
+| Move | What | Why |
+|---|---|---|
+| Stroke-width unify | 14 outline icons at `2` → `1.5`. `Spinner` (`3`), `EmptyTrayIcon` (`1`), `CopyJsonIcon` (signature, `1.4`) keep intentional weights. | Matches modern Heroicons v2 defaults; lighter and more balanced at 16–24px sizes. Mixed `1.5` / `2` was a visible inconsistency once icons sat next to each other (theme toggle + logout at `1.5` vs refresh + search at `2` in the same chrome). |
+| Path upgrades to v2 geometry | `RefreshIcon` → arrow-path; `EyeIcon` / `EyeOffIcon` → v2 curves + slash; `CopyIcon` → document-duplicate. | v2 paths are more geometrically balanced than the v1 equivalents. Copy glyph specifically reads as "duplicate" (two overlapping sheets) instead of a single document with a folded corner. |
+| Dead asset deletion | `public/icons.svg` (social-icon sprite — bluesky/discord/github/x; never imported), `src/assets/hero.png`, `src/assets/vite.svg` (Vite scaffold leftovers). | `grep -r` confirmed zero references. Shrinks the build surface and the asset-audit surface. |
+
+No behavior change, no API change, no visible shift in glyph *identity*; only line-weight and curvature polish. 742 tests green; `npm run build` clean.
+
 **"Updated just now" header strip removed (same-release follow-up).** Operator ask: *"noticed at the top of some views 'Updated just now' but it's never anything else — what's the purpose if it never shows anything other than this text?"* Audit confirmed: every view polls at 15–60s, and `formatRelative` returns `"just now"` for anything under 60s, so the label resets before it can tick to `"1m ago"`.
 
 | Poll interval | View(s) | Observed label |
