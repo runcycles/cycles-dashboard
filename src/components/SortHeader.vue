@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import SortAscIcon from './icons/SortAscIcon.vue'
+import SortUnsortedIcon from './icons/SortUnsortedIcon.vue'
 
 // `as` prop added for V1 virtualization support (Phase 2b): virtualized
 // views build ARIA grids from divs rather than a semantic <table>, because
@@ -38,12 +40,8 @@ const tag = computed(() => props.as ?? 'th')
   >
     <span class="inline-flex items-center gap-1 whitespace-nowrap">
       {{ label }}
-      <svg v-if="activeColumn === column" class="w-3 h-3" :class="direction === 'desc' ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7" />
-      </svg>
-      <svg v-else class="w-3 h-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
-      </svg>
+      <SortAscIcon v-if="activeColumn === column" class="w-3 h-3" :class="direction === 'desc' ? 'rotate-180' : ''" />
+      <SortUnsortedIcon v-else class="w-3 h-3 text-gray-300" />
     </span>
   </component>
 </template>

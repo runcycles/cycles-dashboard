@@ -72,17 +72,22 @@ dashboard UI slice.
 
 ### Refactored
 
-- **Shared icon library at `src/components/icons/`.** Nine reusable SVG
-  components extracted from duplicated inline markup across the
-  dashboard: `CopyJsonIcon`, `DownloadIcon`, `CloseIcon`,
-  `ChevronRightIcon`, `BackArrowIcon`, `SearchIcon`, `CheckIcon`,
-  `Spinner`, `WarningIcon`. Replaced 32+ inline `<svg>` duplications
-  across views (ApiKeys, Budgets, Events, Audit, Overview, Reservations,
-  Tenants, TenantDetail, Webhooks, WebhookDetail) and components
-  (CommandPalette, ConfirmAction, EventTimeline, MaskedValue, Sidebar,
-  BulkActionPreviewDialog, BulkActionResultDialog). Behavior unchanged;
-  all 742 tests green. Future icon edits happen in one place instead of
-  fan-out across a dozen files.
+- **Shared icon library at `src/components/icons/`.** 24 reusable SVG
+  components — every inline glyph in the app now comes from one source
+  of truth (the only exception is the data-driven Sidebar nav-icon
+  whose `d` path is item-table-driven). Round 1 extracted 9 icons:
+  `CopyJsonIcon`, `DownloadIcon`, `CloseIcon`, `ChevronRightIcon`,
+  `BackArrowIcon`, `SearchIcon`, `CheckIcon`, `Spinner`, `WarningIcon`.
+  Round 2 (full-pass polish) added 15 more: `HamburgerIcon`,
+  `LogoutIcon`, `SunIcon`, `MoonIcon`, `RefreshIcon`, `SortAscIcon`,
+  `SortUnsortedIcon`, `ChevronDownIcon`, `KebabIcon`, `CopyIcon`,
+  `EyeIcon`, `EyeOffIcon`, `InfoCircleIcon`, `EmptyTrayIcon`,
+  `CheckCircleIcon`. Side-effects of the consolidation: the three
+  duplicate Copy glyphs (CorrelationIdChip, MaskedValue, inline copy
+  buttons) collapse to one canonical `CopyIcon`; BulkActionResultDialog's
+  hand-rolled alert triangle and info circle now reuse `WarningIcon` +
+  `InfoCircleIcon`; ApiKeysView's ambiguous "view perms" arrow swaps
+  to `ChevronRightIcon`. Behavior unchanged; 742 tests green.
 
 ## [0.1.25.39] — 2026-04-18
 

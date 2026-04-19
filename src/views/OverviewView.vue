@@ -6,6 +6,7 @@ import type { AdminOverviewResponse, ApiKey, AuditLogEntry, BudgetLedger } from 
 import PageHeader from '../components/PageHeader.vue'
 import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import WarningIcon from '../components/icons/WarningIcon.vue'
+import CheckCircleIcon from '../components/icons/CheckCircleIcon.vue'
 import { formatTime } from '../utils/format'
 import { toMessage } from '../utils/errors'
 import { filterExpiringKeys, type ExpiringKey } from '../utils/expiringKeys'
@@ -310,7 +311,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
         role="status"
         class="mb-4 px-4 py-3 rounded-lg border border-green-200 bg-green-50 dark:bg-green-950/40 dark:border-green-800 flex items-center gap-3"
       >
-        <svg class="w-5 h-5 text-green-600 dark:text-green-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" /></svg>
+        <CheckCircleIcon class="w-5 h-5 text-green-600 dark:text-green-400 shrink-0" />
         <p class="text-sm text-green-900 dark:text-green-200">
           <strong>All clear.</strong>
           No webhooks failing, no budgets near cap, no keys near expiry, no denials in the last hour.

@@ -26,6 +26,7 @@ import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import DownloadIcon from '../components/icons/DownloadIcon.vue'
 import CloseIcon from '../components/icons/CloseIcon.vue'
 import Spinner from '../components/icons/Spinner.vue'
+import ChevronRightIcon from '../components/icons/ChevronRightIcon.vue'
 import { formatDateTime } from '../utils/format'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
@@ -562,9 +563,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
               >
                 <span class="tabular-nums font-medium">{{ sortedKeys[v.index].permissions!.length }}</span>
                 <span class="text-xs">perm{{ sortedKeys[v.index].permissions!.length === 1 ? '' : 's' }}</span>
-                <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                </svg>
+                <ChevronRightIcon class="w-3 h-3" />
               </button>
               <span v-else class="text-gray-400">—</span>
             </div>

@@ -3,6 +3,7 @@ import { onMounted, onBeforeUnmount, ref } from 'vue'
 import Sidebar from './Sidebar.vue'
 import CommandPalette from './CommandPalette.vue'
 import { useCommandPalette } from '../composables/useCommandPalette'
+import HamburgerIcon from './icons/HamburgerIcon.vue'
 
 const sidebarOpen = ref(false)
 const palette = useCommandPalette()
@@ -57,9 +58,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
       <!-- Mobile header bar -->
       <div class="md:hidden flex items-center gap-3 table-cell bg-gray-900 text-white shrink-0">
         <button @click="sidebarOpen = true" aria-label="Open menu" class="cursor-pointer">
-          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-          </svg>
+          <HamburgerIcon class="w-5 h-5" />
         </button>
         <img src="/runcycles-logo.svg" alt="Cycles" class="w-6 h-6" />
         <span class="text-sm font-semibold">Cycles Admin</span>

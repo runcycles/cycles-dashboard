@@ -72,6 +72,25 @@ Newest at the top. Older entries preserved verbatim.
 
 Future icon edits (stroke-width tweak, dark-mode color adjustment, accessibility label) happen once instead of fan-out across a dozen files. 742 tests green.
 
+**Icon library full pass (same-release polish).** Operator ask: *"do a pass on all icons, svgs, etc and review, enhance for look and feel."* Audit surfaced 3 visual inconsistencies: (1) the Copy glyph was duplicated three times with three different drawings (CorrelationIdChip, MaskedValue, plus a variant inside CopyJsonIcon), (2) BulkActionResultDialog rolled its own alert-triangle and info-circle instead of reusing the shared `WarningIcon`, (3) 14 inline SVG glyphs still lived in consumer files. Extracted 15 more components for a total of 24:
+
+| Icon | First call site | Replaces |
+|---|---|---|
+| `HamburgerIcon` | AppLayout mobile header | inline 3-bar menu |
+| `LogoutIcon` | Sidebar logout button | inline arrow-out |
+| `SunIcon` / `MoonIcon` | Sidebar theme toggle | inline sun / moon |
+| `RefreshIcon` | RefreshButton | inline arrow-loop |
+| `SortAscIcon` / `SortUnsortedIcon` | SortHeader (all list views) | inline up-arrow + dual-arrow |
+| `ChevronDownIcon` | TimeRangePicker + RowActionsMenu labeled trigger | two inline chevrons (different viewBoxes) |
+| `KebabIcon` | RowActionsMenu trigger | inline three-circle ⋮ |
+| `CopyIcon` | CorrelationIdChip + MaskedValue | two inline copy glyphs (canonical) |
+| `EyeIcon` / `EyeOffIcon` | MaskedValue reveal/hide | two inline eye variants |
+| `InfoCircleIcon` | BulkActionResultDialog "skipped" | inline info circle |
+| `EmptyTrayIcon` | EmptyState | inline tray/inbox |
+| `CheckCircleIcon` | OverviewView "all clear" banner | inline success circle |
+
+Side-effects: BulkActionResultDialog's "failed" glyph now reuses `WarningIcon` instead of its hand-rolled triangle; ApiKeysView's "view all permissions" button swaps the ambiguous trending-up arrow for `ChevronRightIcon` (semantically correct — it indicates "more detail"). The one remaining inline `<svg>` is Sidebar's nav-icon block, whose `d` path is data-driven from the `navItems` table; a shared component would need a `:d` prop and wouldn't reduce duplication. Documented inline. 742 tests green.
+
 **"Updated just now" header strip removed (same-release follow-up).** Operator ask: *"noticed at the top of some views 'Updated just now' but it's never anything else — what's the purpose if it never shows anything other than this text?"* Audit confirmed: every view polls at 15–60s, and `formatRelative` returns `"just now"` for anything under 60s, so the label resets before it can tick to `"1m ago"`.
 
 | Poll interval | View(s) | Observed label |

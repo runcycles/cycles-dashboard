@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { RouterLink, type RouteLocationRaw } from 'vue-router'
+import ChevronDownIcon from './icons/ChevronDownIcon.vue'
+import KebabIcon from './icons/KebabIcon.vue'
 
 // Declarative row-level action menu (kebab ⋮). Replaces the inline
 // btn-row-* button flex patterns that inflated tables like ApiKeysView.
@@ -246,13 +248,9 @@ function onItemClick(item: RowActionItem) {
   >
     <template v-if="triggerLabel">
       {{ triggerLabel }}
-      <svg aria-hidden="true" class="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5l3 3 3-3" /></svg>
+      <ChevronDownIcon class="w-3 h-3" />
     </template>
-    <svg v-else aria-hidden="true" viewBox="0 0 16 16" class="w-4 h-4" fill="currentColor">
-      <circle cx="8" cy="3" r="1.4" />
-      <circle cx="8" cy="8" r="1.4" />
-      <circle cx="8" cy="13" r="1.4" />
-    </svg>
+    <KebabIcon v-else class="w-4 h-4" />
   </button>
 
   <Teleport v-if="open" to="body">

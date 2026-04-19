@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import CopyIcon from './icons/CopyIcon.vue'
 
 // Cross-surface correlation-id chip. Renders one of three identifiers
 // (trace_id, request_id, correlation_id) as a truncated monospace chip
@@ -99,9 +100,7 @@ async function pivot(e: Event) {
       :aria-label="`Copy ${labelKind}`"
     >
       <span v-if="copied" class="text-[10px] leading-none px-1">Copied</span>
-      <svg v-else class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-      </svg>
+      <CopyIcon v-else class="w-3 h-3" />
     </button>
   </span>
 </template>

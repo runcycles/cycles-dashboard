@@ -4,6 +4,8 @@ import { useFocusTrap } from '../composables/useFocusTrap'
 import { formatErrorCode } from '../utils/errorCodeMessages'
 import type { BulkActionRowOutcome } from '../types'
 import CheckIcon from './icons/CheckIcon.vue'
+import WarningIcon from './icons/WarningIcon.vue'
+import InfoCircleIcon from './icons/InfoCircleIcon.vue'
 
 // Per-row outcome dialog for filter-apply bulk actions. Opens after the
 // server returns a response with any non-empty failed[] or skipped[]
@@ -244,9 +246,7 @@ onUnmounted(() => {
             :class="failedOpen ? 'rotate-90' : ''"
             aria-hidden="true"
           >▶</span>
-          <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
+          <WarningIcon class="w-3.5 h-3.5 shrink-0" />
           <strong class="tabular-nums">{{ response.failed.length.toLocaleString() }}</strong>
           <span>failed</span>
         </summary>
@@ -303,9 +303,7 @@ onUnmounted(() => {
             :class="skippedOpen ? 'rotate-90' : ''"
             aria-hidden="true"
           >▶</span>
-          <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 8v4m0 4h.01M12 2a10 10 0 100 20 10 10 0 000-20z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
+          <InfoCircleIcon class="w-3.5 h-3.5 shrink-0" />
           <strong class="tabular-nums">{{ response.skipped.length.toLocaleString() }}</strong>
           <span>skipped</span>
         </summary>
