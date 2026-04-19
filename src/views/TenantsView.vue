@@ -27,6 +27,7 @@ import BulkActionResultDialog from '../components/BulkActionResultDialog.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { useBulkActionPreview } from '../composables/useBulkActionPreview'
 import { formatDate } from '../utils/format'
+import { writeClipboardJson } from '../utils/clipboard'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 import { formatBulkRequestError } from '../utils/errorCodeMessages'
@@ -476,6 +477,11 @@ async function copyTenantId(tenantId: string) {
   }
 }
 
+async function copyTenantJson(tenant: Tenant) {
+  if (await writeClipboardJson(tenant)) toast.success('Tenant JSON copied')
+  else toast.error('Copy failed — clipboard unavailable')
+}
+
 async function executeStatusAction() {
   if (!pendingStatusAction.value) return
   const { tenantId, action } = pendingStatusAction.value
@@ -839,6 +845,7 @@ const gridTemplate = computed(() =>
                 :items="[
                   { label: 'Activity', to: { name: 'audit', query: { tenant_id: sortedTenants[v.index].tenant_id } } },
                   { label: 'Copy tenant ID', onClick: () => copyTenantId(sortedTenants[v.index].tenant_id) },
+                  { label: 'Copy as JSON', onClick: () => copyTenantJson(sortedTenants[v.index]) },
                   { label: 'Reactivate', onClick: () => pendingStatusAction = { tenantId: sortedTenants[v.index].tenant_id, name: sortedTenants[v.index].name, action: 'ACTIVE' }, hidden: sortedTenants[v.index].status !== 'SUSPENDED' },
                   { separator: true },
                   { label: 'Suspend', onClick: () => pendingStatusAction = { tenantId: sortedTenants[v.index].tenant_id, name: sortedTenants[v.index].name, action: 'SUSPENDED' }, danger: true, hidden: sortedTenants[v.index].status !== 'ACTIVE' },

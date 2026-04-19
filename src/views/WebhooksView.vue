@@ -28,6 +28,7 @@ import BulkActionResultDialog from '../components/BulkActionResultDialog.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
+import { writeClipboardJson } from '../utils/clipboard'
 import { useToast } from '../composables/useToast'
 import { useBulkActionPreview } from '../composables/useBulkActionPreview'
 import { toMessage } from '../utils/errors'
@@ -35,6 +36,11 @@ import { formatBulkRequestError } from '../utils/errorCodeMessages'
 import type { WebhookBulkActionResponse } from '../types'
 
 const toast = useToast()
+
+async function copyWebhookJson(w: WebhookSubscription) {
+  if (await writeClipboardJson(w)) toast.success('Webhook JSON copied')
+  else toast.error('Copy failed — clipboard unavailable')
+}
 
 const router = useRouter()
 const route = useRoute()
@@ -815,6 +821,7 @@ const gridTemplate = computed(() =>
                 :items="[
                   { label: 'Activity', to: { name: 'audit', query: { resource_type: 'webhook', resource_id: sortedWebhooks[v.index].subscription_id } } },
                   { label: 'Edit', to: { name: 'webhook-detail', params: { id: sortedWebhooks[v.index].subscription_id }, query: { action: 'edit' } } },
+                  { label: 'Copy as JSON', onClick: () => copyWebhookJson(sortedWebhooks[v.index]) },
                   { label: 'Enable', onClick: () => pendingStatusAction = { id: sortedWebhooks[v.index].subscription_id, url: sortedWebhooks[v.index].url, action: 'ACTIVE' }, hidden: sortedWebhooks[v.index].status !== 'PAUSED' && sortedWebhooks[v.index].status !== 'DISABLED' },
                   { separator: true },
                   { label: 'Pause', onClick: () => pendingStatusAction = { id: sortedWebhooks[v.index].subscription_id, url: sortedWebhooks[v.index].url, action: 'PAUSED' }, danger: true, hidden: sortedWebhooks[v.index].status !== 'ACTIVE' },

@@ -111,7 +111,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
             :title="copiedEventId === events[v.index].event_id ? 'Copied!' : 'Copy row as JSON'"
           >
             <svg v-if="copiedEventId === events[v.index].event_id" aria-hidden="true" class="w-4 h-4 text-green-600" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10l4 4 8-8" /></svg>
-            <svg v-else aria-hidden="true" class="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="3" width="10" height="13" rx="1.5" /><path d="M4 6v9a2 2 0 0 0 2 2h7" /></svg>
+            <svg v-else aria-hidden="true" class="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="3" width="9" height="11" rx="1.5" /><rect x="4" y="6" width="9" height="11" rx="1.5" fill="currentColor" fill-opacity="0.1" /><path d="M7.5 10 q -0.8 0 -0.8 0.8 v 0.6 q 0 0.6 -0.6 0.7 q 0.6 0.1 0.6 0.7 v 0.6 q 0 0.8 0.8 0.8" stroke-width="1.1" /><path d="M9.5 10 q 0.8 0 0.8 0.8 v 0.6 q 0 0.6 0.6 0.7 q -0.6 0.1 -0.6 0.7 v 0.6 q 0 0.8 -0.8 0.8" stroke-width="1.1" /></svg>
             <span class="sr-only">{{ copiedEventId === events[v.index].event_id ? 'Copied!' : 'Copy JSON' }}</span>
           </button>
           <div class="grid grid-cols-2 gap-x-6 gap-y-1 mb-2 pr-8">

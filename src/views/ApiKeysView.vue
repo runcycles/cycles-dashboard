@@ -20,6 +20,7 @@ import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
+import { writeClipboardJson } from '../utils/clipboard'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import { formatDateTime } from '../utils/format'
@@ -122,6 +123,11 @@ async function copyKeyId(id: string) {
   } catch {
     toast.error('Copy failed — clipboard unavailable')
   }
+}
+
+async function copyApiKeyJson(k: KeyWithTenant) {
+  if (await writeClipboardJson(k)) toast.success('API key JSON copied')
+  else toast.error('Copy failed — clipboard unavailable')
 }
 
 function openEdit(k: KeyWithTenant) {
@@ -576,6 +582,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
                 :items="[
                   { label: 'Activity', to: { name: 'audit', query: { key_id: sortedKeys[v.index].key_id } } },
                   { label: 'Copy key ID', onClick: () => copyKeyId(sortedKeys[v.index].key_id) },
+                  { label: 'Copy as JSON', onClick: () => copyApiKeyJson(sortedKeys[v.index]) },
                   { label: 'Edit', onClick: () => openEdit(sortedKeys[v.index]), hidden: sortedKeys[v.index].status !== 'ACTIVE' },
                   { separator: true },
                   { label: 'Revoke', onClick: () => pendingRevoke = sortedKeys[v.index], danger: true, hidden: sortedKeys[v.index].status !== 'ACTIVE' },

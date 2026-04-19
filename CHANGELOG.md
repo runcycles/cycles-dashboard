@@ -34,6 +34,19 @@ UX work that does not advance spec alignment.
     Payload and 2-second check-mark confirmation unchanged. Same
     `aria-label="Copy full JSON for …"` selectors — screen-reader
     behavior preserved.
+  - **Icon redesign.** The panel-header icon is now a combined
+    copy-plus-JSON glyph (two overlapping document rectangles with
+    `{ }` braces inside the front sheet) instead of a generic
+    single-document clipboard. Signals "copy JSON" without relying
+    on tooltip hover.
+- **Copy as JSON is now available in every kebab-bearing list view.**
+  Common operator workflow is "paste this object definition to a
+  developer"; the kebab is the right home for it. Added to
+  TenantsView, TenantDetailView (API keys, policies), WebhooksView,
+  BudgetsView, ReservationsView, ApiKeysView, and WebhookDetailView's
+  subscription-header kebab. Payload is the full row object serialized
+  via `safeJsonStringify` (cycles- and BigInt-safe); toast confirms.
+  Shared helper at `src/utils/clipboard.ts` DRYs the pattern.
 
 ### Reclaimed footprint
 

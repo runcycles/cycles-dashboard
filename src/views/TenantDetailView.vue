@@ -17,6 +17,7 @@ import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
 import ScopeBuilder from '../components/ScopeBuilder.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
+import { writeClipboardJson } from '../utils/clipboard'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 import { rateLimitedBatch } from '../utils/rateLimitedBatch'
@@ -137,6 +138,16 @@ async function copyKeyId(keyId: string) {
   } catch {
     toast.error('Copy failed — clipboard unavailable')
   }
+}
+
+async function copyApiKeyJson(k: ApiKey) {
+  if (await writeClipboardJson(k)) toast.success('API key JSON copied')
+  else toast.error('Copy failed — clipboard unavailable')
+}
+
+async function copyPolicyJson(p: Policy) {
+  if (await writeClipboardJson(p)) toast.success('Policy JSON copied')
+  else toast.error('Copy failed — clipboard unavailable')
 }
 
 async function executeKeyRevoke() {
@@ -773,6 +784,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
                   :items="[
                     { label: 'Activity', to: { name: 'audit', query: { key_id: k.key_id } } },
                     { label: 'Copy key ID', onClick: () => copyKeyId(k.key_id) },
+                    { label: 'Copy as JSON', onClick: () => copyApiKeyJson(k) },
                     { label: 'Edit', onClick: () => openEditKey(k), hidden: k.status !== 'ACTIVE' },
                     { separator: true },
                     { label: 'Revoke', onClick: () => pendingKeyRevoke = k, danger: true, hidden: k.status !== 'ACTIVE' },
@@ -802,6 +814,7 @@ const { refresh, isLoading, lastUpdated } = usePolling(async () => {
                   :aria-label="`Actions for policy ${p.name || p.policy_id}`"
                   :items="[
                     { label: 'Activity', to: { name: 'audit', query: { resource_type: 'policy', resource_id: p.policy_id } } },
+                    { label: 'Copy as JSON', onClick: () => copyPolicyJson(p) },
                     { label: 'Edit', onClick: () => openEditPolicy(p) },
                   ]"
                 />

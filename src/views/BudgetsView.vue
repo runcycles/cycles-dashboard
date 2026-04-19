@@ -23,6 +23,7 @@ import EventTimeline from '../components/EventTimeline.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
+import { writeClipboardJson } from '../utils/clipboard'
 import BulkActionPreviewDialog from '../components/BulkActionPreviewDialog.vue'
 import BulkActionResultDialog from '../components/BulkActionResultDialog.vue'
 import { useBulkActionPreview } from '../composables/useBulkActionPreview'
@@ -283,6 +284,11 @@ async function copyScope(scope: string) {
   } catch {
     toast.error('Copy failed — clipboard unavailable')
   }
+}
+
+async function copyBudgetJson(b: BudgetLedger) {
+  if (await writeClipboardJson(b)) toast.success('Budget JSON copied')
+  else toast.error('Copy failed — clipboard unavailable')
 }
 
 async function executeBudgetAction() {
@@ -1290,6 +1296,7 @@ function rowTenantId(b: BudgetLedger): string {
                   :items="[
                     { label: 'Activity', to: { name: 'audit', query: { resource_type: 'budget', resource_id: sortedBudgets[v.index].scope } } },
                     { label: 'Copy scope', onClick: () => copyScope(sortedBudgets[v.index].scope) },
+                    { label: 'Copy as JSON', onClick: () => copyBudgetJson(sortedBudgets[v.index]) },
                     { label: 'Fund', onClick: () => openFund(sortedBudgets[v.index]), hidden: sortedBudgets[v.index].status !== 'ACTIVE' },
                     { label: 'Unfreeze', onClick: () => requestFreeze(sortedBudgets[v.index].scope, sortedBudgets[v.index].unit, 'unfreeze'), hidden: sortedBudgets[v.index].status !== 'FROZEN' },
                     { separator: true },

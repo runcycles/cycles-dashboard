@@ -30,6 +30,7 @@ import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import FormDialog from '../components/FormDialog.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
+import { writeClipboardJson } from '../utils/clipboard'
 import { formatDateTime, formatRelative } from '../utils/format'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
@@ -266,6 +267,11 @@ async function copyReservationId(id: string) {
   }
 }
 
+async function copyReservationJson(r: ReservationSummary) {
+  if (await writeClipboardJson(r)) toast.success('Reservation JSON copied')
+  else toast.error('Copy failed — clipboard unavailable')
+}
+
 async function submitRelease() {
   if (!pendingRelease.value || releaseLoading.value) return
   releaseError.value = ''
@@ -478,6 +484,7 @@ const gridTemplate = computed(() =>
                 :items="[
                   { label: 'Activity', to: { name: 'audit', query: { resource_id: sortedReservations[v.index].reservation_id } } },
                   { label: 'Copy reservation ID', onClick: () => copyReservationId(sortedReservations[v.index].reservation_id) },
+                  { label: 'Copy as JSON', onClick: () => copyReservationJson(sortedReservations[v.index]) },
                   { separator: true },
                   { label: 'Force release', onClick: () => openRelease(sortedReservations[v.index]), danger: true, hidden: sortedReservations[v.index].status !== 'ACTIVE' },
                 ]"

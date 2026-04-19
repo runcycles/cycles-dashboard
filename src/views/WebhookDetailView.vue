@@ -390,6 +390,15 @@ async function copyDeliveryJson(d: WebhookDelivery) {
     toast.error('Copy failed — clipboard permission denied')
   }
 }
+async function copySubscriptionJson() {
+  if (!webhook.value) return
+  try {
+    await navigator.clipboard.writeText(safeJsonStringify(webhook.value))
+    toast.success('Subscription JSON copied')
+  } catch {
+    toast.error('Copy failed — clipboard permission denied')
+  }
+}
 async function copyDeliveryId(d: WebhookDelivery) {
   try {
     await navigator.clipboard.writeText(d.delivery_id)
@@ -497,6 +506,7 @@ watch(exportError, (v) => { if (v) error.value = v })
                 { label: 'Edit', onClick: openEdit },
                 { label: 'Rotate Secret', onClick: openRotate },
                 { label: 'Replay', onClick: () => { showReplay = true } },
+                { label: 'Copy as JSON', onClick: () => copySubscriptionJson() },
                 { label: 'Reset & Re-enable', onClick: () => { pendingAction = 'reset' }, hidden: !((webhook.consecutive_failures ?? 0) > 0 && webhook.status !== 'ACTIVE') },
                 { label: 'Enable', onClick: () => { pendingAction = 'ACTIVE' }, hidden: webhook.status !== 'DISABLED' && webhook.status !== 'PAUSED' },
                 { separator: true },

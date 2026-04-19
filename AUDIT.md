@@ -38,14 +38,23 @@ Newest at the top. Older entries preserved verbatim.
 
 **Footprint reclaimed.** 48px per delivery row on WebhookDetailView × N visible rows; one ~50px footer row per expansion on three other views.
 
+**Follow-up (same release) — operator feedback mid-review.**
+
+| Ask | Response |
+|---|---|
+| "Icon is generic, requires a tooltip to know what it does" | Redesigned glyph: overlapping document rectangles (universal *copy* visual) with `{ }` curly braces inside the front sheet (universal *JSON* visual). Self-signalling without hover. Applied to all three Track-2 surfaces. |
+| "Every view where we have a kebab should have Copy JSON — common use case is sharing an object definition with a developer" | Added **Copy as JSON** to all seven RowActionsMenu call sites that lacked it: TenantsView, TenantDetailView (API keys + policies), WebhooksView, BudgetsView, ReservationsView, ApiKeysView, and WebhookDetailView's subscription-header kebab. |
+
+**Shared helper.** New `src/utils/clipboard.ts` — `writeClipboardText(value)` and `writeClipboardJson(obj)` both return `Promise<boolean>` (true on success, false on denied permission / missing API). Callers `if (await …) toast.success(…) else toast.error(…)`. DRYs the duplicate try/catch blocks and gives a single test surface for clipboard failure modes.
+
 **Implementation notes.**
 
 - Reused `RowActionsMenu.vue` (v0.1.25.29) on WebhookDetailView — zero API change. Discriminated-union `RowActionItem[]` accepts the three `onClick` entries as-is.
-- Track 2 icon button is inline SVG (clipboard / checkmark swap) with `<span class="sr-only">Copy JSON</span>` so `.text()` selector asserts still work — no test-structure churn on EventsView/AuditView/EventTimeline.
+- Track 2 icon button is inline SVG (copy-plus-JSON glyph / checkmark swap) with `<span class="sr-only">Copy JSON</span>` so `.text()` selector asserts still work — no test-structure churn on EventsView/AuditView/EventTimeline.
 - WebhookDetailView dropped the `copiedDeliveryId` ref + timer (dead code once the label swap goes to a toast).
 - `deliveryGridTemplate`: trailing column `88px → 40px`. Actions header collapsed to `sr-only` since a 40px cell can't hold the word "Actions".
 
-**Validation gates.** `npm run typecheck` / `npm run test` (735 passed) / `npm run build` clean. New WebhookDetailView kebab test exercises all three kebab items and asserts the correct payload per item.
+**Validation gates.** `npm run typecheck` / `npm run test` / `npm run build` clean. New `clipboard.test.ts` covers the helper (success, denied, missing API, cycles, BigInt). WebhookDetailView kebab test exercises all three delivery-row items and asserts the correct payload per item.
 
 ### 2026-04-18 — v0.1.25.39 follow-up: ecosystem baseline rollup (admin `.31 → .32`, server `.13 → .15`, events `:latest → .8`)
 
