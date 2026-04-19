@@ -15,6 +15,29 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.42] — 2026-04-19
+
+### Security
+
+- **Base-image bump unblocks release pipeline.** Trivy (gate on
+  `HIGH,CRITICAL` with `ignore-unfixed: true`) flagged 57 unique
+  fixed-upstream CVEs against the Alpine 3.21.3 layer of
+  `nginx:1.27-alpine` — blocking the push step on both v0.1.25.40
+  and v0.1.25.41 (tags exist upstream; docker images were **never
+  published** for those two versions). Top 3 critical: CVE-2025-15467
+  (openssl RCE, CVSS 9.5), CVE-2025-49794 / CVE-2025-49796 (libxml2
+  UAF / type-confusion DoS, CVSS 9.5). Remaining 54 spanned
+  libpng / musl / zlib / libexpat / curl / busybox / c-ares.
+- **Fix:** bump serve stage `nginx:1.27-alpine` → `nginx:1.29-alpine`
+  (Alpine 3.23.4, 0 HIGH/CRITICAL via Trivy local scan) and build
+  stage `node:20.19-alpine` → `node:20.20-alpine`. Operators pinning
+  `0.1.25.40` or `0.1.25.41` must re-pin to `0.1.25.42` — the
+  earlier tags resolve to absent image manifests.
+
+No source / behavior change beyond the base-image bump. All dashboard
+features ship unchanged from v0.1.25.41 (vue-router 5, shared icon
+library, Copy JSON two-track relocation).
+
 ## [0.1.25.41] — 2026-04-19
 
 ### Updated

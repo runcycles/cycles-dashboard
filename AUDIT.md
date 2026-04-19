@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.41 (2026-04-19)
+**Current release:** v0.1.25.42 (2026-04-19)
 
 ## Baseline requirements
 
@@ -16,6 +16,26 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-19 — v0.1.25.42: base-image bump unblocks release pipeline
+
+**Trigger.** v0.1.25.40 and v0.1.25.41 release workflows both failed at the Trivy vulnerability-scan step (`exit-code: 1` on `HIGH,CRITICAL` with `ignore-unfixed: true`) — the push step was skipped, so neither docker image exists upstream despite the git tags. Root cause: the Trivy DB refresh between v0.1.25.39 (succeeded 14h earlier) and v0.1.25.40 surfaced fixed-upstream CVEs in the Alpine 3.21.3 layer shipped by `nginx:1.27-alpine`.
+
+**CVE breakdown** (57 unique, extracted from uploaded SARIF for run 24630627382):
+
+| Severity | Count | Representative |
+|---|---|---|
+| CRITICAL (CVSS ≥9) | 3 | CVE-2025-15467 (openssl RCE), CVE-2025-49794 / CVE-2025-49796 (libxml2) |
+| HIGH (CVSS 7–8.9) | 18 | libpng × 6, openssl × 2, libxml2 × 2, musl, libexpat, zlib |
+| MEDIUM (reported HIGH by distro) | 29 | mostly openssl follow-on, curl, c-ares, busybox |
+
+**Fix.** Serve stage `nginx:1.27-alpine` (Alpine 3.21.3) → `nginx:1.29-alpine` (Alpine 3.23.4, 0 HIGH/CRITICAL via local `trivy image` scan). Build stage `node:20.19-alpine` → `node:20.20-alpine` (also Alpine 3.23.4) for consistency; build stage is discarded so this is cosmetic for the Trivy gate but keeps local dev on the same Alpine version as production.
+
+**No source / behavior change.** All v0.1.25.41 features (vue-router 5, shared icon library, Copy JSON two-track relocation) ship unchanged. Operators pinning `0.1.25.40` or `0.1.25.41` must re-pin to `0.1.25.42` — the earlier tags resolve to absent image manifests.
+
+**Why bump to current rather than loosen the Trivy gate.** `ignore-unfixed: true` is already the right posture — it means every flagged CVE has an upstream patch. Loosening to `severity: CRITICAL` only would silence the 18 HIGH without actually fixing anything. Base-image rotation is the intended remediation path for supply-chain findings on a static-asset serve stage.
+
+**Follow-up to consider.** Automate Trivy scans on `main` pushes (not just tag workflows) so CVE surface is visible continuously rather than only at release-cut time. Out of scope for this patch.
 
 ### 2026-04-19 — v0.1.25.41: dependency refresh (vue-router 5 major + 4 patches)
 
