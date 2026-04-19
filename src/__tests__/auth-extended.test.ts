@@ -167,7 +167,12 @@ describe('auth store — checkTimeout()', () => {
     const auth = useAuthStore()
     await auth.login('test-key')
 
+    // Freeze time. Without this the wall-clock advances between capturing
+    // `now` and `checkTimeout()`'s own Date.now(), so the gap silently
+    // exceeds IDLE_TIMEOUT_MS on slow CI runners and the strict-boundary
+    // assertion flakes.
     const now = Date.now()
+    vi.spyOn(Date, 'now').mockReturnValue(now)
     // Exactly at boundary — store uses `>` (strict), so this should NOT time out.
     sessionStorage.setItem('cycles_last_activity', String(now - (30 * 60 * 1000)))
 
