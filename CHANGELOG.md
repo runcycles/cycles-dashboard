@@ -15,6 +15,29 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.41] — 2026-04-19
+
+### Updated
+
+- **Dependency bumps** (Dependabot #106–#110):
+  - `vue-router` **4.6.4 → 5.0.4** (major). No behavior change in this
+    dashboard: the app uses only stable APIs (`createRouter`,
+    `createWebHistory` / `createMemoryHistory`, `useRoute`,
+    `useRouter`, `RouterLink`, `RouteLocationRaw`). The v5 breaking
+    changes are in experimental data-loaders and auto-routes / file-
+    based routing — neither in use here. Tested locally and in CI:
+    typecheck clean, 742 tests green, build clean.
+  - `@tanstack/vue-virtual` 3.13.23 → 3.13.24 (patch).
+  - `vite` 8.0.7 → 8.0.8 (dev, patch).
+  - `@vitejs/plugin-vue` 6.0.5 → 6.0.6 (dev, patch).
+  - `github/codeql-action` 3 → 4 (GitHub Actions major; GitHub ships
+    v3 and v4 in parallel with equivalent features — the bump is a
+    track move, not a behavior change).
+
+No protocol, admin, server, or events-server change. Pure dependency
+refresh; ecosystem baseline (cycles-server-admin `.32`, cycles-server
+`.15`, cycles-server-events `.8`) unchanged from v0.1.25.39.
+
 ## [0.1.25.40] — 2026-04-19
 
 ### Changed

@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.40 (2026-04-19)
+**Current release:** v0.1.25.41 (2026-04-19)
 
 ## Baseline requirements
 
@@ -16,6 +16,24 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-19 — v0.1.25.41: dependency refresh (vue-router 5 major + 4 patches)
+
+**Trigger.** Five open Dependabot PRs on top of v0.1.25.40 — one major (`vue-router` 4→5), three patches (`vite`, `@vitejs/plugin-vue`, `@tanstack/vue-virtual`), and one GitHub Actions major (`codeql-action` v3→v4). Rolled into a single release to keep the changelog narrative coherent.
+
+**vue-router 4 → 5 risk review.** The v5 release notes' breaking changes are all in **experimental** surfaces: the new data-loaders API (`NavigationResult` / `reroute` / `selectNavigationResult` / `miss`) and auto-routes / file-based routing. Dashboard grep confirmed zero usage of either — every import resolves to the stable surface (`createRouter`, `createWebHistory`, `createMemoryHistory`, `useRoute`, `useRouter`, `RouterLink`, `RouteLocationRaw`). Local dry-run on the PR branch (`npm install && npm run typecheck && npm run test && npm run build`) passed cleanly before admin-merge.
+
+| Package | Old → New | Kind | Risk |
+|---|---|---|---|
+| `vue-router` | 4.6.4 → **5.0.4** | dep major | low — no experimental API usage |
+| `@tanstack/vue-virtual` | 3.13.23 → 3.13.24 | dep patch | trivial |
+| `vite` | 8.0.7 → 8.0.8 | dev-dep patch | trivial |
+| `@vitejs/plugin-vue` | 6.0.5 → 6.0.6 | dev-dep patch | trivial |
+| `github/codeql-action` | 3 → 4 | workflow major | low — GitHub ships v3 + v4 in parallel with equivalent features |
+
+**Merge order** (to keep main green on every step): `vite` → `vue-router` → `vue-virtual` → `codeql-action` → `plugin-vue`. Dependabot auto-rebased the remaining PRs after each merge; one conflict on `plugin-vue` was resolved by `@dependabot recreate`. Final main: typecheck clean, 742 tests green, build clean, `npm audit` reports 0 vulnerabilities.
+
+**No protocol / admin / server / events-server change.** Ecosystem baseline unchanged from v0.1.25.39 (cycles-server-admin `.32`, cycles-server `.15`, cycles-server-events `.8`).
 
 ### 2026-04-19 — v0.1.25.40: Copy JSON two-track relocation (kebab for flat rows, icon for expanded panels)
 
