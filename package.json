@@ -19,7 +19,7 @@
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
-    "@tanstack/vue-virtual": "^3.13.23",
+    "@tanstack/vue-virtual": "^3.13.24",
     "pinia": "^3.0.4",
     "vue": "^3.5.32",
     "vue-router": "^5.0.4"
