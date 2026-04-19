@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useFocusTrap } from '../composables/useFocusTrap'
 import { formatErrorCode } from '../utils/errorCodeMessages'
 import type { BulkActionRowOutcome } from '../types'
+import CheckIcon from './icons/CheckIcon.vue'
 
 // Per-row outcome dialog for filter-apply bulk actions. Opens after the
 // server returns a response with any non-empty failed[] or skipped[]
@@ -190,9 +191,7 @@ onUnmounted(() => {
             :class="succeededOpen ? 'rotate-90' : ''"
             aria-hidden="true"
           >▶</span>
-          <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
+          <CheckIcon class="w-3.5 h-3.5 shrink-0" />
           <strong class="tabular-nums">{{ response.succeeded.length.toLocaleString() }}</strong>
           <span>succeeded</span>
         </summary>

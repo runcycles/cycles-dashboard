@@ -2,6 +2,7 @@
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useFocusTrap } from '../composables/useFocusTrap'
 import type { PreviewSample } from '../composables/useBulkActionPreview'
+import Spinner from './icons/Spinner.vue'
 
 // O1 (UI/UX P0): operator-facing preview before a filter-apply bulk
 // action commits. Mirrors ConfirmAction's a11y wiring (focus trap, focus
@@ -112,10 +113,7 @@ const SERVER_MAX = props.serverMaxPerRequest ?? 500
         aria-live="polite"
         class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300 mb-3"
       >
-        <svg class="w-4 h-4 animate-spin shrink-0" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-opacity="0.25" />
-          <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" stroke-width="3" />
-        </svg>
+        <Spinner class="w-4 h-4 shrink-0" />
         <span>Counting matches… {{ count }} found so far</span>
       </div>
 
@@ -201,7 +199,7 @@ const SERVER_MAX = props.serverMaxPerRequest ?? 500
             : 'bg-gray-900 hover:bg-gray-800 text-white dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-300'"
           class="px-3 py-1.5 text-sm rounded cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-2"
         >
-          <svg v-if="submitting" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-opacity="0.25" /><path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" stroke-width="3" /></svg>
+          <Spinner v-if="submitting" class="w-3.5 h-3.5" />
           <template v-if="submitting">{{ actionVerb }}…</template>
           <template v-else-if="loading">Counting…</template>
           <template v-else-if="count === 0">{{ actionVerb }}</template>

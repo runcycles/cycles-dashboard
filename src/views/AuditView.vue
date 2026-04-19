@@ -8,7 +8,9 @@ import { useListExport } from '../composables/useListExport'
 import { ERROR_CODES } from '../types'
 import type { AuditLogEntry } from '../types'
 import PageHeader from '../components/PageHeader.vue'
-import CopyJsonIcon from '../components/CopyJsonIcon.vue'
+import CopyJsonIcon from '../components/icons/CopyJsonIcon.vue'
+import DownloadIcon from '../components/icons/DownloadIcon.vue'
+import ChevronRightIcon from '../components/icons/ChevronRightIcon.vue'
 import MaskedValue from '../components/MaskedValue.vue'
 import TenantLink from '../components/TenantLink.vue'
 import SortHeader from '../components/SortHeader.vue'
@@ -369,11 +371,11 @@ function measureRow(el: Element | { $el?: Element } | null) {
     >
       <template #actions>
         <button @click="confirmExport('csv')" :disabled="loading || entries.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 dark:hover:text-gray-200 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed">
-          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          <DownloadIcon class="w-3.5 h-3.5" />
           Export CSV
         </button>
         <button @click="confirmExport('json')" :disabled="loading || entries.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 dark:hover:text-gray-200 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed">
-          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          <DownloadIcon class="w-3.5 h-3.5" />
           Export JSON
         </button>
       </template>
@@ -619,9 +621,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
                   class="p-0.5 -ml-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-400"
                   @click.stop="toggleExpanded(sortedEntries[v.index].log_id)"
                 >
-                  <svg class="w-3.5 h-3.5 transition-transform" :class="expanded.has(sortedEntries[v.index].log_id) ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-                  </svg>
+                  <ChevronRightIcon class="w-3.5 h-3.5 transition-transform" :class="expanded.has(sortedEntries[v.index].log_id) ? 'rotate-90' : ''" />
                 </button>
               </div>
               <div role="cell" class="table-cell muted whitespace-nowrap text-xs" :title="new Date(sortedEntries[v.index].timestamp).toISOString()">{{ formatDateTime(sortedEntries[v.index].timestamp) }}</div>

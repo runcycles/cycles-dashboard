@@ -56,6 +56,22 @@ Newest at the top. Older entries preserved verbatim.
 
 **Validation gates.** `npm run typecheck` / `npm run test` / `npm run build` clean. New `clipboard.test.ts` covers the helper (success, denied, missing API, cycles, BigInt). WebhookDetailView kebab test exercises all three delivery-row items and asserts the correct payload per item.
 
+**Icon library extraction (same-release follow-up).** Operator ask: *"make sure the whole dash uses same approach — all images, icons etc should be sep and shared. no copying."* Created `src/components/icons/` with nine reusable SFCs and replaced 32+ inline SVG duplications.
+
+| Icon | Replaces | Call sites |
+|---|---|---|
+| `CopyJsonIcon` | Composite copy+JSON glyph | EventsView, AuditView, EventTimeline (Track-2 surfaces) |
+| `DownloadIcon` | Export button glyph | 8 list views × 2 states (idle + loading) |
+| `CloseIcon` | Dialog dismiss X | ApiKeys, Budgets, Tenants, Webhooks secrets dialogs |
+| `ChevronRightIcon` | Row expand arrow | Events, Audit, EventTimeline |
+| `BackArrowIcon` | Detail-view back arrow | Tenants, TenantDetail, Budgets, WebhookDetail |
+| `SearchIcon` | Command-palette + sidebar search | Sidebar, CommandPalette |
+| `CheckIcon` | Copied / success checkmark | MaskedValue, BulkActionResultDialog |
+| `Spinner` | Loading indicator | ApiKeys, Budgets, ConfirmAction, BulkActionPreviewDialog (×2) |
+| `WarningIcon` | Alert triangle | OverviewView (×7 alert cards) |
+
+Future icon edits (stroke-width tweak, dark-mode color adjustment, accessibility label) happen once instead of fan-out across a dozen files. 742 tests green.
+
 ### 2026-04-18 — v0.1.25.39 follow-up: ecosystem baseline rollup (admin `.31 → .32`, server `.13 → .15`, events `:latest → .8`)
 
 All three server-side components shipped additive patch releases on the same day. Rolling them into the v0.1.25.39 compose baseline to keep the dashboard's shipped stack coherent with the trace-context feature this release introduces.

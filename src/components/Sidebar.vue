@@ -4,6 +4,7 @@ import { useAuthStore } from '../stores/auth'
 import { useRouter, useRoute } from 'vue-router'
 import { useDarkMode } from '../composables/useDarkMode'
 import { useCommandPalette } from '../composables/useCommandPalette'
+import SearchIcon from './icons/SearchIcon.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -69,9 +70,7 @@ function logout() {
         aria-label="Find tenant (press Command K or Control K)"
         class="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-gray-400 bg-gray-800/60 hover:bg-gray-800 rounded transition-colors cursor-pointer"
       >
-        <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 10a7 7 0 11-14 0 7 7 0 0114 0z" />
-        </svg>
+        <SearchIcon class="w-3.5 h-3.5 shrink-0" />
         <span class="flex-1 text-left">Find tenant</span>
         <kbd class="text-[10px] text-gray-300 border border-gray-600 rounded px-1">{{ isMac ? '⌘K' : 'Ctrl K' }}</kbd>
       </button>

@@ -60,6 +60,20 @@ UX work that does not advance spec alignment.
 No protocol, admin, server, or events-server version change. Pure
 dashboard UI slice.
 
+### Refactored
+
+- **Shared icon library at `src/components/icons/`.** Nine reusable SVG
+  components extracted from duplicated inline markup across the
+  dashboard: `CopyJsonIcon`, `DownloadIcon`, `CloseIcon`,
+  `ChevronRightIcon`, `BackArrowIcon`, `SearchIcon`, `CheckIcon`,
+  `Spinner`, `WarningIcon`. Replaced 32+ inline `<svg>` duplications
+  across views (ApiKeys, Budgets, Events, Audit, Overview, Reservations,
+  Tenants, TenantDetail, Webhooks, WebhookDetail) and components
+  (CommandPalette, ConfirmAction, EventTimeline, MaskedValue, Sidebar,
+  BulkActionPreviewDialog, BulkActionResultDialog). Behavior unchanged;
+  all 742 tests green. Future icon edits happen in one place instead of
+  fan-out across a dozen files.
+
 ## [0.1.25.39] — 2026-04-18
 
 ### Fixed

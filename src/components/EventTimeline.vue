@@ -4,7 +4,8 @@ import { useVirtualizer } from '@tanstack/vue-virtual'
 import type { Event } from '../types'
 import TenantLink from './TenantLink.vue'
 import CorrelationIdChip from './CorrelationIdChip.vue'
-import CopyJsonIcon from './CopyJsonIcon.vue'
+import CopyJsonIcon from './icons/CopyJsonIcon.vue'
+import ChevronRightIcon from './icons/ChevronRightIcon.vue'
 import { formatDateTime } from '../utils/format'
 import { safeJsonStringify } from '../utils/safe'
 
@@ -96,9 +97,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
           @keydown.space.prevent="toggle(events[v.index].event_id)"
           :aria-expanded="expanded.has(events[v.index].event_id)"
         >
-          <svg class="w-3 h-3 muted shrink-0 transition-transform" :class="expanded.has(events[v.index].event_id) ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-          </svg>
+          <ChevronRightIcon class="w-3 h-3 muted shrink-0 transition-transform" :class="expanded.has(events[v.index].event_id) ? 'rotate-90' : ''" />
           <span class="font-mono text-xs text-gray-700 flex-1 min-w-0 truncate" :title="events[v.index].event_type">{{ events[v.index].event_type }}</span>
           <span class="bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 px-1.5 py-0.5 rounded text-xs shrink-0">{{ events[v.index].category }}</span>
           <span class="muted-sm shrink-0 whitespace-nowrap" :title="new Date(events[v.index].timestamp).toISOString()">{{ formatDateTime(events[v.index].timestamp) }}</span>
