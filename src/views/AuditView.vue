@@ -625,7 +625,10 @@ function measureRow(el: Element | { $el?: Element } | null) {
                 </button>
               </div>
               <div role="cell" class="table-cell muted whitespace-nowrap text-xs" :title="new Date(sortedEntries[v.index].timestamp).toISOString()">{{ formatDateTime(sortedEntries[v.index].timestamp) }}</div>
-              <div role="cell" class="table-cell font-mono text-xs truncate" :title="sortedEntries[v.index].operation">{{ sortedEntries[v.index].operation }}</div>
+              <div role="cell" class="table-cell font-mono text-xs truncate flex items-center gap-1.5 min-w-0" :title="sortedEntries[v.index].operation">
+                <span class="truncate">{{ sortedEntries[v.index].operation }}</span>
+                <span v-if="sortedEntries[v.index].operation === 'tenant_close_cascade'" class="bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 px-1.5 py-0.5 rounded text-[0.65rem] font-sans shrink-0" title="Emitted as part of a tenant-close cascade (spec v0.1.25.29 Rule 1)">cascade</span>
+              </div>
               <div role="cell" class="table-cell text-xs truncate">
                 <span v-if="sortedEntries[v.index].resource_type" class="bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 px-1.5 py-0.5 rounded">{{ sortedEntries[v.index].resource_type }}</span>
                 <span v-if="sortedEntries[v.index].resource_id" class="ml-1 font-mono muted" :title="sortedEntries[v.index].resource_id">{{ sortedEntries[v.index].resource_id }}</span>

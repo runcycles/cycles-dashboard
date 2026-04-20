@@ -38,6 +38,20 @@ describe('formatErrorCode — per-row', () => {
     )
   })
 
+  // Rule 2 of spec v0.1.25.29 CASCADE SEMANTICS — the race path when a
+  // stale tab attempts to mutate an object whose owning tenant was just
+  // closed. The canonical prose must frame the ownership relationship so
+  // operators don't think the specific row is broken.
+  it('TENANT_CLOSED without message renders the canonical read-only prose', () => {
+    expect(formatErrorCode('TENANT_CLOSED')).toBe('Tenant is closed — this object is read-only.')
+  })
+
+  it('TENANT_CLOSED with message parenthesizes server detail', () => {
+    expect(formatErrorCode('TENANT_CLOSED', 'tenant tenant-42 closed at 2026-04-20T10:12:00Z')).toBe(
+      'Tenant is closed — this object is read-only (tenant tenant-42 closed at 2026-04-20T10:12:00Z)',
+    )
+  })
+
   // Forward-compat: a code the catalogue has never seen (e.g. a future
   // spec addition) must render as `code: message` so operators see the
   // new code verbatim and can paste it into audit filters.

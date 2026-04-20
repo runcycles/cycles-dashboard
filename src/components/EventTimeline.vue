@@ -99,6 +99,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
         >
           <ChevronRightIcon class="w-3 h-3 muted shrink-0 transition-transform" :class="expanded.has(events[v.index].event_id) ? 'rotate-90' : ''" />
           <span class="font-mono text-xs text-gray-700 flex-1 min-w-0 truncate" :title="events[v.index].event_type">{{ events[v.index].event_type }}</span>
+          <span v-if="events[v.index].event_type.endsWith('_VIA_TENANT_CASCADE')" class="bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 px-1.5 py-0.5 rounded text-xs shrink-0" title="Emitted as part of a tenant-close cascade (spec v0.1.25.29 Rule 1)">tenant cascade</span>
           <span class="bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 px-1.5 py-0.5 rounded text-xs shrink-0">{{ events[v.index].category }}</span>
           <span class="muted-sm shrink-0 whitespace-nowrap" :title="new Date(events[v.index].timestamp).toISOString()">{{ formatDateTime(events[v.index].timestamp) }}</span>
         </div>

@@ -15,6 +15,70 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.43] — 2026-04-20
+
+### Added
+
+- **Closed-tenant tombstone + cascade preview** — consumes governance
+  spec v0.1.25.31 CASCADE SEMANTICS (Rule 1: tenant-close cascades
+  owned objects into terminal states — Mode A atomic or Mode B
+  flip-first-with-guarded-cascade, per spec v0.1.25.31; Rule 2:
+  mutations on a closed tenant's children return 409 `TENANT_CLOSED`
+  regardless of cascade mode). Requires admin image `0.1.25.36` —
+  compose pins bumped in lockstep. The v0.1.25.30 spec widened Rule 2
+  declarations to all mutating ops; admin v0.1.25.36 completed Rule 2
+  wire-up on policies, api-keys, webhook-admin create/update/delete/
+  test/replay, and per-row in bulk-action.
+  - **TenantDetailView banner.** When `tenant.status === 'CLOSED'`,
+    an amber read-only banner renders at the top: "Tenant closed —
+    all owned objects are read-only." Makes the terminal state
+    immediately obvious so operators stop asking "why won't this
+    unfreeze?" on closed-tenant pages.
+  - **CLOSE confirm-dialog cascade preview.** Dialog now enumerates
+    what the cascade will terminate: owned budgets, webhook
+    subscriptions, API keys, open reservations. Counts render from
+    the tenant-detail state (already loaded). Spells out
+    "This cannot be undone."
+  - **`TENANT_CLOSED` 409 humanizer.** Any mutation that races the
+    cascade (stale tab, deep-link, in-flight request) now surfaces
+    "Tenant is closed — this object is read-only." instead of a raw
+    409. Added to `src/utils/errorCodeMessages.ts` alongside the
+    existing error-code map.
+  - **Audit + event-timeline humanization.** `AuditView` operation
+    column and `EventTimeline` rows render a small amber "tenant
+    cascade" chip when the event carries `_VIA_TENANT_CASCADE` (event
+    kinds `budget.closed_via_tenant_cascade`,
+    `webhook.disabled_via_tenant_cascade`,
+    `api_key.revoked_via_tenant_cascade`,
+    `reservation.released_via_tenant_cascade`, or audit operation
+    `tenant_close_cascade`). Operators can visually distinguish
+    cascade-triggered state changes from user-driven ones when
+    correlating by `correlation_id`.
+- **Shared `isTerminalTenant()` predicate** (`src/utils/tenantStatus.ts`).
+  Centralizes the "this tenant is in a sink state" check so views
+  can't drift on which statuses count as terminal.
+
+### Changed
+
+- **Admin image pin `0.1.25.32 → 0.1.25.36`** in
+  `docker-compose.prod.yml`, `docker-compose.yml`, and `README.md`.
+  Operators pinning the previous dashboard bundle must re-pin to
+  pick up the cascade semantics; running this dashboard against
+  admin `.32` still works (tombstone + dialog preview render purely
+  client-side) but the cascade itself won't fire and frozen budgets
+  on closed tenants continue to inflate the Overview alert counter.
+  Running against `.35` works but leaves policy / api-key /
+  webhook-admin mutations un-guarded against the Rule 2 MUST —
+  `.36` completes the guard coverage.
+- **Spec pointer `v0.1.25.29 → v0.1.25.31`.** Spec v0.1.25.30 widened
+  the `409 TENANT_CLOSED` declaration to the remaining mutating ops;
+  v0.1.25.31 relaxed Rule 1 to permit Mode B cascade implementations.
+  Dashboard wire surface is unchanged — both spec revisions are
+  additive-documentation. Reference admin `.36` is retroactively
+  conformant to Mode B.
+
+No protocol, events-server, or runtime-server change.
+
 ## [0.1.25.42] — 2026-04-19
 
 ### Security

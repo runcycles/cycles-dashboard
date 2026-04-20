@@ -29,6 +29,17 @@ const PER_ROW_CODES: Record<string, (message: string | undefined, context: Recor
   // Surface whatever prose the server sent; fall back to a generic note.
   INTERNAL_ERROR: (message) =>
     message ? `Server error — ${message}` : 'Server error — retry or contact support.',
+
+  // cycles-governance-admin v0.1.25.29 Rule 2 — emitted when any mutating
+  // operation targets a budget/webhook/api-key whose owning tenant is
+  // CLOSED. The tenant is terminal; owned objects are permanently read-only.
+  // Keep this prose operator-actionable: the caller almost always landed
+  // here from a stale tab or a deep-link, not a bug, so point at the
+  // ownership relationship rather than the specific field.
+  TENANT_CLOSED: (message) =>
+    message
+      ? `Tenant is closed — this object is read-only (${message})`
+      : 'Tenant is closed — this object is read-only.',
 }
 
 // Format a single per-row outcome's error_code into operator-facing prose.
