@@ -20,6 +20,7 @@ import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { writeClipboardJson } from '../utils/clipboard'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
+import { isTerminalTenant } from '../utils/tenantStatus'
 import { rateLimitedBatch } from '../utils/rateLimitedBatch'
 import { synthesizeRowSelectBulkResult } from '../utils/rowSelectBulkResult'
 import type { RowSelectBulkResponse } from '../utils/rowSelectBulkResult'
@@ -522,6 +523,14 @@ const pendingEmergencyFreeze = ref(false)
 const emergencyFreezeRunning = ref(false)
 const emergencyFreezeProgress = ref({ done: 0, total: 0, failed: 0 })
 const activeBudgets = computed(() => budgets.value.filter(b => b.status === 'ACTIVE'))
+// Counts for the close-tenant cascade preview dialog. Spec v0.1.25.29
+// Rule 1 closes every non-terminal budget (ACTIVE or FROZEN) and every
+// ACTIVE api-key; webhooks always land in DISABLED regardless of start
+// state so the dialog speaks to them in the aggregate.
+const cascadePreview = computed(() => ({
+  nonTerminalBudgets: budgets.value.filter(b => b.status === 'ACTIVE' || b.status === 'FROZEN').length,
+  activeKeys: apiKeys.value.filter(k => k.status === 'ACTIVE').length,
+}))
 // W4 (scale-hardening): emergency-freeze reuses the same concurrent
 // bulk runner as TenantsView / WebhooksView — concurrency 4 with 429
 // backoff. During an incident, freezing 200+ budgets sequentially was
@@ -659,6 +668,15 @@ const { refresh, isLoading } = usePolling(async () => {
       </template>
     </PageHeader>
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
+
+    <!-- Tombstone banner: spec v0.1.25.29 Rule 2. A CLOSED tenant and
+         everything it owns are permanently read-only; every mutating op
+         against them 409s with TENANT_CLOSED. We surface this once, up
+         top, so operators don't burn a round-trip per disabled button
+         trying to figure out why their edits fail. -->
+    <div v-if="isTerminalTenant(tenant)" class="mb-4 bg-amber-50 border border-amber-300 rounded-lg px-4 py-3 text-sm text-amber-800" role="status">
+      <strong>Tenant closed.</strong> All owned objects (budgets, webhooks, API keys) are terminal and read-only. Per spec v0.1.25.29, there is no re-open path.
+    </div>
 
     <template v-if="tenant">
       <div class="bg-white rounded-lg shadow p-6 mb-4">
@@ -839,9 +857,15 @@ const { refresh, isLoading } = usePolling(async () => {
 
     <!-- Close tenant — requires typing tenant name -->
     <div v-if="pendingTenantAction === 'CLOSED'" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50" @click.self="pendingTenantAction = null">
-      <div class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 max-w-sm mx-4" role="dialog" aria-modal="true" aria-label="Close tenant permanently">
+      <div class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 max-w-md mx-4" role="dialog" aria-modal="true" aria-label="Close tenant permanently">
         <h3 class="text-sm font-semibold text-red-600 mb-2">Permanently close this tenant?</h3>
-        <p class="text-sm text-gray-600 mb-3">This action is <strong>irreversible</strong>. Closing <strong>{{ tenant?.name || id }}</strong> will permanently archive this tenant. All API access, keys, budgets, and webhooks will become unusable and cannot be restored.</p>
+        <p class="text-sm text-gray-600 mb-3">This action is <strong>irreversible</strong>. Closing <strong>{{ tenant?.name || id }}</strong> cascades every owned object into its terminal state (spec v0.1.25.29 Rule 1):</p>
+        <ul class="text-sm text-gray-600 list-disc pl-5 mb-3 space-y-0.5">
+          <li v-if="cascadePreview.nonTerminalBudgets > 0">{{ cascadePreview.nonTerminalBudgets }} budget{{ cascadePreview.nonTerminalBudgets === 1 ? '' : 's' }} → <strong>CLOSED</strong> (open reservations released)</li>
+          <li v-if="cascadePreview.activeKeys > 0">{{ cascadePreview.activeKeys }} API key{{ cascadePreview.activeKeys === 1 ? '' : 's' }} → <strong>REVOKED</strong></li>
+          <li>Every owned webhook subscription → <strong>DISABLED</strong></li>
+        </ul>
+        <p class="text-sm text-gray-600 mb-2">Afterwards, any mutation against these objects will return <code class="text-xs bg-gray-100 rounded px-1 py-0.5">TENANT_CLOSED</code> (409). There is no re-open path.</p>
         <p class="text-sm text-gray-600 mb-2">To confirm, type the tenant name below:</p>
         <input v-model="closeConfirmInput" type="text" :placeholder="tenant?.name || id" class="form-input mb-4 font-mono" autocomplete="off" />
         <div class="flex justify-end gap-2">

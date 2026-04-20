@@ -1,21 +1,55 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.42 (2026-04-19)
+**Current release:** v0.1.25.43 (2026-04-20)
 
 ## Baseline requirements
 
 | Component | Minimum | Shipped (compose) | Notes |
 |---|---|---|---|
 | cycles-server (runtime plane) | v0.1.25.8+ | v0.1.25.15 | `.13` bounds `listReservationsSorted` at `SORTED_HYDRATE_CAP=2000`. `.14` adds W3C Trace Context on the runtime plane (`X-Cycles-Trace-Id` response header, `trace_id` on runtime events + audit entries, MDC `traceId`). `.15` adds audit-log retention TTL (default 400 days, matches admin). All additive — no wire breakage. Pre-`.14` runtime rows carry no trace chip; dashboard tolerates the absence. |
-| cycles-admin (governance plane) | v0.1.25.17+ | v0.1.25.32 | `.18+` for `RESET_SPENT` funding. `.26+` for tenant/webhook filter-apply bulk. `.27+` for AuditView error_code / status_band / DSL-completeness filters. `.28+` for audit sentinel split. `.29+` for budgets bulk-action. `.30+` for structured bulk-action audit detail. `.31+` for W3C Trace Context cross-surface correlation (`trace_id` on Event/AuditLogEntry/WebhookDelivery; `trace_id` + `request_id` filter params on audit + events list endpoints). `.32` hardens cross-plane deserialization (`@JsonIgnoreProperties(ignoreUnknown=true)` on `Event` + `WebhookDelivery`) so runtime can ship additive fields without forcing an admin lockstep release — no wire change. Pre-`.31` silently ignores the new filter params; rows simply render no trace chip. |
+| cycles-admin (governance plane) | v0.1.25.17+ | v0.1.25.35 | `.18+` for `RESET_SPENT` funding. `.26+` for tenant/webhook filter-apply bulk. `.27+` for AuditView error_code / status_band / DSL-completeness filters. `.28+` for audit sentinel split. `.29+` for budgets bulk-action. `.30+` for structured bulk-action audit detail. `.31+` for W3C Trace Context cross-surface correlation (`trace_id` on Event/AuditLogEntry/WebhookDelivery; `trace_id` + `request_id` filter params on audit + events list endpoints). `.32` hardens cross-plane deserialization (`@JsonIgnoreProperties(ignoreUnknown=true)` on `Event` + `WebhookDelivery`) so runtime can ship additive fields without forcing an admin lockstep release — no wire change. `.35` ships spec v0.1.25.29 CASCADE SEMANTICS (Rule 1 tenant-close cascade + Rule 2 `TENANT_CLOSED` mutation guard); dashboard `.43+` renders the tombstone banner, cascade preview on CLOSE, and `_VIA_TENANT_CASCADE` chips. Pre-`.31` silently ignores the new filter params; rows simply render no trace chip. |
 | cycles-events (dispatch worker) | v0.1.25.6+ | v0.1.25.8 | `.8` matches protocol v0.1.25.28 — captures `trace_id` / `trace_flags` / `traceparent_inbound_valid` on `WebhookDelivery` and threads them into the outbound `traceparent` header on HTTP delivery. Dashboard renders the captured `trace_id` in the WebhookDetailView delivery row JSON and CSV export. |
-| Spec alignment | — | v0.1.25.28 | Pin moves on end-to-end support. |
+| Spec alignment | — | v0.1.25.29 | Pin moves on end-to-end support. |
 
 **Pre-baseline compatibility:** dashboard `TenantLink.isSystem` accepts both legacy `<unauthenticated>` and new `__`-prefixed sentinels (shipped v0.1.25.31). Row-select bulk paths (Tenants/Webhooks suspend, Budgets freeze, Emergency-freeze) fan out per-row and work against any admin version.
 
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-20 — v0.1.25.43: closed-tenant tombstone + cascade preview (consumes spec v0.1.25.29)
+
+**Trigger.** Operator report: after a tenant is CLOSED (terminal per spec), its budgets remain `FROZEN` forever. OverviewView's **Frozen budgets** alert axis counts them; the number never decreases because the budgets literally cannot be unfrozen (the owning tenant is closed). Every closed tenant permanently inflates "what needs attention" with un-fixable items.
+
+**Root cause (spec).** Spec had no cascade semantics — tenant close was a pure status flip; owned objects untouched. Fixed in governance-admin spec v0.1.25.29 with two rules, implemented in cycles-server-admin `.35`:
+
+| Rule | What it does |
+|---|---|
+| Rule 1 — cascade | Tenant→CLOSED atomically terminal-ifies owned objects: budgets→CLOSED, webhooks→DISABLED, API keys→REVOKED, open reservations→RELEASED. One transaction, correlation-id parity. |
+| Rule 2 — guard | Mutating any object whose owning tenant is CLOSED returns 409 `TENANT_CLOSED`. Covers the webhook gap (DISABLED is not spec-terminal; Rule 2 makes it effectively-terminal for closed owners). |
+
+**Why this fixes the Overview counter with zero client-side filtering.** `budget_counts.frozen` is server-computed as `WHERE status='FROZEN'`. After Rule 1, closed-tenant budgets are `CLOSED`, not `FROZEN`, so they drop out of the aggregate automatically. No client-side `Set<closedTenantIds>` subtraction, no drift between what the Overview tile says and what the list page shows.
+
+**Dashboard slice — polish only, cascade is an admin concern.**
+
+| Surface | Change |
+|---|---|
+| `src/utils/tenantStatus.ts` (new, ~10 LOC) | `isTerminalTenant()` predicate + `TERMINAL_TENANT_STATUSES` constant — single source of truth so views can't drift on which statuses are sinks |
+| `TenantDetailView` banner | Amber read-only banner renders when `tenant.status === 'CLOSED'`: "Tenant closed — all owned objects are read-only." Answers "why won't this unfreeze?" before operators open a ticket |
+| CLOSE confirm dialog | Enumerates cascade impact from tenant-detail state already in memory: budgets / webhooks / API keys / open reservations. Explicit "This cannot be undone" |
+| `AuditView` + `EventTimeline` | Small amber "tenant cascade" chip on rows with `_VIA_TENANT_CASCADE` event kind or `tenant_close_cascade` operation — distinguishes cascade-triggered state changes from user-driven ones when correlating by `correlation_id` |
+| `src/utils/errorCodeMessages.ts` | `TENANT_CLOSED` 409 humanizer — "Tenant is closed — this object is read-only." Handles the race window where a stale tab / deep-link / in-flight request hits Rule 2 |
+
+**Compose pin bumps.** `docker-compose.prod.yml`, `docker-compose.yml`, and `README.md` all move cycles-server-admin `0.1.25.32 → 0.1.25.35`. Running `.43` against `.32` still renders cleanly (banner + preview are purely client-side from `tenant.status`) but the cascade itself won't fire and the Overview counter continues to inflate.
+
+**Why no client-side filtering even as an interim.** Considered a `listTenants({status: 'CLOSED'})` fetch on the Overview poll and subtracting the intersection from the frozen-budget list. Rejected: produces drift between tile count and list page, bakes "the server is wrong" into the client in a way that is hard to remove later, and the admin `.35` was ready in the same release window. The dashboard is now the thin client the cascade makes it.
+
+**Explicitly not doing.**
+- No "un-close" affordance. Close is terminal.
+- No new `WebhookStatus` enum value. Rule 2 makes DISABLED effectively-terminal for closed-owner webhooks — preserves wire compat with every client parsing the enum.
+- No backfill of cascades onto already-closed tenants. Separate slice if operators want historical Overview inflation cleared immediately; without it, the fix takes effect only for tenants closed going forward.
+
+**Verification.** `npm run typecheck`, `npm test`, `npm run build` all clean. Manual smoke: banner renders on a CLOSED tenant; CLOSE dialog on an ACTIVE tenant enumerates non-zero counts; humanized 409 surfaces on a simulated stale mutation.
 
 ### 2026-04-19 — v0.1.25.42: base-image bump unblocks release pipeline
 
