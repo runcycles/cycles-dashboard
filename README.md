@@ -69,7 +69,7 @@ Tier 1 incident-response actions available directly from the dashboard (capabili
 src/
 ├── api/           # API client (X-Admin-API-Key only)
 ├── components/    # Reusable UI: Sidebar, PageHeader, StatusBadge, SortHeader, EmptyState, etc.
-├── composables/   # usePolling, useSort, useDarkMode
+├── composables/   # usePolling, useSort, useDarkMode, useTerminalAwareList
 ├── stores/        # Pinia: auth (introspect + capabilities)
 ├── views/         # 10 route views (login, overview, budgets, events, api-keys, webhooks, audit, tenants + detail views)
 └── types.ts       # TypeScript types matching governance spec schemas
@@ -164,6 +164,24 @@ The dashboard uses `AdminKeyAuth` exclusively (`X-Admin-API-Key` header). No ten
 | `POST /v1/admin/webhooks/{subscription_id}/test` | Webhook Detail | Send test event |
 | `POST /v1/admin/webhooks/{subscription_id}/replay` | Webhook Detail | Replay historical events |
 | `POST /v1/admin/budgets/fund` | Budget Detail | Adjust allocation (RESET operation) |
+
+## List conventions
+
+Every top-level list view (Tenants, Budgets, Webhooks, API Keys) and the TenantDetail sub-lists share a **hide-terminal-by-default** pattern (v0.1.25.46+). Terminal-state rows are hidden at mount and surfaced via a **"Show &lt;verb&gt;"** toggle in the filter row:
+
+| Entity | Terminal states | Toggle label | URL param |
+|---|---|---|---|
+| Tenant | `CLOSED` | Show closed (N) | `?include_terminal=1` |
+| Budget | `CLOSED` | Show closed (N) | `?include_terminal=1` |
+| Webhook | `DISABLED` | Show disabled (N) | `?include_terminal=1` |
+| API Key | `REVOKED`, `EXPIRED` | Show revoked (N) | `?include_terminal=1` |
+
+- **Why:** under default `created_at desc` sort, freshly-terminal rows pin to the top and visually compete with rows that still need operator action. Matches the Gmail / GitHub / Linear "hide done / archived" convention.
+- **Auto-engage:** picking a terminal value from the status dropdown (e.g. `status=CLOSED`) auto-reveals those rows so the operator doesn't see an empty list (same pattern as GitHub's `state:closed`).
+- **Sink order:** when toggled on, terminal rows appear at the bottom of the visible list via stable partition (column-sort order preserved within each group).
+- **Export / select-all / counter:** all read from the post-terminal-filter visible list. CSV/JSON export never includes hidden terminals; bulk actions never silently touch a hidden row.
+
+Shared implementation: `src/composables/useTerminalAwareList.ts`.
 
 ## Polling Strategy
 
