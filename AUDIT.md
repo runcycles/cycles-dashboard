@@ -1,13 +1,13 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.43 (2026-04-20)
+**Current release:** v0.1.25.44 (2026-04-20)
 
 ## Baseline requirements
 
 | Component | Minimum | Shipped (compose) | Notes |
 |---|---|---|---|
 | cycles-server (runtime plane) | v0.1.25.8+ | v0.1.25.15 | `.13` bounds `listReservationsSorted` at `SORTED_HYDRATE_CAP=2000`. `.14` adds W3C Trace Context on the runtime plane (`X-Cycles-Trace-Id` response header, `trace_id` on runtime events + audit entries, MDC `traceId`). `.15` adds audit-log retention TTL (default 400 days, matches admin). All additive — no wire breakage. Pre-`.14` runtime rows carry no trace chip; dashboard tolerates the absence. |
-| cycles-admin (governance plane) | v0.1.25.17+ | v0.1.25.36 | `.18+` for `RESET_SPENT` funding. `.26+` for tenant/webhook filter-apply bulk. `.27+` for AuditView error_code / status_band / DSL-completeness filters. `.28+` for audit sentinel split. `.29+` for budgets bulk-action. `.30+` for structured bulk-action audit detail. `.31+` for W3C Trace Context cross-surface correlation (`trace_id` on Event/AuditLogEntry/WebhookDelivery; `trace_id` + `request_id` filter params on audit + events list endpoints). `.32` hardens cross-plane deserialization (`@JsonIgnoreProperties(ignoreUnknown=true)` on `Event` + `WebhookDelivery`) so runtime can ship additive fields without forcing an admin lockstep release — no wire change. `.35` ships spec v0.1.25.29 CASCADE SEMANTICS (Rule 1 tenant-close cascade + Rule 2 `TENANT_CLOSED` mutation guard, budgets + webhook-tenant create/update only); `.36` completes Rule 2 guard coverage across all admin-mutating endpoints (policies, api-keys, webhook-admin create/update/delete/test/replay, bulk-action per-row). Retroactively conformant to spec v0.1.25.31 Mode B (flip-first-with-guarded-cascade). Dashboard `.43+` renders the tombstone banner, cascade preview on CLOSE, and `_VIA_TENANT_CASCADE` chips. Pre-`.31` silently ignores the new filter params; rows simply render no trace chip. |
+| cycles-admin (governance plane) | v0.1.25.17+ | v0.1.25.37 | `.18+` for `RESET_SPENT` funding. `.26+` for tenant/webhook filter-apply bulk. `.27+` for AuditView error_code / status_band / DSL-completeness filters. `.28+` for audit sentinel split. `.29+` for budgets bulk-action. `.30+` for structured bulk-action audit detail. `.31+` for W3C Trace Context cross-surface correlation (`trace_id` on Event/AuditLogEntry/WebhookDelivery; `trace_id` + `request_id` filter params on audit + events list endpoints). `.32` hardens cross-plane deserialization (`@JsonIgnoreProperties(ignoreUnknown=true)` on `Event` + `WebhookDelivery`) so runtime can ship additive fields without forcing an admin lockstep release — no wire change. `.35` ships spec v0.1.25.29 CASCADE SEMANTICS (Rule 1 tenant-close cascade + Rule 2 `TENANT_CLOSED` mutation guard, budgets + webhook-tenant create/update only); `.36` completes Rule 2 guard coverage across all admin-mutating endpoints (policies, api-keys, webhook-admin create/update/delete/test/replay, bulk-action per-row); retroactively conformant to spec v0.1.25.31 Mode B (flip-first-with-guarded-cascade). `.37` wires Rule 1(c) bounded-convergence into the close paths: `PATCH /v1/admin/tenants/{id} {"status":"CLOSED"}` on an already-CLOSED tenant no longer short-circuits — it re-runs the cascade idempotently over any non-terminal owned children. This is the admin-side counterpart to the dashboard `.44` Re-run cascade affordance; pre-`.37` admin silently no-op'd the re-close PATCH, so the button would succeed at the HTTP layer but drive no child convergence. Dashboard `.43+` renders the tombstone banner, cascade preview on CLOSE, and `_VIA_TENANT_CASCADE` chips; `.44+` adds the cascade-recovery banner + re-run affordance for operator-issued convergence per Rule 1(c). Pre-`.31` silently ignores the new filter params; rows simply render no trace chip. |
 | cycles-events (dispatch worker) | v0.1.25.6+ | v0.1.25.8 | `.8` matches protocol v0.1.25.28 — captures `trace_id` / `trace_flags` / `traceparent_inbound_valid` on `WebhookDelivery` and threads them into the outbound `traceparent` header on HTTP delivery. Dashboard renders the captured `trace_id` in the WebhookDetailView delivery row JSON and CSV export. |
 | Spec alignment | — | v0.1.25.31 | Pin moves on end-to-end support. v0.1.25.30 declared `409 TENANT_CLOSED` on the remaining mutating ops. v0.1.25.31 relaxed Rule 1 to permit Mode B (flip-first-with-guarded-cascade) alongside Mode A (atomic); reference admin `.36` implements Mode B. Dashboard wire surface unchanged. |
 
@@ -16,6 +16,47 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-20 — v0.1.25.44: cascade-recovery affordance (consumes spec v0.1.25.31 Rule 1(c))
+
+**Trigger.** Two operator scenarios the v0.1.25.43 tombstone + cascade-preview pair doesn't reach:
+
+1. **Historical tenants** closed pre-admin-`.35` — cascade never ran, owned objects sit non-terminal under a CLOSED tenant forever. Called out as a caveat in the v0.1.25.43 AUDIT but left unsolved.
+2. **Partial cascade failures** — admin crash mid-loop, Redis blip between the tenant flip and per-child writes. Rule 1(b) idempotency + Rule 1(c) convergence are designed for exactly this, but there was no dashboard affordance — operator had to curl `PATCH /v1/admin/tenants/{id} {"status":"CLOSED"}` by hand.
+
+**Root cause.** Spec v0.1.25.31 Rule 1(c) says Mode B servers converge via an "implementation-defined mechanism"; admin `OPERATIONS.md` documents the mechanism as operator-issued re-close. The dashboard hid it: `TenantDetailView` gated the CLOSE button behind `tenant.status !== 'CLOSED'`, and there was no signal that a closed tenant had a pending cascade.
+
+**Fix — thin client, single banner + confirm dialog.**
+
+| Surface | Change |
+|---|---|
+| `src/utils/tenantStatus.ts` | Add `cascadePendingCounts()` + `cascadeIsIncomplete()`. Per-child terminal constants (`BUDGET=['CLOSED']`, `WEBHOOK=['DISABLED']`, `API_KEY=['REVOKED','EXPIRED']`) treat unknown statuses as non-terminal — forward-compatible against additive status values. |
+| `TenantDetailView` recovery banner | Amber banner renders below the tombstone when `isTerminalTenant(tenant) && cascadeIsIncomplete(children)`. Enumerates pending counts per axis. "Re-run cascade" button opens a confirm dialog that PATCHes `{status:CLOSED}` — no-op at the tenant level per Rule 1 idempotency; drives remaining children to terminal states. |
+| `TenantDetailView` fetch path | Added `listWebhooks({tenant_id})` alongside the existing budgets + api-keys fetch (on initial mount always; on poll only while tenant is CLOSED, to keep ACTIVE-tenant poll cost unchanged). |
+| Rerun handler | Refetches tenant + budgets + webhooks + api-keys after the PATCH so the banner converges on success. On failure, surfaces server error inline under the banner; button stays clickable for retry. |
+
+**Why reuse `ConfirmAction` instead of the CLOSE type-to-confirm dialog.** At re-run time the tenant is already CLOSED — the irreversible tenant-level step already happened. Re-run is a targeted per-child cleanup, not a destructive tenant-level action; the CLOSE dialog's type-tenant-name gate would be ceremonial. The confirm dialog enumerates exact pending counts ("This will close 3 budgets, disable 1 webhook, revoke 2 API keys") so operators still see what'll change.
+
+**What this is NOT.**
+- Not an Overview detection tile. That needs a server aggregate (`GET /admin/tenants?cascade_pending=true` or equivalent) to avoid fanning N child queries from the client. Filed as a follow-up admin spec slice if operators ask for a global view.
+- Not a bulk-reconcile affordance. If an operator has 50 historical-closed tenants with pending cascades, this ships one-click-per-tenant; server-side bulk reconciler is cleaner than a client batch handler.
+- Not a spec change. Rule 1(b) idempotency + Rule 1(c) convergence already support this — pure client UX on an existing endpoint.
+- Not an admin pin bump. `.36` already supports idempotent re-PATCH.
+
+**Reservations — why not counted.** Rule 1 releases open reservations as part of the cascade. Reservations are short-lived (TTL minutes) and not exposed on `TenantDetailView` today. Counting them would add a new `GET /admin/reservations?tenant_id=X&status=ACTIVE` query. Skipped — if the cascade missed a budget, it also missed that budget's reservations; the re-run sweeps both.
+
+**Edge cases.**
+
+| Case | Behavior |
+|---|---|
+| In-flight initial cascade | Banner briefly appears while tenant=CLOSED but children still pre-cascade; disappears on the next poll. One-cycle noise; acceptable. |
+| Re-run succeeds at tenant level but cascade partially fails again | Server 200 on tenant (unchanged), per-child audit rows emit for what succeeded. Client refetch still shows pending; banner persists; button stays clickable. Operator retries. |
+| Concurrent operator re-runs (two tabs) | Both PATCHes are no-op at tenant level; per-child writes are idempotent. Last-write-wins on audit row — not a problem. |
+| Stale children fetch race | Tenant shows CLOSED but children fetched pre-close still look ACTIVE. Rare (one render cycle at mount); resolves on the next poll. |
+
+**Tests.** 15 new tests total. `tenantStatus.test.ts` covers `cascadePendingCounts` (no children, per-axis counting, summing, forward-compat on unknown status, defensive on missing status) and `cascadeIsIncomplete` (ACTIVE tenant, CLOSED clean, CLOSED with pending in each axis, null, empty). Coverage invariant held.
+
+---
 
 ### 2026-04-20 — v0.1.25.43: closed-tenant tombstone + cascade preview (consumes spec v0.1.25.29)
 

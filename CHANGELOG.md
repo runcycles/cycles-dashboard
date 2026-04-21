@@ -15,6 +15,40 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.44] — 2026-04-20
+
+### Added
+
+- **Cascade-recovery banner on `TenantDetailView`.** When a closed
+  tenant still has non-terminal budgets, webhooks, or API keys, an
+  amber banner renders at the top of the page with per-axis pending
+  counts and a "Re-run cascade" button. Clicking opens a confirm
+  dialog that enumerates exactly what the action will change.
+- **Re-run cascade action.** Idempotently re-runs the tenant-close
+  cascade. On success, the banner disappears; on failure, the server
+  error surfaces inside the dialog and the button stays clickable for
+  retry.
+
+### Changed
+
+- `TenantDetailView` now fetches webhooks alongside budgets and API
+  keys on initial mount; webhook refetch on poll only happens while
+  the tenant is CLOSED, so active-tenant poll cost is unchanged.
+
+### Notes
+
+- Admin image pin bumped `0.1.25.36` → `0.1.25.37`. Admin `.37`
+  wires Rule 1(c) bounded-convergence into the close paths — a
+  `PATCH {"status":"CLOSED"}` against an already-CLOSED tenant now
+  re-runs the cascade idempotently over any non-terminal children.
+  Pre-`.37` admin silently no-op'd the re-close, so the Re-run
+  cascade button would return 200 without driving convergence. `.37`
+  is therefore the minimum admin version for this feature to be
+  functional, not just a cosmetic pin bump.
+- No spec change.
+- See `AUDIT.md` for the engineering rationale, edge cases, and the
+  two operator scenarios this unblocks.
+
 ## [0.1.25.43] — 2026-04-20
 
 ### Added
