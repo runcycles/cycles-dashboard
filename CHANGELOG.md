@@ -27,6 +27,14 @@ UX work that does not advance spec alignment.
   with debt, Frozen budgets, Expiring API keys, Failing webhooks —
   creating false "needs attention" work for an operator who has
   already closed the tenant.
+- **Tenants filter state survives drill-in → back.** Setting a filter
+  on `/tenants` (status or parent), clicking into a tenant's detail
+  page, and hitting the back crumb used to reset the filter.
+  `TenantsView` now mirrors filter-ref changes into the URL via
+  `router.replace`, and `TenantDetailView`'s back crumb uses
+  `router.back()` (with a plain `/tenants` fallback when there's no
+  prior history), so the filter state rides the browser history back
+  to the list. Matches the Budgets-view flow operators expected.
 
 ### Changed
 

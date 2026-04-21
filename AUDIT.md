@@ -17,7 +17,39 @@
 
 Newest at the top. Older entries preserved verbatim.
 
-### 2026-04-21 — v0.1.25.45: exclude closed-tenant children from Overview attention cards
+### 2026-04-21 — v0.1.25.45: exclude closed-tenant children from Overview attention cards + Tenants filter persists across drill-in
+
+This release bundles two operator-reported UX fixes.
+
+#### Fix 2 — Tenants filter persists across drill-in → back
+
+**Trigger.** Operator report: *"Tenants: set filter, show list, drill down, go back (via crumbs), filter reset. Works in budgets."*
+
+**Root cause.** `TenantsView` held filter state only in Vue refs (`parentFilter`, `statusFilter`). Drilling into a tenant row navigated to `/tenants/:id` — a different route backed by `TenantDetailView`. On return via the back crumb, `TenantsView` re-mounted and `readStatusFromQuery()` / `readParentFromQuery()` hydrated from `route.query`, which was empty. `BudgetsView` doesn't have this problem because its detail renders in-component (`isDetail` computed off `route.query.scope`) — the same Vue instance stays mounted, so the filter refs survive.
+
+**Fix — two coordinated changes.**
+
+| Surface | Change |
+|---|---|
+| `TenantsView.vue` | Added `watch([parentFilter, statusFilter], () => router.replace({ query: {...} }))`. Replace (not push) — filter fiddling shouldn't clutter browser history; only the drill-in navigation should push. Loop-safe via a diff guard: if the URL already matches the ref (e.g. the ref change originated from the existing `route.query` → `parentFilter` watcher), the replace is skipped. |
+| `TenantDetailView.vue` — `goBack` | Changed from unconditional `router.push('/tenants')` to `router.back()` (with `window.history.length > 1` guard; falls back to `router.push('/tenants')` when the detail page was direct-linked without prior history). Parent-tenant back-path (when `?parent=X` is threaded) unchanged — still pushes to that parent's detail. |
+
+**Why `router.back()` instead of push-with-query-restore.** We considered having `TenantsView` thread the current filter as `from_*` query params on the row-click navigation, and having `goBack` reconstruct `/tenants?status=...&parent=...` from those. Two problems: (1) pollutes detail URL with presentation-layer state that has nothing to do with the detail page itself; (2) the browser's actual back button (not just the crumb) still wouldn't restore filter state — only the crumb would. `router.back()` solves both: back and the back crumb share a single path, and the detail URL stays clean.
+
+**Edge cases.**
+
+| Case | Behavior |
+|---|---|
+| Direct-linked `/tenants/:id` (bookmark, shared URL) | `window.history.length <= 1` → falls back to `router.push('/tenants')`. No filter was ever set, so nothing to restore. |
+| Operator navigated Tenants → Budgets → Tenant detail | `router.back()` goes to Budgets, not Tenants. Acceptable — that IS the back path. The crumb label reads "Back to tenants" which is slightly misleading in this chain, but matches browser semantics and the 95% path (Tenants → detail → back). |
+| Tenant detail reached via "Children of" from another tenant | `parentFromQuery` branch unchanged; still routes back to the parent tenant detail. |
+| Deep-link with `?status=ACTIVE` on mount | Existing pre-hydration via `readStatusFromQuery()` unchanged. New filter→URL watcher skips the initial sync (URL already matches ref). |
+
+**Tests.** 4 new tests in `TenantsView-filter-url-sync.test.ts`: status dropdown pushes `router.replace({query:{status}})`, root-level pseudo-option pushes `parent:'__root__'`, clearing the filter removes the param, and mount-from-URL doesn't loop into a redundant replace.
+
+---
+
+#### Fix 1 — exclude closed-tenant children from Overview attention cards
 
 **Trigger.** Operator report: *"Budgets at or near cap show for closed tenants on the Overview."* Audit requested across all Overview cards.
 

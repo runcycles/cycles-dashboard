@@ -54,6 +54,15 @@ const parentFromQuery = computed<string | null>(() => {
 function goBack() {
   if (parentFromQuery.value) {
     router.push({ name: 'tenant-detail', params: { id: parentFromQuery.value } })
+    return
+  }
+  // Prefer browser-back so any filter state the operator set on
+  // TenantsView (e.g. status=ACTIVE, parent=foo) is restored — the
+  // filter refs on TenantsView mirror into URL query, so the previous
+  // history entry already carries them. Fall back to a plain push
+  // when there's no prior history (direct-link entry to /tenants/:id).
+  if (typeof window !== 'undefined' && window.history.length > 1) {
+    router.back()
   } else {
     router.push('/tenants')
   }
