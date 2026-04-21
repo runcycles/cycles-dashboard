@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
+import { useTerminalAwareList } from '../composables/useTerminalAwareList'
 import { getTenant, listTenants, listBudgets, listApiKeys, listPolicies, listWebhooks, updateTenantStatus, updateTenant, revokeApiKey, createApiKey, updateApiKey, createBudget, createPolicy, updatePolicy, freezeBudget } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { Tenant, BudgetLedger, ApiKey, Policy, WebhookSubscription, ApiKeyCreateResponse, BudgetCreateRequest, PolicyCreateRequest, PolicyUpdateRequest } from '../types'
@@ -84,6 +85,35 @@ const policies = ref<Policy[]>([])
 const webhooks = ref<WebhookSubscription[]>([])
 const error = ref('')
 const tab = ref<'budgets' | 'keys' | 'policies'>('budgets')
+
+// v0.1.25.46: hide terminal rows in the embedded sub-lists by default.
+// Pre-fix, the budgets/keys tables rendered in whatever order the API
+// returned — CLOSED budgets and REVOKED keys mixed in with ACTIVE ones,
+// making the "what can I still act on" question harder than it should
+// be. The toggle is sub-list-scoped (not URL-mirrored) because the
+// TenantDetailView is a single URL destination — no drill-in → back
+// problem to solve here, and the operator picks a setting per-tenant
+// rather than persisting it across views.
+const {
+  visibleRows: visibleBudgets,
+  includeTerminal: includeTerminalBudgets,
+  terminalCount: terminalBudgetsCount,
+  terminalVerb: terminalBudgetsVerb,
+} = useTerminalAwareList<BudgetLedger>({
+  kind: 'budget',
+  source: budgets,
+  statusOf: b => b.status,
+})
+const {
+  visibleRows: visibleApiKeys,
+  includeTerminal: includeTerminalKeys,
+  terminalCount: terminalKeysCount,
+  terminalVerb: terminalKeysVerb,
+} = useTerminalAwareList<ApiKey>({
+  kind: 'apiKey',
+  source: apiKeys,
+  statusOf: k => k.status,
+})
 
 // R9 (scale-hardening): lazy tabs. Pre-fix, Promise.all([budgets, keys,
 // policies, tenants]) ran on every mount and poll regardless of which
@@ -912,30 +942,42 @@ const { refresh, isLoading } = usePolling(async () => {
            row (above) per design convention — every primary action in
            the same place. -->
       <div v-if="tab === 'budgets'" class="card-table">
+        <div v-if="budgets.length > 0" class="flex items-center justify-end px-3 pt-2">
+          <label class="text-sm flex items-center gap-1.5 text-gray-700 dark:text-gray-200 whitespace-nowrap">
+            <input v-model="includeTerminalBudgets" type="checkbox" :aria-label="`Show ${terminalBudgetsVerb} budgets`" />
+            Show {{ terminalBudgetsVerb }}<span v-if="terminalBudgetsCount > 0 && !includeTerminalBudgets" class="muted-sm">&nbsp;({{ terminalBudgetsCount }})</span>
+          </label>
+        </div>
         <table class="w-full text-sm min-w-[520px]">
           <thead class="table-header">
             <tr><th class="table-cell text-left">Scope</th><th class="table-cell text-left">Unit</th><th class="table-cell text-left">Status</th><th class="table-cell text-right">Allocated</th></tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
-            <tr v-for="b in budgets" :key="b.ledger_id" class="table-row-hover">
+            <tr v-for="b in visibleBudgets" :key="b.ledger_id" class="table-row-hover">
               <td class="table-cell"><router-link :to="{ name: 'budgets', query: { scope: b.scope, unit: b.unit } }" class="text-blue-600 hover:underline font-mono text-xs">{{ b.scope }}</router-link></td>
               <td class="table-cell muted">{{ b.unit }}</td>
               <td class="table-cell"><StatusBadge :status="b.status" /></td>
               <td class="table-cell text-right muted tabular-nums">{{ b.allocated.amount.toLocaleString() }}</td>
             </tr>
-            <tr v-if="budgets.length === 0"><td colspan="4"><EmptyState message="No budgets" hint="Budgets will appear here once allocated" /></td></tr>
+            <tr v-if="visibleBudgets.length === 0"><td colspan="4"><EmptyState message="No budgets" hint="Budgets will appear here once allocated" /></td></tr>
           </tbody>
         </table>
       </div>
 
       <!-- API Keys tab. Create button lives in the page header. -->
       <div v-if="tab === 'keys'" class="card-table">
+        <div v-if="apiKeys.length > 0" class="flex items-center justify-end px-3 pt-2">
+          <label class="text-sm flex items-center gap-1.5 text-gray-700 dark:text-gray-200 whitespace-nowrap">
+            <input v-model="includeTerminalKeys" type="checkbox" :aria-label="`Show ${terminalKeysVerb} keys`" />
+            Show {{ terminalKeysVerb }}<span v-if="terminalKeysCount > 0 && !includeTerminalKeys" class="muted-sm">&nbsp;({{ terminalKeysCount }})</span>
+          </label>
+        </div>
         <table class="w-full text-sm min-w-[520px]">
           <thead class="table-header">
             <tr><th class="table-cell text-left">Key ID</th><th class="table-cell text-left">Name</th><th class="table-cell text-left">Status</th><th class="table-cell text-left">Permissions</th><th v-if="canManageKeys" class="table-cell w-20"></th></tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
-            <tr v-for="k in apiKeys" :key="k.key_id" class="table-row-hover">
+            <tr v-for="k in visibleApiKeys" :key="k.key_id" class="table-row-hover">
               <td class="table-cell"><MaskedValue :value="k.key_id" /></td>
               <td class="table-cell text-gray-700">{{ k.name || '-' }}</td>
               <td class="table-cell"><StatusBadge :status="k.status" /></td>
@@ -954,7 +996,7 @@ const { refresh, isLoading } = usePolling(async () => {
                 />
               </td>
             </tr>
-            <tr v-if="apiKeys.length === 0"><td :colspan="canManageKeys ? 5 : 4"><EmptyState message="No API keys" hint="API keys will appear here once created" /></td></tr>
+            <tr v-if="visibleApiKeys.length === 0"><td :colspan="canManageKeys ? 5 : 4"><EmptyState message="No API keys" hint="API keys will appear here once created" /></td></tr>
           </tbody>
         </table>
       </div>

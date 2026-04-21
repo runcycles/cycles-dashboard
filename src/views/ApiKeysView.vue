@@ -4,6 +4,7 @@ import { useVirtualizer } from '@tanstack/vue-virtual'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
+import { useTerminalAwareList } from '../composables/useTerminalAwareList'
 import { useListExport } from '../composables/useListExport'
 import { listTenants, listApiKeys, revokeApiKey, createApiKey, updateApiKey } from '../api/client'
 import { useAuthStore } from '../stores/auth'
@@ -247,13 +248,31 @@ const filteredKeys = computed(() => {
 // re-fetches page 1 via refresh() so the cursor tuple stays consistent
 // with the new (sort_by, sort_dir) pair. Client-side status filter
 // still runs on top of the server-sorted page.
-const { sortKey, sortDir, toggle, sorted: sortedKeys } = useSort(
+const { sortKey, sortDir, toggle, sorted: columnSortedKeys } = useSort(
   filteredKeys,
   'created_at',
   'desc',
   undefined,
   { serverSide: true, onChange: () => { refresh() } },
 )
+
+// v0.1.25.46: hide REVOKED + EXPIRED api keys by default. Both are
+// terminal (mutations rejected; can't be un-revoked or un-expired) and
+// under the default created_at-desc sort, a just-revoked key floated to
+// the top. Operator picking status=REVOKED explicitly auto-shows them.
+// No URL mirror here — api keys don't have a detail route, edits happen
+// in-dialog, so there's no drill-in-back state to preserve.
+const {
+  includeTerminal,
+  visibleRows: sortedKeys,
+  terminalCount: hiddenTerminalCount,
+  terminalVerb,
+} = useTerminalAwareList<KeyWithTenant>({
+  kind: 'apiKey',
+  source: columnSortedKeys,
+  statusOf: k => k.status,
+  explicitStatus: filterStatus,
+})
 
 const statusCounts = computed(() => {
   const counts: Record<string, number> = {}
@@ -350,7 +369,9 @@ const {
 } = useListExport<KeyWithTenant>({
   itemNoun: 'api key',
   filenameStem: 'api-keys',
-  currentItems: filteredKeys,
+  // Export what's visible (post-terminal-filter). Hiding REVOKED /
+  // EXPIRED rows must also hide them from the download.
+  currentItems: sortedKeys,
   hasMore,
   nextCursor,
   fetchPage: async (cursor) => {
@@ -424,16 +445,16 @@ function closePermsViewer() { viewingPermsFor.value = null }
     <PageHeader
       title="API Keys"
       item-noun="key"
-      :loaded="filteredKeys.length"
+      :loaded="sortedKeys.length"
       :loading="isLoading"
       @refresh="refresh"
     >
       <template #actions>
-        <button @click="confirmExport('csv')" :disabled="filteredKeys.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+        <button @click="confirmExport('csv')" :disabled="sortedKeys.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
           <DownloadIcon class="w-3.5 h-3.5" />
           Export CSV
         </button>
-        <button @click="confirmExport('json')" :disabled="filteredKeys.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+        <button @click="confirmExport('json')" :disabled="sortedKeys.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
           <DownloadIcon class="w-3.5 h-3.5" />
           Export JSON
         </button>
@@ -470,6 +491,17 @@ function closePermsViewer() { viewingPermsFor.value = null }
             <option>EXPIRED</option>
           </select>
         </div>
+        <!-- v0.1.25.46: terminal-row toggle. REVOKED + EXPIRED keys
+             hidden by default so they don't pin to the top of the
+             created_at-desc list. Explicit status=REVOKED filter
+             auto-shows them. -->
+        <div>
+          <label class="form-label opacity-0" aria-hidden="true">spacer</label>
+          <label class="text-sm flex items-center gap-1.5 text-gray-700 dark:text-gray-200 whitespace-nowrap py-1.5">
+            <input v-model="includeTerminal" type="checkbox" :aria-label="`Show ${terminalVerb} keys`" />
+            Show {{ terminalVerb }}<span v-if="hiddenTerminalCount > 0 && !includeTerminal" class="muted-sm">&nbsp;({{ hiddenTerminalCount }})</span>
+          </label>
+        </div>
         <div>
           <label for="keys-search" class="form-label">Search</label>
           <input id="keys-search" v-model="search" type="search" placeholder="key_id or name" class="border border-gray-300 rounded px-2 py-1.5 text-sm" aria-label="Search by key_id or name substring" />
@@ -500,7 +532,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
     <div
       class="bg-white rounded-lg shadow overflow-x-auto overflow-y-hidden text-sm flex-1 min-h-0 flex flex-col"
       role="table"
-      :aria-rowcount="filteredKeys.length + 1"
+      :aria-rowcount="sortedKeys.length + 1"
       :aria-colcount="canManage ? 9 : 8"
     >
      <div :style="{ minWidth: canManage ? '1280px' : '1120px' }" class="flex flex-col flex-1 min-h-0">
@@ -752,7 +784,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
 
     <ExportDialog
       :format="showExportConfirm"
-      :loaded-count="filteredKeys.length"
+      :loaded-count="sortedKeys.length"
       :has-more="hasMore"
       :max-rows="EXPORT_MAX_ROWS"
       item-noun-plural="API keys"

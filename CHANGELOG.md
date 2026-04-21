@@ -15,6 +15,36 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.46] — 2026-04-21
+
+### Changed
+
+- **Terminal-state rows (CLOSED / DISABLED / REVOKED / EXPIRED) are
+  hidden by default on every list view.** Previously a freshly-closed
+  tenant or freshly-disabled webhook sorted to the top of the list
+  (default `created_at desc` ordering) and visually competed with rows
+  that actually needed operator attention. Operators had to apply a
+  status filter to cull them — non-obvious, and the default experience
+  showed terminal noise first. Matching the Gmail / GitHub / Linear
+  convention, each list view now hides terminals by default and
+  surfaces a **"Show &lt;verb&gt;"** toggle (with the hidden count, e.g.
+  `Show closed (3)`) in the filter row to opt in.
+- **Toggle state mirrors to the URL** via `?include_terminal=1` on the
+  four top-level views (Tenants, Budgets, Webhooks, API Keys) so the
+  operator's view preference rides browser-history and deep-links.
+- **Explicit terminal-status filter auto-reveals terminal rows.**
+  Picking `status=CLOSED` (Tenants / Budgets), `status=DISABLED`
+  (Webhooks), or `status=REVOKED` (API Keys) from the dropdown shows
+  those rows even with the toggle off — avoids the trap of filtering
+  to a status and getting an empty list. Matches GitHub's
+  `state:closed` behavior.
+- When the toggle is on, terminal rows sink to the bottom of the list
+  (stable partition that preserves column-sort order within each
+  group) rather than interleaving with active rows by `created_at`.
+- TenantDetail sub-lists (owned Budgets + API Keys) get the same
+  hide-by-default + toggle treatment, scoped per tab (no URL mirror —
+  single-URL view).
+
 ## [0.1.25.45] — 2026-04-21
 
 ### Fixed

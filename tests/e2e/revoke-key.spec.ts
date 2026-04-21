@@ -94,6 +94,12 @@ test('operator revokes a leaked API key and the row reflects REVOKED status', as
   // success path didn't run cleanly (pendingRevoke wasn't cleared).
   await expect(dialog).toBeHidden({ timeout: 5_000 })
 
+  // As of v0.1.25.46 terminal-aware lists hide REVOKED rows by default
+  // (GitHub-style "show open, hide closed"). Selecting status=REVOKED
+  // auto-engages the reveal — exercises the documented contract instead
+  // of reaching for the low-level toggle.
+  await page.locator('#keys-status').selectOption('REVOKED')
+
   // And the row now shows REVOKED (not ACTIVE). This proves the list
   // refreshed after the revoke — a regression that skipped the refresh
   // would leave the row stale and the operator unable to confirm the

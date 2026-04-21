@@ -211,6 +211,20 @@ returning `total=0`. Check the admin plane directly
 (`curl -H "X-Admin-API-Key: ..." http://admin:7979/v1/admin/tenants`). If
 that's empty too, the seed data never loaded.
 
+**"A row I know exists isn't showing up in the list."** As of **v0.1.25.46**
+terminal-state rows (tenants/budgets `CLOSED`, webhooks `DISABLED`, api-keys
+`REVOKED` / `EXPIRED`) are hidden by default on every list view. Check the
+**"Show &lt;verb&gt;"** toggle in the filter row — the count next to it
+(`Show closed (3)`) tells you how many are currently hidden. Flip it on, or
+pick the terminal value in the status dropdown (auto-reveals those rows
+even with the toggle off). Toggle state mirrors to `?include_terminal=1` so
+a deep-linked list URL carries the operator's preference.
+
+**"Exported CSV is missing some rows."** Same cause. Export follows the
+visible list — if terminals are hidden, they are not in the export. This
+is deliberate ("export what I see"). Flip the toggle on before exporting
+if you need the terminals included.
+
 **One list view empty, inline error banner.** The dashboard uses
 `Promise.allSettled` on OverviewView so one failing endpoint does not blank
 the landing page. Expand the banner to see the failing endpoint. Usually a

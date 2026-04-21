@@ -5,6 +5,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
+import { useTerminalAwareList } from '../composables/useTerminalAwareList'
 import { useListExport } from '../composables/useListExport'
 import { listWebhooks, listTenants, createWebhook, updateWebhook, getWebhookSecurityConfig, updateWebhookSecurityConfig, bulkActionWebhooks, ApiError } from '../api/client'
 import { rateLimitedBatch } from '../utils/rateLimitedBatch'
@@ -142,13 +143,34 @@ watch([tenantFilter, urlFilter, statusFilter, failingFilter], () => { selected.v
 // Health + Events columns are NOT sortable — they're derived client-side
 // and don't have server enum values. onChange refreshes page 1 so the
 // cursor stays aligned with the new (sort_by, sort_dir) tuple.
-const { sortKey, sortDir, toggle, sorted: sortedWebhooks } = useSort(
+const { sortKey, sortDir, toggle, sorted: columnSortedWebhooks } = useSort(
   filteredWebhooks,
   undefined,
   'asc',
   undefined,
   { serverSide: true, onChange: () => { refresh() } },
 )
+
+// v0.1.25.46: hide DISABLED webhooks by default — they're terminal and
+// pre-fix they floated to the top of any created_at-desc view (freshly-
+// disabled was the newest row), forcing operators to actively filter
+// them out before every triage. Toggle mirrors to the URL so drill-in
+// → back preserves the state. Explicit status=DISABLED filter auto-
+// shows them without needing the toggle (same behavior GitHub's
+// state:closed gives). See useTerminalAwareList for the contract.
+const {
+  includeTerminal,
+  visibleRows: sortedWebhooks,
+  terminalCount: hiddenTerminalCount,
+  terminalVerb,
+} = useTerminalAwareList<WebhookSubscription>({
+  kind: 'webhook',
+  source: columnSortedWebhooks,
+  statusOf: w => w.status,
+  explicitStatus: statusFilter,
+  route,
+  router,
+})
 
 // Helper to fold the current sort tuple + server-side search into a
 // listWebhooks params record. Every call site (polling, loadMore,
@@ -180,17 +202,19 @@ function toggleSelect(id: string) {
   selected.value = next
 }
 const selectedVisibleAll = computed(() =>
-  filteredWebhooks.value.length > 0 &&
-  filteredWebhooks.value.every(w => selected.value.has(w.subscription_id)),
+  sortedWebhooks.value.length > 0 &&
+  sortedWebhooks.value.every(w => selected.value.has(w.subscription_id)),
 )
 const selectedVisibleCount = computed(() =>
-  filteredWebhooks.value.filter(w => selected.value.has(w.subscription_id)).length,
+  sortedWebhooks.value.filter(w => selected.value.has(w.subscription_id)).length,
 )
 function toggleSelectAll() {
   if (selectedVisibleAll.value) {
     selected.value = new Set()
   } else {
-    selected.value = new Set(filteredWebhooks.value.map(w => w.subscription_id))
+    // Select only what's visible (post-terminal-filter). Otherwise
+    // hidden DISABLED rows would silently end up in bulk actions.
+    selected.value = new Set(sortedWebhooks.value.map(w => w.subscription_id))
   }
 }
 
@@ -570,7 +594,9 @@ const {
 } = useListExport<WebhookSubscription>({
   itemNoun: 'subscription',
   filenameStem: 'webhooks',
-  currentItems: filteredWebhooks,
+  // Export what's visible (post-terminal-filter). Hiding DISABLED
+  // rows must also hide them from the download.
+  currentItems: sortedWebhooks,
   hasMore,
   nextCursor,
   fetchPage: async (cursor) => {
@@ -628,17 +654,17 @@ const gridTemplate = computed(() =>
     <PageHeader
       title="Webhooks"
       item-noun="webhook"
-      :loaded="filteredWebhooks.length"
+      :loaded="sortedWebhooks.length"
       :has-more="hasMore"
       :loading="isLoading"
       @refresh="refresh"
     >
       <template #actions>
-        <button @click="confirmExport('csv')" :disabled="filteredWebhooks.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+        <button @click="confirmExport('csv')" :disabled="sortedWebhooks.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
           <DownloadIcon class="w-3.5 h-3.5" />
           Export CSV
         </button>
-        <button @click="confirmExport('json')" :disabled="filteredWebhooks.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+        <button @click="confirmExport('json')" :disabled="sortedWebhooks.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
           <DownloadIcon class="w-3.5 h-3.5" />
           Export JSON
         </button>
@@ -685,6 +711,15 @@ const gridTemplate = computed(() =>
         <label class="text-sm flex items-center gap-1.5 text-gray-700 dark:text-gray-200 whitespace-nowrap">
           <input v-model="failingFilter" type="checkbox" aria-label="Show only failing webhooks" />
           Failing only
+        </label>
+        <!-- v0.1.25.46: terminal-row toggle. DISABLED webhooks are hidden
+             by default (terminal state, nothing actionable) and the
+             operator can opt in here. Count is of terminal rows in the
+             current post-filter page — if there are zero, the label
+             still renders so the affordance is discoverable. -->
+        <label class="text-sm flex items-center gap-1.5 text-gray-700 dark:text-gray-200 whitespace-nowrap">
+          <input v-model="includeTerminal" type="checkbox" :aria-label="`Show ${terminalVerb} webhooks`" />
+          Show {{ terminalVerb }}<span v-if="hiddenTerminalCount > 0 && !includeTerminal" class="muted-sm">&nbsp;({{ hiddenTerminalCount }})</span>
         </label>
         <!-- Filter-apply bulk actions (see TenantsView for rationale).
              Appears when a filter is set AND no row-select is active.
@@ -760,7 +795,7 @@ const gridTemplate = computed(() =>
     <div
       class="bg-white rounded-lg shadow overflow-x-auto overflow-y-hidden text-sm flex-1 min-h-0 flex flex-col"
       role="table"
-      :aria-rowcount="filteredWebhooks.length + 1"
+      :aria-rowcount="sortedWebhooks.length + 1"
       :aria-colcount="canManage ? 7 : 5"
     >
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
@@ -984,7 +1019,7 @@ const gridTemplate = computed(() =>
 
     <ExportDialog
       :format="showExportConfirm"
-      :loaded-count="filteredWebhooks.length"
+      :loaded-count="sortedWebhooks.length"
       :has-more="hasMore"
       :max-rows="EXPORT_MAX_ROWS"
       item-noun-plural="webhooks"
