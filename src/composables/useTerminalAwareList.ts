@@ -70,9 +70,9 @@ export function useTerminalAwareList<T>(opts: UseTerminalAwareListOptions<T>) {
   const includeTerminal = ref<boolean>(readFromQuery())
 
   // URL mirror: ref → URL, and URL → ref (for browser back/forward and
-  // deep-link deep-links from the Overview counters that might one day
-  // include `?include_terminal=1`). Loop-safe: if the value already
-  // matches, skip the router.replace.
+  // deep-links from the Overview counters that might one day include
+  // `?include_terminal=1`). Loop-safe: if the value already matches,
+  // skip the router.replace.
   if (opts.route && opts.router) {
     const route = opts.route
     const router = opts.router

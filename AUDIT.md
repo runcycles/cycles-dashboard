@@ -63,6 +63,7 @@ Newest at the top. Older entries preserved verbatim.
 | Deep-link `?include_terminal=1` | Toggle starts on; no redundant `router.replace` at mount (loop-safe diff guard). |
 | Toggle flip while filter narrows to a single terminal value | No-op — `showTerminal` was already true via auto-engage; URL param writes but the composable's `visibleRows` returns the same set. |
 | Upstream `source` ref is transiently undefined (mid-fetch) | Defensive `source.value ?? []` — composable returns `[]` instead of crashing the component. |
+| Export / select-all / PageHeader counter with terminals hidden | All read from the post-terminal-filter `sortedX` (visible list), not the pre-filter `filteredX`. Export CSV/JSON never includes invisible terminals; select-all never quietly selects a hidden CLOSED row for bulk suspend. Caught in review round; BudgetsView already did this, the other three views were updated to match. |
 
 **Tests.** 30 new tests:
 

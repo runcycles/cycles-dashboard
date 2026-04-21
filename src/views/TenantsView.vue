@@ -230,15 +230,18 @@ function toggleSelectAll() {
   if (selectedVisibleAll.value) {
     selected.value = new Set()
   } else {
-    selected.value = new Set(filteredTenants.value.map(t => t.tenant_id))
+    // Select only what's visible (post-terminal-filter). Otherwise
+    // toggle-off hides CLOSED rows but select-all still grabs them —
+    // bulk actions would then silently touch invisible rows.
+    selected.value = new Set(sortedTenants.value.map(t => t.tenant_id))
   }
 }
 const selectedVisibleAll = computed(() =>
-  filteredTenants.value.length > 0 &&
-  filteredTenants.value.every(t => selected.value.has(t.tenant_id)),
+  sortedTenants.value.length > 0 &&
+  sortedTenants.value.every(t => selected.value.has(t.tenant_id)),
 )
 const selectedVisibleCount = computed(() =>
-  filteredTenants.value.filter(t => selected.value.has(t.tenant_id)).length,
+  sortedTenants.value.filter(t => selected.value.has(t.tenant_id)).length,
 )
 
 // Bulk action state machine. We sequence the per-tenant calls rather
@@ -615,7 +618,9 @@ const {
 } = useListExport<Tenant>({
   itemNoun: 'tenant',
   filenameStem: 'tenants',
-  currentItems: filteredTenants,
+  // Export "what you see" — post-terminal-filter. Operator who's
+  // hiding CLOSED rows won't expect them in the CSV/JSON download.
+  currentItems: sortedTenants,
   hasMore,
   nextCursor,
   fetchPage: async (cursor) => {
@@ -691,7 +696,7 @@ const gridTemplate = computed(() =>
     <PageHeader
       title="Tenants"
       item-noun="tenant"
-      :loaded="filteredTenants.length"
+      :loaded="sortedTenants.length"
       :has-more="hasMore"
       :loading="isLoading"
       @refresh="refresh"
@@ -706,11 +711,11 @@ const gridTemplate = computed(() =>
         </button>
       </template>
       <template #actions>
-        <button @click="confirmExport('csv')" :disabled="filteredTenants.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+        <button @click="confirmExport('csv')" :disabled="sortedTenants.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
           <DownloadIcon class="w-3.5 h-3.5" />
           Export CSV
         </button>
-        <button @click="confirmExport('json')" :disabled="filteredTenants.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+        <button @click="confirmExport('json')" :disabled="sortedTenants.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
           <DownloadIcon class="w-3.5 h-3.5" />
           Export JSON
         </button>
@@ -742,7 +747,7 @@ const gridTemplate = computed(() =>
              status=CLOSED filter auto-shows them. -->
         <label class="text-sm flex items-center gap-1.5 text-gray-700 dark:text-gray-200 whitespace-nowrap">
           <input v-model="includeTerminal" type="checkbox" :aria-label="`Show ${terminalVerb} tenants`" />
-          Show {{ terminalVerb }}<span v-if="hiddenTerminalCount > 0 && !includeTerminal" class="muted-sm"> ({{ hiddenTerminalCount }})</span>
+          Show {{ terminalVerb }}<span v-if="hiddenTerminalCount > 0 && !includeTerminal" class="muted-sm">&nbsp;({{ hiddenTerminalCount }})</span>
         </label>
         <!-- Filter-apply bulk actions. Appears when the operator has a
              non-empty filter (so the action targets an explicit subset,
@@ -825,7 +830,7 @@ const gridTemplate = computed(() =>
     <div
       class="bg-white rounded-lg shadow overflow-hidden text-sm flex-1 min-h-0 flex flex-col"
       role="table"
-      :aria-rowcount="filteredTenants.length + 1"
+      :aria-rowcount="sortedTenants.length + 1"
       :aria-colcount="canManage ? 8 : 6"
     >
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
@@ -1029,7 +1034,7 @@ const gridTemplate = computed(() =>
 
     <ExportDialog
       :format="showExportConfirm"
-      :loaded-count="filteredTenants.length"
+      :loaded-count="sortedTenants.length"
       :has-more="hasMore"
       :max-rows="EXPORT_MAX_ROWS"
       item-noun-plural="tenants"

@@ -369,7 +369,9 @@ const {
 } = useListExport<KeyWithTenant>({
   itemNoun: 'api key',
   filenameStem: 'api-keys',
-  currentItems: filteredKeys,
+  // Export what's visible (post-terminal-filter). Hiding REVOKED /
+  // EXPIRED rows must also hide them from the download.
+  currentItems: sortedKeys,
   hasMore,
   nextCursor,
   fetchPage: async (cursor) => {
@@ -443,16 +445,16 @@ function closePermsViewer() { viewingPermsFor.value = null }
     <PageHeader
       title="API Keys"
       item-noun="key"
-      :loaded="filteredKeys.length"
+      :loaded="sortedKeys.length"
       :loading="isLoading"
       @refresh="refresh"
     >
       <template #actions>
-        <button @click="confirmExport('csv')" :disabled="filteredKeys.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+        <button @click="confirmExport('csv')" :disabled="sortedKeys.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
           <DownloadIcon class="w-3.5 h-3.5" />
           Export CSV
         </button>
-        <button @click="confirmExport('json')" :disabled="filteredKeys.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+        <button @click="confirmExport('json')" :disabled="sortedKeys.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
           <DownloadIcon class="w-3.5 h-3.5" />
           Export JSON
         </button>
@@ -530,7 +532,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
     <div
       class="bg-white rounded-lg shadow overflow-x-auto overflow-y-hidden text-sm flex-1 min-h-0 flex flex-col"
       role="table"
-      :aria-rowcount="filteredKeys.length + 1"
+      :aria-rowcount="sortedKeys.length + 1"
       :aria-colcount="canManage ? 9 : 8"
     >
      <div :style="{ minWidth: canManage ? '1280px' : '1120px' }" class="flex flex-col flex-1 min-h-0">
@@ -782,7 +784,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
 
     <ExportDialog
       :format="showExportConfirm"
-      :loaded-count="filteredKeys.length"
+      :loaded-count="sortedKeys.length"
       :has-more="hasMore"
       :max-rows="EXPORT_MAX_ROWS"
       item-noun-plural="API keys"

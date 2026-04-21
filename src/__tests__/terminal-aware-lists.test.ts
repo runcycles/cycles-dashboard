@@ -217,6 +217,20 @@ describe('TenantsView — hide CLOSED by default', () => {
     const call = replaceMock.mock.calls.find(c => (c[0] as { query?: Record<string, unknown> }).query?.include_terminal === '1')
     expect(call).toBeDefined()
   })
+
+  it('PageHeader counter + aria-rowcount match the visible (post-terminal-filter) list', async () => {
+    // Review-round regression guard: counter, aria-rowcount, and the
+    // select-all toggle must read from the terminal-filtered list, not
+    // the pre-filter list. Otherwise the counter inflates and
+    // select-all silently grabs the hidden CLOSED row for bulk actions.
+    const { default: TenantsView } = await import('../views/TenantsView.vue')
+    const w = mount(TenantsView, stdMount())
+    await flushPromises()
+    // 3 tenants in the fixture, 1 CLOSED → counter reads 2, not 3.
+    expect(w.text()).toContain('2 tenants')
+    const table = w.find('[role="table"]')
+    expect(table.attributes('aria-rowcount')).toBe('3') // 2 rows + header
+  })
 })
 
 // ─────────────────────────── BudgetsView ──────────────────────────────
