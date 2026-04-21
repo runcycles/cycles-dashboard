@@ -84,6 +84,28 @@ watch(() => route.query.status, () => {
   if (statusFilter.value !== s) statusFilter.value = s
 })
 
+// Filter → URL sync. When the operator changes a filter dropdown,
+// persist to the URL so (a) drill-into-detail + browser-back restores
+// the filter state, and (b) the URL is copy-pasteable. `replace`
+// (not push) — filter fiddling shouldn't clutter history; only the
+// drill-in navigation should. Loop-safe: if the URL already matches
+// the ref (e.g. the change came from a route.query watcher above),
+// the guard below skips the replace call.
+watch([parentFilter, statusFilter], () => {
+  const desiredParent = parentFilter.value || undefined
+  const desiredStatus = statusFilter.value || undefined
+  const currentParent = typeof route.query.parent === 'string' ? route.query.parent : undefined
+  const currentStatus = typeof route.query.status === 'string' ? route.query.status : undefined
+  if (desiredParent === currentParent && desiredStatus === currentStatus) return
+  router.replace({
+    query: {
+      ...route.query,
+      parent: desiredParent,
+      status: desiredStatus,
+    },
+  })
+})
+
 // V5 (Phase 3): debounce the search input so filter re-computation
 // runs 200ms AFTER the last keystroke instead of on every character.
 // Debouncing a client-side filter is subtler than debouncing a fetch —

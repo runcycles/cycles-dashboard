@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.44 (2026-04-20)
+**Current release:** v0.1.25.45 (2026-04-21)
 
 ## Baseline requirements
 
@@ -16,6 +16,113 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-21 — v0.1.25.45: exclude closed-tenant children from Overview attention cards + Tenants filter persists across drill-in + clean-close banner flash
+
+This release bundles three operator-reported UX fixes.
+
+#### Fix 3 — Cascade-recovery banner no longer flashes after a clean close
+
+**Trigger.** Operator report: *"When closing a tenant, right after cascade warning comes up, even though all is closed, requires refresh page to go away."*
+
+**Root cause.** `executeTenantAction()` only refetched `tenant` after the CLOSE PATCH — the `budgets`, `webhooks`, and `apiKeys` refs stayed stale (whatever was loaded before the close). `showRecoveryBanner` is a `computed(() => cascadeIsIncomplete(tenant, { budgets, webhooks, apiKeys }))` — with the tenant now CLOSED but stale ACTIVE children visible in the refs, the predicate returned true and the banner rendered. It cleared on the next 30s poll (which did refetch all four), but that's an eternity in UI terms; operators hit refresh instead.
+
+`rerunCascade()` already did the correct four-way refetch, which is what made the contrast sharp — the re-run flow's banner cleared cleanly but the initial-close flow's banner didn't.
+
+**Fix.** In `executeTenantAction`, branch on the action: for `CLOSED` do the four-way `Promise.all([getTenant, listBudgets, listWebhooks, listApiKeys])` refetch (same shape as `rerunCascade`); for `SUSPENDED` / `ACTIVE` keep the existing tenant-only refetch since those actions don't run a cascade.
+
+**Why not just refetch all four for every action.** Suspend and reactivate leave owned children in whatever state they were. Refetching them on those actions is wasteful per-click traffic for no observable benefit. The branch keeps the wire footprint minimal.
+
+**Edge cases.**
+
+| Case | Behavior |
+|---|---|
+| Mode B admin where cascade takes multiple seconds to converge | Refetch may return pre-cascade children → banner renders. Correct — that's exactly the spec v0.1.25.31 Rule 1(c) convergence window. Operator can click Re-run cascade immediately or wait for the next poll. |
+| Mode A admin (atomic cascade) | Refetch returns post-cascade children → banner stays hidden. The happy path this fix targets. |
+| PATCH succeeds but one of the three list refetches fails | Tenant ref updates, that list ref doesn't. Falls through to the `catch` (because `Promise.all` rejects); error surfaces via `toast.error`. Acceptable — tenant status is correct, banner may show stale data for one poll cycle until the next tick refreshes. |
+
+**Tests.** 1 new test in `TenantDetailView-cascade-recovery.test.ts`: ACTIVE tenant with ACTIVE children → operator clicks Close → types name → confirms → server-side cascade converges → banner MUST NOT render, and the four-parameter refetch MUST have fired with the expected `{tenant_id}` params.
+
+---
+
+#### Fix 2 — Tenants filter persists across drill-in → back
+
+**Trigger.** Operator report: *"Tenants: set filter, show list, drill down, go back (via crumbs), filter reset. Works in budgets."*
+
+**Root cause.** `TenantsView` held filter state only in Vue refs (`parentFilter`, `statusFilter`). Drilling into a tenant row navigated to `/tenants/:id` — a different route backed by `TenantDetailView`. On return via the back crumb, `TenantsView` re-mounted and `readStatusFromQuery()` / `readParentFromQuery()` hydrated from `route.query`, which was empty. `BudgetsView` doesn't have this problem because its detail renders in-component (`isDetail` computed off `route.query.scope`) — the same Vue instance stays mounted, so the filter refs survive.
+
+**Fix — two coordinated changes.**
+
+| Surface | Change |
+|---|---|
+| `TenantsView.vue` | Added `watch([parentFilter, statusFilter], () => router.replace({ query: {...} }))`. Replace (not push) — filter fiddling shouldn't clutter browser history; only the drill-in navigation should push. Loop-safe via a diff guard: if the URL already matches the ref (e.g. the ref change originated from the existing `route.query` → `parentFilter` watcher), the replace is skipped. |
+| `TenantDetailView.vue` — `goBack` | Changed from unconditional `router.push('/tenants')` to `router.back()` (with `window.history.length > 1` guard; falls back to `router.push('/tenants')` when the detail page was direct-linked without prior history). Parent-tenant back-path (when `?parent=X` is threaded) unchanged — still pushes to that parent's detail. |
+
+**Why `router.back()` instead of push-with-query-restore.** We considered having `TenantsView` thread the current filter as `from_*` query params on the row-click navigation, and having `goBack` reconstruct `/tenants?status=...&parent=...` from those. Two problems: (1) pollutes detail URL with presentation-layer state that has nothing to do with the detail page itself; (2) the browser's actual back button (not just the crumb) still wouldn't restore filter state — only the crumb would. `router.back()` solves both: back and the back crumb share a single path, and the detail URL stays clean.
+
+**Edge cases.**
+
+| Case | Behavior |
+|---|---|
+| Direct-linked `/tenants/:id` (bookmark, shared URL) | `window.history.length <= 1` → falls back to `router.push('/tenants')`. No filter was ever set, so nothing to restore. |
+| Operator navigated Tenants → Budgets → Tenant detail | `router.back()` goes to Budgets, not Tenants. Acceptable — that IS the back path. The crumb label reads "Back to tenants" which is slightly misleading in this chain, but matches browser semantics and the 95% path (Tenants → detail → back). |
+| Tenant detail reached via "Children of" from another tenant | `parentFromQuery` branch unchanged; still routes back to the parent tenant detail. |
+| Deep-link with `?status=ACTIVE` on mount | Existing pre-hydration via `readStatusFromQuery()` unchanged. New filter→URL watcher skips the initial sync (URL already matches ref). |
+
+**Tests.** 4 new tests in `TenantsView-filter-url-sync.test.ts`: status dropdown pushes `router.replace({query:{status}})`, root-level pseudo-option pushes `parent:'__root__'`, clearing the filter removes the param, and mount-from-URL doesn't loop into a redundant replace.
+
+---
+
+#### Fix 1 — exclude closed-tenant children from Overview attention cards
+
+**Trigger.** Operator report: *"Budgets at or near cap show for closed tenants on the Overview."* Audit requested across all Overview cards.
+
+**Root cause.** Spec v0.1.25.31 Rule 1 Mode B is eventually-consistent — the tenant-close flip commits first, children terminal-ify via a guarded post-flip cascade, and Rule 1(c) permits an "implementation-defined" bounded-convergence window. During that window a CLOSED tenant can own non-terminal children (FROZEN budget, ACTIVE api_key, ACTIVE webhook-sub). Five Overview attention cards read those children directly and surfaced them as pending work — exactly opposite the operator intent behind tenant.close.
+
+**Audit across all six attention cards + counter strip.**
+
+| Card | Leak? | Data source | Resolution |
+|---|---|---|---|
+| Budgets at or near cap | yes | `listBudgets({utilization_min:'0.9'})` | `BudgetLedger.tenant_id` populated (v0.1.25.19+); client-side filter |
+| Budgets with debt | yes | `overview.debt_scopes` (no tenant_id) | **Source swap** → `listBudgets({has_debt:'true'})` + client filter |
+| Frozen budgets | yes | `listBudgets({status:'FROZEN'})` | Client-side filter |
+| Expiring API keys | yes | `listApiKeys` | `ApiKey.tenant_id` always populated; client-side filter |
+| Failing webhooks | yes | `overview.failing_webhooks` (no tenant_id) | **Source swap** → `listWebhooks` + client `consecutive_failures>0` + closed-tenant filter |
+| Recent denials | no | runtime events | Closed-tenant mutations now return TENANT_CLOSED before a denial is emitted — naturally excluded |
+| Recent operator activity | no | audit log | `tenant.close` itself belongs here; intended signal |
+| Counter strip tiles | no | server aggregates | Navigational counters, not actionable work — drilling lands on a filterable list |
+
+**Why client-side filter, not a new server aggregate.** Closed-tenant set is bounded (operators don't close tenants often); fetching `listTenants({status:'CLOSED'})` once per Overview poll is one extra roundtrip against an endpoint that already exists. Adding `exclude_closed_tenants=true` server params would touch 4+ endpoints for a transient-window concern; the client filter converges to zero rows the moment Rule 1(c) completes anyway.
+
+**Fix.**
+
+| Surface | Change |
+|---|---|
+| `OverviewView.vue` fetch fanout | `Promise.allSettled` extended from 5 → 8 parallel fetches: adds `listTenants({status:'CLOSED'})`, `listBudgets({has_debt:'true'})`, `listWebhooks()`. Same allSettled graceful-degradation story — any one failing doesn't wedge the others. |
+| New refs | `closedTenantIds: Set<string>`, `debtBudgets: BudgetLedger[]`, `failingWebhooksRaw: WebhookSubscription[]` |
+| `isNotClosedTenant(t)` helper | `!t.tenant_id \|\| !closedTenantIds.has(t.tenant_id)` — defensive on missing tenant_id (pre-`.19` budgets carry no tenant_id; treat as visible rather than mass-hiding on ambiguity) |
+| Filtered computeds | `atCapBudgetsFiltered`, `frozenBudgetsFiltered`, `debtBudgetsFiltered`, `keysFiltered`, `failingWebhooksFiltered` — every downstream sorted/count computed rebased on these |
+| Badges + banner axis pills | Counts derive from filtered list lengths, not server aggregates — the pill, tile badge, and row list stay consistent |
+| Debt card template | Rewired from `debtScopesSorted` (reading `s.debt`, `s.overdraft_limit` as numbers) to `debtBudgetsSorted` (reading `b.debt?.amount`, `b.overdraft_limit?.amount` as Amount objects) |
+
+**What this is NOT.**
+- Not a spec change — Mode B is working as designed; this is just a client-side presentation fix for the transient convergence window.
+- Not an admin pin bump — no new admin capability required; `listBudgets?has_debt` + `listWebhooks` already exist.
+- Not a filter for Tenants/Budgets/Webhooks views — those are dedicated list pages where the operator filters explicitly; the transient window is visible there by design (drill-in expected).
+- Not a filter on the counter strip — tiles are nav counters, not attention work; closed-tenant children DO count toward the global "you have N budgets" total.
+
+**Tests.** 5 new closed-tenant-exclusion tests (one per fixed card) assert the row is hidden when the owning tenant is CLOSED AND the non-closed sibling remains visible. 6 pre-existing tests updated to the new data sources (`listBudgetsMock.mockImplementation` branching on `params.has_debt` / `params.status` / `params.utilization_min`; `listWebhooksMock` seeded with `webhookSub()` fixtures). Full suite 783/783 green.
+
+**Edge cases.**
+
+| Case | Behavior |
+|---|---|
+| Budget `tenant_id` missing (pre-`.19` data) | `isNotClosedTenant` returns true → row stays visible. Prefers over-visibility to over-hiding when ownership is ambiguous. |
+| `listTenants` fails | `closedTenantIds` stays empty → no filtering applied; cards render the full list (pre-fix behavior). Degrades gracefully. |
+| Operator re-opens a CLOSED tenant | Spec says CLOSED is terminal — not actually possible. If a future spec revision adds un-close, the set membership refreshes on the next poll (30s). |
+| Large closed-tenant population (N > 1000) | `listTenants({status:'CLOSED'})` paginates (no `limit` specified → server default). If operators accumulate thousands of closed tenants the set becomes incomplete and some rows leak. Acceptable for now; revisit if it bites. |
+
+---
 
 ### 2026-04-20 — v0.1.25.44: cascade-recovery affordance (consumes spec v0.1.25.31 Rule 1(c))
 

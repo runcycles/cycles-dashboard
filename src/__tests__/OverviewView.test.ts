@@ -8,12 +8,14 @@ import { h as actualH, defineComponent } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '../stores/auth'
-import type { Capabilities, AdminOverviewResponse, ApiKey, AuditLogEntry, BudgetLedger } from '../types'
+import type { Capabilities, AdminOverviewResponse, ApiKey, AuditLogEntry, BudgetLedger, Tenant, WebhookSubscription } from '../types'
 
 const getOverviewMock = vi.fn()
 const listApiKeysMock = vi.fn()
 const listAuditLogsMock = vi.fn()
 const listBudgetsMock = vi.fn()
+const listTenantsMock = vi.fn()
+const listWebhooksMock = vi.fn()
 
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
@@ -23,6 +25,8 @@ vi.mock('../api/client', async () => {
     listApiKeys: (...args: unknown[]) => listApiKeysMock(...args),
     listAuditLogs: (...args: unknown[]) => listAuditLogsMock(...args),
     listBudgets: (...args: unknown[]) => listBudgetsMock(...args),
+    listTenants: (...args: unknown[]) => listTenantsMock(...args),
+    listWebhooks: (...args: unknown[]) => listWebhooksMock(...args),
   }
 })
 
@@ -102,6 +106,29 @@ function atCapBudget(scope: string, overrides: Partial<BudgetLedger> = {}): Budg
   }
 }
 
+function webhookSub(id: string, overrides: Partial<WebhookSubscription> = {}): WebhookSubscription {
+  return {
+    subscription_id: id,
+    tenant_id: 'acme',
+    url: `https://${id}.example/hook`,
+    event_types: [],
+    status: 'ACTIVE',
+    consecutive_failures: 3,
+    created_at: '2026-01-01T00:00:00Z',
+    ...overrides,
+  }
+}
+
+function tenant(id: string, overrides: Partial<Tenant> = {}): Tenant {
+  return {
+    tenant_id: id,
+    name: id,
+    status: 'CLOSED',
+    created_at: '2026-01-01T00:00:00Z',
+    ...overrides,
+  }
+}
+
 function auditEntry(id: string, overrides: Partial<AuditLogEntry> = {}): AuditLogEntry {
   return {
     log_id: id,
@@ -147,10 +174,17 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
     listApiKeysMock.mockReset()
     listAuditLogsMock.mockReset()
     listBudgetsMock.mockReset()
+    listTenantsMock.mockReset()
+    listWebhooksMock.mockReset()
     listApiKeysMock.mockResolvedValue({ keys: [], has_more: false })
     listAuditLogsMock.mockResolvedValue({ logs: [], has_more: false })
     // Default: no at-cap budgets. Individual tests override as needed.
     listBudgetsMock.mockResolvedValue({ ledgers: [], has_more: false })
+    // Default: no closed tenants. Tests that exercise the closed-
+    // tenant exclusion override with { status: 'CLOSED', ... } rows.
+    listTenantsMock.mockResolvedValue({ tenants: [], has_more: false })
+    // Default: no webhooks fetched. Failing-webhooks tests override.
+    listWebhooksMock.mockResolvedValue({ subscriptions: [], has_more: false })
   })
 
   describe('top-of-page headline', () => {
@@ -164,10 +198,11 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
     it('renders the alert banner with count when webhooks are failing', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview({
         webhook_counts: { total: 3, active: 3, disabled: 0, with_failures: 2 },
-        failing_webhooks: [
-          { subscription_id: 'wh_a', url: 'https://a.example/hook', consecutive_failures: 5 },
-        ],
       }))
+      listWebhooksMock.mockResolvedValue({
+        subscriptions: [webhookSub('wh_a', { consecutive_failures: 5 })],
+        has_more: false,
+      })
       const w = await mountOverview()
       expect(w.text()).toContain('area needs attention')
       expect(w.text()).not.toContain('All clear')
@@ -176,11 +211,20 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
     it('pluralizes the banner when multiple areas fire', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview({
         webhook_counts: { total: 3, active: 3, disabled: 0, with_failures: 1 },
-        failing_webhooks: [{ subscription_id: 'wh_a', url: 'https://a', consecutive_failures: 3 }],
         budget_counts: {
           total: 2, active: 2, frozen: 1, closed: 0, over_limit: 0, with_debt: 0, by_unit: {},
         },
       }))
+      listWebhooksMock.mockResolvedValue({
+        subscriptions: [webhookSub('wh_a')],
+        has_more: false,
+      })
+      listBudgetsMock.mockImplementation((params: Record<string, string>) => {
+        if (params.status === 'FROZEN') {
+          return Promise.resolve({ ledgers: [atCapBudget('acme/frozen', { status: 'FROZEN' })], has_more: false })
+        }
+        return Promise.resolve({ ledgers: [], has_more: false })
+      })
       const w = await mountOverview()
       expect(w.text()).toContain('2 areas need attention')
     })
@@ -190,12 +234,19 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
     it('enumerates firing axes as named pills (not just a count)', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview({
         webhook_counts: { total: 3, active: 2, disabled: 0, with_failures: 1 },
-        failing_webhooks: [{ subscription_id: 'wh_a', url: 'https://a', consecutive_failures: 3 }],
         budget_counts: {
           total: 4, active: 2, frozen: 1, closed: 0, over_limit: 0, with_debt: 0, by_unit: {},
         },
       }))
-      listBudgetsMock.mockResolvedValue({ ledgers: [atCapBudget('acme/foo')], has_more: false })
+      listWebhooksMock.mockResolvedValue({
+        subscriptions: [webhookSub('wh_a')],
+        has_more: false,
+      })
+      listBudgetsMock.mockImplementation((params: Record<string, string>) => {
+        if (params.utilization_min) return Promise.resolve({ ledgers: [atCapBudget('acme/foo')], has_more: false })
+        if (params.status === 'FROZEN') return Promise.resolve({ ledgers: [atCapBudget('acme/frozen', { status: 'FROZEN' })], has_more: false })
+        return Promise.resolve({ ledgers: [], has_more: false })
+      })
       const w = await mountOverview()
       const axes = w.find('[data-testid="alert-axes"]')
       expect(axes.exists()).toBe(true)
@@ -207,11 +258,18 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
     it('each axis pill carries severity class (danger=red, warning=amber)', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview({
         webhook_counts: { total: 3, active: 2, disabled: 0, with_failures: 1 },
-        failing_webhooks: [{ subscription_id: 'wh_a', url: 'https://a', consecutive_failures: 3 }],
         budget_counts: {
           total: 2, active: 1, frozen: 1, closed: 0, over_limit: 0, with_debt: 0, by_unit: {},
         },
       }))
+      listWebhooksMock.mockResolvedValue({
+        subscriptions: [webhookSub('wh_a')],
+        has_more: false,
+      })
+      listBudgetsMock.mockImplementation((params: Record<string, string>) => {
+        if (params.status === 'FROZEN') return Promise.resolve({ ledgers: [atCapBudget('acme/frozen', { status: 'FROZEN' })], has_more: false })
+        return Promise.resolve({ ledgers: [], has_more: false })
+      })
       const w = await mountOverview()
       const failing = w.find('[data-axis="failing-webhooks"]')
       const frozen = w.find('[data-axis="frozen-budgets"]')
@@ -222,8 +280,11 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
     it('omits axis pills for non-firing axes (no healthy chips)', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview({
         webhook_counts: { total: 3, active: 2, disabled: 0, with_failures: 1 },
-        failing_webhooks: [{ subscription_id: 'wh_a', url: 'https://a', consecutive_failures: 3 }],
       }))
+      listWebhooksMock.mockResolvedValue({
+        subscriptions: [webhookSub('wh_a')],
+        has_more: false,
+      })
       const w = await mountOverview()
       // Only Failing webhooks fires — the other five axes should NOT have pills.
       expect(w.find('[data-axis="failing-webhooks"]').exists()).toBe(true)
@@ -280,11 +341,11 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
     it('calls listBudgets with utilization_min=0.9 (catches near-cap too)', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview())
       await mountOverview()
-      // Two listBudgets calls total — one for at-or-near-cap
-      // (utilization_min=0.9), one for frozen scopes (status=FROZEN).
-      // Asserting on the at-cap one by matching its param shape so
-      // the spec is resilient to call-order changes.
-      expect(listBudgetsMock).toHaveBeenCalledTimes(2)
+      // Three listBudgets calls total — at-or-near-cap
+      // (utilization_min=0.9), frozen scopes (status=FROZEN), and
+      // debt scopes (has_debt=true). Match on param shape so the spec
+      // is resilient to call-order changes.
+      expect(listBudgetsMock).toHaveBeenCalledTimes(3)
       const atCapCall = listBudgetsMock.mock.calls
         .map(c => c[0] as Record<string, string>)
         .find(p => p.utilization_min !== undefined)
@@ -409,8 +470,13 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
     it('degrades gracefully when listBudgets fails (other sections still render)', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview({
         webhook_counts: { total: 3, active: 2, disabled: 0, with_failures: 1 },
-        failing_webhooks: [{ subscription_id: 'wh_a', url: 'https://a', consecutive_failures: 3 }],
       }))
+      // Failing webhooks now comes from listWebhooks (not overview.failing_webhooks)
+      // so the "other sections still render" assertion needs that source seeded.
+      listWebhooksMock.mockResolvedValue({
+        subscriptions: [webhookSub('wh_a')],
+        has_more: false,
+      })
       listBudgetsMock.mockRejectedValue(new Error('simulated outage'))
       const w = await mountOverview()
       // Failing-webhooks axis still renders even though the at-cap
@@ -518,16 +584,25 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
   })
 
   describe('Budgets with Debt card — caps at 5 rows (parity with other budget cards)', () => {
-    it('slices overview.debt_scopes to 5 on the landing card', async () => {
+    it('slices the debt-scopes list to 5 on the landing card', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview({
         budget_counts: { total: 10, active: 3, frozen: 0, closed: 0, over_limit: 0, with_debt: 7, by_unit: {} },
-        debt_scopes: Array.from({ length: 7 }, (_, i) => ({
-          scope: `scope-${i}`,
-          unit: 'tokens',
-          debt: 100 - i,
-          overdraft_limit: 500,
-        })),
       }))
+      // Debt rows now come from listBudgets?has_debt=true (so we can
+      // read tenant_id and filter closed-tenant leakage). Server sorts
+      // desc by debt; we seed in that order.
+      listBudgetsMock.mockImplementation((params: Record<string, string>) => {
+        if (params.has_debt === 'true') {
+          return Promise.resolve({
+            ledgers: Array.from({ length: 7 }, (_, i) => atCapBudget(`scope-${i}`, {
+              debt: { unit: 'tokens', amount: 100 - i },
+              overdraft_limit: { unit: 'tokens', amount: 500 },
+            })),
+            has_more: false,
+          })
+        }
+        return Promise.resolve({ ledgers: [], has_more: false })
+      })
       const w = await mountOverview()
       const card = w.find('#budgets-with-debt')
       const rows = card.findAll('a[title^="scope-"]')
@@ -574,8 +649,11 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
     it('firing card gets border-l-4 and red accent when danger severity', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview({
         webhook_counts: { total: 3, active: 2, disabled: 0, with_failures: 1 },
-        failing_webhooks: [{ subscription_id: 'wh_a', url: 'https://a', consecutive_failures: 3 }],
       }))
+      listWebhooksMock.mockResolvedValue({
+        subscriptions: [webhookSub('wh_a')],
+        has_more: false,
+      })
       const w = await mountOverview()
       const card = w.find('#failing-webhooks')
       expect(card.exists()).toBe(true)
@@ -589,6 +667,15 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
           total: 2, active: 1, frozen: 1, closed: 0, over_limit: 0, with_debt: 0, by_unit: {},
         },
       }))
+      listBudgetsMock.mockImplementation((params: Record<string, string>) => {
+        if (params.status === 'FROZEN') {
+          return Promise.resolve({
+            ledgers: [atCapBudget('acme/frozen', { status: 'FROZEN' })],
+            has_more: false,
+          })
+        }
+        return Promise.resolve({ ledgers: [], has_more: false })
+      })
       const w = await mountOverview()
       const card = w.find('#frozen-budgets')
       expect(card.classes()).toContain('border-l-4')
@@ -681,12 +768,17 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
     it('Failing Webhooks card caps at 5 rows even when the server returns more', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview({
         webhook_counts: { total: 10, active: 3, disabled: 0, with_failures: 7 },
-        failing_webhooks: Array.from({ length: 7 }, (_, i) => ({
-          subscription_id: `wh_${i}`,
+      }))
+      // Failing-webhooks rows now come from listWebhooks (so tenant_id
+      // is available for closed-tenant filtering). Seed 7 subs with
+      // consecutive_failures>0 — card slices to 5, badge shows 7.
+      listWebhooksMock.mockResolvedValue({
+        subscriptions: Array.from({ length: 7 }, (_, i) => webhookSub(`wh_${i}`, {
           url: `https://wh-${i}.example/hook`,
           consecutive_failures: i + 1,
         })),
-      }))
+        has_more: false,
+      })
       const w = await mountOverview()
       const card = w.find('#failing-webhooks')
       // 7 firing upstream; card renders 5. Badge + banner pill still
@@ -1035,6 +1127,141 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       // Clean up the pending promise so vitest doesn't complain.
       resolveOverview(healthyOverview())
       await flushPromises()
+    })
+  })
+
+  // Mode B cascade (spec v0.1.25.31 Rule 1(c)) is eventually-consistent:
+  // a closed tenant can transiently own non-terminal children while the
+  // admin-side cascade converges. Those children MUST NOT leak onto the
+  // Overview "needs attention" cards — the operator has already acted
+  // (tenant.close), and surfacing them as pending work is confusing +
+  // regresses the v0.1.25.44 "close is decisive" UX.
+  describe('closed-tenant children are excluded from the attention cards', () => {
+    it('at-cap card hides budgets owned by CLOSED tenants', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      listTenantsMock.mockResolvedValue({
+        tenants: [tenant('closed-co', { status: 'CLOSED' })],
+        has_more: false,
+      })
+      listBudgetsMock.mockImplementation((params: Record<string, string>) => {
+        if (params.utilization_min) {
+          return Promise.resolve({
+            ledgers: [
+              atCapBudget('closed-co/prod', { tenant_id: 'closed-co' }),
+              atCapBudget('acme/prod', { tenant_id: 'acme' }),
+            ],
+            has_more: false,
+          })
+        }
+        return Promise.resolve({ ledgers: [], has_more: false })
+      })
+      const w = await mountOverview()
+      const card = w.find('[data-testid="budgets-at-cap-card"]')
+      expect(card.text()).toContain('acme/prod')
+      expect(card.text()).not.toContain('closed-co/prod')
+      // Banner axis pill count reflects the filtered list.
+      expect(w.find('[data-axis="budgets-at-cap"]').text()).toContain('·1')
+    })
+
+    it('frozen-budgets card hides FROZEN budgets owned by CLOSED tenants', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        budget_counts: { total: 3, active: 1, frozen: 2, closed: 0, over_limit: 0, with_debt: 0, by_unit: {} },
+      }))
+      listTenantsMock.mockResolvedValue({
+        tenants: [tenant('closed-co')],
+        has_more: false,
+      })
+      listBudgetsMock.mockImplementation((params: Record<string, string>) => {
+        if (params.status === 'FROZEN') {
+          return Promise.resolve({
+            ledgers: [
+              atCapBudget('closed-co/frozen', { status: 'FROZEN', tenant_id: 'closed-co' }),
+              atCapBudget('acme/frozen',      { status: 'FROZEN', tenant_id: 'acme' }),
+            ],
+            has_more: false,
+          })
+        }
+        return Promise.resolve({ ledgers: [], has_more: false })
+      })
+      const w = await mountOverview()
+      const card = w.find('#frozen-budgets')
+      expect(card.text()).toContain('acme/frozen')
+      expect(card.text()).not.toContain('closed-co/frozen')
+    })
+
+    it('with-debt card hides debt budgets owned by CLOSED tenants', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        budget_counts: { total: 2, active: 1, frozen: 0, closed: 0, over_limit: 0, with_debt: 2, by_unit: {} },
+      }))
+      listTenantsMock.mockResolvedValue({
+        tenants: [tenant('closed-co')],
+        has_more: false,
+      })
+      listBudgetsMock.mockImplementation((params: Record<string, string>) => {
+        if (params.has_debt === 'true') {
+          return Promise.resolve({
+            ledgers: [
+              atCapBudget('closed-co/debt', {
+                tenant_id: 'closed-co',
+                debt: { unit: 'tokens', amount: 50 },
+                overdraft_limit: { unit: 'tokens', amount: 500 },
+              }),
+              atCapBudget('acme/debt', {
+                tenant_id: 'acme',
+                debt: { unit: 'tokens', amount: 30 },
+                overdraft_limit: { unit: 'tokens', amount: 500 },
+              }),
+            ],
+            has_more: false,
+          })
+        }
+        return Promise.resolve({ ledgers: [], has_more: false })
+      })
+      const w = await mountOverview()
+      const card = w.find('#budgets-with-debt')
+      expect(card.text()).toContain('acme/debt')
+      expect(card.text()).not.toContain('closed-co/debt')
+    })
+
+    it('expiring-keys card hides API keys owned by CLOSED tenants', async () => {
+      const soon = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString()
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      listTenantsMock.mockResolvedValue({
+        tenants: [tenant('closed-co')],
+        has_more: false,
+      })
+      listApiKeysMock.mockResolvedValue({
+        keys: [
+          key('closed-co-key', { name: 'closed-key', tenant_id: 'closed-co', expires_at: soon }),
+          key('acme-key',      { name: 'live-key',   tenant_id: 'acme',      expires_at: soon }),
+        ],
+        has_more: false,
+      })
+      const w = await mountOverview()
+      const card = w.find('[data-testid="expiring-keys-card"]')
+      expect(card.text()).toContain('live-key')
+      expect(card.text()).not.toContain('closed-key')
+    })
+
+    it('failing-webhooks card hides subscriptions owned by CLOSED tenants', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        webhook_counts: { total: 2, active: 2, disabled: 0, with_failures: 2 },
+      }))
+      listTenantsMock.mockResolvedValue({
+        tenants: [tenant('closed-co')],
+        has_more: false,
+      })
+      listWebhooksMock.mockResolvedValue({
+        subscriptions: [
+          webhookSub('wh_closed', { tenant_id: 'closed-co' }),
+          webhookSub('wh_live',   { tenant_id: 'acme' }),
+        ],
+        has_more: false,
+      })
+      const w = await mountOverview()
+      const card = w.find('#failing-webhooks')
+      expect(card.text()).toContain('wh_live')
+      expect(card.text()).not.toContain('wh_closed')
     })
   })
 })

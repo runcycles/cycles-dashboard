@@ -293,6 +293,50 @@ describe('TenantDetailView — cascade-recovery banner (v0.1.25.44)', () => {
       expect(w.text()).toContain('Re-run cascade on this closed tenant')
     })
 
+    it('CLOSE action refetches children so the recovery banner does not flash for a cleanly-converged cascade', async () => {
+      // Regression: operator closes an ACTIVE tenant, server-side cascade
+      // runs cleanly, but the dashboard kept stale budgets/webhooks/apiKeys
+      // refs because executeTenantAction() only refetched `tenant`. The
+      // cascade-recovery banner then rendered for up to 30s (one poll
+      // cycle) before clearing — operator had to refresh the page to
+      // make it go away. Fix: refetch the cascade children alongside
+      // the tenant when the action is CLOSE.
+      getTenantMock.mockResolvedValueOnce(tenant('ACTIVE'))
+      listBudgetsMock.mockResolvedValueOnce({ ledgers: [budget('ACTIVE')], has_more: false })
+      listWebhooksMock.mockResolvedValueOnce({ subscriptions: [webhook('ACTIVE')], has_more: false })
+      listApiKeysMock.mockResolvedValueOnce({ keys: [apiKey('ACTIVE')], has_more: false })
+
+      const w = await mountView()
+      // ACTIVE tenant — no banner pre-close.
+      expect(w.find('[data-testid="cascade-recovery-banner"]').exists()).toBe(false)
+
+      // Post-CLOSE: tenant is CLOSED, cascade converged → all children terminal.
+      updateTenantStatusMock.mockResolvedValue(tenant('CLOSED'))
+      getTenantMock.mockResolvedValue(tenant('CLOSED'))
+      listBudgetsMock.mockResolvedValue({ ledgers: [budget('CLOSED')], has_more: false })
+      listWebhooksMock.mockResolvedValue({ subscriptions: [webhook('DISABLED')], has_more: false })
+      listApiKeysMock.mockResolvedValue({ keys: [apiKey('REVOKED')], has_more: false })
+
+      // Click the Close button, type the tenant name, confirm.
+      const closeBtn = w.findAll('button').find(b => b.text() === 'Close')
+      await closeBtn!.trigger('click')
+      await flushPromises()
+      const nameInput = w.find<HTMLInputElement>('input[type="text"]')
+      await nameInput.setValue('Acme Corp')
+      const confirmBtn = w.findAll('button').find(b => b.text() === 'Close Permanently')
+      await confirmBtn!.trigger('click')
+      await flushPromises()
+
+      // Tenant is now CLOSED and cascade is clean → banner MUST NOT show.
+      // Pre-fix, stale budgets ref held ACTIVE budget → banner appeared.
+      expect(w.find('[data-testid="cascade-recovery-banner"]').exists()).toBe(false)
+      // Confirm the refetch actually happened (4 parallel fetches).
+      expect(updateTenantStatusMock).toHaveBeenCalledWith('acme', 'CLOSED')
+      expect(listBudgetsMock).toHaveBeenCalledWith({ tenant_id: 'acme' })
+      expect(listWebhooksMock).toHaveBeenCalledWith({ tenant_id: 'acme' })
+      expect(listApiKeysMock).toHaveBeenCalledWith({ tenant_id: 'acme' })
+    })
+
     it('poll tick that fires mid-rerun does not clobber fresh post-PATCH state', async () => {
       // Rerun-cascade runs: PATCH + refetch of 4 resources. If a poll
       // tick interleaves, its fetches (which see pre-PATCH state) can

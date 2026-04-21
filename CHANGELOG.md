@@ -15,6 +15,63 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.45] — 2026-04-21
+
+### Fixed
+
+- **Overview attention cards no longer surface children of CLOSED
+  tenants.** Under spec v0.1.25.31 Rule 1 Mode B, a closed tenant's
+  owned budgets, webhooks, and API keys can transiently remain
+  non-terminal while the admin-side cascade converges. Those rows were
+  leaking onto five attention cards — Budgets at or near cap, Budgets
+  with debt, Frozen budgets, Expiring API keys, Failing webhooks —
+  creating false "needs attention" work for an operator who has
+  already closed the tenant.
+- **Tenants filter state survives drill-in → back.** Setting a filter
+  on `/tenants` (status or parent), clicking into a tenant's detail
+  page, and hitting the back crumb used to reset the filter.
+  `TenantsView` now mirrors filter-ref changes into the URL via
+  `router.replace`, and `TenantDetailView`'s back crumb uses
+  `router.back()` (with a plain `/tenants` fallback when there's no
+  prior history), so the filter state rides the browser history back
+  to the list. Matches the Budgets-view flow operators expected.
+- **Cascade-recovery banner no longer flashes for a clean close.**
+  After closing an ACTIVE tenant whose cascade converged cleanly
+  server-side, the recovery banner would still render until the next
+  30s poll tick — operator had to refresh the page to dismiss it.
+  `executeTenantAction` now refetches budgets + webhooks + API keys
+  alongside the tenant on CLOSE (same pattern as `rerunCascade`), so
+  the banner-visibility computation sees post-cascade state
+  immediately. Suspend / reactivate actions still do a tenant-only
+  refetch — cascade doesn't run on those.
+
+### Changed
+
+- Overview now fetches `listTenants({status:"CLOSED"})` alongside the
+  existing fanout and builds a closed-tenant id set. Every card with
+  per-row data filters client-side against that set.
+- Budgets-with-debt rows now come from `listBudgets({has_debt:"true"})`
+  instead of `overview.debt_scopes` (which lacks `tenant_id`). Failing
+  webhooks rows now come from `listWebhooks` + client-side
+  `consecutive_failures>0` filter instead of `overview.failing_webhooks`
+  (same reason). Card visuals and sort order unchanged.
+- Axis pill counts + card badges reflect the filtered list length so
+  the banner, tile, and rows stay consistent with what the operator
+  sees.
+
+### Notes
+
+- Pure dashboard fix — no spec change, no admin version bump. Admin
+  pin stays at `0.1.25.37`.
+- Tenants tile, Budgets tile chips, and Webhooks tile chips continue
+  to show server aggregates (closed-tenant children included) because
+  those tiles are navigational counters, not actionable work surfaces —
+  clicking a tile lands on a filterable list where the operator can
+  drill in.
+- See `AUDIT.md` for the audit of all six attention cards and why
+  Recent Denials / Recent Operator Activity don't need the same
+  filter.
+
 ## [0.1.25.44] — 2026-04-20
 
 ### Added
