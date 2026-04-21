@@ -2,9 +2,9 @@
 import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
-import { getTenant, listTenants, listBudgets, listApiKeys, listPolicies, updateTenantStatus, updateTenant, revokeApiKey, createApiKey, updateApiKey, createBudget, createPolicy, updatePolicy, freezeBudget } from '../api/client'
+import { getTenant, listTenants, listBudgets, listApiKeys, listPolicies, listWebhooks, updateTenantStatus, updateTenant, revokeApiKey, createApiKey, updateApiKey, createBudget, createPolicy, updatePolicy, freezeBudget } from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import type { Tenant, BudgetLedger, ApiKey, Policy, ApiKeyCreateResponse, BudgetCreateRequest, PolicyCreateRequest, PolicyUpdateRequest } from '../types'
+import type { Tenant, BudgetLedger, ApiKey, Policy, WebhookSubscription, ApiKeyCreateResponse, BudgetCreateRequest, PolicyCreateRequest, PolicyUpdateRequest } from '../types'
 import { COMMIT_OVERAGE_POLICIES, PERMISSIONS } from '../types'
 import PermissionPicker from '../components/PermissionPicker.vue'
 import { validateScope } from '../utils/safe'
@@ -20,7 +20,7 @@ import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { writeClipboardJson } from '../utils/clipboard'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
-import { isTerminalTenant } from '../utils/tenantStatus'
+import { isTerminalTenant, cascadePendingCounts, cascadeIsIncomplete } from '../utils/tenantStatus'
 import { rateLimitedBatch } from '../utils/rateLimitedBatch'
 import { synthesizeRowSelectBulkResult } from '../utils/rowSelectBulkResult'
 import type { RowSelectBulkResponse } from '../utils/rowSelectBulkResult'
@@ -66,6 +66,13 @@ const allTenants = ref<Tenant[]>([])
 const budgets = ref<BudgetLedger[]>([])
 const apiKeys = ref<ApiKey[]>([])
 const policies = ref<Policy[]>([])
+// v0.1.25.44: webhook subscriptions owned by this tenant — not
+// displayed in a tab yet, but needed for the cascade-recovery banner
+// so it can tell an operator exactly how many are still non-terminal
+// under a CLOSED tenant. Fetched on initial mount and on every poll
+// while the tenant is CLOSED (banner-relevant window); skipped on
+// ACTIVE/SUSPENDED polls to keep per-tick cost bounded.
+const webhooks = ref<WebhookSubscription[]>([])
 const error = ref('')
 const tab = ref<'budgets' | 'keys' | 'policies'>('budgets')
 
@@ -531,6 +538,69 @@ const cascadePreview = computed(() => ({
   nonTerminalBudgets: budgets.value.filter(b => b.status === 'ACTIVE' || b.status === 'FROZEN').length,
   activeKeys: apiKeys.value.filter(k => k.status === 'ACTIVE').length,
 }))
+
+// v0.1.25.44 CASCADE-RECOVERY BANNER: when a tenant is already CLOSED
+// but at least one owned child is non-terminal, surface a banner with
+// a "Re-run cascade" action. Spec v0.1.25.31 Rule 1(c) documents
+// operator-issued re-close as the convergence mechanism for Mode B
+// admins (including the reference Redis-backed admin); this is the
+// dashboard affordance for it. Handles both historical tenants closed
+// pre-.35 (whose cascade never ran) and recent partial failures.
+const cascadeChildren = computed(() => ({
+  budgets: budgets.value,
+  webhooks: webhooks.value,
+  apiKeys: apiKeys.value,
+}))
+const cascadePending = computed(() => cascadePendingCounts(cascadeChildren.value))
+const showRecoveryBanner = computed(() =>
+  cascadeIsIncomplete(tenant.value, cascadeChildren.value),
+)
+// Rerun-cascade confirm dialog + request lifecycle. Kept in its own
+// ref set (not shoehorned into pendingTenantAction) because the
+// initial-CLOSE flow requires typing the tenant name whereas re-run
+// is a single-click confirm — different UX, same underlying PATCH.
+const pendingRerunCascade = ref(false)
+const rerunCascadeLoading = ref(false)
+const rerunCascadeError = ref('')
+
+async function rerunCascade() {
+  if (rerunCascadeLoading.value) return
+  rerunCascadeLoading.value = true
+  rerunCascadeError.value = ''
+  try {
+    // Idempotent PATCH {status: CLOSED} — no-op at the tenant level,
+    // drives the cascade over any remaining non-terminal children per
+    // spec v0.1.25.31 Rule 1(b)/(c).
+    await updateTenantStatus(id, 'CLOSED')
+    const [tRes, bRes, wRes, kRes] = await Promise.all([
+      getTenant(id),
+      listBudgets({ tenant_id: id }),
+      listWebhooks({ tenant_id: id }),
+      listApiKeys({ tenant_id: id }),
+    ])
+    tenant.value = tRes
+    budgets.value = bRes.ledgers
+    webhooks.value = wRes.subscriptions
+    apiKeys.value = kRes.keys
+    const remaining = cascadePendingCounts({
+      budgets: bRes.ledgers,
+      webhooks: wRes.subscriptions,
+      apiKeys: kRes.keys,
+    }).total
+    if (remaining === 0) {
+      toast.success('Cascade complete — all owned objects terminal')
+    } else {
+      toast.success(`Cascade re-run — ${remaining} object${remaining === 1 ? '' : 's'} still non-terminal; retry may be needed`)
+    }
+    pendingRerunCascade.value = false
+  } catch (e) {
+    const msg = toMessage(e)
+    rerunCascadeError.value = msg
+    toast.error(`Cascade re-run failed: ${msg}`)
+  } finally {
+    rerunCascadeLoading.value = false
+  }
+}
 // W4 (scale-hardening): emergency-freeze reuses the same concurrent
 // bulk runner as TenantsView / WebhooksView — concurrency 4 with 429
 // backoff. During an incident, freezing 200+ budgets sequentially was
@@ -618,18 +688,20 @@ const { refresh, isLoading } = usePolling(async () => {
       // accurate immediately. One-time per component instance; the
       // cost for a 10k-key tenant is capped at this single fetch
       // rather than recurring every 60s.
-      const [tRes, bRes, ttRes, kRes, pRes] = await Promise.all([
+      const [tRes, bRes, ttRes, kRes, pRes, wRes] = await Promise.all([
         getTenant(id),
         listBudgets({ tenant_id: id }),
         listTenants(),
         listApiKeys({ tenant_id: id }),
         listPolicies({ tenant_id: id }),
+        listWebhooks({ tenant_id: id }),
       ])
       tenant.value = tRes
       budgets.value = bRes.ledgers
       allTenants.value = ttRes.tenants
       apiKeys.value = kRes.keys
       policies.value = pRes.policies
+      webhooks.value = wRes.subscriptions
       initialLoadDone = true
       error.value = ''
       return
@@ -652,6 +724,20 @@ const { refresh, isLoading } = usePolling(async () => {
     } else if (tab.value === 'policies') {
       const pRes = await listPolicies({ tenant_id: id })
       policies.value = pRes.policies
+    }
+    // v0.1.25.44: while the tenant is CLOSED, keep the cascade-recovery
+    // banner's inputs fresh by re-fetching webhooks + api-keys on every
+    // poll so a successful cascade converges the banner on the next
+    // tick without the operator having to refresh manually. On
+    // ACTIVE/SUSPENDED tenants the banner can never render, so we skip
+    // these fetches to preserve the existing lazy-by-tab poll cost.
+    if (isTerminalTenant(tenant.value)) {
+      const [wRes, kRes] = await Promise.all([
+        listWebhooks({ tenant_id: id }),
+        listApiKeys({ tenant_id: id }),
+      ])
+      webhooks.value = wRes.subscriptions
+      apiKeys.value = kRes.keys
     }
     error.value = ''
   } catch (e) { error.value = toMessage(e) }
@@ -676,6 +762,33 @@ const { refresh, isLoading } = usePolling(async () => {
          trying to figure out why their edits fail. -->
     <div v-if="isTerminalTenant(tenant)" class="mb-4 bg-amber-50 border border-amber-300 rounded-lg px-4 py-3 text-sm text-amber-800" role="status">
       <strong>Tenant closed.</strong> All owned objects (budgets, webhooks, API keys) are terminal and read-only. Per spec v0.1.25.29, there is no re-open path.
+    </div>
+
+    <!-- Cascade-recovery banner (v0.1.25.44, spec v0.1.25.31 Rule 1(c)).
+         Surfaces when a CLOSED tenant still has non-terminal owned
+         objects — either a historical tenant closed pre-.35 (cascade
+         never ran) or a recent partial failure. Operator clicks
+         "Re-run cascade" to PATCH {status: CLOSED} again, which is a
+         no-op at the tenant level but idempotently drives remaining
+         children to their terminal states. -->
+    <div v-if="showRecoveryBanner && canManageTenants" class="mb-4 bg-amber-50 border border-amber-400 rounded-lg px-4 py-3 text-sm text-amber-900" role="alert" data-testid="cascade-recovery-banner">
+      <div class="flex items-start gap-3">
+        <div class="flex-1">
+          <p class="font-medium mb-1">Cascade incomplete</p>
+          <p class="text-xs mb-2">
+            This tenant is CLOSED but
+            <template v-if="cascadePending.budgets > 0"><strong>{{ cascadePending.budgets }}</strong> budget{{ cascadePending.budgets === 1 ? '' : 's' }}</template><template v-if="cascadePending.budgets > 0 && (cascadePending.webhooks > 0 || cascadePending.apiKeys > 0)">, </template><template v-if="cascadePending.webhooks > 0"><strong>{{ cascadePending.webhooks }}</strong> webhook{{ cascadePending.webhooks === 1 ? '' : 's' }}</template><template v-if="cascadePending.webhooks > 0 && cascadePending.apiKeys > 0">, </template><template v-if="cascadePending.apiKeys > 0"><strong>{{ cascadePending.apiKeys }}</strong> API key{{ cascadePending.apiKeys === 1 ? '' : 's' }}</template>
+            {{ cascadePending.total === 1 ? 'is' : 'are' }} still non-terminal. Re-running the cascade drives the remaining objects to their terminal states (spec v0.1.25.31 Rule 1(c)).
+          </p>
+          <p v-if="rerunCascadeError" class="text-xs text-red-700 mb-2">{{ rerunCascadeError }}</p>
+          <button
+            @click="pendingRerunCascade = true"
+            :disabled="rerunCascadeLoading"
+            class="text-xs bg-amber-600 hover:bg-amber-700 text-white rounded px-3 py-1.5 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            data-testid="cascade-recovery-button"
+          >{{ rerunCascadeLoading ? 'Re-running…' : 'Re-run cascade' }}</button>
+        </div>
+      </div>
     </div>
 
     <template v-if="tenant">
@@ -883,6 +996,22 @@ const { refresh, isLoading } = usePolling(async () => {
       :danger="true"
       @confirm="executeKeyRevoke"
       @cancel="pendingKeyRevoke = null"
+    />
+
+    <!-- Rerun cascade confirm — v0.1.25.44. Reuses ConfirmAction
+         instead of the type-to-confirm CLOSE dialog because at this
+         point the tenant is already CLOSED; the irreversible step
+         already happened. This is a targeted per-child cleanup, not a
+         destructive tenant-level action. Enumerates the exact pending
+         counts so operators know what'll change. -->
+    <ConfirmAction
+      v-if="pendingRerunCascade"
+      title="Re-run cascade on this closed tenant?"
+      :message="`This will close ${cascadePending.budgets} budget${cascadePending.budgets === 1 ? '' : 's'}, disable ${cascadePending.webhooks} webhook${cascadePending.webhooks === 1 ? '' : 's'}, and revoke ${cascadePending.apiKeys} API key${cascadePending.apiKeys === 1 ? '' : 's'} still non-terminal on this CLOSED tenant. No-op at the tenant level; only the owned objects transition. This cannot be undone.`"
+      confirm-label="Re-run Cascade"
+      :danger="true"
+      @confirm="rerunCascade"
+      @cancel="pendingRerunCascade = false; rerunCascadeError = ''"
     />
 
     <!-- Edit tenant dialog -->
