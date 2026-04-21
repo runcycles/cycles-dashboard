@@ -5,6 +5,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
+import { useTerminalAwareList } from '../composables/useTerminalAwareList'
 import { useListExport } from '../composables/useListExport'
 import { listWebhooks, listTenants, createWebhook, updateWebhook, getWebhookSecurityConfig, updateWebhookSecurityConfig, bulkActionWebhooks, ApiError } from '../api/client'
 import { rateLimitedBatch } from '../utils/rateLimitedBatch'
@@ -142,13 +143,34 @@ watch([tenantFilter, urlFilter, statusFilter, failingFilter], () => { selected.v
 // Health + Events columns are NOT sortable — they're derived client-side
 // and don't have server enum values. onChange refreshes page 1 so the
 // cursor stays aligned with the new (sort_by, sort_dir) tuple.
-const { sortKey, sortDir, toggle, sorted: sortedWebhooks } = useSort(
+const { sortKey, sortDir, toggle, sorted: columnSortedWebhooks } = useSort(
   filteredWebhooks,
   undefined,
   'asc',
   undefined,
   { serverSide: true, onChange: () => { refresh() } },
 )
+
+// v0.1.25.46: hide DISABLED webhooks by default — they're terminal and
+// pre-fix they floated to the top of any created_at-desc view (freshly-
+// disabled was the newest row), forcing operators to actively filter
+// them out before every triage. Toggle mirrors to the URL so drill-in
+// → back preserves the state. Explicit status=DISABLED filter auto-
+// shows them without needing the toggle (same behavior GitHub's
+// state:closed gives). See useTerminalAwareList for the contract.
+const {
+  includeTerminal,
+  visibleRows: sortedWebhooks,
+  terminalCount: hiddenTerminalCount,
+  terminalVerb,
+} = useTerminalAwareList<WebhookSubscription>({
+  kind: 'webhook',
+  source: columnSortedWebhooks,
+  statusOf: w => w.status,
+  explicitStatus: statusFilter,
+  route,
+  router,
+})
 
 // Helper to fold the current sort tuple + server-side search into a
 // listWebhooks params record. Every call site (polling, loadMore,
@@ -685,6 +707,15 @@ const gridTemplate = computed(() =>
         <label class="text-sm flex items-center gap-1.5 text-gray-700 dark:text-gray-200 whitespace-nowrap">
           <input v-model="failingFilter" type="checkbox" aria-label="Show only failing webhooks" />
           Failing only
+        </label>
+        <!-- v0.1.25.46: terminal-row toggle. DISABLED webhooks are hidden
+             by default (terminal state, nothing actionable) and the
+             operator can opt in here. Count is of terminal rows in the
+             current post-filter page — if there are zero, the label
+             still renders so the affordance is discoverable. -->
+        <label class="text-sm flex items-center gap-1.5 text-gray-700 dark:text-gray-200 whitespace-nowrap">
+          <input v-model="includeTerminal" type="checkbox" :aria-label="`Show ${terminalVerb} webhooks`" />
+          Show {{ terminalVerb }}<span v-if="hiddenTerminalCount > 0 && !includeTerminal" class="muted-sm"> ({{ hiddenTerminalCount }})</span>
         </label>
         <!-- Filter-apply bulk actions (see TenantsView for rationale).
              Appears when a filter is set AND no row-select is active.

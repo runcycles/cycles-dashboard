@@ -5,6 +5,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
+import { useTerminalAwareList } from '../composables/useTerminalAwareList'
 import { useListExport } from '../composables/useListExport'
 import { listTenants, createTenant, updateTenantStatus, bulkActionTenants, ApiError } from '../api/client'
 import { rateLimitedBatch } from '../utils/rateLimitedBatch'
@@ -175,13 +176,34 @@ const filteredTenants = computed(() => {
 // and the server has no index over them — so those columns render as
 // plain headers below (no SortHeader). onChange refreshes page 1 so
 // the cursor tuple stays aligned with the new (sort_by, sort_dir).
-const { sortKey, sortDir, toggle, sorted: sortedTenants } = useSort(
+const { sortKey, sortDir, toggle, sorted: columnSortedTenants } = useSort(
   filteredTenants,
   'created_at',
   'desc',
   undefined,
   { serverSide: true, onChange: () => { refresh() } },
 )
+
+// v0.1.25.46: hide CLOSED tenants by default. Terminal state — nothing
+// actionable (mutations are spec-rejected with 409 TENANT_CLOSED) — and
+// under the default created_at-desc sort, a just-closed tenant was
+// pinned to the top of every list. Mirrors the GitHub Issues "closed
+// issues hidden by default" convention. Toggle state mirrors to the
+// URL so drill-in → back preserves visibility. Operator picking
+// status=CLOSED explicitly auto-shows them.
+const {
+  includeTerminal,
+  visibleRows: sortedTenants,
+  terminalCount: hiddenTerminalCount,
+  terminalVerb,
+} = useTerminalAwareList<Tenant>({
+  kind: 'tenant',
+  source: columnSortedTenants,
+  statusOf: t => t.status,
+  explicitStatus: statusFilter,
+  route,
+  router,
+})
 
 // Parents available in the filter dropdown — union of tenants that have
 // at least one child, so the filter doesn't list tenants with no kids
@@ -714,6 +736,14 @@ const gridTemplate = computed(() =>
           <option value="SUSPENDED">Suspended</option>
           <option value="CLOSED">Closed</option>
         </select>
+        <!-- v0.1.25.46: terminal-row toggle. CLOSED tenants hidden by
+             default so operators don't scroll past just-closed rows
+             pinned to the top of the created_at-desc list. Explicit
+             status=CLOSED filter auto-shows them. -->
+        <label class="text-sm flex items-center gap-1.5 text-gray-700 dark:text-gray-200 whitespace-nowrap">
+          <input v-model="includeTerminal" type="checkbox" :aria-label="`Show ${terminalVerb} tenants`" />
+          Show {{ terminalVerb }}<span v-if="hiddenTerminalCount > 0 && !includeTerminal" class="muted-sm"> ({{ hiddenTerminalCount }})</span>
+        </label>
         <!-- Filter-apply bulk actions. Appears when the operator has a
              non-empty filter (so the action targets an explicit subset,
              not "all tenants") AND no row-select is active (keeps the

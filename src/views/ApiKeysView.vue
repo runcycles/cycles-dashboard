@@ -4,6 +4,7 @@ import { useVirtualizer } from '@tanstack/vue-virtual'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
+import { useTerminalAwareList } from '../composables/useTerminalAwareList'
 import { useListExport } from '../composables/useListExport'
 import { listTenants, listApiKeys, revokeApiKey, createApiKey, updateApiKey } from '../api/client'
 import { useAuthStore } from '../stores/auth'
@@ -247,13 +248,31 @@ const filteredKeys = computed(() => {
 // re-fetches page 1 via refresh() so the cursor tuple stays consistent
 // with the new (sort_by, sort_dir) pair. Client-side status filter
 // still runs on top of the server-sorted page.
-const { sortKey, sortDir, toggle, sorted: sortedKeys } = useSort(
+const { sortKey, sortDir, toggle, sorted: columnSortedKeys } = useSort(
   filteredKeys,
   'created_at',
   'desc',
   undefined,
   { serverSide: true, onChange: () => { refresh() } },
 )
+
+// v0.1.25.46: hide REVOKED + EXPIRED api keys by default. Both are
+// terminal (mutations rejected; can't be un-revoked or un-expired) and
+// under the default created_at-desc sort, a just-revoked key floated to
+// the top. Operator picking status=REVOKED explicitly auto-shows them.
+// No URL mirror here — api keys don't have a detail route, edits happen
+// in-dialog, so there's no drill-in-back state to preserve.
+const {
+  includeTerminal,
+  visibleRows: sortedKeys,
+  terminalCount: hiddenTerminalCount,
+  terminalVerb,
+} = useTerminalAwareList<KeyWithTenant>({
+  kind: 'apiKey',
+  source: columnSortedKeys,
+  statusOf: k => k.status,
+  explicitStatus: filterStatus,
+})
 
 const statusCounts = computed(() => {
   const counts: Record<string, number> = {}
@@ -469,6 +488,17 @@ function closePermsViewer() { viewingPermsFor.value = null }
             <option>REVOKED</option>
             <option>EXPIRED</option>
           </select>
+        </div>
+        <!-- v0.1.25.46: terminal-row toggle. REVOKED + EXPIRED keys
+             hidden by default so they don't pin to the top of the
+             created_at-desc list. Explicit status=REVOKED filter
+             auto-shows them. -->
+        <div>
+          <label class="form-label opacity-0" aria-hidden="true">spacer</label>
+          <label class="text-sm flex items-center gap-1.5 text-gray-700 dark:text-gray-200 whitespace-nowrap py-1.5">
+            <input v-model="includeTerminal" type="checkbox" :aria-label="`Show ${terminalVerb} keys`" />
+            Show {{ terminalVerb }}<span v-if="hiddenTerminalCount > 0 && !includeTerminal" class="muted-sm">&nbsp;({{ hiddenTerminalCount }})</span>
+          </label>
         </div>
         <div>
           <label for="keys-search" class="form-label">Search</label>

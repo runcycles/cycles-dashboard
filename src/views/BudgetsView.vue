@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
+import { useTerminalAwareList } from '../composables/useTerminalAwareList'
 import { useListExport } from '../composables/useListExport'
 import { listBudgets, lookupBudget, listTenants, listEvents, fundBudget, freezeBudget, unfreezeBudget, updateBudgetConfig, bulkActionBudgets, ApiError } from '../api/client'
 import { COMMIT_OVERAGE_POLICIES } from '../types'
@@ -71,7 +72,7 @@ const error = ref('')
 // debt). onChange re-fetches page 1 because the cursor is bound to the
 // (sort_by, sort_dir, filters) tuple — reusing a cursor under a new sort
 // order returns 400 CURSOR_SORT_MISMATCH on 0.1.25.12+.
-const { sortKey, sortDir, toggle, sorted: sortedBudgets } = useSort(
+const { sortKey, sortDir, toggle, sorted: columnSortedBudgets } = useSort(
   budgets,
   'utilization',
   'desc',
@@ -82,6 +83,7 @@ const { sortKey, sortDir, toggle, sorted: sortedBudgets } = useSort(
   },
   { serverSide: true, onChange: () => { loadList() } },
 )
+
 const detail = ref<BudgetLedger | null>(null)
 const detailEvents = ref<Event[]>([])
 // R8 (scale-hardening): paginate the budget-detail event timeline.
@@ -95,6 +97,26 @@ const detailEventsLoadingMore = ref(false)
 const filterStatus = ref((route.query.status as string) || '')
 const filterUnit = ref('')
 const filterScope = ref('')
+
+// v0.1.25.46: hide CLOSED budgets by default. Under the utilization-desc
+// default sort, a freshly-closed budget was pinned at the top of the
+// list — no operator action remaining (CLOSED is terminal) but visually
+// indistinguishable from a high-util ACTIVE one that does need attention.
+// Toggle state mirrors to the URL. Picking status=CLOSED explicitly
+// auto-shows closed budgets even with the toggle off.
+const {
+  includeTerminal,
+  visibleRows: sortedBudgets,
+  terminalCount: hiddenTerminalCount,
+  terminalVerb,
+} = useTerminalAwareList<BudgetLedger>({
+  kind: 'budget',
+  source: columnSortedBudgets,
+  statusOf: b => b.status,
+  explicitStatus: filterStatus,
+  route,
+  router,
+})
 // v0.1.25.21 (#9): utilization range filter. Captures the common ops
 // query "show me budgets at >X%" without the user having to eyeball
 // the utilization bars row by row.
@@ -1185,6 +1207,17 @@ function rowTenantId(b: BudgetLedger): string {
               <span class="muted-sm">to</span>
               <input id="budget-util-max" v-model="filterUtilMax" type="number" min="0" max="100" placeholder="max" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-16" aria-label="Maximum utilization percent" />
             </div>
+          </div>
+          <!-- v0.1.25.46: terminal-row toggle. CLOSED budgets are hidden
+               by default so a freshly-closed ledger doesn't pin to the top
+               of the utilization-desc list. Explicit status=CLOSED filter
+               auto-shows them. -->
+          <div>
+            <label class="form-label opacity-0" aria-hidden="true">spacer</label>
+            <label class="text-sm flex items-center gap-1.5 text-gray-700 dark:text-gray-200 whitespace-nowrap py-1.5">
+              <input v-model="includeTerminal" type="checkbox" :aria-label="`Show ${terminalVerb} budgets`" />
+              Show {{ terminalVerb }}<span v-if="hiddenTerminalCount > 0 && !includeTerminal" class="muted-sm">&nbsp;({{ hiddenTerminalCount }})</span>
+            </label>
           </div>
           <div v-if="isLoading" class="flex items-center">
             <Spinner class="w-4 h-4 muted" />

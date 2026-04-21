@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.45 (2026-04-21)
+**Current release:** v0.1.25.46 (2026-04-21)
 
 ## Baseline requirements
 
@@ -16,6 +16,71 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-21 — v0.1.25.46: hide terminal-state rows by default across every list view
+
+**Trigger.** Operator report: *"What is the default sort order for webhooks? Problem is when tenants are closed, DISABLED webhooks are visible first and user has to actively filter them out; since it's a terminal state, that means usability is a problem in default."*
+
+**Root cause.** Default sort on every list view is `created_at desc`. Terminal rows are the most recently-transitioned items, so they pin to the top. A closed tenant with three disabled webhooks dominates the first screen of `/webhooks` even though no operator action remains on those rows (DISABLED is terminal per governance-spec Rule 1 cascade; REVOKED/EXPIRED are the same for api-keys; CLOSED is the same for tenants and budgets). Operators had to add an explicit status filter — non-obvious, and the default screen showed terminal noise first. The OverviewView closed-tenant filtering shipped in v0.1.25.45 solved one surface of this; the underlying list views kept the old behavior.
+
+**Decision — GitHub / Linear / Gmail convention.** Hide terminals by default; surface a "Show &lt;verb&gt;" toggle with the hidden count. Matches every product operators already use for "done / archived" items. Rejected alternatives documented below.
+
+**Fix — single shared composable + per-view wiring.**
+
+| Surface | Change |
+|---|---|
+| `src/composables/useTerminalAwareList.ts` (new) | Parametric composable: `{kind, source, statusOf, explicitStatus?, route?, router?, queryParam?}`. Returns `{includeTerminal, showTerminal, visibleRows, terminalCount, terminalVerb, isTerminal}`. Single source of truth for what counts as "terminal" per entity kind. |
+| `WebhooksView`, `TenantsView`, `BudgetsView`, `ApiKeysView` | Drop-in wiring: rename `sorted: sortedX` from `useSort` to `columnSortedX`, feed through the composable, restore the template binding name. Toggle checkbox added in the filter row after the status dropdown. URL mirror via `?include_terminal=1`. |
+| `TenantDetailView` | Two composable calls — one per sub-list tab (Budgets, API Keys). No URL mirror on sub-lists (single-URL view). |
+
+**Key design decisions.**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Terminal definitions | `tenant:CLOSED`, `budget:CLOSED`, `webhook:DISABLED`, `apiKey:[REVOKED,EXPIRED]` | Matches the governance-spec Rule 2 mutation-guard surface. EXPIRED grouped with REVOKED for api-keys because nothing an operator does to the row can bring it back. |
+| Sink behavior when toggle is ON | Stable partition (active-first, terminal-last) | Preserves upstream column-sort order within each group — `utilization desc` still sorts budgets by utilization, just with the closed ones at the bottom. |
+| Auto-engage | Yes, when `explicitStatus` matches a terminal value | Picking `status=CLOSED` from the dropdown with the toggle off would otherwise yield an empty list. GitHub's `state:closed` does the same. |
+| URL mirror scope | Top-level views only (Tenants, Budgets, Webhooks, ApiKeys) | TenantDetail sub-tabs share a URL; per-tab mirror would collide. Sub-lists default-off, no persistence. |
+| Verb vocabulary | "closed" / "disabled" / "revoked" (participles) | Matches operator language, not enum literals ("CLOSED webhooks" reads weirdly to a non-engineer). |
+| URL param name | `include_terminal=1` (single boolean) | One name across all four views; `1` / absent semantics match `?failing=1` already in use. |
+
+**Rejected alternatives.**
+
+| Option | Why not |
+|---|---|
+| Default sort to push terminals to the bottom (no hide) | Terminal rows still consume vertical space, still visible above the fold once the list shrinks below the viewport. Doesn't solve the "first screen is noise" complaint. |
+| Separate tab/view for terminal rows | Heavier lift (routing, per-view filter state, URL surface), and terminal-reveal is a transient need — operators audit-view historical closes, they don't camp on them. Toggle beats tab for <10%-of-time views. |
+| Server-side `hide_terminal=true` query param | Dashboard-only UX concern; no reason to widen the admin-plane surface. Client-side filter is 50 lines of Vue, server-side would be N controller changes + OpenAPI spec edits. |
+| Delete/hide terminals from responses entirely | Operators still need access for audit/debugging ("when did this get closed?"). Terminal state is informational, just not default-screen-real-estate. |
+
+**Edge cases.**
+
+| Case | Behavior |
+|---|---|
+| Operator filters status=CLOSED with toggle off | Auto-engage shows closed rows (non-empty list). |
+| All rows terminal | Visible list is empty; toggle still appears with `Show closed (N)`. Operator can flip it and see the list. |
+| No terminals in the source | Toggle still rendered (operator can toggle preemptively); count shows `0` so the hint drops to just `Show closed`. |
+| Deep-link `?include_terminal=1` | Toggle starts on; no redundant `router.replace` at mount (loop-safe diff guard). |
+| Toggle flip while filter narrows to a single terminal value | No-op — `showTerminal` was already true via auto-engage; URL param writes but the composable's `visibleRows` returns the same set. |
+| Upstream `source` ref is transiently undefined (mid-fetch) | Defensive `source.value ?? []` — composable returns `[]` instead of crashing the component. |
+
+**Tests.** 30 new tests:
+
+- `useTerminalAwareList.test.ts` (18): terminal-set/verb definitions per kind; hide-by-default; empty-all-terminal; pass-through no-terminals; stable partition sink; URL mirror both directions; loop-safety guard; auto-engage; custom `queryParam` override.
+- `terminal-aware-lists.test.ts` (12): per-view integration — hide-at-mount, auto-engage on terminal-status URL or dropdown, toggle flip writes `?include_terminal=1` or reveals rows in DOM. Covers all four top-level views.
+
+Full suite passes at 818/818 (+30 from .45's 788).
+
+**Docs.**
+
+- `CHANGELOG.md` — v0.1.25.46 entry (downstream-facing summary of behavior change).
+- `AUDIT.md` — this entry.
+- `README.md` — image pin `0.1.25.45 → 0.1.25.46`.
+- `package.json` — version bump.
+
+No spec change; no wire change; no server-side change. Governance-spec pin stays at v0.1.25.31 (behavior is a dashboard-only UX refinement).
+
+---
 
 ### 2026-04-21 — v0.1.25.45: exclude closed-tenant children from Overview attention cards + Tenants filter persists across drill-in + clean-close banner flash
 
