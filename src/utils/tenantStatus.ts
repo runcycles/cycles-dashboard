@@ -15,15 +15,10 @@ export function isTerminalTenant(t: Pick<Tenant, 'status'> | null | undefined): 
   return (TERMINAL_TENANT_STATUSES as readonly string[]).includes(t.status)
 }
 
-// Per-child-type terminal states, per spec v0.1.25.31 Rule 1. Used by
-// cascadeIsIncomplete() below to answer "did the cascade finish, or
-// does this CLOSED tenant still have non-terminal children?" — the
-// signal the cascade-recovery banner keys off.
-//
-// Server-side enums are open (additive-status contract) so we check for
-// "matches a known terminal value" rather than "not one of the known
-// non-terminal values" — future additive statuses (hypothetical
-// ARCHIVED etc.) default to "non-terminal" and keep the banner honest.
+// Per-child terminal states, spec v0.1.25.31 Rule 1. Open-enum
+// contract: we match "is a known terminal value" rather than "is not
+// a known non-terminal value" so future additive statuses default to
+// "still pending" and keep the banner honest.
 const TERMINAL_BUDGET_STATUSES = ['CLOSED'] as const
 const TERMINAL_WEBHOOK_STATUSES = ['DISABLED'] as const
 const TERMINAL_API_KEY_STATUSES = ['REVOKED', 'EXPIRED'] as const
@@ -48,11 +43,9 @@ export function cascadePendingCounts(children: CascadeChildren): CascadePendingC
   return { budgets, webhooks, apiKeys, total: budgets + webhooks + apiKeys }
 }
 
-// True when the tenant is CLOSED AND at least one owned child is
-// non-terminal — the signal the recovery banner keys off. Spec
-// v0.1.25.31 Rule 1(c): operator re-issue of close is the documented
-// convergence mechanism for Mode B admins (including the reference
-// Redis-backed admin).
+// Signal for the cascade-recovery banner: CLOSED tenant with at least
+// one non-terminal child. Spec v0.1.25.31 Rule 1(c) convergence via
+// operator re-issue.
 export function cascadeIsIncomplete(
   tenant: Pick<Tenant, 'status'> | null | undefined,
   children: CascadeChildren,

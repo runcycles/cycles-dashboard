@@ -19,42 +19,28 @@ UX work that does not advance spec alignment.
 
 ### Added
 
-- **Cascade-recovery banner on `TenantDetailView`** — surfaces when a
-  tenant is CLOSED but at least one owned object (budget, webhook, or
-  API key) is still non-terminal. Handles two scenarios the v0.1.25.43
-  tombstone didn't reach:
-  - Historical tenants closed on admin pre-`.35`, whose cascade never
-    ran (caveat called out in the v0.1.25.43 AUDIT).
-  - Recent cascade failures — admin crash mid-loop, Redis blip
-    between the tenant flip and per-child writes.
-- **"Re-run cascade" button** inside the banner. PATCHes
-  `{"status":"CLOSED"}` on the already-CLOSED tenant, which is a
-  tenant-level no-op that idempotently drives remaining non-terminal
-  children to their terminal states — the operator affordance for
-  Rule 1(c) convergence. Opens a confirm dialog that enumerates the
-  exact pending counts per axis; on success, refetches tenant +
-  budgets + webhooks + api-keys so the banner disappears when all
-  children are terminal. On failure, surfaces the server error inline
-  and keeps the button clickable for retry.
-- **`cascadePendingCounts` + `cascadeIsIncomplete` helpers** in
-  `src/utils/tenantStatus.ts`. Single source of truth for per-child
-  terminal predicates (budget → CLOSED, webhook → DISABLED, api-key →
-  REVOKED/EXPIRED). Treats unknown status values as non-terminal so
-  future additive enum values default to the safer "still pending"
-  read rather than silently disappearing from the banner.
+- **Cascade-recovery banner on `TenantDetailView`.** When a closed
+  tenant still has non-terminal budgets, webhooks, or API keys, an
+  amber banner renders at the top of the page with per-axis pending
+  counts and a "Re-run cascade" button. Clicking opens a confirm
+  dialog that enumerates exactly what the action will change.
+- **Re-run cascade action.** Idempotently re-runs the tenant-close
+  cascade. On success, the banner disappears; on failure, the server
+  error surfaces inside the dialog and the button stays clickable for
+  retry.
 
 ### Changed
 
-- `TenantDetailView` now fetches `listWebhooks({tenant_id})` alongside
-  budgets + api-keys on initial mount. On steady-state poll, the extra
-  webhook fetch only runs while the tenant is CLOSED, keeping
-  ACTIVE-tenant poll cost unchanged.
+- `TenantDetailView` now fetches webhooks alongside budgets and API
+  keys on initial mount; webhook refetch on poll only happens while
+  the tenant is CLOSED, so active-tenant poll cost is unchanged.
 
 ### Notes
 
-- No admin pin bump. v0.1.25.36 already supports idempotent re-PATCH
-  per spec v0.1.25.31 Rule 1(b).
-- No spec change. Pure client UX on an existing endpoint.
+- Compose pins unchanged — admin image stays at `0.1.25.36`.
+- No spec change.
+- See `AUDIT.md` for the engineering rationale, edge cases, and the
+  two operator scenarios this unblocks.
 
 ## [0.1.25.43] — 2026-04-20
 

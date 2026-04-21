@@ -682,6 +682,11 @@ function cancelEmergencyFreeze() {
 let initialLoadDone = false
 
 const { refresh, isLoading } = usePolling(async () => {
+  // Skip polls while a rerun-cascade PATCH+refetch is in flight. Without
+  // this, a poll tick that interleaves between the PATCH and its four
+  // post-PATCH GETs can resolve after them and clobber the fresh state
+  // with pre-PATCH data, re-showing the banner until the next tick.
+  if (rerunCascadeLoading.value) return
   try {
     if (!initialLoadDone) {
       // Mount-time eager load: fetch everything so badge counts are
@@ -760,35 +765,32 @@ const { refresh, isLoading } = usePolling(async () => {
          against them 409s with TENANT_CLOSED. We surface this once, up
          top, so operators don't burn a round-trip per disabled button
          trying to figure out why their edits fail. -->
-    <div v-if="isTerminalTenant(tenant)" class="mb-4 bg-amber-50 border border-amber-300 rounded-lg px-4 py-3 text-sm text-amber-800" role="status">
-      <strong>Tenant closed.</strong> All owned objects (budgets, webhooks, API keys) are terminal and read-only. Per spec v0.1.25.29, there is no re-open path.
+    <!-- Recovery banner sits ABOVE the tombstone: actionable state
+         outranks informational-final state (Gmail/Linear/GitHub
+         convention). Tombstone palette is demoted to amber-200 so the
+         recovery banner wins the visual hierarchy despite both being
+         amber. Banner renders for all roles so a read-only operator
+         paged into triage can at least see the signal and escalate;
+         the action button is gated on `manage_tenants`. -->
+    <div v-if="showRecoveryBanner" class="mb-4 bg-amber-50 border border-amber-400 rounded-lg px-4 py-3 text-sm text-amber-900" role="status" data-testid="cascade-recovery-banner">
+      <p class="font-medium mb-1">Cascade incomplete</p>
+      <p class="text-xs mb-2">
+        This tenant is CLOSED but
+        <template v-if="cascadePending.budgets > 0"><strong>{{ cascadePending.budgets }}</strong> budget{{ cascadePending.budgets === 1 ? '' : 's' }}</template><template v-if="cascadePending.budgets > 0 && (cascadePending.webhooks > 0 || cascadePending.apiKeys > 0)">, </template><template v-if="cascadePending.webhooks > 0"><strong>{{ cascadePending.webhooks }}</strong> webhook{{ cascadePending.webhooks === 1 ? '' : 's' }}</template><template v-if="cascadePending.webhooks > 0 && cascadePending.apiKeys > 0">, </template><template v-if="cascadePending.apiKeys > 0"><strong>{{ cascadePending.apiKeys }}</strong> API key{{ cascadePending.apiKeys === 1 ? '' : 's' }}</template>
+        {{ cascadePending.total === 1 ? 'is' : 'are' }} still non-terminal. Re-running the cascade drives the remaining objects to their terminal states (spec v0.1.25.31 Rule 1(c)).
+      </p>
+      <button
+        v-if="canManageTenants"
+        @click="pendingRerunCascade = true"
+        :disabled="rerunCascadeLoading"
+        class="btn-pill-danger disabled:opacity-50 disabled:cursor-not-allowed"
+        data-testid="cascade-recovery-button"
+      >{{ rerunCascadeLoading ? 'Re-running…' : 'Re-run cascade' }}</button>
+      <p v-else class="text-xs muted italic">Read-only view — ask an operator with manage-tenants access to re-run the cascade.</p>
     </div>
 
-    <!-- Cascade-recovery banner (v0.1.25.44, spec v0.1.25.31 Rule 1(c)).
-         Surfaces when a CLOSED tenant still has non-terminal owned
-         objects — either a historical tenant closed pre-.35 (cascade
-         never ran) or a recent partial failure. Operator clicks
-         "Re-run cascade" to PATCH {status: CLOSED} again, which is a
-         no-op at the tenant level but idempotently drives remaining
-         children to their terminal states. -->
-    <div v-if="showRecoveryBanner && canManageTenants" class="mb-4 bg-amber-50 border border-amber-400 rounded-lg px-4 py-3 text-sm text-amber-900" role="alert" data-testid="cascade-recovery-banner">
-      <div class="flex items-start gap-3">
-        <div class="flex-1">
-          <p class="font-medium mb-1">Cascade incomplete</p>
-          <p class="text-xs mb-2">
-            This tenant is CLOSED but
-            <template v-if="cascadePending.budgets > 0"><strong>{{ cascadePending.budgets }}</strong> budget{{ cascadePending.budgets === 1 ? '' : 's' }}</template><template v-if="cascadePending.budgets > 0 && (cascadePending.webhooks > 0 || cascadePending.apiKeys > 0)">, </template><template v-if="cascadePending.webhooks > 0"><strong>{{ cascadePending.webhooks }}</strong> webhook{{ cascadePending.webhooks === 1 ? '' : 's' }}</template><template v-if="cascadePending.webhooks > 0 && cascadePending.apiKeys > 0">, </template><template v-if="cascadePending.apiKeys > 0"><strong>{{ cascadePending.apiKeys }}</strong> API key{{ cascadePending.apiKeys === 1 ? '' : 's' }}</template>
-            {{ cascadePending.total === 1 ? 'is' : 'are' }} still non-terminal. Re-running the cascade drives the remaining objects to their terminal states (spec v0.1.25.31 Rule 1(c)).
-          </p>
-          <p v-if="rerunCascadeError" class="text-xs text-red-700 mb-2">{{ rerunCascadeError }}</p>
-          <button
-            @click="pendingRerunCascade = true"
-            :disabled="rerunCascadeLoading"
-            class="text-xs bg-amber-600 hover:bg-amber-700 text-white rounded px-3 py-1.5 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            data-testid="cascade-recovery-button"
-          >{{ rerunCascadeLoading ? 'Re-running…' : 'Re-run cascade' }}</button>
-        </div>
-      </div>
+    <div v-if="isTerminalTenant(tenant)" class="mb-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800" role="status">
+      <strong>Tenant closed.</strong> All owned objects (budgets, webhooks, API keys) are terminal and read-only. Per spec v0.1.25.29, there is no re-open path.
     </div>
 
     <template v-if="tenant">
@@ -998,18 +1000,20 @@ const { refresh, isLoading } = usePolling(async () => {
       @cancel="pendingKeyRevoke = null"
     />
 
-    <!-- Rerun cascade confirm — v0.1.25.44. Reuses ConfirmAction
-         instead of the type-to-confirm CLOSE dialog because at this
-         point the tenant is already CLOSED; the irreversible step
-         already happened. This is a targeted per-child cleanup, not a
-         destructive tenant-level action. Enumerates the exact pending
-         counts so operators know what'll change. -->
+    <!-- Rerun cascade confirm — v0.1.25.44. ConfirmAction (not the
+         type-to-confirm CLOSE dialog) because at this point the tenant
+         is already CLOSED; the irreversible step already happened.
+         This is a per-child cleanup. Enumerates exact pending counts +
+         the two scenarios that produce this state so operators aren't
+         guessing whether they're papering over an active bug. -->
     <ConfirmAction
       v-if="pendingRerunCascade"
       title="Re-run cascade on this closed tenant?"
-      :message="`This will close ${cascadePending.budgets} budget${cascadePending.budgets === 1 ? '' : 's'}, disable ${cascadePending.webhooks} webhook${cascadePending.webhooks === 1 ? '' : 's'}, and revoke ${cascadePending.apiKeys} API key${cascadePending.apiKeys === 1 ? '' : 's'} still non-terminal on this CLOSED tenant. No-op at the tenant level; only the owned objects transition. This cannot be undone.`"
+      :message="`This will close ${cascadePending.budgets} budget${cascadePending.budgets === 1 ? '' : 's'}, disable ${cascadePending.webhooks} webhook${cascadePending.webhooks === 1 ? '' : 's'}, and revoke ${cascadePending.apiKeys} API key${cascadePending.apiKeys === 1 ? '' : 's'} still non-terminal on this CLOSED tenant. This happens on tenants closed before admin v0.1.25.35 (no cascade ran) or after a partial-failure cascade. No-op at the tenant level; only the owned objects transition. This cannot be undone.`"
       confirm-label="Re-run Cascade"
       :danger="true"
+      :loading="rerunCascadeLoading"
+      :error="rerunCascadeError"
       @confirm="rerunCascade"
       @cancel="pendingRerunCascade = false; rerunCascadeError = ''"
     />

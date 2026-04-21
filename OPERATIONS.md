@@ -250,3 +250,22 @@ row. With admin-server **v0.1.25.30+** the entry renders a structured summary
 codes). The raw metadata JSON is available under the "Raw metadata" collapse
 for wire-level inspection. Earlier admin versions fall back to the legacy
 inline JSON block — upgrade admin to `.30` for the scannable view.
+
+**Triaging a cascade-incomplete tenant.** A CLOSED tenant with non-terminal
+owned objects renders an amber **"Cascade incomplete"** banner at the top
+of TenantDetailView, above the tombstone. The banner enumerates per-axis
+pending counts ("N budgets, N webhooks, N API keys are still non-terminal").
+Two populations produce this state: tenants closed on admin **pre-v0.1.25.35**
+(cascade semantics did not yet exist) and partial-failure cascades on
+`.35+` (admin crash mid-loop, Redis blip between the tenant-status flip
+and the per-child writes). Click **Re-run cascade** → confirm in the
+dialog. The dashboard re-PATCHes `{"status":"CLOSED"}` on the already-CLOSED
+tenant, which is a tenant-level no-op per spec v0.1.25.31 Rule 1(b)
+idempotency and drives remaining non-terminal children to their terminal
+states per Rule 1(c) convergence. On success the banner disappears. On
+failure the dialog surfaces the server error and stays open for retry; if
+a specific child repeatedly fails to transition, check the admin plane
+logs for the per-child write error (usually a Redis connection issue or a
+stale DISABLED-but-not-closed webhook). Operators without
+`manage_tenants` see the banner (so they can escalate) but not the
+button.
