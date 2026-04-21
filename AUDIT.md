@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.44 (2026-04-20)
+**Current release:** v0.1.25.45 (2026-04-21)
 
 ## Baseline requirements
 
@@ -16,6 +16,57 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-21 — v0.1.25.45: exclude closed-tenant children from Overview attention cards
+
+**Trigger.** Operator report: *"Budgets at or near cap show for closed tenants on the Overview."* Audit requested across all Overview cards.
+
+**Root cause.** Spec v0.1.25.31 Rule 1 Mode B is eventually-consistent — the tenant-close flip commits first, children terminal-ify via a guarded post-flip cascade, and Rule 1(c) permits an "implementation-defined" bounded-convergence window. During that window a CLOSED tenant can own non-terminal children (FROZEN budget, ACTIVE api_key, ACTIVE webhook-sub). Five Overview attention cards read those children directly and surfaced them as pending work — exactly opposite the operator intent behind tenant.close.
+
+**Audit across all six attention cards + counter strip.**
+
+| Card | Leak? | Data source | Resolution |
+|---|---|---|---|
+| Budgets at or near cap | yes | `listBudgets({utilization_min:'0.9'})` | `BudgetLedger.tenant_id` populated (v0.1.25.19+); client-side filter |
+| Budgets with debt | yes | `overview.debt_scopes` (no tenant_id) | **Source swap** → `listBudgets({has_debt:'true'})` + client filter |
+| Frozen budgets | yes | `listBudgets({status:'FROZEN'})` | Client-side filter |
+| Expiring API keys | yes | `listApiKeys` | `ApiKey.tenant_id` always populated; client-side filter |
+| Failing webhooks | yes | `overview.failing_webhooks` (no tenant_id) | **Source swap** → `listWebhooks` + client `consecutive_failures>0` + closed-tenant filter |
+| Recent denials | no | runtime events | Closed-tenant mutations now return TENANT_CLOSED before a denial is emitted — naturally excluded |
+| Recent operator activity | no | audit log | `tenant.close` itself belongs here; intended signal |
+| Counter strip tiles | no | server aggregates | Navigational counters, not actionable work — drilling lands on a filterable list |
+
+**Why client-side filter, not a new server aggregate.** Closed-tenant set is bounded (operators don't close tenants often); fetching `listTenants({status:'CLOSED'})` once per Overview poll is one extra roundtrip against an endpoint that already exists. Adding `exclude_closed_tenants=true` server params would touch 4+ endpoints for a transient-window concern; the client filter converges to zero rows the moment Rule 1(c) completes anyway.
+
+**Fix.**
+
+| Surface | Change |
+|---|---|
+| `OverviewView.vue` fetch fanout | `Promise.allSettled` extended from 5 → 8 parallel fetches: adds `listTenants({status:'CLOSED'})`, `listBudgets({has_debt:'true'})`, `listWebhooks()`. Same allSettled graceful-degradation story — any one failing doesn't wedge the others. |
+| New refs | `closedTenantIds: Set<string>`, `debtBudgets: BudgetLedger[]`, `failingWebhooksRaw: WebhookSubscription[]` |
+| `isNotClosedTenant(t)` helper | `!t.tenant_id \|\| !closedTenantIds.has(t.tenant_id)` — defensive on missing tenant_id (pre-`.19` budgets carry no tenant_id; treat as visible rather than mass-hiding on ambiguity) |
+| Filtered computeds | `atCapBudgetsFiltered`, `frozenBudgetsFiltered`, `debtBudgetsFiltered`, `keysFiltered`, `failingWebhooksFiltered` — every downstream sorted/count computed rebased on these |
+| Badges + banner axis pills | Counts derive from filtered list lengths, not server aggregates — the pill, tile badge, and row list stay consistent |
+| Debt card template | Rewired from `debtScopesSorted` (reading `s.debt`, `s.overdraft_limit` as numbers) to `debtBudgetsSorted` (reading `b.debt?.amount`, `b.overdraft_limit?.amount` as Amount objects) |
+
+**What this is NOT.**
+- Not a spec change — Mode B is working as designed; this is just a client-side presentation fix for the transient convergence window.
+- Not an admin pin bump — no new admin capability required; `listBudgets?has_debt` + `listWebhooks` already exist.
+- Not a filter for Tenants/Budgets/Webhooks views — those are dedicated list pages where the operator filters explicitly; the transient window is visible there by design (drill-in expected).
+- Not a filter on the counter strip — tiles are nav counters, not attention work; closed-tenant children DO count toward the global "you have N budgets" total.
+
+**Tests.** 5 new closed-tenant-exclusion tests (one per fixed card) assert the row is hidden when the owning tenant is CLOSED AND the non-closed sibling remains visible. 6 pre-existing tests updated to the new data sources (`listBudgetsMock.mockImplementation` branching on `params.has_debt` / `params.status` / `params.utilization_min`; `listWebhooksMock` seeded with `webhookSub()` fixtures). Full suite 783/783 green.
+
+**Edge cases.**
+
+| Case | Behavior |
+|---|---|
+| Budget `tenant_id` missing (pre-`.19` data) | `isNotClosedTenant` returns true → row stays visible. Prefers over-visibility to over-hiding when ownership is ambiguous. |
+| `listTenants` fails | `closedTenantIds` stays empty → no filtering applied; cards render the full list (pre-fix behavior). Degrades gracefully. |
+| Operator re-opens a CLOSED tenant | Spec says CLOSED is terminal — not actually possible. If a future spec revision adds un-close, the set membership refreshes on the next poll (30s). |
+| Large closed-tenant population (N > 1000) | `listTenants({status:'CLOSED'})` paginates (no `limit` specified → server default). If operators accumulate thousands of closed tenants the set becomes incomplete and some rows leak. Acceptable for now; revisit if it bites. |
+
+---
 
 ### 2026-04-20 — v0.1.25.44: cascade-recovery affordance (consumes spec v0.1.25.31 Rule 1(c))
 

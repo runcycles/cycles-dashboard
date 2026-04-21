@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { usePolling } from '../composables/usePolling'
-import { getOverview, listApiKeys, listAuditLogs, listBudgets } from '../api/client'
-import type { AdminOverviewResponse, ApiKey, AuditLogEntry, BudgetLedger } from '../types'
+import { getOverview, listApiKeys, listAuditLogs, listBudgets, listTenants, listWebhooks } from '../api/client'
+import type { AdminOverviewResponse, ApiKey, AuditLogEntry, BudgetLedger, WebhookSubscription } from '../types'
 import PageHeader from '../components/PageHeader.vue'
 import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import WarningIcon from '../components/icons/WarningIcon.vue'
@@ -25,6 +25,32 @@ import { filterExpiringKeys, type ExpiringKey } from '../utils/expiringKeys'
 const overview = ref<AdminOverviewResponse | null>(null)
 const keys = ref<ApiKey[]>([])
 const recentAudit = ref<AuditLogEntry[]>([])
+// Closed-tenant exclusion set. Spec v0.1.25.31 Rule 1 cascades a closed
+// tenant's owned objects to terminal states; under Mode B (admin
+// reference implementation) the cascade is eventually-consistent, so
+// between the CLOSED flip and cascade completion an operator can
+// observe a closed tenant's still-ACTIVE budget / still-ACTIVE api-key
+// / still-ACTIVE webhook. Those don't belong on the "what needs
+// attention" landing page — a closed tenant is terminal and TenantDetail
+// surfaces the per-tenant cascade-recovery banner. Fetch the closed set
+// once per poll and filter every client-side-fetched attention card
+// against it. The Overview's counter-strip tile chips (e.g. "3 over",
+// "2 failing") stay on the server aggregate — they're positioned as
+// navigational state breakdowns, not attention signals; a true
+// tenant-status-aware aggregate count needs spec/admin work.
+const closedTenantIds = ref<Set<string>>(new Set())
+// Budgets with debt — replaces the use of overview.debt_scopes (which
+// lacks tenant_id and so cannot be filtered against the closed set).
+// listBudgets(has_debt=true) returns BudgetLedger rows that carry
+// tenant_id from v0.1.25.19+.
+const debtBudgets = ref<BudgetLedger[]>([])
+// Failing webhooks — replaces overview.failing_webhooks (narrower
+// shape without tenant_id). Fetch full WebhookSubscription rows, then
+// client-filter for (consecutive_failures ?? 0) > 0. listWebhooks has
+// no server-side `failing` filter (WebhooksView applies it client-side
+// too; see src/views/WebhooksView.vue:126), so we pull a reasonable
+// page and filter locally. Closed-tenant exclusion layered on top.
+const failingWebhooksRaw = ref<WebhookSubscription[]>([])
 // Budgets at or near cap (utilization ≥ 90%). The Overview payload's
 // `over_limit_scopes` is narrower than what operators expect: per
 // spec (cycles-governance-admin-v0.1.25.yaml:1415–1417)
@@ -48,11 +74,11 @@ const atCapBudgets = ref<BudgetLedger[]>([])
 const frozenBudgets = ref<BudgetLedger[]>([])
 const error = ref('')
 
-// All five fetches parallelize; any individual failure degrades
+// All eight fetches parallelize; any individual failure degrades
 // gracefully (error banner, but other sections keep rendering so a
 // flaky audit endpoint doesn't blank out the whole landing page).
 const { refresh, isLoading } = usePolling(async () => {
-  const [ov, apiKeys, audit, atCap, frozen] = await Promise.allSettled([
+  const [ov, apiKeys, audit, atCap, frozen, closed, debt, webhooks] = await Promise.allSettled([
     getOverview(),
     // Pull one page; client-side filter for 7d window. Fine even for
     // tenants with thousands of keys — we don't need the full set,
@@ -69,17 +95,46 @@ const { refresh, isLoading } = usePolling(async () => {
     // Frozen budgets — scopes, not just a count. Lets the Frozen
     // Budgets card list the top 5 inline instead of a center link.
     listBudgets({ status: 'FROZEN', limit: '10' }),
+    // Closed tenants — exclusion set for all client-side-fetched
+    // attention cards (see closedTenantIds declaration). Typical admin
+    // deployments have << 1000 closed tenants; if a deployment exceeds
+    // that, the unfiltered items are over-counted on Overview (server
+    // aggregates stay correct), and the follow-up is spec work to add
+    // `exclude_closed_tenants` to the list endpoints.
+    listTenants({ status: 'CLOSED', limit: '1000' }),
+    // Budgets with debt — replaces overview.debt_scopes so the list
+    // carries tenant_id and can be filtered against the closed set.
+    listBudgets({ has_debt: 'true', limit: '10' }),
+    // Webhooks — for the Failing Webhooks card. Full list + client
+    // filter for (consecutive_failures ?? 0) > 0 (WebhooksView does
+    // the same thing; the admin API has no server-side `failing`
+    // filter). Limit sized generously so the typical deployment has
+    // all failing subs in this page.
+    listWebhooks({ limit: '200' }),
   ])
   if (ov.status === 'fulfilled') overview.value = ov.value
   if (apiKeys.status === 'fulfilled') keys.value = apiKeys.value.keys
   if (audit.status === 'fulfilled') recentAudit.value = audit.value.logs
   if (atCap.status === 'fulfilled') atCapBudgets.value = atCap.value.ledgers
   if (frozen.status === 'fulfilled') frozenBudgets.value = frozen.value.ledgers
+  if (closed.status === 'fulfilled') {
+    closedTenantIds.value = new Set(closed.value.tenants.map(t => t.tenant_id))
+  }
+  if (debt.status === 'fulfilled') debtBudgets.value = debt.value.ledgers
+  if (webhooks.status === 'fulfilled') failingWebhooksRaw.value = webhooks.value.subscriptions
   // Surface the first failure so the operator sees *something* wrong —
   // but only error-banner; cards for the successful fetches still render.
-  const firstFail = [ov, apiKeys, audit, atCap, frozen].find(r => r.status === 'rejected')
+  const firstFail = [ov, apiKeys, audit, atCap, frozen, closed, debt, webhooks].find(r => r.status === 'rejected')
   error.value = firstFail && firstFail.status === 'rejected' ? toMessage(firstFail.reason) : ''
 }, 30000)
+
+// A row belongs on an "attention" card only if its owning tenant is
+// not CLOSED. Rows without a tenant_id (pre-v0.1.25.19 servers) are
+// kept — we can't prove they're closed, so don't hide them.
+function isNotClosedTenant(t: { tenant_id?: string }): boolean {
+  if (!t.tenant_id) return true
+  return !closedTenantIds.value.has(t.tenant_id)
+}
 
 // Utilization helper — BudgetLedger carries {unit, amount} Amount
 // objects for allocated/spent. When allocated.amount is 0, utilization
@@ -92,16 +147,29 @@ function utilizationOf(b: BudgetLedger): number {
   return spent / alloc
 }
 
+// Closed-tenant-filtered views. Each attention card derives from its
+// *Filtered* computed so the badge, banner axis count, and row list
+// all agree. Rows without tenant_id fall through (see isNotClosedTenant).
+const atCapBudgetsFiltered = computed<BudgetLedger[]>(() => atCapBudgets.value.filter(isNotClosedTenant))
+const frozenBudgetsFiltered = computed<BudgetLedger[]>(() => frozenBudgets.value.filter(isNotClosedTenant))
+const debtBudgetsFiltered = computed<BudgetLedger[]>(() => debtBudgets.value.filter(isNotClosedTenant))
+const keysFiltered = computed<ApiKey[]>(() => keys.value.filter(isNotClosedTenant))
+const failingWebhooksFiltered = computed<WebhookSubscription[]>(() =>
+  failingWebhooksRaw.value
+    .filter(w => (w.consecutive_failures ?? 0) > 0)
+    .filter(isNotClosedTenant)
+)
+
 // Sorted descending by utilization so the most-broken budget leads
 // the card display. Tie-break by scope for stable rendering. Sliced
 // to 5 to match the Expiring Keys card convention — landing-page
 // summary, not a full list; "View all" link carries operators to
 // /budgets?utilization_min=0.9 for the complete set. The banner
-// badge still shows the full count (atCapBudgets.length), so the
-// operator sees "7" on the pill and 5 rows in the card with the
+// badge still shows the full count (atCapBudgetsFiltered.length), so
+// the operator sees "7" on the pill and 5 rows in the card with the
 // "View all" link implicitly covering the other 2.
 const atCapSorted = computed<BudgetLedger[]>(() => {
-  return [...atCapBudgets.value].sort((a, b) => {
+  return [...atCapBudgetsFiltered.value].sort((a, b) => {
     const ua = utilizationOf(a)
     const ub = utilizationOf(b)
     if (ua !== ub) return ub - ua
@@ -114,29 +182,33 @@ const atCapSorted = computed<BudgetLedger[]>(() => {
 // summary. "View all" in the header carries operators to the full
 // filtered BudgetsView.
 const frozenSorted = computed<BudgetLedger[]>(() => {
-  return [...frozenBudgets.value]
+  return [...frozenBudgetsFiltered.value]
     .sort((a, b) => a.scope.localeCompare(b.scope))
     .slice(0, 5)
 })
 
-// Debt scopes — slice to 5 for parity with the other two budget
-// cards. The server already sorts desc by debt (per overview spec),
-// so we keep that ordering.
-const debtScopesSorted = computed(() => {
-  return (overview.value?.debt_scopes ?? []).slice(0, 5)
+// Budgets with debt — sort desc by debt amount (server returns ordered
+// but filtering may re-order on edge cases; re-sort defensively).
+// Slice to 5 for parity with the other two budget cards.
+const debtBudgetsSorted = computed<BudgetLedger[]>(() => {
+  return [...debtBudgetsFiltered.value]
+    .sort((a, b) => (b.debt?.amount ?? 0) - (a.debt?.amount ?? 0))
+    .slice(0, 5)
 })
 
 // Expiring keys (7d) — sorted soonest-first, capped to 5 for the card.
-const expiringKeys = computed<ExpiringKey[]>(() => filterExpiringKeys(keys.value).slice(0, 5))
-const expiringTotal = computed<number>(() => filterExpiringKeys(keys.value).length)
+const expiringKeys = computed<ExpiringKey[]>(() => filterExpiringKeys(keysFiltered.value).slice(0, 5))
+const expiringTotal = computed<number>(() => filterExpiringKeys(keysFiltered.value).length)
 
 // Failing webhooks — slice to 5 for landing-page summary parity with
 // the three budget cards and Expiring Keys. "View all" link carries
 // operators to /webhooks?failing=1 for the complete set. The axis
-// badge still shows the full `webhook_counts.with_failures` aggregate,
-// so "7 failing · showing 5" reads consistently across cards.
-const failingWebhooksSorted = computed(() => {
-  return (overview.value?.failing_webhooks ?? []).slice(0, 5)
+// badge now shows the filtered count (excludes closed-tenant subs) so
+// the banner pill, badge, and card body all agree.
+const failingWebhooksSorted = computed<WebhookSubscription[]>(() => {
+  return [...failingWebhooksFiltered.value]
+    .sort((a, b) => (b.consecutive_failures ?? 0) - (a.consecutive_failures ?? 0))
+    .slice(0, 5)
 })
 
 // Recent denials — slice to 5 for the same reason. The server caps the
@@ -192,38 +264,43 @@ interface AlertAxis {
   count: number
   severity: AxisSeverity
 }
+// Axis counts derive from the closed-tenant-filtered lists so the
+// banner pills, card badges, and card row counts all agree. Server
+// aggregates (`webhook_counts.with_failures`, `budget_counts.frozen`,
+// etc.) still power the counter-strip tile chips, which are
+// navigational, not attention signals — see closedTenantIds.
 const alertAxes = computed<AlertAxis[]>(() => {
   if (!overview.value) return []
   const axes: AlertAxis[] = []
-  if (overview.value.webhook_counts.with_failures > 0) {
-    axes.push({ id: 'failing-webhooks', label: 'Failing webhooks', count: overview.value.webhook_counts.with_failures, severity: 'danger' })
+  if (failingWebhooksFiltered.value.length > 0) {
+    axes.push({ id: 'failing-webhooks', label: 'Failing webhooks', count: failingWebhooksFiltered.value.length, severity: 'danger' })
   }
-  // atCapBudgets is broader than overview.budget_counts.over_limit —
+  // atCapBudgetsFiltered is broader than overview.budget_counts.over_limit —
   // catches exhausted-without-debt AND the 90–99% "about to blow"
   // range (see atCapBudgets declaration for spec-gap rationale).
   // Severity tracks the worst row: danger if any budget is actually
   // at/over cap, warning if everything firing is in the near-cap
   // 90–99% range.
-  if (atCapBudgets.value.length > 0) {
-    const anyAtCap = atCapBudgets.value.some(b => utilizationOf(b) >= 1)
+  if (atCapBudgetsFiltered.value.length > 0) {
+    const anyAtCap = atCapBudgetsFiltered.value.some(b => utilizationOf(b) >= 1)
     axes.push({
       id: 'budgets-at-cap',
       label: anyAtCap ? 'Budgets at or near cap' : 'Budgets near cap',
-      count: atCapBudgets.value.length,
+      count: atCapBudgetsFiltered.value.length,
       severity: anyAtCap ? 'danger' : 'warning',
     })
   }
   if (overview.value.recent_denials.length > 0) {
     axes.push({ id: 'recent-denials', label: 'Recent denials', count: overview.value.recent_denials.length, severity: 'danger' })
   }
-  if (overview.value.budget_counts.with_debt > 0) {
-    axes.push({ id: 'budgets-with-debt', label: 'Budgets with debt', count: overview.value.budget_counts.with_debt, severity: 'warning' })
+  if (debtBudgetsFiltered.value.length > 0) {
+    axes.push({ id: 'budgets-with-debt', label: 'Budgets with debt', count: debtBudgetsFiltered.value.length, severity: 'warning' })
   }
   if (expiringTotal.value > 0) {
     axes.push({ id: 'expiring-keys', label: 'Expiring keys', count: expiringTotal.value, severity: 'warning' })
   }
-  if (overview.value.budget_counts.frozen > 0) {
-    axes.push({ id: 'frozen-budgets', label: 'Frozen budgets', count: overview.value.budget_counts.frozen, severity: 'warning' })
+  if (frozenBudgetsFiltered.value.length > 0) {
+    axes.push({ id: 'frozen-budgets', label: 'Frozen budgets', count: frozenBudgetsFiltered.value.length, severity: 'warning' })
   }
   return axes
 })
@@ -503,10 +580,10 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
               />
               Budgets at or near cap
               <span
-                v-if="atCapBudgets.length > 0"
+                v-if="atCapBudgetsFiltered.length > 0"
                 class="ml-1"
                 :class="axisById['budgets-at-cap']?.severity === 'danger' ? 'badge-danger' : 'badge-warning'"
-              >{{ atCapBudgets.length }}</span>
+              >{{ atCapBudgetsFiltered.length }}</span>
             </h2>
             <router-link :to="{ name: 'budgets', query: { utilization_min: '0.9' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
@@ -539,22 +616,22 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
             <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
               <WarningIcon v-if="axisById['budgets-with-debt']" class="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" />
               Budgets with debt
-              <span v-if="overview.budget_counts.with_debt > 0" class="ml-1 badge-warning">{{ overview.budget_counts.with_debt }}</span>
+              <span v-if="debtBudgetsFiltered.length > 0" class="ml-1 badge-warning">{{ debtBudgetsFiltered.length }}</span>
             </h2>
             <router-link :to="{ name: 'budgets', query: { filter: 'has_debt' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
-          <div v-if="debtScopesSorted.length === 0" class="text-sm muted py-4 text-center">No outstanding debt</div>
+          <div v-if="debtBudgetsSorted.length === 0" class="text-sm muted py-4 text-center">No outstanding debt</div>
           <div
-            v-for="s in debtScopesSorted"
-            :key="s.scope + s.unit"
+            v-for="b in debtBudgetsSorted"
+            :key="b.scope + b.unit"
             class="flex justify-between items-center py-1.5 border-b border-gray-100 last:border-0 dark:border-gray-700"
           >
             <router-link
-              :to="{ name: 'budgets', query: { scope: s.scope, unit: s.unit } }"
+              :to="{ name: 'budgets', query: { scope: b.scope, unit: b.unit } }"
               class="text-sm text-blue-600 hover:underline truncate mr-2 dark:text-blue-400"
-              :title="s.scope"
-            >{{ s.scope }}</router-link>
-            <span class="muted-sm shrink-0 tabular-nums">{{ s.debt.toLocaleString() }} / {{ s.overdraft_limit.toLocaleString() }}</span>
+              :title="b.scope"
+            >{{ b.scope }}</router-link>
+            <span class="muted-sm shrink-0 tabular-nums">{{ (b.debt?.amount ?? 0).toLocaleString() }} / {{ (b.overdraft_limit?.amount ?? 0).toLocaleString() }}</span>
           </div>
         </div>
 
@@ -568,15 +645,18 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
             <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
               <WarningIcon v-if="axisById['frozen-budgets']" class="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" />
               Frozen budgets
-              <span v-if="overview.budget_counts.frozen > 0" class="ml-1 badge-warning">{{ overview.budget_counts.frozen }}</span>
+              <span v-if="frozenBudgetsFiltered.length > 0" class="ml-1 badge-warning">{{ frozenBudgetsFiltered.length }}</span>
             </h2>
             <router-link :to="{ name: 'budgets', query: { status: 'FROZEN' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
-          <!-- Empty state prefers the overview count as the source of
+          <!-- Empty state: prefer the filtered list as the source of
                truth. If the frozen-scopes fetch failed but the overview
                count is non-zero, we surface the count rather than
                silently rendering "No frozen budgets" — otherwise the
-               card would contradict the banner badge. -->
+               card would contradict the banner badge. The overview
+               count includes closed-tenant children (server aggregate),
+               so the "details unavailable" line can over-state vs the
+               filtered card; acceptable fallback, matches the banner. -->
           <div v-if="frozenSorted.length === 0 && overview.budget_counts.frozen === 0" class="text-sm muted py-4 text-center">No frozen budgets</div>
           <div v-else-if="frozenSorted.length === 0" class="text-sm muted py-4 text-center">
             {{ overview.budget_counts.frozen }} frozen budget<span v-if="overview.budget_counts.frozen !== 1">s</span> — details unavailable
@@ -610,11 +690,11 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
             <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
               <WarningIcon v-if="axisById['failing-webhooks']" class="w-4 h-4 text-red-500 dark:text-red-400 shrink-0" />
               Failing webhooks
-              <span v-if="overview.webhook_counts.with_failures > 0" class="ml-1 badge-danger">{{ overview.webhook_counts.with_failures }}</span>
+              <span v-if="failingWebhooksFiltered.length > 0" class="ml-1 badge-danger">{{ failingWebhooksFiltered.length }}</span>
             </h2>
             <router-link to="/webhooks" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
-          <div v-if="overview.failing_webhooks.length === 0" class="text-sm muted py-4 text-center">All webhooks healthy</div>
+          <div v-if="failingWebhooksSorted.length === 0" class="text-sm muted py-4 text-center">All webhooks healthy</div>
           <div
             v-for="w in failingWebhooksSorted"
             :key="w.subscription_id"
@@ -625,7 +705,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
               class="text-sm text-blue-600 hover:underline truncate mr-2 dark:text-blue-400"
               :title="w.url"
             >{{ w.url }}</router-link>
-            <span class="text-xs text-red-600 dark:text-red-400 shrink-0 tabular-nums">{{ w.consecutive_failures }} failures</span>
+            <span class="text-xs text-red-600 dark:text-red-400 shrink-0 tabular-nums">{{ w.consecutive_failures ?? 0 }} failures</span>
           </div>
         </div>
 
