@@ -17,9 +17,33 @@
 
 Newest at the top. Older entries preserved verbatim.
 
-### 2026-04-21 — v0.1.25.45: exclude closed-tenant children from Overview attention cards + Tenants filter persists across drill-in
+### 2026-04-21 — v0.1.25.45: exclude closed-tenant children from Overview attention cards + Tenants filter persists across drill-in + clean-close banner flash
 
-This release bundles two operator-reported UX fixes.
+This release bundles three operator-reported UX fixes.
+
+#### Fix 3 — Cascade-recovery banner no longer flashes after a clean close
+
+**Trigger.** Operator report: *"When closing a tenant, right after cascade warning comes up, even though all is closed, requires refresh page to go away."*
+
+**Root cause.** `executeTenantAction()` only refetched `tenant` after the CLOSE PATCH — the `budgets`, `webhooks`, and `apiKeys` refs stayed stale (whatever was loaded before the close). `showRecoveryBanner` is a `computed(() => cascadeIsIncomplete(tenant, { budgets, webhooks, apiKeys }))` — with the tenant now CLOSED but stale ACTIVE children visible in the refs, the predicate returned true and the banner rendered. It cleared on the next 30s poll (which did refetch all four), but that's an eternity in UI terms; operators hit refresh instead.
+
+`rerunCascade()` already did the correct four-way refetch, which is what made the contrast sharp — the re-run flow's banner cleared cleanly but the initial-close flow's banner didn't.
+
+**Fix.** In `executeTenantAction`, branch on the action: for `CLOSED` do the four-way `Promise.all([getTenant, listBudgets, listWebhooks, listApiKeys])` refetch (same shape as `rerunCascade`); for `SUSPENDED` / `ACTIVE` keep the existing tenant-only refetch since those actions don't run a cascade.
+
+**Why not just refetch all four for every action.** Suspend and reactivate leave owned children in whatever state they were. Refetching them on those actions is wasteful per-click traffic for no observable benefit. The branch keeps the wire footprint minimal.
+
+**Edge cases.**
+
+| Case | Behavior |
+|---|---|
+| Mode B admin where cascade takes multiple seconds to converge | Refetch may return pre-cascade children → banner renders. Correct — that's exactly the spec v0.1.25.31 Rule 1(c) convergence window. Operator can click Re-run cascade immediately or wait for the next poll. |
+| Mode A admin (atomic cascade) | Refetch returns post-cascade children → banner stays hidden. The happy path this fix targets. |
+| PATCH succeeds but one of the three list refetches fails | Tenant ref updates, that list ref doesn't. Falls through to the `catch` (because `Promise.all` rejects); error surfaces via `toast.error`. Acceptable — tenant status is correct, banner may show stale data for one poll cycle until the next tick refreshes. |
+
+**Tests.** 1 new test in `TenantDetailView-cascade-recovery.test.ts`: ACTIVE tenant with ACTIVE children → operator clicks Close → types name → confirms → server-side cascade converges → banner MUST NOT render, and the four-parameter refetch MUST have fired with the expected `{tenant_id}` params.
+
+---
 
 #### Fix 2 — Tenants filter persists across drill-in → back
 

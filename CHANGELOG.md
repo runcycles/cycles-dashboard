@@ -35,6 +35,15 @@ UX work that does not advance spec alignment.
   `router.back()` (with a plain `/tenants` fallback when there's no
   prior history), so the filter state rides the browser history back
   to the list. Matches the Budgets-view flow operators expected.
+- **Cascade-recovery banner no longer flashes for a clean close.**
+  After closing an ACTIVE tenant whose cascade converged cleanly
+  server-side, the recovery banner would still render until the next
+  30s poll tick — operator had to refresh the page to dismiss it.
+  `executeTenantAction` now refetches budgets + webhooks + API keys
+  alongside the tenant on CLOSE (same pattern as `rerunCascade`), so
+  the banner-visibility computation sees post-cascade state
+  immediately. Suspend / reactivate actions still do a tenant-only
+  refetch — cascade doesn't run on those.
 
 ### Changed
 

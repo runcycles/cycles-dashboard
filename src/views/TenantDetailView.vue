@@ -133,11 +133,32 @@ const closeConfirmInput = ref('')
 
 async function executeTenantAction() {
   if (!pendingTenantAction.value) return
+  const action = pendingTenantAction.value
   try {
-    await updateTenantStatus(id, pendingTenantAction.value)
+    await updateTenantStatus(id, action)
     const labels: Record<string, string> = { SUSPENDED: 'Tenant suspended', ACTIVE: 'Tenant reactivated', CLOSED: 'Tenant permanently closed' }
-    toast.success(labels[pendingTenantAction.value])
-    tenant.value = await getTenant(id)
+    toast.success(labels[action])
+    // On CLOSE, refetch the cascade children alongside the tenant so
+    // the recovery banner (which computes off budgets/webhooks/apiKeys)
+    // reflects post-cascade state immediately instead of waiting for
+    // the next 30s poll. Pre-fix: banner appeared right after close
+    // even when the cascade completed cleanly, since the stale refs
+    // still showed ACTIVE/FROZEN children. Other actions (suspend/
+    // reactivate) don't trigger cascade — tenant-only refetch suffices.
+    if (action === 'CLOSED') {
+      const [tRes, bRes, wRes, kRes] = await Promise.all([
+        getTenant(id),
+        listBudgets({ tenant_id: id }),
+        listWebhooks({ tenant_id: id }),
+        listApiKeys({ tenant_id: id }),
+      ])
+      tenant.value = tRes
+      budgets.value = bRes.ledgers
+      webhooks.value = wRes.subscriptions
+      apiKeys.value = kRes.keys
+    } else {
+      tenant.value = await getTenant(id)
+    }
   } catch (e) {
     const msg = toMessage(e)
     error.value = msg
