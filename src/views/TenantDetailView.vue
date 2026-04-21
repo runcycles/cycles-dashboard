@@ -772,7 +772,7 @@ const { refresh, isLoading } = usePolling(async () => {
          amber. Banner renders for all roles so a read-only operator
          paged into triage can at least see the signal and escalate;
          the action button is gated on `manage_tenants`. -->
-    <div v-if="showRecoveryBanner" class="mb-4 bg-amber-50 border border-amber-400 rounded-lg px-4 py-3 text-sm text-amber-900" role="status" data-testid="cascade-recovery-banner">
+    <div v-if="showRecoveryBanner" class="mb-4 bg-amber-50 border border-amber-400 rounded-lg px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/50 dark:border-amber-600 dark:text-amber-100" role="status" data-testid="cascade-recovery-banner">
       <p class="font-medium mb-1">Cascade incomplete</p>
       <p class="text-xs mb-2">
         This tenant is CLOSED but
@@ -789,7 +789,7 @@ const { refresh, isLoading } = usePolling(async () => {
       <p v-else class="text-xs muted italic">Read-only view — ask an operator with manage-tenants access to re-run the cascade.</p>
     </div>
 
-    <div v-if="isTerminalTenant(tenant)" class="mb-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800" role="status">
+    <div v-if="isTerminalTenant(tenant)" class="mb-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800 dark:bg-amber-950/40 dark:border-amber-800 dark:text-amber-200" role="status">
       <strong>Tenant closed.</strong> All owned objects (budgets, webhooks, API keys) are terminal and read-only. Per spec v0.1.25.29, there is no re-open path.
     </div>
 
