@@ -3,22 +3,22 @@ import { computed } from 'vue'
 import VChart, { THEME_KEY } from 'vue-echarts'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
-import { PieChart, BarChart } from 'echarts/charts'
+import { PieChart } from 'echarts/charts'
 import {
   TooltipComponent,
   LegendComponent,
-  GridComponent,
 } from 'echarts/components'
 import type { EChartsOption } from 'echarts/types/dist/shared'
 import { provide } from 'vue'
 import { useChartTheme } from '../composables/useChartTheme'
 
-// v0.1.25.48 trio: PieChart covers the donuts (budget status, events by
-// category). BarChart + GridComponent cover the horizontal utilization
-// bar. Tooltip + Legend are shared. Upcoming slices can extend this set
-// (LineChart for sparklines, etc.) — register only what we use so
-// tree-shaking keeps the chart chunk small.
-use([CanvasRenderer, PieChart, BarChart, TooltipComponent, LegendComponent, GridComponent])
+// v0.1.25.50: all three Overview charts are donuts, so only PieChart +
+// Tooltip + Legend are registered. The utilization chart was reshaped
+// from a debt-based stacked bar to a true-utilization donut; BarChart +
+// GridComponent were removed in the process to keep the bundle small.
+// Upcoming slices can extend this set (LineChart for sparklines, etc.)
+// — register only what we use so tree-shaking stays honest.
+use([CanvasRenderer, PieChart, TooltipComponent, LegendComponent])
 
 const props = defineProps<{
   option: EChartsOption

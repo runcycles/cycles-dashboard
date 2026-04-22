@@ -99,6 +99,9 @@ const QUERIES: Array<[string, Record<string, string>]> = [
   ['?filter=BOGUS (unknown value ignored)', { filter: 'BOGUS' }],
   ['?filter=over_limit&status=ACTIVE (combo)', { filter: 'over_limit', status: 'ACTIVE' }],
   ['?scope=tenant:acme/*&unit=USD_MICROCENTS (detail mode)', { scope: 'tenant:acme/*', unit: 'USD_MICROCENTS' }],
+  ['?utilization_min=90 (Overview utilization donut → Near cap)', { utilization_min: '90' }],
+  ['?utilization_min=100 (Overview utilization donut → Over cap)', { utilization_min: '100' }],
+  ['?utilization_min=90&utilization_max=100 (Near-cap band)', { utilization_min: '90', utilization_max: '100' }],
 ]
 
 describe('BudgetsView — URL deep-link smoke', () => {
@@ -141,4 +144,44 @@ describe('BudgetsView — URL deep-link smoke', () => {
       expect(w.find('h1').exists()).toBe(true)
     })
   }
+
+  it('?utilization_min=90 hydrates the filter and hits the server with fractional 0.9', async () => {
+    // Regression pin for v0.1.25.50: the Overview utilization donut
+    // drill-down navigates to /budgets?utilization_min=90. Prior to
+    // v0.1.25.50 BudgetsView did not hydrate filterUtilMin from
+    // route.query, so the deep-link silently rendered an unfiltered
+    // list. Assert both halves of the contract: (1) the server gets
+    // the fractional value, (2) the page renders.
+    routeRef.query = { utilization_min: '90', utilization_max: '100' }
+    const { default: BudgetsView } = await import('../views/BudgetsView.vue')
+    const w = mount(BudgetsView, stdMount())
+    await flushPromises()
+    expect(w.find('h1').exists()).toBe(true)
+    expect(listBudgetsMock).toHaveBeenCalled()
+    const params = listBudgetsMock.mock.calls[0][0] as Record<string, string>
+    expect(params.utilization_min).toBe('0.9')
+    expect(params.utilization_max).toBe('1')
+  })
+
+  it('?utilization_min=150 (out of range) clamps to 100 / 1.0 on the wire', async () => {
+    // Don't trust the URL — the clamp in parseUtilPct guards against a
+    // pasted-in URL or a drifted bookmark bypassing the UI slider.
+    routeRef.query = { utilization_min: '150' }
+    const { default: BudgetsView } = await import('../views/BudgetsView.vue')
+    const w = mount(BudgetsView, stdMount())
+    await flushPromises()
+    expect(w.find('h1').exists()).toBe(true)
+    const params = listBudgetsMock.mock.calls[0][0] as Record<string, string>
+    expect(params.utilization_min).toBe('1')
+  })
+
+  it('?utilization_min=not-a-number is ignored (no filter applied)', async () => {
+    routeRef.query = { utilization_min: 'abc' }
+    const { default: BudgetsView } = await import('../views/BudgetsView.vue')
+    const w = mount(BudgetsView, stdMount())
+    await flushPromises()
+    expect(w.find('h1').exists()).toBe(true)
+    const params = listBudgetsMock.mock.calls[0][0] as Record<string, string>
+    expect(params.utilization_min).toBeUndefined()
+  })
 })

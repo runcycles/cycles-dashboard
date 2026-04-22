@@ -187,10 +187,12 @@ Shared implementation: `src/composables/useTerminalAwareList.ts`.
 
 The dashboard renders inline charts alongside the data tables via Apache
 ECharts (`vue-echarts`). The charting layer landed as a trial slice in
-v0.1.25.47 (single donut) and expanded in v0.1.25.48 to three
-Overview charts: **Budget status distribution** (lifecycle donut),
-**Budget fleet utilization** (healthy / with-debt / over-limit stacked
-bar), and **Events by category** (donut over the recent event window).
+v0.1.25.47 (single donut) and expanded through v0.1.25.48 – v0.1.25.50
+to three Overview donuts: **Budget status distribution** (lifecycle
+mix), **Budget fleet utilization** (true-utilization buckets —
+Healthy < 90% / Near cap 90–99% / Over cap ≥ 100%, computed from
+`spent/allocated` rather than the debt-based `is_over_limit` server
+signal), and **Events by category** (recent-window activity mix).
 Subsequent slices extend the pattern to Budgets / Webhooks / API Keys /
 Events views.
 
@@ -202,17 +204,24 @@ Shared building blocks:
 | `src/composables/useChartTheme.ts` | Reactive palette mapping the Tailwind status tokens (success / warning / danger / info / neutral) plus axis / grid / tooltip colors to ECharts values. Re-derives on dark-mode toggle. |
 
 ECharts is lazy-loaded per-view via `defineAsyncComponent` so the chart
-bundle (~165 KB gzip after v0.1.25.48's BarChart + GridComponent
-additions) downloads only when a chart actually renders. No view's
-initial chunk pays the chart-library cost.
+bundle downloads only when a chart actually renders. No view's initial
+chunk pays the chart-library cost. v0.1.25.50 removed the BarChart +
+GridComponent registrations when the utilization chart was reshaped
+from stacked bar to donut — only PieChart / Tooltip / Legend
+components remain bundled today.
 
 Every chart reads data the view already fetched — no chart adds a
-network request. Charts are also **clickable**: slices and segments
-emit `slice-click` which the parent view maps to `router.push` with
-the corresponding list-view filter pre-applied (Budgets: `status` /
-`filter=over_limit|has_debt`; Events: `category`). For the full
-six-slice roadmap and what each view is expected to visualize, see
-`AUDIT.md` → *v0.1.25.47 charting layer*.
+network request beyond what the attention cards above already drive.
+Charts are also **clickable**: slices emit `slice-click` which the
+parent view maps to `router.push` with the corresponding list-view
+filter pre-applied. Current drill-down contracts:
+
+- Budget status donut → Budgets filtered by `status=ACTIVE|FROZEN|CLOSED` or `filter=over_limit`.
+- Budget fleet utilization donut → Budgets filtered by `utilization_min` / `utilization_max` (integer percent, 0–100). `BudgetsView` hydrates both params from the URL on mount.
+- Events by category donut → Events filtered by `category=<name>`.
+
+For the full six-slice roadmap and what each view is expected to
+visualize, see `AUDIT.md` → *v0.1.25.47 charting layer*.
 
 ## Polling Strategy
 
@@ -322,7 +331,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.49
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.50
     restart: unless-stopped
     # No exposed ports — only accessible through Caddy
     depends_on:

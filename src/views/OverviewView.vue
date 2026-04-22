@@ -97,8 +97,14 @@ const { refresh, isLoading } = usePolling(async () => {
     // Budgets at or near cap (utilization ≥ 0.9). Catches
     // exhausted-without-debt (our blind spot), over-limit-via-debt,
     // AND the 90–99% range so operators can intervene before a
-    // budget actually blows rather than after.
-    listBudgets({ utilization_min: '0.9', limit: '10' }),
+    // budget actually blows rather than after. Limit 500 is the
+    // fleet-histogram cap — the at-cap card slices to 5 for display,
+    // but the utilization donut computes its Near-cap / Over-cap
+    // buckets from this same set so it needs a representative sample
+    // of the fleet, not just the top 10. Deployments with > 500
+    // budgets at ≥ 90% utilization will under-count the donut; the
+    // card badge / "View all" link still carry the full audit.
+    listBudgets({ utilization_min: '0.9', limit: '500' }),
     // Frozen budgets — scopes, not just a count. Lets the Frozen
     // Budgets card list the top 5 inline instead of a center link.
     listBudgets({ status: 'FROZEN', limit: '10' }),
@@ -267,11 +273,26 @@ function onBudgetStatusClick(p: ChartClickParams) {
   else if (name === 'over-limit') router.push({ name: 'budgets', query: { filter: 'over_limit' } })
 }
 
+// Budget fleet utilization donut — drill-down by `spent/allocated`
+// bucket (not by debt — see `budgetUtilizationOption` for the
+// semantic distinction). Operators clicking each slice land on the
+// corresponding utilization-filtered list.
+//   Healthy  (< 90%)    → unfiltered /budgets (the majority view)
+//   Near cap (90–100%)  → ?utilization_min=90&utilization_max=100
+//   Over cap (≥ 100%)   → ?utilization_min=100
+// Integer-percent bounds are inclusive on both edges, so a budget at
+// exactly 90% surfaces in both Healthy (via fleet default) and Near
+// cap; exactly 100% surfaces in both Near cap and Over cap. Minor
+// boundary overlap is standard histogram behavior.
 function onBudgetUtilizationClick(p: ChartClickParams) {
-  const name = (p?.seriesName ?? '').toLowerCase()
-  if (name === 'over-limit') router.push({ name: 'budgets', query: { filter: 'over_limit' } })
-  else if (name === 'with debt') router.push({ name: 'budgets', query: { filter: 'has_debt' } })
-  else if (name === 'healthy') router.push({ name: 'budgets' })
+  const name = (p?.name ?? '').toLowerCase()
+  if (name === 'near cap') {
+    router.push({ name: 'budgets', query: { utilization_min: '90', utilization_max: '100' } })
+  } else if (name === 'over cap') {
+    router.push({ name: 'budgets', query: { utilization_min: '100' } })
+  } else if (name === 'healthy') {
+    router.push({ name: 'budgets' })
+  }
 }
 
 function onEventsCategoryClick(p: ChartClickParams) {
@@ -315,21 +336,47 @@ const budgetStatusOption = computed(() => {
   }
 })
 
-// Budget fleet utilization — horizontal stacked bar over
-// `budget_counts.total`. Segmentation: Over-limit (debt > overdraft
-// cap) → danger; With-debt (debt > 0 but within cap) → warning;
-// Healthy (remainder) → success. Answers "how much of the fleet is
-// healthy vs. in trouble" at a glance, separate from the
-// by-status mix in the donut beside it. Zero new fetches — same
-// `/overview` payload.
+// Budget fleet utilization — donut over actual `spent / allocated`
+// (true utilization), NOT over the server's debt-based aggregates.
+// An earlier iteration derived segments from `budget_counts.over_limit`
+// + `budget_counts.with_debt`, but per spec
+// (cycles-governance-admin-v0.1.25.yaml:1415–1417) `is_over_limit =
+// debt > overdraft_limit` — a purely financial overdraft signal. A
+// budget at 113% spent/allocated with overdraft_limit covering the
+// overage has debt = 0 and counted as "Healthy" in the old chart
+// even though operators would call it critically over cap. The new
+// chart reads the same `listBudgets({utilization_min:0.9, limit:500})`
+// fetch the attention cards use and buckets by real utilization:
+//   • Near cap (90–99%) — warning, "about to blow"
+//   • Over cap (≥100%)  — danger, "spent exceeds allocated"
+//   • Healthy (<90%)    — success, everything else
+// Click contract: each slice drills to the utilization-filtered
+// BudgetsView so the operator can triage the band directly. Shape
+// matches the other two Overview donuts for visual consistency.
 const budgetUtilizationOption = computed(() => {
   const bc = overview.value?.budget_counts
   if (!bc || bc.total === 0) {
-    return { series: [{ type: 'bar' as const, data: [] }] }
+    return { series: [{ type: 'pie' as const, data: [] }] }
   }
-  const overLimit = bc.over_limit
-  const withDebt = Math.max(0, bc.with_debt - bc.over_limit)
-  const healthy = Math.max(0, bc.total - overLimit - withDebt)
+  // atCapBudgets is server-filtered to utilization ≥ 0.9. Bucket
+  // client-side: ≥1.0 → over cap; in [0.9, 1.0) → near cap.
+  let nearCap = 0
+  let overCap = 0
+  for (const b of atCapBudgets.value) {
+    if (utilizationOf(b) >= 1) overCap++
+    else nearCap++
+  }
+  // Healthy = total − (near + over). `bc.total` is a server aggregate
+  // that includes closed-tenant children, so this slightly over-counts
+  // Healthy vs. the cards' closed-tenant-filtered numbers — acceptable
+  // because the donut is the fleet-health read, not the attention read.
+  // Clamp to 0 in case of transient server/client skew.
+  const healthy = Math.max(0, bc.total - nearCap - overCap)
+  const slices = [
+    { name: 'Healthy', value: healthy, itemStyle: { color: palette.value.success } },
+    { name: 'Near cap', value: nearCap, itemStyle: { color: palette.value.warning } },
+    { name: 'Over cap', value: overCap, itemStyle: { color: palette.value.danger } },
+  ].filter((s) => s.value > 0)
   return {
     tooltip: {
       trigger: 'item' as const,
@@ -338,59 +385,26 @@ const budgetUtilizationOption = computed(() => {
       textStyle: { color: palette.value.textPrimary },
       formatter: (params: unknown) => {
         const p = Array.isArray(params) ? params[0] : params
+        const name = String((p as { name?: string }).name ?? '')
         const value = Number((p as { value?: unknown }).value ?? 0)
-        const seriesName = String((p as { seriesName?: string }).seriesName ?? '')
-        const pct = bc.total ? ((value / bc.total) * 100).toFixed(0) : '0'
-        return `${seriesName}: <b>${value}</b> (${pct}%)`
+        const pct = Number((p as { percent?: number }).percent ?? 0)
+        const band =
+          name === 'Healthy' ? ' (< 90%)' :
+          name === 'Near cap' ? ' (90–99%)' :
+          name === 'Over cap' ? ' (≥ 100%)' : ''
+        return `${name}${band}: <b>${value}</b> (${pct}%)`
       },
     },
     legend: { bottom: 0, textStyle: { color: palette.value.textMuted, fontSize: 11 } },
-    grid: { left: 8, right: 8, top: 12, bottom: 32, containLabel: false },
-    xAxis: { type: 'value' as const, max: bc.total, show: false },
-    yAxis: { type: 'category' as const, data: [''], show: false },
     series: [
       {
-        name: 'Healthy',
-        type: 'bar' as const,
-        stack: 'fleet',
-        data: [healthy],
-        itemStyle: { color: palette.value.success, borderRadius: [4, 0, 0, 4] },
-        barWidth: 28,
-        label: {
-          show: healthy > 0,
-          position: 'inside' as const,
-          formatter: '{c}',
-          color: '#ffffff',
-          fontWeight: 600,
-        },
-      },
-      {
-        name: 'With debt',
-        type: 'bar' as const,
-        stack: 'fleet',
-        data: [withDebt],
-        itemStyle: { color: palette.value.warning },
-        label: {
-          show: withDebt > 0,
-          position: 'inside' as const,
-          formatter: '{c}',
-          color: '#ffffff',
-          fontWeight: 600,
-        },
-      },
-      {
-        name: 'Over-limit',
-        type: 'bar' as const,
-        stack: 'fleet',
-        data: [overLimit],
-        itemStyle: { color: palette.value.danger, borderRadius: [0, 4, 4, 0] },
-        label: {
-          show: overLimit > 0,
-          position: 'inside' as const,
-          formatter: '{c}',
-          color: '#ffffff',
-          fontWeight: 600,
-        },
+        type: 'pie' as const,
+        radius: ['55%', '78%'],
+        center: ['50%', '45%'],
+        avoidLabelOverlap: true,
+        label: { show: false },
+        labelLine: { show: false },
+        data: slices,
       },
     ],
   }
@@ -803,15 +817,19 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
         </div>
       </div>
 
-      <!-- At-a-glance visualizations (v0.1.25.48). Three lightweight
-           ancillary charts that read the same `/overview` payload as
-           the counter strip above — no new fetches. Each one hides
-           itself when its backing data is empty so an empty fleet
-           never surfaces an empty chart. Layout is a 3-up grid on
-           wide screens, stacking vertically on narrow ones.
-             • Budget status distribution (donut) — lifecycle mix.
-             • Budget fleet utilization (stacked bar) — healthy vs.
-               with-debt vs. over-limit share of the fleet.
+      <!-- At-a-glance visualizations (v0.1.25.50). Three lightweight
+           ancillary charts that read payload already in-flight — no
+           new fetches. Each one hides itself when its backing data is
+           empty so an empty fleet never surfaces an empty chart.
+           Layout is a 3-up grid on wide screens, stacking vertically
+           on narrow ones.
+             • Budget status distribution (donut) — lifecycle mix
+               (active / frozen / closed / over-limit).
+             • Budget fleet utilization (donut) — true utilization
+               buckets (Healthy < 90% / Near cap 90–99% /
+               Over cap ≥ 100%) computed from spent/allocated across
+               the at-cap fetch, NOT from the debt-based server
+               aggregate. See `budgetUtilizationOption` for rationale.
              • Events by category (donut) — recent activity mix
                across the event window. -->
       <div
@@ -839,15 +857,15 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
         <div
           v-if="overview.budget_counts.total > 0"
           class="card p-3"
-          data-testid="budget-utilization-bar"
+          data-testid="budget-utilization-donut"
         >
           <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
             Budget fleet utilization
-            <span class="muted text-xs font-normal">· click a segment</span>
+            <span class="muted text-xs font-normal">· click a slice</span>
           </div>
           <BaseChart
             :option="budgetUtilizationOption"
-            label="Budget fleet utilization stacked bar chart — clickable"
+            label="Budget fleet utilization donut chart — clickable"
             height="180px"
             @slice-click="onBudgetUtilizationClick"
           />
@@ -928,7 +946,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
                 :class="axisById['budgets-at-cap']?.severity === 'danger' ? 'badge-danger' : 'badge-warning'"
               >{{ atCapBudgetsFiltered.length }}</span>
             </h2>
-            <router-link :to="{ name: 'budgets', query: { utilization_min: '0.9' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
+            <router-link :to="{ name: 'budgets', query: { utilization_min: '90' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
           <div v-if="atCapSorted.length === 0" class="text-sm muted py-4 text-center">All budgets under 90% utilized</div>
           <div

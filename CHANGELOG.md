@@ -15,6 +15,53 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.50] — 2026-04-22
+
+### Changed
+
+- **Overview "Budget fleet utilization" — reshaped to a true-utilization
+  donut (operator-reported regression).** Report: "169 budgets, several
+  at 90%+ and one at 113%, all show as Healthy." Root cause: the
+  previous stacked bar derived segments from `budget_counts.over_limit`
+  + `budget_counts.with_debt`; per spec
+  (`cycles-governance-admin-v0.1.25.yaml:1415–1417`) `is_over_limit =
+  debt > overdraft_limit` is a purely financial overdraft signal, so a
+  budget at 113% spent/allocated whose `overdraft_limit` absorbs the
+  overage has `debt = 0` and counted as Healthy. The chart now buckets
+  by actual `spent / allocated` across the `utilization_min=0.9` fetch
+  that already powers the at-cap attention card:
+  - Healthy (< 90%) — success
+  - Near cap (90–99%) — warning
+  - Over cap (≥ 100%) — danger
+
+  Donut shape matches the two neighboring charts for visual consistency
+  (three donuts rather than two donuts + a bar).
+- **Utilization drill-down uses `utilization_min` / `utilization_max`
+  instead of the debt-based `filter=over_limit|has_debt`.** Click
+  contracts: Healthy → `/budgets` (unfiltered); Near cap →
+  `/budgets?utilization_min=90&utilization_max=100`; Over cap →
+  `/budgets?utilization_min=100`. `BudgetsView` now hydrates both
+  params from the URL on mount — previously they were wired to the
+  inline form but not to deep links, silently rendering an unfiltered
+  list.
+- **`/overview` attention-card fetch `utilization_min=0.9` limit bumped
+  10 → 500.** The at-cap card still slices to 5 for display, but the
+  new fleet-utilization donut needs a representative sample of the
+  at-cap + near-cap set to produce honest bucket counts.
+
+### Removed
+
+- **`BarChart` + `GridComponent` ECharts registrations.** The
+  utilization stacked bar was the only consumer. Only `PieChart` +
+  `TooltipComponent` + `LegendComponent` remain bundled, shrinking the
+  chart chunk.
+
+### Fixed
+
+- Overview at-cap card "View all" link — `utilization_min=0.9` →
+  `utilization_min=90` to match the new percent URL convention the
+  BudgetsView filter inputs already expose.
+
 ## [0.1.25.49] — 2026-04-22
 
 ### Fixed

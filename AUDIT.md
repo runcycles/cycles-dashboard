@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.49 (2026-04-22)
+**Current release:** v0.1.25.50 (2026-04-22)
 
 ## Baseline requirements
 
@@ -16,6 +16,37 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-22 — v0.1.25.50: Budget fleet utilization — debt-based bar → true-utilization donut
+
+**Trigger.** Operator report: *"what does Budget fleet utilization represent? I have a few budgets over 90%, some 113% utilization, but all 169 show as healthy on Budget fleet utilization, so how does it determine health?"*
+
+**Root cause.** The v0.1.25.48 stacked bar derived segments from `budget_counts.over_limit` + `budget_counts.with_debt`. Per spec (`cycles-governance-admin-v0.1.25.yaml:1415–1417`) `is_over_limit = debt > overdraft_limit` — a *financial overdraft* signal, not a *utilization* signal. A budget at 113% spent/allocated whose `overdraft_limit` absorbs the overage has `debt = 0` and therefore counted as Healthy in the old chart. Chart title implied utilization; data behind it was debt. Semantic mismatch.
+
+**Fix.** Reshape the chart to read `spent / allocated` across the `utilization_min=0.9` fetch already in-flight for the at-cap card. Bucket client-side:
+
+| Bucket | Range | Color | Drill-down |
+|---|---|---|---|
+| Healthy | `util < 0.9` | success | `/budgets` (unfiltered) |
+| Near cap | `0.9 ≤ util < 1.0` | warning | `/budgets?utilization_min=90&utilization_max=100` |
+| Over cap | `util ≥ 1.0` | danger | `/budgets?utilization_min=100` |
+
+Chart type changed from stacked bar to donut so all three Overview charts share a consistent shape.
+
+**Scope.**
+
+| Surface | Change |
+|---|---|
+| `src/views/OverviewView.vue` | `budgetUtilizationOption` rewritten as a pie over three buckets. `atCapBudgets` fetch limit 10 → 500 so bucket counts reflect fleet state, not the top-10 card sample. `onBudgetUtilizationClick` drills via `utilization_min` / `utilization_max` (integer percent) instead of the debt-based `filter=over_limit|has_debt`. Existing at-cap card "View all" link updated from `utilization_min=0.9` → `utilization_min=90` for URL-format consistency. |
+| `src/views/BudgetsView.vue` | `filterUtilMin` / `filterUtilMax` now hydrate from `route.query` on mount via `parseUtilPct()` (clamp to [0, 100], drop non-finite). Query watcher syncs the same params on subsequent navigation. Prior to this change the inputs were wired to the form but not to deep links — the Overview drill-down and the existing at-cap "View all" link silently rendered an unfiltered list. |
+| `src/components/BaseChart.vue` | `BarChart` + `GridComponent` registrations removed — PieChart is now the only chart type in use. Tree-shaking drops the unused code from the ECharts chunk. |
+| `src/__tests__/BaseChart.test.ts` | Utilization block rewritten: regression pin that a synthetic 113%-util / zero-debt budget lands in Over cap (not Healthy). Drill-down tests updated for the new slice names — Near cap → `utilization_min=90&utilization_max=100`, Over cap → `utilization_min=100`. |
+| `src/__tests__/BudgetsView-url-deeplink.test.ts` | +3 URL hydration tests: 90/100 → wire fractional 0.9/1.0; out-of-range `utilization_min=150` clamps to 1.0; non-numeric `utilization_min=abc` is ignored. |
+| `src/__tests__/OverviewView.test.ts` | ECharts mocks narrowed — `BarChart` / `GridComponent` stubs removed to match the registration change. |
+
+**URL contract (operator-visible).** BudgetsView accepts `utilization_min` / `utilization_max` as **integer percent (0–100)** matching the existing form inputs. Server receives fractional 0.0–1.0 after the `/100` conversion.
+
+**Verification.** `npm run test` → 842 passing (+6 new). `npm run typecheck` clean.
 
 ### 2026-04-22 — v0.1.25.49: chart drill-down (slice-click → filtered list view) + color-collision fix
 

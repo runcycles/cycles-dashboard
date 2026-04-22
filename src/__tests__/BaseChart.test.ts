@@ -65,11 +65,10 @@ vi.mock('vue-echarts', () => ({
 }))
 vi.mock('echarts/core', () => ({ use: () => {} }))
 vi.mock('echarts/renderers', () => ({ CanvasRenderer: {} }))
-vi.mock('echarts/charts', () => ({ PieChart: {}, BarChart: {} }))
+vi.mock('echarts/charts', () => ({ PieChart: {} }))
 vi.mock('echarts/components', () => ({
   TooltipComponent: {},
   LegendComponent: {},
-  GridComponent: {},
 }))
 
 const FULL_CAPS: Capabilities = {
@@ -196,7 +195,36 @@ describe('OverviewView — budget-status donut (v0.1.25.47 trial chart)', () => 
   })
 })
 
-describe('OverviewView — budget utilization bar (v0.1.25.48)', () => {
+describe('OverviewView — budget fleet utilization donut (v0.1.25.50)', () => {
+  // Regression pin for the reshape from stacked bar (debt-based) to
+  // donut (true utilization). The operator report was: "169 budgets
+  // all show as Healthy on Budget fleet utilization even though I
+  // have budgets at 90%+ and one at 113%." Root cause: the old chart
+  // segmented by budget_counts.over_limit + with_debt — is_over_limit
+  // is `debt > overdraft_limit`, so an over-cap budget whose
+  // overdraft absorbs the overage shows debt=0 → Healthy. Tests below
+  // assert the new chart buckets by actual spent/allocated.
+
+  function atCapLedger(scope: string, util: number, unit = 'cost') {
+    // Minimal shape: utilizationOf() reads allocated.amount and
+    // spent.amount. util > 1 → spent > allocated (over cap); util in
+    // [0.9, 1.0) → near cap.
+    return {
+      ledger_id: scope,
+      scope,
+      tenant_id: 't1',
+      unit,
+      allocated: { unit, amount: 100 },
+      spent: { unit, amount: Math.round(100 * util) },
+      remaining: { unit, amount: Math.max(0, 100 - Math.round(100 * util)) },
+      debt: { unit, amount: 0 },
+      overdraft_limit: { unit, amount: 0 },
+      reserved: { unit, amount: 0 },
+      status: 'ACTIVE',
+      created_at: '2026-01-01T00:00:00Z',
+    }
+  }
+
   beforeEach(() => {
     setActivePinia(createPinia())
     const auth = useAuthStore()
@@ -215,20 +243,56 @@ describe('OverviewView — budget utilization bar (v0.1.25.48)', () => {
     listWebhooksMock.mockResolvedValue({ subscriptions: [], has_more: false })
   })
 
-  it('renders utilization bar when the fleet has at least one budget', async () => {
+  it('renders utilization donut when the fleet has at least one budget', async () => {
     getOverviewMock.mockResolvedValue(healthyOverview({
-      budget_counts: { total: 5, active: 5, frozen: 0, closed: 0, over_limit: 1, with_debt: 2, by_unit: {} },
+      budget_counts: { total: 5, active: 5, frozen: 0, closed: 0, over_limit: 0, with_debt: 0, by_unit: {} },
     }))
     const w = await mountOverview()
-    expect(w.find('[data-testid="budget-utilization-bar"]').exists()).toBe(true)
+    const card = w.find('[data-testid="budget-utilization-donut"]')
+    expect(card.exists()).toBe(true)
+    expect(card.find('[role="img"]').attributes('aria-label')).toBe('Budget fleet utilization donut chart — clickable')
   })
 
-  it('hides utilization bar on an empty fleet (total = 0)', async () => {
+  it('hides utilization donut on an empty fleet (total = 0)', async () => {
     getOverviewMock.mockResolvedValue(healthyOverview({
       budget_counts: { total: 0, active: 0, frozen: 0, closed: 0, over_limit: 0, with_debt: 0, by_unit: {} },
     }))
     const w = await mountOverview()
-    expect(w.find('[data-testid="budget-utilization-bar"]').exists()).toBe(false)
+    expect(w.find('[data-testid="budget-utilization-donut"]').exists()).toBe(false)
+  })
+
+  it('buckets by actual spent/allocated — a 113% budget with zero debt lands in Over cap, not Healthy', async () => {
+    // The exact operator-reported regression: overdraft_limit absorbs
+    // the overage so debt = 0 and the OLD chart counted this as
+    // "Healthy". Ensure the new chart reads utilization, not debt.
+    getOverviewMock.mockResolvedValue(healthyOverview({
+      budget_counts: { total: 169, active: 169, frozen: 0, closed: 0, over_limit: 0, with_debt: 0, by_unit: {} },
+    }))
+    listBudgetsMock.mockImplementation((params: { utilization_min?: string }) => {
+      if (params?.utilization_min === '0.9') {
+        return Promise.resolve({
+          ledgers: [
+            atCapLedger('s/over', 1.13),    // 113% → over cap
+            atCapLedger('s/at',   1.00),    // 100% → over cap
+            atCapLedger('s/near', 0.95),    // 95%  → near cap
+            atCapLedger('s/edge', 0.90),    // 90%  → near cap
+          ],
+          has_more: false,
+        })
+      }
+      return Promise.resolve({ ledgers: [], has_more: false })
+    })
+    const w = await mountOverview()
+    const vm = w.vm as unknown as {
+      budgetUtilizationOption: {
+        series: Array<{ data: Array<{ name: string; value: number }> }>
+      }
+    }
+    const slices = vm.budgetUtilizationOption.series[0].data
+    const byName = Object.fromEntries(slices.map((s) => [s.name, s.value]))
+    expect(byName['Over cap']).toBe(2)   // 113% + 100%
+    expect(byName['Near cap']).toBe(2)   // 95% + 90%
+    expect(byName['Healthy']).toBe(165)  // 169 − 4
   })
 })
 
@@ -321,12 +385,26 @@ describe('OverviewView — chart drill-down (v0.1.25.49)', () => {
     expect(pushMock).toHaveBeenCalledWith({ name: 'budgets', query: { filter: 'over_limit' } })
   })
 
-  it('utilization With-debt segment pushes to budgets?filter=has_debt', async () => {
+  it('utilization Near-cap slice pushes to budgets?utilization_min=90&utilization_max=100', async () => {
     const w = await mountOverview()
     const charts = w.findAllComponents({ name: 'BaseChart' })
-    charts[1].vm.$emit('slice-click', { seriesName: 'With debt' })
+    charts[1].vm.$emit('slice-click', { name: 'Near cap' })
     await flushPromises()
-    expect(pushMock).toHaveBeenCalledWith({ name: 'budgets', query: { filter: 'has_debt' } })
+    expect(pushMock).toHaveBeenCalledWith({
+      name: 'budgets',
+      query: { utilization_min: '90', utilization_max: '100' },
+    })
+  })
+
+  it('utilization Over-cap slice pushes to budgets?utilization_min=100', async () => {
+    const w = await mountOverview()
+    const charts = w.findAllComponents({ name: 'BaseChart' })
+    charts[1].vm.$emit('slice-click', { name: 'Over cap' })
+    await flushPromises()
+    expect(pushMock).toHaveBeenCalledWith({
+      name: 'budgets',
+      query: { utilization_min: '100' },
+    })
   })
 
   it('events donut category slice pushes to events?category=policy', async () => {
