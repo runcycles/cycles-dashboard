@@ -28,7 +28,7 @@ services:
     # Runtime-plane server. Release cadence is independent of dashboard +
     # cycles-server-admin — this tag intentionally lags the others. Only
     # bump when a new runtime-plane feature requires it.
-    image: ghcr.io/runcycles/cycles-server:0.1.25.15
+    image: ghcr.io/runcycles/cycles-server:0.1.25.17
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
@@ -55,7 +55,7 @@ services:
     # release — bump in lockstep with protocol revisions that affect
     # WebhookDelivery. `.8` matches protocol v0.1.25.28 (trace_id /
     # trace_flags / traceparent_inbound_valid).
-    image: ghcr.io/runcycles/cycles-server-events:0.1.25.8
+    image: ghcr.io/runcycles/cycles-server-events:0.1.25.10
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
@@ -65,7 +65,7 @@ services:
       EVENT_TTL_DAYS: ${EVENT_TTL_DAYS:-90}
       DELIVERY_TTL_DAYS: ${DELIVERY_TTL_DAYS:-14}
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7980/actuator/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9980/actuator/health"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -77,7 +77,7 @@ services:
       - cycles
 
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.37
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.38
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
