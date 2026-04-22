@@ -375,19 +375,12 @@ const CATEGORY_COLORS: Record<string, keyof typeof palette.value> = {
   tenant: 'neutral',
   runtime: 'success',
 }
-// Wrapping-grid visibility: skip the row entirely when no chart
-// inside it has data, so we don't render an empty 3-column grid on
-// a brand-new environment.
-const hasAnyChart = computed(() => {
-  const donutSlices = (budgetStatusOption.value.series?.[0] as { data: unknown[] } | undefined)?.data?.length ?? 0
-  const total = overview.value?.budget_counts?.total ?? 0
-  const ec = overview.value?.event_counts
-  const evtCats = ec?.by_category
-    ? Object.values(ec.by_category).some((v) => (v as number) > 0)
-    : false
-  const evtTotal = (ec?.total_recent ?? 0) > 0
-  return donutSlices > 0 || total > 0 || evtCats || evtTotal
-})
+// Wrapping-grid visibility: always show the row once overview has
+// loaded. The events-by-category card is always rendered (with an
+// empty-state message if no events), so the 3-up layout stays stable
+// across environments — operators reported the row disappearing on
+// idle dev environments when we previously hid the events card.
+const hasAnyChart = computed(() => overview.value !== null)
 
 const eventsByCategoryOption = computed(() => {
   const ec = overview.value?.event_counts
@@ -793,16 +786,23 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
         </div>
 
         <div
-          v-if="eventsByCategoryOption.series[0].data.length > 0"
           class="card p-3"
           data-testid="events-by-category-donut"
         >
           <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Events by category ({{ Math.round(overview.event_window_seconds / 60) }}m)</div>
           <BaseChart
+            v-if="eventsByCategoryOption.series[0].data.length > 0"
             :option="eventsByCategoryOption"
             label="Events by category donut chart"
             height="180px"
           />
+          <div
+            v-else
+            class="flex items-center justify-center text-xs muted"
+            style="height: 180px"
+          >
+            No recent events in the last {{ Math.round(overview.event_window_seconds / 60) }}m
+          </div>
         </div>
       </div>
 

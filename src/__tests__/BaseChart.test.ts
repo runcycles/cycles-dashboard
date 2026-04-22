@@ -258,12 +258,17 @@ describe('OverviewView — events-by-category donut (v0.1.25.48)', () => {
     expect(w.find('[data-testid="events-by-category-donut"]').exists()).toBe(true)
   })
 
-  it('hides when event_counts.by_category is empty AND total_recent is 0', async () => {
+  it('still renders the card with an empty-state message when total_recent is 0', async () => {
+    // Layout stability: the 3-up grid must not collapse to 2 columns on
+    // an idle environment. The card renders with a "No recent events"
+    // message instead of the chart.
     getOverviewMock.mockResolvedValue(healthyOverview({
       event_counts: { total_recent: 0, by_category: {} },
     }))
     const w = await mountOverview()
-    expect(w.find('[data-testid="events-by-category-donut"]').exists()).toBe(false)
+    const card = w.find('[data-testid="events-by-category-donut"]')
+    expect(card.exists()).toBe(true)
+    expect(card.text()).toContain('No recent events')
   })
 
   it('still renders a single uncategorized slice when by_category is empty but total_recent > 0', async () => {
