@@ -15,6 +15,45 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.51] — 2026-04-22
+
+### Added
+
+- **WebhooksView — fleet-health donut.** New card above the filter
+  row, at parity with the three Overview donuts. Client-side reduce
+  over the already-fetched `webhooks` list (60s poll, no new request).
+  Four slices: **Healthy** (ACTIVE, no failures), **Failing**
+  (`consecutive_failures ≥ 1` regardless of status — a PAUSED
+  webhook with latent failures still needs attention), **Paused**
+  (PAUSED, no failures), **Disabled** (terminal). Click-to-drill
+  contracts:
+  - Healthy → `/webhooks?status=ACTIVE`
+  - Failing → `/webhooks?failing=1`
+  - Paused → `/webhooks?status=PAUSED`
+  - Disabled → `/webhooks?status=DISABLED`
+- **WebhookDetailView — four-up per-subscription stat row.** Sits
+  between the subscription card and the Delivery History table.
+  All four derive from the already-loaded deliveries page (30s poll):
+  - **Last successful delivery** — traffic-light chip mirroring
+    PagerDuty/Grafana convention (green < 1h, amber 1h–24h, red
+    ≥ 24h or no successful delivery yet).
+  - **Delivery outcome donut** — SUCCESS / FAILED / RETRYING /
+    PENDING over the loaded page. Clicking a slice sets the
+    history-table status filter in place (no route push).
+  - **Attempts per delivery histogram** — bucket counts for
+    1 / 2 / 3 / 4 / 5+ attempts. A long tail in 4/5+ surfaces
+    retry storms visibly before operators have to scan the table.
+  - **Response time** — p50 / p95 / max over deliveries that
+    carry `response_time_ms`. Text stats rather than a histogram
+    because fighting over bucket widths on a variable-size cursor
+    page gives p50/p95 better signal.
+
+### Changed
+
+- **BaseChart re-registers `BarChart` + `GridComponent`.** The
+  attempts histogram needs them; tree-shaking still only bundles
+  what's actively used (PieChart, BarChart, Tooltip, Legend, Grid).
+
 ## [0.1.25.50] — 2026-04-22
 
 ### Changed

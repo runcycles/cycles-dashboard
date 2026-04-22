@@ -193,8 +193,12 @@ mix), **Budget fleet utilization** (true-utilization buckets —
 Healthy < 90% / Near cap 90–99% / Over cap ≥ 100%, computed from
 `spent/allocated` rather than the debt-based `is_over_limit` server
 signal), and **Events by category** (recent-window activity mix).
-Subsequent slices extend the pattern to Budgets / Webhooks / API Keys /
-Events views.
+v0.1.25.51 added a **webhook fleet-health donut** on `WebhooksView`
+(Healthy / Failing / Paused / Disabled) and a four-up
+**per-subscription stat row** on `WebhookDetailView` (last-success
+band, delivery-outcome donut, attempts histogram, response-time
+p50/p95/max) — all derived from the data polls already in flight.
+Subsequent slices extend the pattern to API Keys / Events views.
 
 Shared building blocks:
 
@@ -205,10 +209,11 @@ Shared building blocks:
 
 ECharts is lazy-loaded per-view via `defineAsyncComponent` so the chart
 bundle downloads only when a chart actually renders. No view's initial
-chunk pays the chart-library cost. v0.1.25.50 removed the BarChart +
-GridComponent registrations when the utilization chart was reshaped
-from stacked bar to donut — only PieChart / Tooltip / Legend
-components remain bundled today.
+chunk pays the chart-library cost. v0.1.25.51 re-registered BarChart +
+GridComponent (removed in v0.1.25.50 when all three Overview charts
+became donuts) because `WebhookDetailView` introduces an attempts-
+per-delivery bar chart. Active registrations: PieChart, BarChart,
+TooltipComponent, LegendComponent, GridComponent.
 
 Every chart reads data the view already fetched — no chart adds a
 network request beyond what the attention cards above already drive.
@@ -219,6 +224,8 @@ filter pre-applied. Current drill-down contracts:
 - Budget status donut → Budgets filtered by `status=ACTIVE|FROZEN|CLOSED` or `filter=over_limit`.
 - Budget fleet utilization donut → Budgets filtered by `utilization_min` / `utilization_max` (integer percent, 0–100). `BudgetsView` hydrates both params from the URL on mount.
 - Events by category donut → Events filtered by `category=<name>`.
+- Webhook fleet-health donut → Webhooks filtered by `status=ACTIVE|PAUSED|DISABLED` or `failing=1` (the Failing slice is orthogonal to status — a `PAUSED` webhook with `consecutive_failures ≥ 1` still counts as Failing so the chart and the `failing=1` filter match).
+- Delivery-outcome donut (WebhookDetailView) → local status filter on the history table, no route push.
 
 For the full six-slice roadmap and what each view is expected to
 visualize, see `AUDIT.md` → *v0.1.25.47 charting layer*.
@@ -331,7 +338,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.50
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.51
     restart: unless-stopped
     # No exposed ports — only accessible through Caddy
     depends_on:

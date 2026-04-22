@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.50 (2026-04-22)
+**Current release:** v0.1.25.51 (2026-04-22)
 
 ## Baseline requirements
 
@@ -16,6 +16,24 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-22 — v0.1.25.51: Webhook visualizations — fleet-health donut + per-subscription stat row
+
+**Trigger.** Operator ask after the v0.1.25.50 chart review: *"review again, anything else where we can add, improve with charts + stats?"* Top two gaps surfaced were the webhook surfaces — fleet health was row-level green/yellow/red dots with no aggregate shape, and the detail view carried per-delivery data (`response_time_ms`, `attempts`, `status`, `last_success_at`) that were fetched, listed, and then summarily thrown away at the aggregate level.
+
+**Scope.**
+
+| Surface | Change |
+|---|---|
+| `src/views/WebhooksView.vue` | New fleet-health donut above the filter card. Client-side reduce over `webhooks` (60s poll, no new request). Four slices — Healthy (ACTIVE, no failures) / Failing (`consecutive_failures ≥ 1` regardless of status) / Paused (no failures) / Disabled. Click drills to `?status=...` or `?failing=1`, mirroring the contract Overview's counter-strip tiles use. |
+| `src/views/WebhookDetailView.vue` | New four-up stat row between the subscription card and the Delivery History table. (a) Last-success chip with PagerDuty traffic-light semantics (green < 1h, amber 1h–24h, red ≥ 24h or no successful delivery). (b) Delivery-outcome donut; click sets the history-table status filter in place — no route push because the filter is local state. (c) Attempts-per-delivery histogram bucketed 0/1/2/3/4/5+ with severity color ramp so retry storms are visible before operators scan rows. (d) Response-time p50 / p95 / max over deliveries that carry `response_time_ms`. Percentile method: NIST nearest-rank (`ceil((p/100) * n)`) so 4 samples at p50 → 2nd-smallest rather than 3rd. |
+| `src/components/BaseChart.vue` | Re-register `BarChart` + `GridComponent` (dropped in v0.1.25.50 when all three Overview charts became donuts). Attempts histogram needs them. |
+| `src/__tests__/WebhookCharts.test.ts` | 10 new tests. Fleet-health bucket assignment, empty-fleet guard, drill-down for Failing/Disabled/Paused slices, per-subscription stat computation (outcome donut, attempts histogram, response-time stats), last-success band green/amber/red, hidden-row guard when no deliveries loaded, click-donut sets local filter without route push. |
+| `src/__tests__/BaseChart.test.ts` | ECharts stubs re-widened for BarChart + GridComponent. |
+
+**URL contract (operator-visible).** WebhooksView drill-down reuses the existing `status` + `failing` URL params — no new params, no version gate.
+
+**Verification.** `npm run test` → 852 passing (+10 new). `npm run typecheck` clean.
 
 ### 2026-04-22 — v0.1.25.50: Budget fleet utilization — debt-based bar → true-utilization donut
 

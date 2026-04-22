@@ -65,10 +65,11 @@ vi.mock('vue-echarts', () => ({
 }))
 vi.mock('echarts/core', () => ({ use: () => {} }))
 vi.mock('echarts/renderers', () => ({ CanvasRenderer: {} }))
-vi.mock('echarts/charts', () => ({ PieChart: {} }))
+vi.mock('echarts/charts', () => ({ PieChart: {}, BarChart: {} }))
 vi.mock('echarts/components', () => ({
   TooltipComponent: {},
   LegendComponent: {},
+  GridComponent: {},
 }))
 
 const FULL_CAPS: Capabilities = {
