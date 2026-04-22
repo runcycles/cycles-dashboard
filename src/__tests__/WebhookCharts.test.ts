@@ -1,11 +1,13 @@
-// v0.1.25.51 — Webhook visualization slice.
+// v0.1.25.52 — Webhook visualization slice.
 //
 // Pins:
-//   1. WebhooksView fleet-health donut renders the correct slice
-//      distribution from webhooks already in-flight.
+//   1. OverviewView webhook fleet-health donut renders the correct
+//      slice distribution from the webhooks page already in-flight.
+//      (Relocated from WebhooksView in v0.1.25.52 — glance layer
+//      belongs on Overview, not on the list.)
 //   2. Clicking a slice drills to the right /webhooks?status=... or
-//      ?failing=1 URL (the contract Overview's counter-strip tiles
-//      use — keep the two in sync).
+//      ?failing=1 URL (the same contract Overview's counter-strip
+//      tiles already use — keep the two in sync).
 //   3. WebhookDetailView per-subscription stat row computes
 //      outcomes / attempts / response-time stats / last-success band
 //      from the already-loaded deliveries page.
@@ -13,7 +15,7 @@
 //      status filter (stays on page — not a route push).
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { defineComponent } from 'vue'
+import { defineComponent, h as actualH } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '../stores/auth'
@@ -21,8 +23,13 @@ import type {
   Capabilities,
   WebhookSubscription,
   WebhookDelivery,
+  AdminOverviewResponse,
 } from '../types'
 
+const getOverviewMock = vi.fn()
+const listApiKeysMock = vi.fn()
+const listAuditLogsMock = vi.fn()
+const listBudgetsMock = vi.fn()
 const listWebhooksMock = vi.fn()
 const listTenantsMock = vi.fn()
 const getWebhookMock = vi.fn()
@@ -32,6 +39,10 @@ vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
   return {
     ...actual,
+    getOverview: (...args: unknown[]) => getOverviewMock(...args),
+    listApiKeys: (...args: unknown[]) => listApiKeysMock(...args),
+    listAuditLogs: (...args: unknown[]) => listAuditLogsMock(...args),
+    listBudgets: (...args: unknown[]) => listBudgetsMock(...args),
     listWebhooks: (...args: unknown[]) => listWebhooksMock(...args),
     listTenants: (...args: unknown[]) => listTenantsMock(...args),
     getWebhook: (...args: unknown[]) => getWebhookMock(...args),
@@ -158,25 +169,80 @@ function delivery(overrides: Partial<WebhookDelivery> = {}): WebhookDelivery {
   } as WebhookDelivery
 }
 
+function healthyOverview(overrides: Partial<AdminOverviewResponse> = {}): AdminOverviewResponse {
+  return {
+    as_of: '2026-04-22T12:00:00Z',
+    event_window_seconds: 3600,
+    tenant_counts: { total: 10, active: 10, suspended: 0, closed: 0 },
+    budget_counts: { total: 5, active: 5, frozen: 0, closed: 0, over_limit: 0, with_debt: 0, by_unit: {} },
+    over_limit_scopes: [],
+    debt_scopes: [],
+    webhook_counts: { total: 0, active: 0, disabled: 0, with_failures: 0 },
+    failing_webhooks: [],
+    event_counts: { total_recent: 0, by_category: {} },
+    recent_denials: [],
+    recent_expiries: [],
+    ...overrides,
+  }
+}
+
+async function mountOverview() {
+  const { default: OverviewView } = await import('../views/OverviewView.vue')
+  const w = mount(OverviewView, {
+    global: {
+      stubs: {
+        RouterLink: defineComponent({
+          props: { to: { type: null, required: false, default: null } },
+          inheritAttrs: false,
+          setup(props, { slots, attrs }) {
+            return () => {
+              const to = props.to as { name?: string } | string | null | undefined
+              const href = typeof to === 'string' ? to : (to?.name ?? '')
+              return actualH('a', { ...attrs, href }, slots.default?.())
+            }
+          },
+        }),
+        BaseChart: BaseChartStub,
+      },
+    },
+  })
+  await settleAsync()
+  return w
+}
+
 // Resolve the async BaseChart wrapper for a given test id by
 // finding the real (stubbed) BaseChart component instance inside it.
 async function settleAsync(count = 3) {
   for (let i = 0; i < count; i++) await flushPromises()
 }
 
-describe('WebhooksView — fleet-health donut', () => {
+describe('OverviewView — webhook fleet-health donut (relocated v0.1.25.52)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     const auth = useAuthStore()
     auth.apiKey = 'test-key'
     auth.capabilities = FULL_CAPS
+    getOverviewMock.mockReset()
+    listApiKeysMock.mockReset()
+    listAuditLogsMock.mockReset()
+    listBudgetsMock.mockReset()
     listWebhooksMock.mockReset()
     listTenantsMock.mockReset()
     pushMock.mockReset()
     routeRef.query = {}
     routeRef.params = {}
+    // Defaults — all cards empty so only the webhook slice under test varies.
+    listApiKeysMock.mockResolvedValue({ keys: [], has_more: false })
+    listAuditLogsMock.mockResolvedValue({ logs: [], has_more: false })
+    listBudgetsMock.mockResolvedValue({ ledgers: [], has_more: false })
     listTenantsMock.mockResolvedValue({ tenants: [], has_more: false })
+    getOverviewMock.mockResolvedValue(healthyOverview())
   })
+
+  function findWebhookChart(w: ReturnType<typeof mount>) {
+    const card = w.find('[data-testid="webhook-fleet-health-donut"]')
+    return card.exists() ? card.findComponent({ name: 'BaseChart' }) : null
+  }
 
   it('buckets webhooks into Healthy / Failing / Paused / Disabled', async () => {
     const subs: WebhookSubscription[] = [
@@ -188,14 +254,11 @@ describe('WebhooksView — fleet-health donut', () => {
       hook({ status: 'DISABLED', consecutive_failures: 10 }),
     ]
     listWebhooksMock.mockResolvedValue({ subscriptions: subs, has_more: false })
-    const { default: WebhooksView } = await import('../views/WebhooksView.vue')
-    const w = mount(WebhooksView, stdMount())
-    await settleAsync()
+    const w = await mountOverview()
 
-    expect(w.find('[data-testid="webhook-fleet-health-donut"]').exists()).toBe(true)
-    const chart = w.findComponent({ name: 'BaseChart' })
-    expect(chart.exists()).toBe(true)
-    const option = chart.props('option') as { series: Array<{ data: Array<{ name: string; value: number }> }> }
+    const chart = findWebhookChart(w)
+    expect(chart).toBeTruthy()
+    const option = chart!.props('option') as { series: Array<{ data: Array<{ name: string; value: number }> }> }
     const byName = Object.fromEntries(option.series[0].data.map(s => [s.name, s.value]))
     expect(byName['Healthy']).toBe(2)
     expect(byName['Failing']).toBe(2)
@@ -205,47 +268,39 @@ describe('WebhooksView — fleet-health donut', () => {
 
   it('hides the card when there are no webhooks', async () => {
     listWebhooksMock.mockResolvedValue({ subscriptions: [], has_more: false })
-    const { default: WebhooksView } = await import('../views/WebhooksView.vue')
-    const w = mount(WebhooksView, stdMount())
-    await settleAsync()
+    const w = await mountOverview()
     expect(w.find('[data-testid="webhook-fleet-health-donut"]').exists()).toBe(false)
   })
 
-  it('drills to ?failing=1 when Failing slice clicked', async () => {
+  it('drills to /webhooks?failing=1 when Failing slice clicked', async () => {
     listWebhooksMock.mockResolvedValue({
       subscriptions: [hook({ status: 'ACTIVE', consecutive_failures: 3 })],
       has_more: false,
     })
-    const { default: WebhooksView } = await import('../views/WebhooksView.vue')
-    const w = mount(WebhooksView, stdMount())
-    await settleAsync()
-    w.findComponent({ name: 'BaseChart' }).vm.$emit('slice-click', { name: 'Failing' })
+    const w = await mountOverview()
+    findWebhookChart(w)!.vm.$emit('slice-click', { name: 'Failing' })
     await flushPromises()
     expect(pushMock).toHaveBeenCalledWith({ name: 'webhooks', query: { failing: '1' } })
   })
 
-  it('drills to ?status=DISABLED when Disabled slice clicked', async () => {
+  it('drills to /webhooks?status=DISABLED when Disabled slice clicked', async () => {
     listWebhooksMock.mockResolvedValue({
       subscriptions: [hook({ status: 'DISABLED', consecutive_failures: 10 })],
       has_more: false,
     })
-    const { default: WebhooksView } = await import('../views/WebhooksView.vue')
-    const w = mount(WebhooksView, stdMount())
-    await settleAsync()
-    w.findComponent({ name: 'BaseChart' }).vm.$emit('slice-click', { name: 'Disabled' })
+    const w = await mountOverview()
+    findWebhookChart(w)!.vm.$emit('slice-click', { name: 'Disabled' })
     await flushPromises()
     expect(pushMock).toHaveBeenCalledWith({ name: 'webhooks', query: { status: 'DISABLED' } })
   })
 
-  it('drills to ?status=PAUSED when Paused slice clicked', async () => {
+  it('drills to /webhooks?status=PAUSED when Paused slice clicked', async () => {
     listWebhooksMock.mockResolvedValue({
       subscriptions: [hook({ status: 'PAUSED', consecutive_failures: 0 })],
       has_more: false,
     })
-    const { default: WebhooksView } = await import('../views/WebhooksView.vue')
-    const w = mount(WebhooksView, stdMount())
-    await settleAsync()
-    w.findComponent({ name: 'BaseChart' }).vm.$emit('slice-click', { name: 'Paused' })
+    const w = await mountOverview()
+    findWebhookChart(w)!.vm.$emit('slice-click', { name: 'Paused' })
     await flushPromises()
     expect(pushMock).toHaveBeenCalledWith({ name: 'webhooks', query: { status: 'PAUSED' } })
   })

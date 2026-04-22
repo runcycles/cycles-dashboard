@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.51 (2026-04-22)
+**Current release:** v0.1.25.52 (2026-04-22)
 
 ## Baseline requirements
 
@@ -16,6 +16,22 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-22 — v0.1.25.52: Relocate webhook fleet-health donut from WebhooksView → OverviewView
+
+**Trigger.** Operator ask one release after v0.1.25.51: *"so webhookc chart on Webhooks, takes a lot of space, I think its better to, move it to Overview after Budget fleet utilization, agree?"*
+
+**Rationale.** WebhooksView is the surface operators use most for row-level triage (paused? failing? last success?). Mounting a donut above the filter card pushed the table below the fold on a `lg` viewport for a signal that is fleet-level, not row-level. OverviewView is the right home for fleet-glance donuts — budget-utilization, events-by-category, top-10 by debt already live there. Same data source (`listWebhooks({ limit: '200' })` already fetched for the failing-webhooks card), same drill-down contract (`?status=ACTIVE|PAUSED|DISABLED`, `?failing=1`). Net move, no new fetch, no new visual.
+
+**Scope.**
+
+| Surface | Change |
+|---|---|
+| `src/views/OverviewView.vue` | Added `webhookFleetSlices` / `webhookHealthOption` computeds + `onWebhookHealthClick` handler alongside the existing budget / events donut machinery. New card inserted between `budget-utilization-donut` and `events-by-category-donut`. Chart grid widened `md:grid-cols-2 lg:grid-cols-3` → `md:grid-cols-2 lg:grid-cols-4`. |
+| `src/views/WebhooksView.vue` | Donut card + supporting computeds / handler / `useChartTheme` / `defineAsyncComponent(BaseChart)` imports removed. Back to pre-v0.1.25.51 structure — filter card sits directly below the error banner. Row-level health dot preserved. |
+| `src/__tests__/WebhookCharts.test.ts` | `WebhooksView — fleet-health donut` describe replaced with `OverviewView — webhook fleet-health donut (relocated v0.1.25.52)` (5 tests). WebhookDetailView stat-row describe block unchanged (5 tests, still at 10 total). Added `getOverviewMock` / `listApiKeysMock` / `listAuditLogsMock` / `listBudgetsMock` so OverviewView mounts cleanly; `healthyOverview()` helper returns a valid `AdminOverviewResponse` with only the webhook slice varying per test. |
+
+**Verification.** `npm run typecheck` clean. `npx vitest run src/__tests__/WebhookCharts.test.ts` → 10 passing. Full suite → 852 passing.
 
 ### 2026-04-22 — v0.1.25.51: Webhook visualizations — fleet-health donut + per-subscription stat row
 

@@ -1,12 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, watch, defineAsyncComponent } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRouter, useRoute } from 'vue-router'
-import { useChartTheme } from '../composables/useChartTheme'
-// Lazy-loaded to keep ECharts + vue-echarts out of the list-view
-// initial chunk. The donut hides itself when webhooks.length === 0,
-// so the bundle split also delays network fetch until needed.
-const BaseChart = defineAsyncComponent(() => import('../components/BaseChart.vue'))
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
@@ -449,75 +444,6 @@ function healthLabel(w: WebhookSubscription): string {
   return 'Healthy'
 }
 
-// v0.1.25.51 — Fleet-health donut. Client-side reduce over the
-// already-fetched `webhooks` ref (60s poll, no new request). Segments
-// are orthogonal to the status enum:
-//   • Active healthy — status=ACTIVE && consecutive_failures=0
-//   • Failing — consecutive_failures ≥ 1 (regardless of status,
-//       since a PAUSED webhook with latent failures still needs
-//       attention). Drills to ?failing=1.
-//   • Paused — status=PAUSED && consecutive_failures=0 (not shown
-//       as "also failing" — falls under Failing if it is).
-//   • Disabled — status=DISABLED (terminal; server-disabled after
-//       disable_after_failures threshold).
-// Ordering mirrors WebhookCounts intent: healthy-first, then the
-// three attention buckets. Colors match OverviewView's palette so
-// operators read one mental model (success / warning / danger /
-// neutral for terminal).
-const { palette } = useChartTheme()
-
-type FleetSlice = { healthy: number; failing: number; paused: number; disabled: number }
-
-const fleetHealth = computed<FleetSlice>(() => {
-  const out: FleetSlice = { healthy: 0, failing: 0, paused: 0, disabled: 0 }
-  for (const w of webhooks.value) {
-    const failing = (w.consecutive_failures ?? 0) >= 1
-    if (w.status === 'DISABLED') out.disabled++
-    else if (failing) out.failing++
-    else if (w.status === 'PAUSED') out.paused++
-    else out.healthy++
-  }
-  return out
-})
-
-const webhookHealthOption = computed(() => {
-  const f = fleetHealth.value
-  const slices = [
-    { name: 'Healthy', value: f.healthy, itemStyle: { color: palette.value.success } },
-    { name: 'Failing', value: f.failing, itemStyle: { color: palette.value.danger } },
-    { name: 'Paused', value: f.paused, itemStyle: { color: palette.value.warning } },
-    { name: 'Disabled', value: f.disabled, itemStyle: { color: palette.value.neutral } },
-  ].filter(s => s.value > 0)
-  return {
-    tooltip: {
-      trigger: 'item' as const,
-      backgroundColor: palette.value.tooltipBg,
-      borderColor: palette.value.tooltipBorder,
-      textStyle: { color: palette.value.textPrimary },
-    },
-    legend: { bottom: 0, textStyle: { color: palette.value.textMuted, fontSize: 11 } },
-    series: [{
-      type: 'pie' as const,
-      radius: ['55%', '78%'],
-      center: ['50%', '45%'],
-      avoidLabelOverlap: true,
-      label: { show: false },
-      labelLine: { show: false },
-      data: slices,
-    }],
-  }
-})
-
-type ChartClickParams = { seriesName?: string; name?: string }
-
-function onWebhookHealthClick(p: ChartClickParams) {
-  const name = (p?.name ?? '').toLowerCase()
-  if (name === 'failing') router.push({ name: 'webhooks', query: { failing: '1' } })
-  else if (name === 'paused') router.push({ name: 'webhooks', query: { status: 'PAUSED' } })
-  else if (name === 'disabled') router.push({ name: 'webhooks', query: { status: 'DISABLED' } })
-  else if (name === 'healthy') router.push({ name: 'webhooks', query: { status: 'ACTIVE' } })
-}
-
 // Create webhook
 const showCreate = ref(false)
 const createLoading = ref(false)
@@ -747,28 +673,6 @@ const gridTemplate = computed(() =>
       </template>
     </PageHeader>
     <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
-
-    <!-- v0.1.25.51 fleet-health donut. Client-side reduce over the
-         already-fetched webhooks list. Hides itself when the fleet is
-         empty so the empty-state below (from the virtualized table)
-         owns the "no data" messaging. Click a slice to drill in to
-         the filtered list. -->
-    <div
-      v-if="webhooks.length > 0"
-      class="card p-3 mb-4"
-      data-testid="webhook-fleet-health-donut"
-    >
-      <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
-        Webhook fleet health
-        <span class="muted text-xs font-normal">· click a slice</span>
-      </div>
-      <BaseChart
-        :option="webhookHealthOption"
-        label="Webhook fleet health donut chart — clickable"
-        height="180px"
-        @slice-click="onWebhookHealthClick"
-      />
-    </div>
 
     <!-- Tenant + URL filters. Tenant options sourced from the loaded
          webhook set so the dropdown only lists tenants that actually

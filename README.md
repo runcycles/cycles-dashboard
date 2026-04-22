@@ -193,12 +193,19 @@ mix), **Budget fleet utilization** (true-utilization buckets —
 Healthy < 90% / Near cap 90–99% / Over cap ≥ 100%, computed from
 `spent/allocated` rather than the debt-based `is_over_limit` server
 signal), and **Events by category** (recent-window activity mix).
-v0.1.25.51 added a **webhook fleet-health donut** on `WebhooksView`
+v0.1.25.51 added a **webhook fleet-health donut**
 (Healthy / Failing / Paused / Disabled) and a four-up
 **per-subscription stat row** on `WebhookDetailView` (last-success
 band, delivery-outcome donut, attempts histogram, response-time
 p50/p95/max) — all derived from the data polls already in flight.
-Subsequent slices extend the pattern to API Keys / Events views.
+v0.1.25.52 **relocated** the webhook fleet-health donut from
+`WebhooksView` to the Overview chart row (now 4-up on `lg`:
+budget utilization → webhook fleet health → events by category
+→ top-10 by debt) so `WebhooksView` keeps the table above the
+fold for row-level triage; `WebhookDetailView` stat row stays on
+the detail view (per-subscription detail belongs with the
+subscription). Subsequent slices extend the pattern to API Keys /
+Events views.
 
 Shared building blocks:
 
@@ -338,7 +345,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.51
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.52
     restart: unless-stopped
     # No exposed ports — only accessible through Caddy
     depends_on:

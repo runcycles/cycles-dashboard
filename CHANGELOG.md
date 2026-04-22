@@ -15,6 +15,25 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.52] — 2026-04-22
+
+### Changed
+
+- **Webhook fleet-health donut relocated to OverviewView.** The
+  donut shipped in v0.1.25.51 was mounted on WebhooksView above the
+  filter row, where it competed with the table for vertical space
+  on the view operators use most. Moved to the Overview chart row
+  (now 4-up on `lg`: budget utilization → **webhook fleet health**
+  → events by category → top-10 by debt) where it lives alongside
+  the other fleet-glance donuts. Same four slices, same drill-down
+  contracts (`?status=ACTIVE`, `?failing=1`, `?status=PAUSED`,
+  `?status=DISABLED`). Data source still the already-fetched
+  webhook list on Overview — no new requests.
+- **WebhooksView returns to its pre-v0.1.25.51 layout** — filter
+  row directly below the error banner. Row-level health dot
+  (green/amber/red) stays; that signal lives with the row it
+  describes.
+
 ## [0.1.25.51] — 2026-04-22
 
 ### Added

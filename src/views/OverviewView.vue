@@ -304,6 +304,64 @@ function onEventsCategoryClick(p: ChartClickParams) {
   }
 }
 
+// Webhook fleet-health donut. Relocated from WebhooksView
+// (v0.1.25.52) — Overview is the glance layer; the list view
+// was the wrong home because it squeezed the table and
+// duplicated the role of this page's at-a-glance strip.
+// Client-side reduce over `failingWebhooksRaw`, which already
+// holds the full webhook page (limit 200). The "Failing" slice
+// counts any webhook with `consecutive_failures ≥ 1` regardless
+// of status, so a PAUSED webhook with latent failures still
+// surfaces — matches the `?failing=1` URL filter semantics.
+type WebhookFleetSlices = { healthy: number; failing: number; paused: number; disabled: number }
+const webhookFleetSlices = computed<WebhookFleetSlices>(() => {
+  const out: WebhookFleetSlices = { healthy: 0, failing: 0, paused: 0, disabled: 0 }
+  for (const w of failingWebhooksRaw.value) {
+    const failing = (w.consecutive_failures ?? 0) >= 1
+    if (w.status === 'DISABLED') out.disabled++
+    else if (failing) out.failing++
+    else if (w.status === 'PAUSED') out.paused++
+    else out.healthy++
+  }
+  return out
+})
+
+const webhookHealthOption = computed(() => {
+  const f = webhookFleetSlices.value
+  const slices = [
+    { name: 'Healthy', value: f.healthy, itemStyle: { color: palette.value.success } },
+    { name: 'Failing', value: f.failing, itemStyle: { color: palette.value.danger } },
+    { name: 'Paused', value: f.paused, itemStyle: { color: palette.value.warning } },
+    { name: 'Disabled', value: f.disabled, itemStyle: { color: palette.value.neutral } },
+  ].filter(s => s.value > 0)
+  return {
+    tooltip: {
+      trigger: 'item' as const,
+      backgroundColor: palette.value.tooltipBg,
+      borderColor: palette.value.tooltipBorder,
+      textStyle: { color: palette.value.textPrimary },
+    },
+    legend: { bottom: 0, textStyle: { color: palette.value.textMuted, fontSize: 11 } },
+    series: [{
+      type: 'pie' as const,
+      radius: ['55%', '78%'],
+      center: ['50%', '45%'],
+      avoidLabelOverlap: true,
+      label: { show: false },
+      labelLine: { show: false },
+      data: slices,
+    }],
+  }
+})
+
+function onWebhookHealthClick(p: ChartClickParams) {
+  const name = (p?.name ?? '').toLowerCase()
+  if (name === 'failing') router.push({ name: 'webhooks', query: { failing: '1' } })
+  else if (name === 'paused') router.push({ name: 'webhooks', query: { status: 'PAUSED' } })
+  else if (name === 'disabled') router.push({ name: 'webhooks', query: { status: 'DISABLED' } })
+  else if (name === 'healthy') router.push({ name: 'webhooks', query: { status: 'ACTIVE' } })
+}
+
 const budgetStatusOption = computed(() => {
   const bc = overview.value?.budget_counts
   const slices = bc
@@ -817,12 +875,12 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
         </div>
       </div>
 
-      <!-- At-a-glance visualizations (v0.1.25.50). Three lightweight
-           ancillary charts that read payload already in-flight — no
-           new fetches. Each one hides itself when its backing data is
-           empty so an empty fleet never surfaces an empty chart.
-           Layout is a 3-up grid on wide screens, stacking vertically
-           on narrow ones.
+      <!-- At-a-glance visualizations. Four lightweight ancillary
+           charts that read payload already in-flight — no new
+           fetches. Each hides itself when its backing data is empty
+           so an empty fleet never surfaces an empty chart. Layout
+           is a 4-up grid on wide screens, 2-up on medium, stacking
+           vertically on narrow.
              • Budget status distribution (donut) — lifecycle mix
                (active / frozen / closed / over-limit).
              • Budget fleet utilization (donut) — true utilization
@@ -830,11 +888,15 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
                Over cap ≥ 100%) computed from spent/allocated across
                the at-cap fetch, NOT from the debt-based server
                aggregate. See `budgetUtilizationOption` for rationale.
+             • Webhook fleet health (donut, v0.1.25.52) — relocated
+               from WebhooksView; Healthy / Failing / Paused /
+               Disabled; click drills to /webhooks?status=... or
+               ?failing=1.
              • Events by category (donut) — recent activity mix
                across the event window. -->
       <div
         v-if="hasAnyChart"
-        class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6"
+        class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"
         data-testid="overview-charts"
       >
         <div
@@ -868,6 +930,23 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
             label="Budget fleet utilization donut chart — clickable"
             height="180px"
             @slice-click="onBudgetUtilizationClick"
+          />
+        </div>
+
+        <div
+          v-if="failingWebhooksRaw.length > 0"
+          class="card p-3"
+          data-testid="webhook-fleet-health-donut"
+        >
+          <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
+            Webhook fleet health
+            <span class="muted text-xs font-normal">· click a slice</span>
+          </div>
+          <BaseChart
+            :option="webhookHealthOption"
+            label="Webhook fleet health donut chart — clickable"
+            height="180px"
+            @slice-click="onWebhookHealthClick"
           />
         </div>
 
