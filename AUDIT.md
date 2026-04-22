@@ -17,6 +17,24 @@
 
 Newest at the top. Older entries preserved verbatim.
 
+### 2026-04-22 — v0.1.25.49: chart drill-down (slice-click → filtered list view) + color-collision fix
+
+**Late repair — color collisions on events donut.** Operator report after drill-down landed: *"tenant, api_key both grey, budget orange — why is the color the same for 2 categories?"* Root cause: the initial `CATEGORY_COLORS` map only had the 5-tone semantic palette available (success / warning / danger / info / neutral) and three categories (`audit`, `tenant`, `api_key` fallback) landed on `neutral` grey. Every known category now gets a distinct hue from a new 10-slot qualitative palette added to `useChartTheme`; unknown categories use a deterministic `hashCategory` → palette index so two unknowns also can't collide on the same fallback slot. `policy` keeps danger (red) and `reservation` keeps success (green) because operators already associate those semantics.
+
+| Category | Old color | New color |
+|---|---|---|
+| policy | danger (red) | danger (red) — unchanged |
+| reservation | success (green) | success (green) — unchanged |
+| webhook | info (blue) | qualitative slot 0 (blue) |
+| budget | warning (amber) | qualitative slot 2 (amber) |
+| tenant | neutral (grey — collision) | qualitative slot 4 (purple) |
+| api_key | neutral (grey — collision) | qualitative slot 5 (teal) |
+| audit | neutral (grey — collision) | qualitative slot 6 (pink) |
+| runtime | success | qualitative slot 7 (indigo) |
+| <unknown> | neutral (collision) | hashCategory(name) % 10 — stable per-name |
+
+Test pin: `src/__tests__/BaseChart.test.ts` asserts `new Set(colors).size === colors.length` across `{ tenant, api_key, audit, budget }`.
+
 ### 2026-04-22 — v0.1.25.49: chart drill-down (slice-click → filtered list view)
 
 **Trigger.** Operator ask after v0.1.25.48 landed: *"Can we support drill down from charts, should be able to."* The three Overview charts had been read-only; operators expected clicks on a slice/segment to navigate to the filtered list view the same way counter-strip chips already do.

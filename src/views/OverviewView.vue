@@ -403,14 +403,40 @@ const budgetUtilizationOption = computed(() => {
 // "webhook" events vs. the usual "reservation" baseline is the kind
 // of thing that merits attention. Hidden when zero categories have
 // non-zero volume.
-const CATEGORY_COLORS: Record<string, keyof typeof palette.value> = {
-  policy: 'danger',
-  reservation: 'success',
-  webhook: 'info',
-  audit: 'neutral',
-  budget: 'warning',
-  tenant: 'neutral',
-  runtime: 'success',
+// Color assignment strategy for event categories:
+//   1. `policy` and `reservation` keep semantic colors (danger =
+//      denial-adjacent; success = normal traffic) — operators already
+//      associate those.
+//   2. Every other known category gets a distinct hue from the
+//      qualitative palette so no two categories collide. Operator
+//      report: "tenant, api_key both grey — why is the color the
+//      same for 2 categories?" — fixed by one hue per category.
+//   3. Unknown categories fall back to a deterministic hash →
+//      qualitative index so two unknowns also land on different
+//      slots (not on the same fallback neutral).
+function hashCategory(name: string): number {
+  let h = 0
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
+  return h
+}
+function categoryColor(name: string): string {
+  const key = name.toLowerCase()
+  if (key === 'policy') return palette.value.danger
+  if (key === 'reservation') return palette.value.success
+  // Stable qualitative slot per known category (index into palette.categorical).
+  const assignments: Record<string, number> = {
+    webhook: 0,     // blue
+    budget: 2,      // amber
+    tenant: 4,      // purple
+    api_key: 5,     // teal — was grey before
+    apikey: 5,
+    audit: 6,       // pink — was grey before
+    runtime: 7,     // indigo
+    policy_eval: 3, // red-adjacent sub-category
+  }
+  const cat = palette.value.categorical
+  const idx = assignments[key] ?? (hashCategory(key) % cat.length)
+  return cat[idx]
 }
 // Wrapping-grid visibility: always show the row once overview has
 // loaded. The events-by-category card is always rendered (with an
@@ -424,14 +450,11 @@ const eventsByCategoryOption = computed(() => {
   const map = ec?.by_category
   let slices = map
     ? Object.entries(map)
-        .map(([name, value]) => {
-          const tone = CATEGORY_COLORS[name.toLowerCase()] ?? 'neutral'
-          return {
-            name,
-            value: value as number,
-            itemStyle: { color: palette.value[tone] as string },
-          }
-        })
+        .map(([name, value]) => ({
+          name,
+          value: value as number,
+          itemStyle: { color: categoryColor(name) },
+        }))
         .filter((s) => s.value > 0)
         .sort((a, b) => b.value - a.value)
     : []

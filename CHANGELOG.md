@@ -17,6 +17,19 @@ UX work that does not advance spec alignment.
 
 ## [0.1.25.49] — 2026-04-22
 
+### Fixed
+
+- **Events-by-category donut color collisions.** Operator report:
+  "tenant, api_key both grey, budget orange — why is the color the
+  same for 2 categories?" The previous 5-tone semantic palette
+  (success / warning / danger / info / neutral) forced three
+  categories onto `neutral` grey. Added a 10-hue qualitative palette
+  to `useChartTheme` and assigned each known category to a distinct
+  slot (tenant = purple, api_key = teal, audit = pink, webhook = blue,
+  etc.). `policy` keeps red and `reservation` keeps green for their
+  semantic associations. Unknown categories use a deterministic
+  hash → slot so two unknowns never collide either.
+
 ### Added
 
 - **Chart drill-down.** Every slice/segment on the Overview charts is

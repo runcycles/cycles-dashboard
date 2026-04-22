@@ -14,6 +14,11 @@ export interface ChartPalette {
   background: string
   tooltipBg: string
   tooltipBorder: string
+  // Qualitative palette for charts where the series are nominal
+  // categories with no severity semantics (e.g. events-by-category).
+  // Ten distinct hues, ordered so adjacent indices are far apart in
+  // hue so the default assign-by-index read is discriminable.
+  categorical: readonly string[]
 }
 
 const LIGHT: ChartPalette = {
@@ -29,6 +34,18 @@ const LIGHT: ChartPalette = {
   background: 'transparent',
   tooltipBg: '#ffffff',
   tooltipBorder: '#e5e7eb',
+  categorical: [
+    '#2563eb', // blue
+    '#16a34a', // green
+    '#ca8a04', // amber
+    '#dc2626', // red
+    '#9333ea', // purple
+    '#0d9488', // teal
+    '#db2777', // pink
+    '#4f46e5', // indigo
+    '#65a30d', // lime
+    '#6b7280', // neutral (fallback)
+  ],
 }
 
 const DARK: ChartPalette = {
@@ -44,6 +61,18 @@ const DARK: ChartPalette = {
   background: 'transparent',
   tooltipBg: '#1f2937',
   tooltipBorder: '#374151',
+  categorical: [
+    '#60a5fa', // blue
+    '#4ade80', // green
+    '#facc15', // amber
+    '#f87171', // red
+    '#c084fc', // purple
+    '#2dd4bf', // teal
+    '#f472b6', // pink
+    '#818cf8', // indigo
+    '#a3e635', // lime
+    '#9ca3af', // neutral (fallback)
+  ],
 }
 
 export function useChartTheme() {

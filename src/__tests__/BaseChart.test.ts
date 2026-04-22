@@ -337,3 +337,44 @@ describe('OverviewView — chart drill-down (v0.1.25.49)', () => {
     expect(pushMock).toHaveBeenCalledWith({ name: 'events', query: { category: 'policy' } })
   })
 })
+
+describe('OverviewView — events donut color uniqueness (v0.1.25.49)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    const auth = useAuthStore()
+    auth.apiKey = 'test-key'
+    auth.capabilities = FULL_CAPS
+    getOverviewMock.mockReset()
+    listApiKeysMock.mockReset()
+    listAuditLogsMock.mockReset()
+    listBudgetsMock.mockReset()
+    listTenantsMock.mockReset()
+    listWebhooksMock.mockReset()
+    listApiKeysMock.mockResolvedValue({ keys: [], has_more: false })
+    listAuditLogsMock.mockResolvedValue({ logs: [], has_more: false })
+    listBudgetsMock.mockResolvedValue({ ledgers: [], has_more: false })
+    listTenantsMock.mockResolvedValue({ tenants: [], has_more: false })
+    listWebhooksMock.mockResolvedValue({ subscriptions: [], has_more: false })
+  })
+
+  it('assigns a distinct color to tenant, api_key, audit, budget (operator-reported collision)', async () => {
+    // Regression pin for the operator report: "tenant, api_key both
+    // grey, budget orange — why is the color the same for 2
+    // categories?" Every known category must get a unique slice color.
+    getOverviewMock.mockResolvedValue(healthyOverview({
+      event_counts: {
+        total_recent: 40,
+        by_category: { tenant: 10, api_key: 10, audit: 10, budget: 10 },
+      },
+    }))
+    const w = await mountOverview()
+    const vm = w.vm as unknown as {
+      eventsByCategoryOption: {
+        series: Array<{ data: Array<{ name: string; itemStyle: { color: string } }> }>
+      }
+    }
+    const slices = vm.eventsByCategoryOption.series[0].data
+    const colors = slices.map((s) => s.itemStyle.color)
+    expect(new Set(colors).size).toBe(colors.length)
+  })
+})
