@@ -234,6 +234,22 @@ param or endpoint.
 **CORS preflight 403 in dev.** `DASHBOARD_CORS_ORIGIN` on the admin plane
 does not include `http://localhost:5173`. See [CORS](#cors).
 
+**"The budget-status donut on Overview isn't drawing."** Two cases. (1) The
+fleet is empty — if `budget_counts.{active,frozen,closed,over_limit}` are
+all zero, the donut block is intentionally hidden (no empty-chart
+placeholder). Create or fund a budget and refresh. (2) The ECharts chunk
+failed to load — the chart is lazy-split (`BaseChart-*.js`, ~142 KB gz).
+DevTools → Network → look for a failed JS fetch; the Overview shell still
+renders its counter strip and attention cards regardless. This is almost
+always a reverse-proxy caching miss — verify your nginx / Caddy / CDN
+allows all `/assets/*.js` through without path rewriting.
+
+**"Dark-mode palette on a chart looks wrong after a theme toggle."** The
+chart theme reactively rebinds when `isDark` flips. If colors look frozen
+on the old palette, the browser's service worker may be serving a stale
+`BaseChart-*.js` from before a deployment. Hard-refresh (Ctrl+Shift+R)
+clears it.
+
 **Bulk action "N failed" with no dialog.** Older bulk paths (pre-v0.1.25.37
 extension) dropped failures to browser console. Open DevTools Console for the
 per-row failure reasons. As of v0.1.25.37 extension every bulk surface opens

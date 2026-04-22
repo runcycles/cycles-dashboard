@@ -1,8 +1,13 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, defineAsyncComponent } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
+import { useChartTheme } from '../composables/useChartTheme'
+// Lazy-loaded to keep ECharts + vue-echarts out of the detail-view
+// initial chunk. Stats panel hides itself when deliveries.length === 0
+// so the bundle split also delays network fetch until needed.
+const BaseChart = defineAsyncComponent(() => import('../components/BaseChart.vue'))
 import { useListExport } from '../composables/useListExport'
 import { useSort } from '../composables/useSort'
 import { getWebhook, listDeliveries, updateWebhook, deleteWebhook, testWebhook, replayWebhookEvents, rotateWebhookSecret } from '../api/client'
@@ -68,6 +73,184 @@ const {
   sorted: sortedDeliveries,
 } = useSort<WebhookDelivery>(filteredDeliveries as import('vue').Ref<WebhookDelivery[]>, 'time', 'desc', {
   time: (d) => d.completed_at ?? d.attempted_at ?? d.created_at ?? null,
+})
+
+// v0.1.25.51 — Per-subscription delivery stats. All metrics are
+// client-side reductions over the already-fetched `deliveries` ref
+// (30s poll, no new request). Scope is the loaded page — on a busy
+// webhook the operator sees the last N deliveries, which matches
+// what the history table below renders, so the chart labels and the
+// row detail stay consistent.
+const { palette } = useChartTheme()
+
+type OutcomeBuckets = { success: number; failed: number; retrying: number; pending: number }
+
+const deliveryOutcomes = computed<OutcomeBuckets>(() => {
+  const out: OutcomeBuckets = { success: 0, failed: 0, retrying: 0, pending: 0 }
+  for (const d of deliveries.value) {
+    if (d.status === 'SUCCESS') out.success++
+    else if (d.status === 'FAILED') out.failed++
+    else if (d.status === 'RETRYING') out.retrying++
+    else if (d.status === 'PENDING') out.pending++
+  }
+  return out
+})
+
+const deliveryOutcomeOption = computed(() => {
+  const o = deliveryOutcomes.value
+  const slices = [
+    { name: 'Success', value: o.success, itemStyle: { color: palette.value.success } },
+    { name: 'Failed', value: o.failed, itemStyle: { color: palette.value.danger } },
+    { name: 'Retrying', value: o.retrying, itemStyle: { color: palette.value.warning } },
+    { name: 'Pending', value: o.pending, itemStyle: { color: palette.value.neutral } },
+  ].filter(s => s.value > 0)
+  return {
+    tooltip: {
+      trigger: 'item' as const,
+      backgroundColor: palette.value.tooltipBg,
+      borderColor: palette.value.tooltipBorder,
+      textStyle: { color: palette.value.textPrimary },
+    },
+    legend: { bottom: 0, textStyle: { color: palette.value.textMuted, fontSize: 11 } },
+    series: [{
+      type: 'pie' as const,
+      radius: ['55%', '78%'],
+      center: ['50%', '45%'],
+      avoidLabelOverlap: true,
+      label: { show: false },
+      labelLine: { show: false },
+      data: slices,
+    }],
+  }
+})
+
+type ChartClickParams = { seriesName?: string; name?: string }
+
+function onDeliveryOutcomeClick(p: ChartClickParams) {
+  const name = (p?.name ?? '').toUpperCase()
+  if (['SUCCESS', 'FAILED', 'RETRYING', 'PENDING'].includes(name)) {
+    deliveryStatusFilter.value = name
+  }
+}
+
+// Attempts histogram — x-axis is attempt count (1, 2, 3, 4, 5+),
+// y-axis is delivery count. A long tail in 4/5+ means a retry
+// storm on this subscription: a single slow/failing endpoint can
+// eat disproportionate delivery budget. Caps at 5+ so a pathological
+// row with attempts=99 doesn't blow up the axis.
+type AttemptsBucket = { label: string; count: number }
+const attemptsBuckets = computed<AttemptsBucket[]>(() => {
+  const tallies = new Map<string, number>()
+  for (const d of deliveries.value) {
+    const a = d.attempts ?? 0
+    const label = a >= 5 ? '5+' : String(a)
+    tallies.set(label, (tallies.get(label) ?? 0) + 1)
+  }
+  const order = ['0', '1', '2', '3', '4', '5+']
+  return order
+    .filter(label => tallies.has(label))
+    .map(label => ({ label, count: tallies.get(label) ?? 0 }))
+})
+
+// Response-time summary. Plain stats row (no chart) rather than a
+// histogram because the attempts histogram already owns the bar-chart
+// slot and response-time over a variable-size cursor page gives p50 /
+// p95 more signal than fighting over bucket widths. Only includes
+// deliveries that reached the endpoint (response_time_ms set).
+type ResponseStats = { count: number; p50: number; p95: number; max: number }
+function percentile(sorted: number[], p: number): number {
+  if (sorted.length === 0) return 0
+  // Nearest-rank method (NIST): ceil((p/100) * n) → 1-indexed rank.
+  // Chosen over the floor variant so small pages still assign the
+  // middle-or-better sample to p50 (for 4 samples, p50 = 2nd of 4
+  // rather than 3rd, which is surprising to operators reading the
+  // stat strip).
+  const rank = Math.max(1, Math.ceil((p / 100) * sorted.length))
+  return sorted[Math.min(rank, sorted.length) - 1]
+}
+const responseStats = computed<ResponseStats>(() => {
+  const times: number[] = []
+  for (const d of deliveries.value) {
+    if (typeof d.response_time_ms === 'number' && d.response_time_ms >= 0) times.push(d.response_time_ms)
+  }
+  if (times.length === 0) return { count: 0, p50: 0, p95: 0, max: 0 }
+  times.sort((a, b) => a - b)
+  return {
+    count: times.length,
+    p50: percentile(times, 50),
+    p95: percentile(times, 95),
+    max: times[times.length - 1],
+  }
+})
+
+// Time-since-last-success indicator. Traffic lights mirror the
+// oncall severity convention operators already know from PagerDuty /
+// Grafana:
+//   green  — < 1h (or no last_success_at yet on a fresh webhook)
+//   amber  — 1h – 24h
+//   red    — ≥ 24h OR disable_after_failures reached
+// Returns the tuple so the template can render both chip + tooltip.
+type HealthBand = { band: 'green' | 'amber' | 'red' | 'unknown'; label: string; detail: string }
+function formatElapsed(ms: number): string {
+  if (ms < 60_000) return '< 1 min'
+  if (ms < 3_600_000) return `${Math.round(ms / 60_000)} min`
+  if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)} hr`
+  return `${Math.round(ms / 86_400_000)} d`
+}
+const lastSuccessBand = computed<HealthBand>(() => {
+  const w = webhook.value
+  if (!w) return { band: 'unknown', label: 'No data', detail: '' }
+  const t = w.last_success_at
+  if (!t) {
+    return w.last_failure_at
+      ? { band: 'red', label: 'No successful deliveries', detail: 'Only failures recorded' }
+      : { band: 'unknown', label: 'No deliveries yet', detail: 'Waiting for first event' }
+  }
+  const ts = Date.parse(t)
+  if (!Number.isFinite(ts)) return { band: 'unknown', label: 'Unknown', detail: '' }
+  const elapsed = Date.now() - ts
+  const elapsedLabel = formatElapsed(elapsed)
+  if (elapsed < 3_600_000) return { band: 'green', label: `Success ${elapsedLabel} ago`, detail: t }
+  if (elapsed < 86_400_000) return { band: 'amber', label: `Success ${elapsedLabel} ago`, detail: t }
+  return { band: 'red', label: `Stale · ${elapsedLabel} since last success`, detail: t }
+})
+
+const attemptsChartOption = computed(() => {
+  const buckets = attemptsBuckets.value
+  return {
+    tooltip: {
+      trigger: 'axis' as const,
+      backgroundColor: palette.value.tooltipBg,
+      borderColor: palette.value.tooltipBorder,
+      textStyle: { color: palette.value.textPrimary },
+    },
+    grid: { top: 16, right: 16, bottom: 24, left: 32 },
+    xAxis: {
+      type: 'category' as const,
+      data: buckets.map(b => b.label),
+      axisLabel: { color: palette.value.textMuted, fontSize: 11 },
+      axisLine: { lineStyle: { color: palette.value.grid } },
+    },
+    yAxis: {
+      type: 'value' as const,
+      axisLabel: { color: palette.value.textMuted, fontSize: 11 },
+      splitLine: { lineStyle: { color: palette.value.grid } },
+    },
+    series: [{
+      type: 'bar' as const,
+      data: buckets.map((b, i) => ({
+        value: b.count,
+        itemStyle: {
+          color: i <= 1
+            ? palette.value.success
+            : i <= 2
+              ? palette.value.warning
+              : palette.value.danger,
+        },
+      })),
+      barMaxWidth: 40,
+    }],
+  }
 })
 
 async function executeAction() {
@@ -585,6 +768,111 @@ watch(exportError, (v) => { if (v) error.value = v })
       <div v-if="replayResult" class="mb-4 table-cell rounded-lg text-sm bg-blue-50 border border-blue-200 text-blue-700 flex items-start justify-between gap-3" role="status">
         <span>{{ replayResult }}</span>
         <button type="button" @click="replayResult = null" aria-label="Dismiss replay notification" class="text-blue-500 hover:text-blue-800 cursor-pointer shrink-0">✕</button>
+      </div>
+
+      <!-- v0.1.25.51 — Per-subscription delivery stats. 4-up grid:
+             • Time since last success (chip, green/amber/red)
+             • Delivery outcome donut (SUCCESS/FAILED/RETRYING/PENDING) —
+                 click → sets the status filter on the history table below
+             • Attempts histogram — long tail in 4/5+ = retry storm
+             • Response-time p50 / p95 / max (text stats, not a chart,
+                 because fighting over bucket widths on a variable-size
+                 cursor page gives p50/p95 better signal)
+           All metrics are client-side reductions over the already-
+           fetched `deliveries` page — no new requests. Hidden when
+           the page has no deliveries yet. -->
+      <div v-if="deliveries.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4" data-testid="webhook-delivery-stats">
+        <!-- Time-since-last-success chip. Traffic-light semantics
+             match PagerDuty / Grafana convention so operators don't
+             have to re-learn the palette. Tooltip reveals the exact
+             timestamp for audit traceability. -->
+        <div
+          class="card p-3 flex flex-col justify-between"
+          data-testid="webhook-last-success-band"
+        >
+          <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Last successful delivery</div>
+          <div
+            class="inline-flex items-center gap-2 text-sm"
+            :title="lastSuccessBand.detail"
+          >
+            <span
+              class="inline-block w-3 h-3 rounded-full shrink-0"
+              :class="{
+                'bg-green-500': lastSuccessBand.band === 'green',
+                'bg-yellow-500': lastSuccessBand.band === 'amber',
+                'bg-red-500': lastSuccessBand.band === 'red',
+                'bg-gray-400': lastSuccessBand.band === 'unknown',
+              }"
+              aria-hidden="true"
+            />
+            <span
+              :class="{
+                'text-green-700 dark:text-green-400': lastSuccessBand.band === 'green',
+                'text-yellow-700 dark:text-yellow-400': lastSuccessBand.band === 'amber',
+                'text-red-700 dark:text-red-400': lastSuccessBand.band === 'red',
+                'muted': lastSuccessBand.band === 'unknown',
+              }"
+            >{{ lastSuccessBand.label }}</span>
+          </div>
+        </div>
+
+        <!-- Delivery outcome donut. Click a slice to narrow the history
+             table below to that status — mirrors the Overview donut
+             drill-down pattern, but stays on-page since the filter is
+             local state rather than a separate route. -->
+        <div
+          v-if="deliveryOutcomeOption.series[0].data.length > 0"
+          class="card p-3"
+          data-testid="webhook-delivery-outcome-donut"
+        >
+          <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
+            Delivery outcome
+            <span class="muted text-xs font-normal">· click a slice</span>
+          </div>
+          <BaseChart
+            :option="deliveryOutcomeOption"
+            label="Delivery outcome donut chart — clickable"
+            height="160px"
+            @slice-click="onDeliveryOutcomeClick"
+          />
+        </div>
+
+        <!-- Attempts histogram. Tiny bar chart over the number of
+             attempts it took each delivery to settle. A long tail
+             in 4 / 5+ means a retry storm — a flag that the
+             endpoint is flaky or that disable_after_failures is
+             too lenient. Color ramp mirrors severity. -->
+        <div
+          v-if="attemptsBuckets.length > 0"
+          class="card p-3"
+          data-testid="webhook-attempts-histogram"
+        >
+          <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Attempts per delivery</div>
+          <BaseChart
+            :option="attemptsChartOption"
+            label="Attempts histogram bar chart"
+            height="160px"
+          />
+        </div>
+
+        <!-- Response-time stats. Text stats instead of a chart:
+             p50/p95/max on a cursor page give sharper signal than a
+             histogram with fighting bucket widths. Only counts
+             deliveries where response_time_ms is set (i.e. the
+             endpoint responded at least once). -->
+        <div
+          class="card p-3 flex flex-col"
+          data-testid="webhook-response-time-stats"
+        >
+          <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Response time</div>
+          <div v-if="responseStats.count > 0" class="space-y-1 text-sm">
+            <div class="flex justify-between"><span class="muted">p50</span><span class="tabular-nums font-medium">{{ responseStats.p50 }} ms</span></div>
+            <div class="flex justify-between"><span class="muted">p95</span><span class="tabular-nums font-medium">{{ responseStats.p95 }} ms</span></div>
+            <div class="flex justify-between"><span class="muted">max</span><span class="tabular-nums font-medium">{{ responseStats.max }} ms</span></div>
+            <div class="muted-sm pt-1">over {{ responseStats.count }} delivery{{ responseStats.count === 1 ? '' : 'ies' }}</div>
+          </div>
+          <div v-else class="text-sm muted">No timed responses yet</div>
+        </div>
       </div>
 
       <!-- V1 virtualized delivery history. Title on its own row at the

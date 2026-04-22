@@ -69,7 +69,7 @@ Tier 1 incident-response actions available directly from the dashboard (capabili
 src/
 ├── api/           # API client (X-Admin-API-Key only)
 ├── components/    # Reusable UI: Sidebar, PageHeader, StatusBadge, SortHeader, EmptyState, etc.
-├── composables/   # usePolling, useSort, useDarkMode, useTerminalAwareList
+├── composables/   # usePolling, useSort, useDarkMode, useTerminalAwareList, useChartTheme
 ├── stores/        # Pinia: auth (introspect + capabilities)
 ├── views/         # 10 route views (login, overview, budgets, events, api-keys, webhooks, audit, tenants + detail views)
 └── types.ts       # TypeScript types matching governance spec schemas
@@ -183,6 +183,60 @@ Every top-level list view (Tenants, Budgets, Webhooks, API Keys) and the TenantD
 
 Shared implementation: `src/composables/useTerminalAwareList.ts`.
 
+## Visualizations
+
+The dashboard renders inline charts alongside the data tables via Apache
+ECharts (`vue-echarts`). The charting layer landed as a trial slice in
+v0.1.25.47 (single donut) and expanded through v0.1.25.48 – v0.1.25.50
+to three Overview donuts: **Budget status distribution** (lifecycle
+mix), **Budget fleet utilization** (true-utilization buckets —
+Healthy < 90% / Near cap 90–99% / Over cap ≥ 100%, computed from
+`spent/allocated` rather than the debt-based `is_over_limit` server
+signal), and **Events by category** (recent-window activity mix).
+v0.1.25.51 added a **webhook fleet-health donut**
+(Healthy / Failing / Paused / Disabled) and a four-up
+**per-subscription stat row** on `WebhookDetailView` (last-success
+band, delivery-outcome donut, attempts histogram, response-time
+p50/p95/max) — all derived from the data polls already in flight.
+v0.1.25.52 **relocated** the webhook fleet-health donut from
+`WebhooksView` to the Overview chart row (now 4-up on `lg`:
+budget utilization → webhook fleet health → events by category
+→ top-10 by debt) so `WebhooksView` keeps the table above the
+fold for row-level triage; `WebhookDetailView` stat row stays on
+the detail view (per-subscription detail belongs with the
+subscription). Subsequent slices extend the pattern to API Keys /
+Events views.
+
+Shared building blocks:
+
+| File | Role |
+|---|---|
+| `src/components/BaseChart.vue` | Shared wrapper. Props: `option`, `label` (accessibility), `height`. Tree-shaken ECharts registrations — only chart types in use are bundled. |
+| `src/composables/useChartTheme.ts` | Reactive palette mapping the Tailwind status tokens (success / warning / danger / info / neutral) plus axis / grid / tooltip colors to ECharts values. Re-derives on dark-mode toggle. |
+
+ECharts is lazy-loaded per-view via `defineAsyncComponent` so the chart
+bundle downloads only when a chart actually renders. No view's initial
+chunk pays the chart-library cost. v0.1.25.51 re-registered BarChart +
+GridComponent (removed in v0.1.25.50 when all three Overview charts
+became donuts) because `WebhookDetailView` introduces an attempts-
+per-delivery bar chart. Active registrations: PieChart, BarChart,
+TooltipComponent, LegendComponent, GridComponent.
+
+Every chart reads data the view already fetched — no chart adds a
+network request beyond what the attention cards above already drive.
+Charts are also **clickable**: slices emit `slice-click` which the
+parent view maps to `router.push` with the corresponding list-view
+filter pre-applied. Current drill-down contracts:
+
+- Budget status donut → Budgets filtered by `status=ACTIVE|FROZEN|CLOSED` or `filter=over_limit`.
+- Budget fleet utilization donut → Budgets filtered by `utilization_min` / `utilization_max` (integer percent, 0–100). `BudgetsView` hydrates both params from the URL on mount.
+- Events by category donut → Events filtered by `category=<name>`.
+- Webhook fleet-health donut → Webhooks filtered by `status=ACTIVE|PAUSED|DISABLED` or `failing=1` (the Failing slice is orthogonal to status — a `PAUSED` webhook with `consecutive_failures ≥ 1` still counts as Failing so the chart and the `failing=1` filter match).
+- Delivery-outcome donut (WebhookDetailView) → local status filter on the history table, no route push.
+
+For the full six-slice roadmap and what each view is expected to
+visualize, see `AUDIT.md` → *v0.1.25.47 charting layer*.
+
 ## Polling Strategy
 
 Each page manages its own polling lifecycle via the `usePolling` composable:
@@ -291,7 +345,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.46
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.52
     restart: unless-stopped
     # No exposed ports — only accessible through Caddy
     depends_on:

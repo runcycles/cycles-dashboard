@@ -127,8 +127,19 @@ const {
 // stays a string until they touch the input. Per the v0.1.25.19
 // `Fund Budget Execute` regression: never call string methods on a
 // v-model'd number-input value. We treat both at consumption.
-const filterUtilMin = ref<number | string>('')
-const filterUtilMax = ref<number | string>('')
+// Hydrate from ?utilization_min=<pct>&utilization_max=<pct>. URL
+// contract is integer percent (0–100) for operator readability —
+// matches the input placeholder "min"/"max" labels and lets the
+// Overview utilization donut's drill-down land on a pre-filtered
+// list. Sanitized: only finite values in [0, 100] seed the filter.
+function parseUtilPct(v: unknown): number | string {
+  if (v === undefined || v === null || v === '') return ''
+  const n = Number(v)
+  if (!Number.isFinite(n)) return ''
+  return Math.max(0, Math.min(100, n))
+}
+const filterUtilMin = ref<number | string>(parseUtilPct(route.query.utilization_min))
+const filterUtilMax = ref<number | string>(parseUtilPct(route.query.utilization_max))
 // cycles-governance-admin v0.1.25.21: free-text `search` query param
 // on listBudgets (case-insensitive substring match on tenant_id +
 // scope). Distinct from `scope_prefix` (kept as-is) — scope_prefix is
@@ -946,15 +957,19 @@ async function executeFilterBulk() {
 
 watch(selectedTenant, () => { if (!isCrossTenantFilter.value && !isDetail.value) loadList() })
 watch(() => route.query, (q) => {
-  // BulkActionResultDialog's View-budget link navigates to the same
-  // /budgets route with different query params — Vue Router keeps the
-  // component mounted, so the setup-time hydration above doesn't
-  // re-run. Sync the refs explicitly when tenant_id / search change in
-  // the URL so the deep-link actually filters the list.
+  // BulkActionResultDialog's View-budget link and the Overview
+  // utilization donut's drill-down both navigate to the same /budgets
+  // route with different query params — Vue Router keeps the component
+  // mounted, so the setup-time hydration above doesn't re-run. Sync
+  // the refs explicitly when URL-driven filters change.
   const nextTenant = (q.tenant_id as string) || ''
   if (nextTenant !== selectedTenant.value) selectedTenant.value = nextTenant
   const nextSearch = (q.search as string) || ''
   if (nextSearch !== search.value) search.value = nextSearch
+  const nextUtilMin = parseUtilPct(q.utilization_min)
+  if (nextUtilMin !== filterUtilMin.value) filterUtilMin.value = nextUtilMin
+  const nextUtilMax = parseUtilPct(q.utilization_max)
+  if (nextUtilMax !== filterUtilMax.value) filterUtilMax.value = nextUtilMax
   if (isDetail.value) loadDetail()
   else loadList()
 })

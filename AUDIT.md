@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.46 (2026-04-21)
+**Current release:** v0.1.25.52 (2026-04-22)
 
 ## Baseline requirements
 
@@ -16,6 +16,273 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-22 — v0.1.25.52: Relocate webhook fleet-health donut from WebhooksView → OverviewView
+
+**Trigger.** Operator ask one release after v0.1.25.51: *"so webhookc chart on Webhooks, takes a lot of space, I think its better to, move it to Overview after Budget fleet utilization, agree?"*
+
+**Rationale.** WebhooksView is the surface operators use most for row-level triage (paused? failing? last success?). Mounting a donut above the filter card pushed the table below the fold on a `lg` viewport for a signal that is fleet-level, not row-level. OverviewView is the right home for fleet-glance donuts — budget-utilization, events-by-category, top-10 by debt already live there. Same data source (`listWebhooks({ limit: '200' })` already fetched for the failing-webhooks card), same drill-down contract (`?status=ACTIVE|PAUSED|DISABLED`, `?failing=1`). Net move, no new fetch, no new visual.
+
+**Scope.**
+
+| Surface | Change |
+|---|---|
+| `src/views/OverviewView.vue` | Added `webhookFleetSlices` / `webhookHealthOption` computeds + `onWebhookHealthClick` handler alongside the existing budget / events donut machinery. New card inserted between `budget-utilization-donut` and `events-by-category-donut`. Chart grid widened `md:grid-cols-2 lg:grid-cols-3` → `md:grid-cols-2 lg:grid-cols-4`. |
+| `src/views/WebhooksView.vue` | Donut card + supporting computeds / handler / `useChartTheme` / `defineAsyncComponent(BaseChart)` imports removed. Back to pre-v0.1.25.51 structure — filter card sits directly below the error banner. Row-level health dot preserved. |
+| `src/__tests__/WebhookCharts.test.ts` | `WebhooksView — fleet-health donut` describe replaced with `OverviewView — webhook fleet-health donut (relocated v0.1.25.52)` (5 tests). WebhookDetailView stat-row describe block unchanged (5 tests, still at 10 total). Added `getOverviewMock` / `listApiKeysMock` / `listAuditLogsMock` / `listBudgetsMock` so OverviewView mounts cleanly; `healthyOverview()` helper returns a valid `AdminOverviewResponse` with only the webhook slice varying per test. |
+
+**Late repairs (same release, follow-on commits).**
+
+| Commit | Trigger | Fix |
+|---|---|---|
+| `f76dcce` | Operator: *"Webhook legend on top of chart because it has 4 elements, so Failing is on top of pie chart. Event will probably have same problem."* | Donut legend overlapped pie on the new 4-up grid — each card shrank ~33% → ~25% wide, and a 4-item legend wraps onto two lines at that width. All four Overview donuts now use `legend.type: 'scroll'` with tighter item spacing (itemWidth 10 / itemHeight 8 / itemGap 10). Chart height bumped 180px → 200px. Pre-empts the predicted repeat on events-by-category. |
+| `4fe53fe` | Operator: *"Webhook fleet health pie chart smaller than other pie charts."* | The radius-shrink in `f76dcce` used `replace_all` on `radius: ['55%', '78%']`, but only the webhook option is written at 6-space indent. The other three options nest the pie config in `series: [{...}]` arrays at 8-space indent, so the replace skipped them. Webhook was the only pie that shrank. Corrected: radius `['48%', '68%']` + center `['50%', '40%']` applied uniformly. Lesson: a bare `replace_all` presumes a single canonical indent — `Grep`ping for every match before and after is the safeguard. |
+
+**Verification.** `npm run typecheck` clean. `npx vitest run src/__tests__/WebhookCharts.test.ts` → 10 passing. Full suite → 852 passing.
+
+### 2026-04-22 — v0.1.25.51: Webhook visualizations — fleet-health donut + per-subscription stat row
+
+**Trigger.** Operator ask after the v0.1.25.50 chart review: *"review again, anything else where we can add, improve with charts + stats?"* Top two gaps surfaced were the webhook surfaces — fleet health was row-level green/yellow/red dots with no aggregate shape, and the detail view carried per-delivery data (`response_time_ms`, `attempts`, `status`, `last_success_at`) that were fetched, listed, and then summarily thrown away at the aggregate level.
+
+**Scope.**
+
+| Surface | Change |
+|---|---|
+| `src/views/WebhooksView.vue` | New fleet-health donut above the filter card. Client-side reduce over `webhooks` (60s poll, no new request). Four slices — Healthy (ACTIVE, no failures) / Failing (`consecutive_failures ≥ 1` regardless of status) / Paused (no failures) / Disabled. Click drills to `?status=...` or `?failing=1`, mirroring the contract Overview's counter-strip tiles use. |
+| `src/views/WebhookDetailView.vue` | New four-up stat row between the subscription card and the Delivery History table. (a) Last-success chip with PagerDuty traffic-light semantics (green < 1h, amber 1h–24h, red ≥ 24h or no successful delivery). (b) Delivery-outcome donut; click sets the history-table status filter in place — no route push because the filter is local state. (c) Attempts-per-delivery histogram bucketed 0/1/2/3/4/5+ with severity color ramp so retry storms are visible before operators scan rows. (d) Response-time p50 / p95 / max over deliveries that carry `response_time_ms`. Percentile method: NIST nearest-rank (`ceil((p/100) * n)`) so 4 samples at p50 → 2nd-smallest rather than 3rd. |
+| `src/components/BaseChart.vue` | Re-register `BarChart` + `GridComponent` (dropped in v0.1.25.50 when all three Overview charts became donuts). Attempts histogram needs them. |
+| `src/__tests__/WebhookCharts.test.ts` | 10 new tests. Fleet-health bucket assignment, empty-fleet guard, drill-down for Failing/Disabled/Paused slices, per-subscription stat computation (outcome donut, attempts histogram, response-time stats), last-success band green/amber/red, hidden-row guard when no deliveries loaded, click-donut sets local filter without route push. |
+| `src/__tests__/BaseChart.test.ts` | ECharts stubs re-widened for BarChart + GridComponent. |
+
+**URL contract (operator-visible).** WebhooksView drill-down reuses the existing `status` + `failing` URL params — no new params, no version gate.
+
+**Verification.** `npm run test` → 852 passing (+10 new). `npm run typecheck` clean.
+
+### 2026-04-22 — v0.1.25.50: Budget fleet utilization — debt-based bar → true-utilization donut
+
+**Trigger.** Operator report: *"what does Budget fleet utilization represent? I have a few budgets over 90%, some 113% utilization, but all 169 show as healthy on Budget fleet utilization, so how does it determine health?"*
+
+**Root cause.** The v0.1.25.48 stacked bar derived segments from `budget_counts.over_limit` + `budget_counts.with_debt`. Per spec (`cycles-governance-admin-v0.1.25.yaml:1415–1417`) `is_over_limit = debt > overdraft_limit` — a *financial overdraft* signal, not a *utilization* signal. A budget at 113% spent/allocated whose `overdraft_limit` absorbs the overage has `debt = 0` and therefore counted as Healthy in the old chart. Chart title implied utilization; data behind it was debt. Semantic mismatch.
+
+**Fix.** Reshape the chart to read `spent / allocated` across the `utilization_min=0.9` fetch already in-flight for the at-cap card. Bucket client-side:
+
+| Bucket | Range | Color | Drill-down |
+|---|---|---|---|
+| Healthy | `util < 0.9` | success | `/budgets` (unfiltered) |
+| Near cap | `0.9 ≤ util < 1.0` | warning | `/budgets?utilization_min=90&utilization_max=100` |
+| Over cap | `util ≥ 1.0` | danger | `/budgets?utilization_min=100` |
+
+Chart type changed from stacked bar to donut so all three Overview charts share a consistent shape.
+
+**Scope.**
+
+| Surface | Change |
+|---|---|
+| `src/views/OverviewView.vue` | `budgetUtilizationOption` rewritten as a pie over three buckets. `atCapBudgets` fetch limit 10 → 500 so bucket counts reflect fleet state, not the top-10 card sample. `onBudgetUtilizationClick` drills via `utilization_min` / `utilization_max` (integer percent) instead of the debt-based `filter=over_limit|has_debt`. Existing at-cap card "View all" link updated from `utilization_min=0.9` → `utilization_min=90` for URL-format consistency. |
+| `src/views/BudgetsView.vue` | `filterUtilMin` / `filterUtilMax` now hydrate from `route.query` on mount via `parseUtilPct()` (clamp to [0, 100], drop non-finite). Query watcher syncs the same params on subsequent navigation. Prior to this change the inputs were wired to the form but not to deep links — the Overview drill-down and the existing at-cap "View all" link silently rendered an unfiltered list. |
+| `src/components/BaseChart.vue` | `BarChart` + `GridComponent` registrations removed — PieChart is now the only chart type in use. Tree-shaking drops the unused code from the ECharts chunk. |
+| `src/__tests__/BaseChart.test.ts` | Utilization block rewritten: regression pin that a synthetic 113%-util / zero-debt budget lands in Over cap (not Healthy). Drill-down tests updated for the new slice names — Near cap → `utilization_min=90&utilization_max=100`, Over cap → `utilization_min=100`. |
+| `src/__tests__/BudgetsView-url-deeplink.test.ts` | +3 URL hydration tests: 90/100 → wire fractional 0.9/1.0; out-of-range `utilization_min=150` clamps to 1.0; non-numeric `utilization_min=abc` is ignored. |
+| `src/__tests__/OverviewView.test.ts` | ECharts mocks narrowed — `BarChart` / `GridComponent` stubs removed to match the registration change. |
+
+**URL contract (operator-visible).** BudgetsView accepts `utilization_min` / `utilization_max` as **integer percent (0–100)** matching the existing form inputs. Server receives fractional 0.0–1.0 after the `/100` conversion.
+
+**Verification.** `npm run test` → 842 passing (+6 new). `npm run typecheck` clean.
+
+### 2026-04-22 — v0.1.25.49: chart drill-down (slice-click → filtered list view) + color-collision fix
+
+**Late repair — color collisions on events donut.** Operator report after drill-down landed: *"tenant, api_key both grey, budget orange — why is the color the same for 2 categories?"* Root cause: the initial `CATEGORY_COLORS` map only had the 5-tone semantic palette available (success / warning / danger / info / neutral) and three categories (`audit`, `tenant`, `api_key` fallback) landed on `neutral` grey. Every known category now gets a distinct hue from a new 10-slot qualitative palette added to `useChartTheme`; unknown categories use a deterministic `hashCategory` → palette index so two unknowns also can't collide on the same fallback slot. `policy` keeps danger (red) and `reservation` keeps success (green) because operators already associate those semantics.
+
+| Category | Old color | New color |
+|---|---|---|
+| policy | danger (red) | danger (red) — unchanged |
+| reservation | success (green) | success (green) — unchanged |
+| webhook | info (blue) | qualitative slot 0 (blue) |
+| budget | warning (amber) | qualitative slot 2 (amber) |
+| tenant | neutral (grey — collision) | qualitative slot 4 (purple) |
+| api_key | neutral (grey — collision) | qualitative slot 5 (teal) |
+| audit | neutral (grey — collision) | qualitative slot 6 (pink) |
+| runtime | success | qualitative slot 7 (indigo) |
+| <unknown> | neutral (collision) | hashCategory(name) % 10 — stable per-name |
+
+Test pin: `src/__tests__/BaseChart.test.ts` asserts `new Set(colors).size === colors.length` across `{ tenant, api_key, audit, budget }`.
+
+### 2026-04-22 — v0.1.25.49: chart drill-down (slice-click → filtered list view)
+
+**Trigger.** Operator ask after v0.1.25.48 landed: *"Can we support drill down from charts, should be able to."* The three Overview charts had been read-only; operators expected clicks on a slice/segment to navigate to the filtered list view the same way counter-strip chips already do.
+
+**Scope.** Click-to-drill-down wired on all three Overview charts. No new API surface; drill-downs reuse the existing URL query contracts on BudgetsView (`status`, `filter`) and EventsView (`category`).
+
+| Surface | Change |
+|---|---|
+| `src/components/BaseChart.vue` | `defineEmits<{ 'slice-click': ChartClickParams }>()` forwarding the ECharts click payload. `cursor: pointer` on the inner `<v-chart>` so the interaction is discoverable. |
+| `src/views/OverviewView.vue` | `useRouter()` + three click handlers — `onBudgetStatusClick`, `onBudgetUtilizationClick`, `onEventsCategoryClick` — each mapping the clicked slice/segment name to `router.push({ name, query })`. Each chart card title gets a muted "· click a slice/segment" hint so the affordance is discoverable without a tooltip. |
+| `src/__tests__/BaseChart.test.ts` | +4 drill-down tests: donut Frozen/Over-limit → budgets routes, utilization With-debt → `filter=has_debt`, events policy slice → `events?category=policy`. Shared `pushMock` so handlers can be asserted against the vue-router stub. |
+
+**Click target → route table.**
+
+| Chart | Slice / segment | Route |
+|---|---|---|
+| Budget status donut | Active | `budgets?status=ACTIVE` |
+| Budget status donut | Frozen | `budgets?status=FROZEN` |
+| Budget status donut | Over-limit | `budgets?filter=over_limit` |
+| Budget status donut | Closed | `budgets?status=CLOSED` |
+| Utilization bar | Healthy | `budgets` (unfiltered) |
+| Utilization bar | With debt | `budgets?filter=has_debt` |
+| Utilization bar | Over-limit | `budgets?filter=over_limit` |
+| Events by category donut | `<name>` | `events?category=<name>` |
+| Events by category donut | uncategorized (fallback slice) | `events` (unfiltered) |
+
+**Key design decisions.**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Click payload location | Emit from `BaseChart`, handle in `OverviewView` | The wrapper stays dumb about navigation — future views can wire their own drill-downs without touching the shared component. |
+| Discovery | Chart title suffix "· click a slice" + `cursor: pointer` | Charts don't have native clickability affordance. The hint is subtle (muted, small) so it doesn't compete with the data, but telegraphs interactivity at first glance. |
+| Over-limit donut target | `filter=over_limit` (not `status=OVER_LIMIT`) | There is no `OVER_LIMIT` budget status — it's a derived boolean from `debt > overdraft_limit` per spec. BudgetsView already exposes this as the `filter=over_limit` cross-tenant mode. |
+| Events "uncategorized" fallback | Routes to unfiltered EventsView | The synthesized slice doesn't map to a real category, so filtering would return empty. Send operators to the full recent window instead. |
+
+**Rejected alternatives.**
+
+| Option | Why not |
+|---|---|
+| Let ECharts `urlLink` handle navigation inline | Clashes with vue-router — a full reload instead of SPA navigation. Emit-up keeps us in the SPA. |
+| Modal drill-down inside the chart card | Would duplicate list-view rendering. Pushing to the list view reuses bulk actions, terminal-aware toggles, CSV export, etc. |
+| Drill-down on the utilization Healthy segment lands on `?status=ACTIVE` | Healthy is a derived segment (total − over_limit − with_debt), not the same as `status=ACTIVE`. Pushing unfiltered lets the operator see the whole picture and then apply their own cut. |
+
+**Edge cases.**
+
+| Case | Behavior |
+|---|---|
+| Click on a slice with `value = 0` (shouldn't exist — filtered upstream) | Handler still fires but the destination list would be empty; no harm. |
+| Click on the events "uncategorized" fallback slice | Routes to `EventsView` unfiltered (the fallback exists because no categorization is available, so no category filter would match). |
+| Click on chart legend / tooltip (not a slice) | ECharts emits a click with `componentType !== 'series'` — our handlers short-circuit because `name` won't match any known slice. No navigation. |
+
+**Tests.**
+
+| File | Count | Pins |
+|---|---|---|
+| `src/__tests__/BaseChart.test.ts` | 14 (was 10) | Added 4 drill-down assertions; updated the aria-label assertion for the new "— clickable" suffix. |
+
+Full suite: 833/833 passing.
+
+### 2026-04-22 — v0.1.25.48: Overview charts expanded (utilization bar + events-by-category)
+
+**Trigger.** Operator response after v0.1.25.47 landed: *"see one chart, we need at least 3 — status is fine, but also about budget utilization; recommend other 2 charts useful for ops."* Expand the Overview visualization row from one chart to three without requiring any new API surface.
+
+**Scope.** Two additional charts on OverviewView, laid out as a 3-up grid beneath the counter strip. Same `/v1/admin/overview` payload — no new fetches.
+
+| Surface | Change |
+|---|---|
+| `src/views/OverviewView.vue` | + `budgetUtilizationOption` (stacked horizontal bar — Healthy / With-debt / Over-limit across `budget_counts.total`). + `eventsByCategoryOption` (donut over `event_counts.by_category` with tone-mapped colors per category). + `hasAnyChart` guard so the wrapping grid hides when no chart inside it has data. Template switched from single `mb-6` card to `grid grid-cols-1 md:grid-cols-3 gap-4` row. |
+| `src/components/BaseChart.vue` | Register `BarChart` + `GridComponent` alongside the existing `PieChart`. Tooltip + Legend shared. |
+| `src/__tests__/BaseChart.test.ts` | +4 tests (utilization bar mount vs. empty-fleet skip, events-donut mount vs. empty-categories skip). |
+| `README.md` Visualizations section | Updated to describe the three Overview charts + revised bundle delta (~165 KB gz). |
+
+**Key design decisions.**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Budget utilization shape | Horizontal stacked bar, not a histogram | Shows "what fraction of the fleet is in trouble" in a single compact row — matches the donut's height next to it for visual parity. A utilization-by-percent histogram is the right shape for BudgetsView (per-row), not Overview (fleet aggregate). |
+| Utilization segmentation | Healthy / With-debt / Over-limit | Maps directly to the three operator-visible severity bands. `with_debt - over_limit` isolates the "has debt but still within cap" middle tier so over-limit doesn't double-count. |
+| Events donut category tones | Tone-mapped (policy = danger, reservation = success, webhook = info, audit/tenant = neutral, budget = warning, runtime = success) | Same mental model as the counter-strip chips — operators already associate policy/denial volume = red. |
+| Layout | 3-up grid, `md:grid-cols-3`, stacks on narrow | Keeps all three charts at the same 180px height so they read as one visual row, not a primary chart + two companions. |
+| Empty-state strategy | Each chart has its own `v-if` guard + a wrapping `hasAnyChart` so the grid row hides entirely on a brand-new environment | Avoids rendering an empty 3-column grid or a single lonely card. |
+
+**Rejected alternatives.**
+
+| Option | Why not |
+|---|---|
+| Per-unit allocated-vs-spent bar chart on Overview | Rich enough to deserve its own section on BudgetsView (Cut 2 of the roadmap). Would clutter the landing page and duplicate work. |
+| Top-N budgets by debt bar chart on Overview | Already covered by the debt-scopes attention card below; a bar chart would overlap without adding signal. |
+| Webhook fleet health donut on Overview | Planned for WebhooksView stat header (Cut 3); putting it on Overview would spread the operational picture too thin per view. |
+| Combining "events by category" into the existing counter-strip tile | Chip row already renders counts — the donut shows *proportions*, which is the complementary read. Keeping them side-by-side lets operators read both "how many events" and "what mix" without mode-switching. |
+
+**Edge cases.**
+
+| Case | Behavior |
+|---|---|
+| `budget_counts.total = 0` | Utilization bar `v-if`-skipped; donut + events donut may still render if they have data. |
+| `with_debt < over_limit` in a bad payload | Clamped to zero via `Math.max(0, …)` so the stacked bar never renders a negative segment. |
+| Single dominant event category | Donut renders a single full-circle slice; legend still shows its name. |
+| Dark-mode toggle | All three charts re-derive from `useChartTheme` palette identically. |
+
+**Tests.**
+
+| File | Count | Pins |
+|---|---|---|
+| `src/__tests__/BaseChart.test.ts` | 9 (was 5) | Added utilization-bar mount + empty-fleet skip; events-donut mount + empty-categories skip. |
+
+Full suite green. Bundle split: OverviewView 28.71 KB (gzip 7.11 KB), BaseChart chunk 494.38 KB (gzip 164.80 KB).
+
+**What's next.** PR 3: BudgetsView utilization histogram + top-N debt + per-unit bars (spec-unchanged). PR 4+: Webhooks fleet health, API-key expiry runway, Events stacked time-histogram.
+
+### 2026-04-22 — v0.1.25.47: charting layer — trial slice (budget status donut)
+
+**Trigger.** Operator question: *"Our dashboard currently shows tables, info, config, but no charts, graphs, stats. What can we show within the current spec or do we need a spec change?"* Answer: a lot, within the current spec. This release is PR 1 of a six-PR visualizations roadmap — the trial slice that proves the wire-up before investing in view-specific charts.
+
+**Scope.** One chart (budget-status donut on OverviewView) plus the shared infrastructure to make the rest of the roadmap mechanical. No new API calls, no spec change.
+
+| Surface | Change |
+|---|---|
+| `package.json` | Add `echarts@^5`, `vue-echarts@^7`. Tree-shaken imports; only `PieChart` + `TooltipComponent` + `LegendComponent` + `CanvasRenderer` are registered in this slice. |
+| `src/components/BaseChart.vue` (new) | Shared wrapper. Props: `option: EChartsOption`, `label: string`, `height?: string`. Provides `THEME_KEY` from dark-mode state so every chart follows the app's current palette. |
+| `src/composables/useChartTheme.ts` (new) | Reactive palette: maps status tokens (`success`/`warning`/`danger`/`info`/`neutral`) plus axis/grid/text/tooltip colors to light and dark values. Re-derives on `isDark` flips. |
+| `src/views/OverviewView.vue` | `defineAsyncComponent(() => import('../components/BaseChart.vue'))` so ECharts lands in a separate chunk. New `budgetStatusOption` computed over `overview.budget_counts`. Template block between counter-strip and attention cards, `v-if="… data.length > 0"` to hide on empty fleet. |
+| `vitest.config.ts` + `src/__tests__/setup.ts` | Global `ResizeObserver` polyfill for jsdom (vue-echarts autoresize needs it). |
+| `src/__tests__/BaseChart.test.ts` (new) | 5 tests: wrapper forwards option/label/height, donut renders/hides by slice-count, aria-labelled region present. |
+| `src/__tests__/OverviewView.test.ts` | Add `vue-echarts` + `echarts/*` stubs so the existing 60+ tests don't hit Canvas under jsdom. |
+
+**Key design decisions.**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Library | Apache ECharts via `vue-echarts` | Tree-shakable, Apache-2.0, first-class Vue support, covers the full 6-PR roadmap (pie/bar/line/histogram/stacked-time). Chart.js too basic, Recharts React-first, ApexCharts heavier default. |
+| Renderer | `CanvasRenderer` | 4 KB smaller gzipped than SVG for pie-only. Re-evaluate if future slices bring many SVG-cheap charts. |
+| Theme source | Tailwind hex constants mirrored into a typed palette | Rebuilds on dark-mode toggle via `computed(() => isDark.value ? DARK : LIGHT)`. Avoids reading computed CSS variables at chart-init time (fragile across hydration). |
+| First chart | Budget status donut | `/overview` already fetched by every landing-page operator. Highest ROI demonstration with zero new network cost. |
+| Chart placement | Between counter strip and attention cards | Ancillary visual ("how is the fleet distributed") beneath the quick-jump nav but above the actionable alert row. Fixed compact height (180px) so it doesn't compete for attention. |
+| Lazy-load | Yes — async component | OverviewView initial chunk stays at ~6.4 KB gzip. ECharts lands in a dedicated ~142 KB gz chunk that downloads only when a chart first renders. |
+| Prop name | `label` (not `ariaLabel` or `aria-label`) | Vue 3 does not auto-camelCase `aria-label` attribute into the `ariaLabel` prop. Using `label` sidesteps the special-casing entirely. |
+
+**Rejected alternatives.**
+
+| Option | Why not |
+|---|---|
+| Chart.js | Weaker interactivity, harder to style consistently with dark-mode + status tokens. |
+| Recharts | React-first; the Vue adapter lags React releases and carries an extra dependency layer. |
+| D3 | Low-level. Would require writing a pie/bar/line abstraction ourselves — ECharts already is that abstraction. |
+| ApexCharts | Heavier default bundle and weaker tree-shake story for partial usage. |
+| Ship all six slices in one PR | Loses incrementalism: a regression in any one view would block the rest. The plan intentionally slices per-view for low-blast-radius PRs. |
+| Eagerly import BaseChart in the OverviewView bundle | Would have grown OverviewView from ~6.4 KB → ~181 KB gz (tested). Unacceptable for a view that's the landing page. |
+
+**Edge cases.**
+
+| Case | Behavior |
+|---|---|
+| Empty fleet (all budget_counts fields 0) | Donut block is `v-if`-skipped; no empty chart, no zero-data ECharts warning. |
+| Only one non-zero slice (e.g. only over-limit) | Donut renders that single slice full-circle with its legend entry. Pinned by test. |
+| Dark-mode toggle while donut is visible | `useChartTheme` palette recomputes, vue-echarts' `THEME_KEY` provided value flips, ECharts re-renders with the dark palette. |
+| jsdom unit tests (no Canvas) | `vue-echarts` + `echarts/*` are mocked per test file; a `ResizeObserver` polyfill in `setup.ts` covers the autoresize watcher. |
+| Operator never scrolls to the donut | ECharts chunk still lazy-loads on first render (it's within initial viewport above the fold). Below-the-fold views won't trigger it. |
+
+**Tests.**
+
+| File | Count | Pins |
+|---|---|---|
+| `src/__tests__/BaseChart.test.ts` | 5 | Wrapper aria-label + option forwarding + height; donut mount vs. skip vs. single-slice. |
+| `src/__tests__/OverviewView.test.ts` | 824 total (unchanged) | Added vue-echarts mock so the existing suite keeps passing without pulling Canvas under jsdom. |
+
+Full suite: 824/824 passing. Build green. Bundle split: OverviewView 25.55 KB (gzip 6.40 KB) initial, BaseChart-chunk 423.09 KB (gzip 142.05 KB) lazy.
+
+**What's next (roadmap — not in this release).** PR 2: Overview stat-strip with six KPI tiles inline. PR 3: Budget utilization histogram + top-N debt bars. PR 4: Webhook fleet health donut + per-subscription delivery detail charts. PR 5: API-key expiry runway. PR 6: Events stacked time-histogram. PR 7+: spec-side `/v1/admin/metrics` proposal to unlock p50/p95 latency and throughput buckets (outside this dashboard's scope).
+
+**Post-merge repairs (same release).**
+
+| Symptom | Root cause | Fix |
+|---|---|---|
+| Donut card header rendered but chart area stayed empty on operator dashboard. | The initial slice applied the same computed inline `style` to both the outer wrapper div and the inner `<v-chart>`. Vue-echarts' internal container received a redundant height that did not propagate to ECharts' own render div, so autoresize measured 0×0 and drew nothing. | `<v-chart>` now gets an explicit `style="height: 100%; width: 100%"`; the sized outer div is the only height source. |
+| `PR Container Scan` (Trivy HIGH/CRITICAL, ignore-unfixed) turned red on the feature branch while yesterday's main was green. | `nginx:1.29-alpine` floated to `alpine 3.23.4`, which accumulated fixable HIGH/CRITICAL CVEs overnight before upstream refloated the nginx tag. Trivy fails any build caught in that window. | Added `RUN apk update && apk upgrade --no-cache && rm -rf /var/cache/apk/*` to the serve stage so every container build pulls the latest alpine security patches, independent of how stale the pinned tag is. |
 
 ### 2026-04-21 — v0.1.25.46: hide terminal-state rows by default across every list view
 

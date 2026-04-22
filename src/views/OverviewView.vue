@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { getOverview, listApiKeys, listAuditLogs, listBudgets, listTenants, listWebhooks } from '../api/client'
 import type { AdminOverviewResponse, ApiKey, AuditLogEntry, BudgetLedger, WebhookSubscription } from '../types'
@@ -7,6 +8,12 @@ import PageHeader from '../components/PageHeader.vue'
 import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import WarningIcon from '../components/icons/WarningIcon.vue'
 import CheckCircleIcon from '../components/icons/CheckCircleIcon.vue'
+// Lazy-loaded to keep ECharts + vue-echarts out of the OverviewView
+// initial chunk. Charts render only after the `v-if` slice-count guard
+// passes, so the bundle split also delays the network fetch until the
+// chart is actually needed.
+const BaseChart = defineAsyncComponent(() => import('../components/BaseChart.vue'))
+import { useChartTheme } from '../composables/useChartTheme'
 import { formatTime } from '../utils/format'
 import { toMessage } from '../utils/errors'
 import { filterExpiringKeys, type ExpiringKey } from '../utils/expiringKeys'
@@ -90,8 +97,14 @@ const { refresh, isLoading } = usePolling(async () => {
     // Budgets at or near cap (utilization ≥ 0.9). Catches
     // exhausted-without-debt (our blind spot), over-limit-via-debt,
     // AND the 90–99% range so operators can intervene before a
-    // budget actually blows rather than after.
-    listBudgets({ utilization_min: '0.9', limit: '10' }),
+    // budget actually blows rather than after. Limit 500 is the
+    // fleet-histogram cap — the at-cap card slices to 5 for display,
+    // but the utilization donut computes its Near-cap / Over-cap
+    // buckets from this same set so it needs a representative sample
+    // of the fleet, not just the top 10. Deployments with > 500
+    // budgets at ≥ 90% utilization will under-count the donut; the
+    // card badge / "View all" link still carry the full audit.
+    listBudgets({ utilization_min: '0.9', limit: '500' }),
     // Frozen budgets — scopes, not just a count. Lets the Frozen
     // Budgets card list the top 5 inline instead of a center link.
     listBudgets({ status: 'FROZEN', limit: '10' }),
@@ -231,6 +244,361 @@ const webhookPausedCount = computed<number>(() => {
   if (!overview.value) return 0
   const wc = overview.value.webhook_counts
   return Math.max(0, wc.total - wc.active - wc.disabled)
+})
+
+// Trial visualization (v0.1.25.47): budget status donut. Consumes the
+// already-fetched overview.budget_counts — no new request. The stat-strip
+// tile right above gives the authoritative numbers; this chart sits
+// beside it to visualize the distribution (what share of the fleet is
+// active vs. frozen vs. closed vs. over-limit). Colors match the
+// counter-strip chip palette so operators read one mental model.
+const { palette } = useChartTheme()
+
+// Chart drill-down. Each slice/segment is a filter predicate — clicking
+// navigates to the corresponding list view with that filter pre-applied
+// via the router. Reuses the existing URL query contracts:
+//   - BudgetsView: ?status=ACTIVE|FROZEN|CLOSED and ?filter=over_limit|has_debt
+//   - EventsView:  ?category=<name>
+// Keeps the chart wrapper stateless; navigation lives with the view
+// that owns the data model.
+const router = useRouter()
+
+type ChartClickParams = { seriesName?: string; name?: string }
+
+function onBudgetStatusClick(p: ChartClickParams) {
+  const name = (p?.name ?? '').toLowerCase()
+  if (name === 'active') router.push({ name: 'budgets', query: { status: 'ACTIVE' } })
+  else if (name === 'frozen') router.push({ name: 'budgets', query: { status: 'FROZEN' } })
+  else if (name === 'closed') router.push({ name: 'budgets', query: { status: 'CLOSED' } })
+  else if (name === 'over-limit') router.push({ name: 'budgets', query: { filter: 'over_limit' } })
+}
+
+// Budget fleet utilization donut — drill-down by `spent/allocated`
+// bucket (not by debt — see `budgetUtilizationOption` for the
+// semantic distinction). Operators clicking each slice land on the
+// corresponding utilization-filtered list.
+//   Healthy  (< 90%)    → unfiltered /budgets (the majority view)
+//   Near cap (90–100%)  → ?utilization_min=90&utilization_max=100
+//   Over cap (≥ 100%)   → ?utilization_min=100
+// Integer-percent bounds are inclusive on both edges, so a budget at
+// exactly 90% surfaces in both Healthy (via fleet default) and Near
+// cap; exactly 100% surfaces in both Near cap and Over cap. Minor
+// boundary overlap is standard histogram behavior.
+function onBudgetUtilizationClick(p: ChartClickParams) {
+  const name = (p?.name ?? '').toLowerCase()
+  if (name === 'near cap') {
+    router.push({ name: 'budgets', query: { utilization_min: '90', utilization_max: '100' } })
+  } else if (name === 'over cap') {
+    router.push({ name: 'budgets', query: { utilization_min: '100' } })
+  } else if (name === 'healthy') {
+    router.push({ name: 'budgets' })
+  }
+}
+
+function onEventsCategoryClick(p: ChartClickParams) {
+  const name = p?.name ?? ''
+  if (name && name !== 'uncategorized') {
+    router.push({ name: 'events', query: { category: name } })
+  } else if (name === 'uncategorized') {
+    router.push({ name: 'events' })
+  }
+}
+
+// Webhook fleet-health donut. Relocated from WebhooksView
+// (v0.1.25.52) — Overview is the glance layer; the list view
+// was the wrong home because it squeezed the table and
+// duplicated the role of this page's at-a-glance strip.
+// Client-side reduce over `failingWebhooksRaw`, which already
+// holds the full webhook page (limit 200). The "Failing" slice
+// counts any webhook with `consecutive_failures ≥ 1` regardless
+// of status, so a PAUSED webhook with latent failures still
+// surfaces — matches the `?failing=1` URL filter semantics.
+type WebhookFleetSlices = { healthy: number; failing: number; paused: number; disabled: number }
+const webhookFleetSlices = computed<WebhookFleetSlices>(() => {
+  const out: WebhookFleetSlices = { healthy: 0, failing: 0, paused: 0, disabled: 0 }
+  for (const w of failingWebhooksRaw.value) {
+    const failing = (w.consecutive_failures ?? 0) >= 1
+    if (w.status === 'DISABLED') out.disabled++
+    else if (failing) out.failing++
+    else if (w.status === 'PAUSED') out.paused++
+    else out.healthy++
+  }
+  return out
+})
+
+const webhookHealthOption = computed(() => {
+  const f = webhookFleetSlices.value
+  const slices = [
+    { name: 'Healthy', value: f.healthy, itemStyle: { color: palette.value.success } },
+    { name: 'Failing', value: f.failing, itemStyle: { color: palette.value.danger } },
+    { name: 'Paused', value: f.paused, itemStyle: { color: palette.value.warning } },
+    { name: 'Disabled', value: f.disabled, itemStyle: { color: palette.value.neutral } },
+  ].filter(s => s.value > 0)
+  return {
+    tooltip: {
+      trigger: 'item' as const,
+      backgroundColor: palette.value.tooltipBg,
+      borderColor: palette.value.tooltipBorder,
+      textStyle: { color: palette.value.textPrimary },
+    },
+    legend: {
+      bottom: 0,
+      type: 'scroll' as const,
+      itemWidth: 10,
+      itemHeight: 8,
+      itemGap: 10,
+      textStyle: { color: palette.value.textMuted, fontSize: 11 },
+    },
+    series: [{
+      type: 'pie' as const,
+      radius: ['48%', '68%'],
+      center: ['50%', '40%'],
+      avoidLabelOverlap: true,
+      label: { show: false },
+      labelLine: { show: false },
+      data: slices,
+    }],
+  }
+})
+
+function onWebhookHealthClick(p: ChartClickParams) {
+  const name = (p?.name ?? '').toLowerCase()
+  if (name === 'failing') router.push({ name: 'webhooks', query: { failing: '1' } })
+  else if (name === 'paused') router.push({ name: 'webhooks', query: { status: 'PAUSED' } })
+  else if (name === 'disabled') router.push({ name: 'webhooks', query: { status: 'DISABLED' } })
+  else if (name === 'healthy') router.push({ name: 'webhooks', query: { status: 'ACTIVE' } })
+}
+
+const budgetStatusOption = computed(() => {
+  const bc = overview.value?.budget_counts
+  const slices = bc
+    ? [
+        { name: 'Active', value: bc.active, itemStyle: { color: palette.value.success } },
+        { name: 'Frozen', value: bc.frozen, itemStyle: { color: palette.value.warning } },
+        { name: 'Over-limit', value: bc.over_limit, itemStyle: { color: palette.value.danger } },
+        { name: 'Closed', value: bc.closed, itemStyle: { color: palette.value.neutral } },
+      ].filter((s) => s.value > 0)
+    : []
+  return {
+    tooltip: {
+      trigger: 'item' as const,
+      backgroundColor: palette.value.tooltipBg,
+      borderColor: palette.value.tooltipBorder,
+      textStyle: { color: palette.value.textPrimary },
+    },
+    legend: {
+      bottom: 0,
+      type: 'scroll' as const,
+      itemWidth: 10,
+      itemHeight: 8,
+      itemGap: 10,
+      textStyle: { color: palette.value.textMuted, fontSize: 11 },
+    },
+    series: [
+      {
+        type: 'pie' as const,
+        radius: ['48%', '68%'],
+        center: ['50%', '40%'],
+        avoidLabelOverlap: true,
+        label: { show: false },
+        labelLine: { show: false },
+        data: slices,
+      },
+    ],
+  }
+})
+
+// Budget fleet utilization — donut over actual `spent / allocated`
+// (true utilization), NOT over the server's debt-based aggregates.
+// An earlier iteration derived segments from `budget_counts.over_limit`
+// + `budget_counts.with_debt`, but per spec
+// (cycles-governance-admin-v0.1.25.yaml:1415–1417) `is_over_limit =
+// debt > overdraft_limit` — a purely financial overdraft signal. A
+// budget at 113% spent/allocated with overdraft_limit covering the
+// overage has debt = 0 and counted as "Healthy" in the old chart
+// even though operators would call it critically over cap. The new
+// chart reads the same `listBudgets({utilization_min:0.9, limit:500})`
+// fetch the attention cards use and buckets by real utilization:
+//   • Near cap (90–99%) — warning, "about to blow"
+//   • Over cap (≥100%)  — danger, "spent exceeds allocated"
+//   • Healthy (<90%)    — success, everything else
+// Click contract: each slice drills to the utilization-filtered
+// BudgetsView so the operator can triage the band directly. Shape
+// matches the other two Overview donuts for visual consistency.
+const budgetUtilizationOption = computed(() => {
+  const bc = overview.value?.budget_counts
+  if (!bc || bc.total === 0) {
+    return { series: [{ type: 'pie' as const, data: [] }] }
+  }
+  // atCapBudgets is server-filtered to utilization ≥ 0.9. Bucket
+  // client-side: ≥1.0 → over cap; in [0.9, 1.0) → near cap.
+  let nearCap = 0
+  let overCap = 0
+  for (const b of atCapBudgets.value) {
+    if (utilizationOf(b) >= 1) overCap++
+    else nearCap++
+  }
+  // Healthy = total − (near + over). `bc.total` is a server aggregate
+  // that includes closed-tenant children, so this slightly over-counts
+  // Healthy vs. the cards' closed-tenant-filtered numbers — acceptable
+  // because the donut is the fleet-health read, not the attention read.
+  // Clamp to 0 in case of transient server/client skew.
+  const healthy = Math.max(0, bc.total - nearCap - overCap)
+  const slices = [
+    { name: 'Healthy', value: healthy, itemStyle: { color: palette.value.success } },
+    { name: 'Near cap', value: nearCap, itemStyle: { color: palette.value.warning } },
+    { name: 'Over cap', value: overCap, itemStyle: { color: palette.value.danger } },
+  ].filter((s) => s.value > 0)
+  return {
+    tooltip: {
+      trigger: 'item' as const,
+      backgroundColor: palette.value.tooltipBg,
+      borderColor: palette.value.tooltipBorder,
+      textStyle: { color: palette.value.textPrimary },
+      formatter: (params: unknown) => {
+        const p = Array.isArray(params) ? params[0] : params
+        const name = String((p as { name?: string }).name ?? '')
+        const value = Number((p as { value?: unknown }).value ?? 0)
+        const pct = Number((p as { percent?: number }).percent ?? 0)
+        const band =
+          name === 'Healthy' ? ' (< 90%)' :
+          name === 'Near cap' ? ' (90–99%)' :
+          name === 'Over cap' ? ' (≥ 100%)' : ''
+        return `${name}${band}: <b>${value}</b> (${pct}%)`
+      },
+    },
+    legend: {
+      bottom: 0,
+      type: 'scroll' as const,
+      itemWidth: 10,
+      itemHeight: 8,
+      itemGap: 10,
+      textStyle: { color: palette.value.textMuted, fontSize: 11 },
+    },
+    series: [
+      {
+        type: 'pie' as const,
+        radius: ['48%', '68%'],
+        center: ['50%', '40%'],
+        avoidLabelOverlap: true,
+        label: { show: false },
+        labelLine: { show: false },
+        data: slices,
+      },
+    ],
+  }
+})
+
+// Events by category donut — what class of activity is the runtime
+// emitting in the recent window. Sourced from
+// `overview.event_counts.by_category` (already-aggregated). Operators
+// use this to sanity-check traffic mix: a sudden spike in "policy" or
+// "webhook" events vs. the usual "reservation" baseline is the kind
+// of thing that merits attention. Hidden when zero categories have
+// non-zero volume.
+// Color assignment strategy for event categories:
+//   1. `policy` and `reservation` keep semantic colors (danger =
+//      denial-adjacent; success = normal traffic) — operators already
+//      associate those.
+//   2. Every other known category gets a distinct hue from the
+//      qualitative palette so no two categories collide. Operator
+//      report: "tenant, api_key both grey — why is the color the
+//      same for 2 categories?" — fixed by one hue per category.
+//   3. Unknown categories fall back to a deterministic hash →
+//      qualitative index so two unknowns also land on different
+//      slots (not on the same fallback neutral).
+function hashCategory(name: string): number {
+  let h = 0
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
+  return h
+}
+function categoryColor(name: string): string {
+  const key = name.toLowerCase()
+  if (key === 'policy') return palette.value.danger
+  if (key === 'reservation') return palette.value.success
+  // Stable qualitative slot per known category (index into palette.categorical).
+  const assignments: Record<string, number> = {
+    webhook: 0,     // blue
+    budget: 2,      // amber
+    tenant: 4,      // purple
+    api_key: 5,     // teal — was grey before
+    apikey: 5,
+    audit: 6,       // pink — was grey before
+    runtime: 7,     // indigo
+    policy_eval: 3, // red-adjacent sub-category
+  }
+  const cat = palette.value.categorical
+  const idx = assignments[key] ?? (hashCategory(key) % cat.length)
+  return cat[idx]
+}
+// Wrapping-grid visibility: always show the row once overview has
+// loaded. The events-by-category card is always rendered (with an
+// empty-state message if no events), so the 3-up layout stays stable
+// across environments — operators reported the row disappearing on
+// idle dev environments when we previously hid the events card.
+const hasAnyChart = computed(() => overview.value !== null)
+
+const eventsByCategoryOption = computed(() => {
+  const ec = overview.value?.event_counts
+  const map = ec?.by_category
+  let slices = map
+    ? Object.entries(map)
+        .map(([name, value]) => ({
+          name,
+          value: value as number,
+          itemStyle: { color: categoryColor(name) },
+        }))
+        .filter((s) => s.value > 0)
+        .sort((a, b) => b.value - a.value)
+    : []
+  // Fallback: if we have events but no category breakdown (older admin
+  // versions, or a runtime that hasn't categorized yet), render a
+  // single "uncategorized" slice so the chart still shows *something*
+  // instead of disappearing. Operators reported "only see 2 charts"
+  // exactly because of this empty-by_category path.
+  if (slices.length === 0 && (ec?.total_recent ?? 0) > 0) {
+    slices = [
+      {
+        name: 'uncategorized',
+        value: ec!.total_recent,
+        itemStyle: { color: palette.value.neutral as string },
+      },
+    ]
+  }
+  return {
+    tooltip: {
+      trigger: 'item' as const,
+      backgroundColor: palette.value.tooltipBg,
+      borderColor: palette.value.tooltipBorder,
+      textStyle: { color: palette.value.textPrimary },
+      formatter: (params: unknown) => {
+        const p = Array.isArray(params) ? params[0] : params
+        const name = String((p as { name?: string }).name ?? '')
+        const value = Number((p as { value?: unknown }).value ?? 0)
+        const pct = Number((p as { percent?: number }).percent ?? 0)
+        return `${name}: <b>${value}</b> (${pct}%)`
+      },
+    },
+    legend: {
+      bottom: 0,
+      type: 'scroll' as const,
+      itemWidth: 10,
+      itemHeight: 8,
+      itemGap: 10,
+      textStyle: { color: palette.value.textMuted, fontSize: 11 },
+    },
+    series: [
+      {
+        type: 'pie' as const,
+        radius: ['48%', '68%'],
+        center: ['50%', '40%'],
+        avoidLabelOverlap: true,
+        label: { show: false },
+        labelLine: { show: false },
+        data: slices,
+      },
+    ],
+  }
 })
 
 // Denial breakdown by reason_code (v0.1.25.8+ server). The per-row
@@ -535,6 +903,106 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
         </div>
       </div>
 
+      <!-- At-a-glance visualizations. Four lightweight ancillary
+           charts that read payload already in-flight — no new
+           fetches. Each hides itself when its backing data is empty
+           so an empty fleet never surfaces an empty chart. Layout
+           is a 4-up grid on wide screens, 2-up on medium, stacking
+           vertically on narrow.
+             • Budget status distribution (donut) — lifecycle mix
+               (active / frozen / closed / over-limit).
+             • Budget fleet utilization (donut) — true utilization
+               buckets (Healthy < 90% / Near cap 90–99% /
+               Over cap ≥ 100%) computed from spent/allocated across
+               the at-cap fetch, NOT from the debt-based server
+               aggregate. See `budgetUtilizationOption` for rationale.
+             • Webhook fleet health (donut, v0.1.25.52) — relocated
+               from WebhooksView; Healthy / Failing / Paused /
+               Disabled; click drills to /webhooks?status=... or
+               ?failing=1.
+             • Events by category (donut) — recent activity mix
+               across the event window. -->
+      <div
+        v-if="hasAnyChart"
+        class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"
+        data-testid="overview-charts"
+      >
+        <div
+          v-if="budgetStatusOption.series[0].data.length > 0"
+          class="card p-3"
+          data-testid="budget-status-donut"
+        >
+          <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
+            Budget status distribution
+            <span class="muted text-xs font-normal">· click a slice</span>
+          </div>
+          <BaseChart
+            :option="budgetStatusOption"
+            label="Budget status distribution donut chart — clickable"
+            height="200px"
+            @slice-click="onBudgetStatusClick"
+          />
+        </div>
+
+        <div
+          v-if="overview.budget_counts.total > 0"
+          class="card p-3"
+          data-testid="budget-utilization-donut"
+        >
+          <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
+            Budget fleet utilization
+            <span class="muted text-xs font-normal">· click a slice</span>
+          </div>
+          <BaseChart
+            :option="budgetUtilizationOption"
+            label="Budget fleet utilization donut chart — clickable"
+            height="200px"
+            @slice-click="onBudgetUtilizationClick"
+          />
+        </div>
+
+        <div
+          v-if="failingWebhooksRaw.length > 0"
+          class="card p-3"
+          data-testid="webhook-fleet-health-donut"
+        >
+          <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
+            Webhook fleet health
+            <span class="muted text-xs font-normal">· click a slice</span>
+          </div>
+          <BaseChart
+            :option="webhookHealthOption"
+            label="Webhook fleet health donut chart — clickable"
+            height="200px"
+            @slice-click="onWebhookHealthClick"
+          />
+        </div>
+
+        <div
+          class="card p-3"
+          data-testid="events-by-category-donut"
+        >
+          <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
+            Events by category ({{ Math.round(overview.event_window_seconds / 60) }}m)
+            <span class="muted text-xs font-normal">· click a slice</span>
+          </div>
+          <BaseChart
+            v-if="eventsByCategoryOption.series[0].data.length > 0"
+            :option="eventsByCategoryOption"
+            label="Events by category donut chart — clickable"
+            height="200px"
+            @slice-click="onEventsCategoryClick"
+          />
+          <div
+            v-else
+            class="flex items-center justify-center text-xs muted"
+            style="height: 180px"
+          >
+            No recent events in the last {{ Math.round(overview.event_window_seconds / 60) }}m
+          </div>
+        </div>
+      </div>
+
       <!-- WHAT NEEDS ATTENTION — 6 cards, alerts-first. Each card has a
            "problems first" orientation: count badge + severity-colored
            left border + warning icon in the title row if firing;
@@ -585,7 +1053,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
                 :class="axisById['budgets-at-cap']?.severity === 'danger' ? 'badge-danger' : 'badge-warning'"
               >{{ atCapBudgetsFiltered.length }}</span>
             </h2>
-            <router-link :to="{ name: 'budgets', query: { utilization_min: '0.9' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
+            <router-link :to="{ name: 'budgets', query: { utilization_min: '90' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
           <div v-if="atCapSorted.length === 0" class="text-sm muted py-4 text-center">All budgets under 90% utilized</div>
           <div

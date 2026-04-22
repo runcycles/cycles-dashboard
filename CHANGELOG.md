@@ -15,6 +15,229 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.52] — 2026-04-22
+
+### Changed
+
+- **Webhook fleet-health donut relocated to OverviewView.** The
+  donut shipped in v0.1.25.51 was mounted on WebhooksView above the
+  filter row, where it competed with the table for vertical space
+  on the view operators use most. Moved to the Overview chart row
+  (now 4-up on `lg`: budget utilization → **webhook fleet health**
+  → events by category → top-10 by debt) where it lives alongside
+  the other fleet-glance donuts. Same four slices, same drill-down
+  contracts (`?status=ACTIVE`, `?failing=1`, `?status=PAUSED`,
+  `?status=DISABLED`). Data source still the already-fetched
+  webhook list on Overview — no new requests.
+- **WebhooksView returns to its pre-v0.1.25.51 layout** — filter
+  row directly below the error banner. Row-level health dot
+  (green/amber/red) stays; that signal lives with the row it
+  describes.
+
+### Fixed
+
+- **Overview donut legend no longer overlaps pie on the 4-up grid.**
+  Going from 3-up to 4-up on `lg` shrank each card ~33% → ~25% of
+  viewport width. At that width a 4-item legend wraps onto two
+  lines and crashes into the pie. All four Overview donuts now use
+  `legend.type: 'scroll'` with tighter item spacing, chart height
+  bumped 180px → 200px for breathing room.
+- **All four Overview donuts share identical pie geometry.** The
+  shrink-radius fix above only caught one option because the others
+  live at a deeper indent inside `series: [{...}]` arrays; the
+  webhook donut ended up visibly smaller than its neighbors.
+  Radius `['48%', '68%']` + center `['50%', '40%']` now applied
+  uniformly.
+
+## [0.1.25.51] — 2026-04-22
+
+### Added
+
+- **WebhooksView — fleet-health donut.** New card above the filter
+  row, at parity with the three Overview donuts. Client-side reduce
+  over the already-fetched `webhooks` list (60s poll, no new request).
+  Four slices: **Healthy** (ACTIVE, no failures), **Failing**
+  (`consecutive_failures ≥ 1` regardless of status — a PAUSED
+  webhook with latent failures still needs attention), **Paused**
+  (PAUSED, no failures), **Disabled** (terminal). Click-to-drill
+  contracts:
+  - Healthy → `/webhooks?status=ACTIVE`
+  - Failing → `/webhooks?failing=1`
+  - Paused → `/webhooks?status=PAUSED`
+  - Disabled → `/webhooks?status=DISABLED`
+- **WebhookDetailView — four-up per-subscription stat row.** Sits
+  between the subscription card and the Delivery History table.
+  All four derive from the already-loaded deliveries page (30s poll):
+  - **Last successful delivery** — traffic-light chip mirroring
+    PagerDuty/Grafana convention (green < 1h, amber 1h–24h, red
+    ≥ 24h or no successful delivery yet).
+  - **Delivery outcome donut** — SUCCESS / FAILED / RETRYING /
+    PENDING over the loaded page. Clicking a slice sets the
+    history-table status filter in place (no route push).
+  - **Attempts per delivery histogram** — bucket counts for
+    1 / 2 / 3 / 4 / 5+ attempts. A long tail in 4/5+ surfaces
+    retry storms visibly before operators have to scan the table.
+  - **Response time** — p50 / p95 / max over deliveries that
+    carry `response_time_ms`. Text stats rather than a histogram
+    because fighting over bucket widths on a variable-size cursor
+    page gives p50/p95 better signal.
+
+### Changed
+
+- **BaseChart re-registers `BarChart` + `GridComponent`.** The
+  attempts histogram needs them; tree-shaking still only bundles
+  what's actively used (PieChart, BarChart, Tooltip, Legend, Grid).
+
+## [0.1.25.50] — 2026-04-22
+
+### Changed
+
+- **Overview "Budget fleet utilization" — reshaped to a true-utilization
+  donut (operator-reported regression).** Report: "169 budgets, several
+  at 90%+ and one at 113%, all show as Healthy." Root cause: the
+  previous stacked bar derived segments from `budget_counts.over_limit`
+  + `budget_counts.with_debt`; per spec
+  (`cycles-governance-admin-v0.1.25.yaml:1415–1417`) `is_over_limit =
+  debt > overdraft_limit` is a purely financial overdraft signal, so a
+  budget at 113% spent/allocated whose `overdraft_limit` absorbs the
+  overage has `debt = 0` and counted as Healthy. The chart now buckets
+  by actual `spent / allocated` across the `utilization_min=0.9` fetch
+  that already powers the at-cap attention card:
+  - Healthy (< 90%) — success
+  - Near cap (90–99%) — warning
+  - Over cap (≥ 100%) — danger
+
+  Donut shape matches the two neighboring charts for visual consistency
+  (three donuts rather than two donuts + a bar).
+- **Utilization drill-down uses `utilization_min` / `utilization_max`
+  instead of the debt-based `filter=over_limit|has_debt`.** Click
+  contracts: Healthy → `/budgets` (unfiltered); Near cap →
+  `/budgets?utilization_min=90&utilization_max=100`; Over cap →
+  `/budgets?utilization_min=100`. `BudgetsView` now hydrates both
+  params from the URL on mount — previously they were wired to the
+  inline form but not to deep links, silently rendering an unfiltered
+  list.
+- **`/overview` attention-card fetch `utilization_min=0.9` limit bumped
+  10 → 500.** The at-cap card still slices to 5 for display, but the
+  new fleet-utilization donut needs a representative sample of the
+  at-cap + near-cap set to produce honest bucket counts.
+
+### Removed
+
+- **`BarChart` + `GridComponent` ECharts registrations.** The
+  utilization stacked bar was the only consumer. Only `PieChart` +
+  `TooltipComponent` + `LegendComponent` remain bundled, shrinking the
+  chart chunk.
+
+### Fixed
+
+- Overview at-cap card "View all" link — `utilization_min=0.9` →
+  `utilization_min=90` to match the new percent URL convention the
+  BudgetsView filter inputs already expose.
+
+## [0.1.25.49] — 2026-04-22
+
+### Fixed
+
+- **Events-by-category donut color collisions.** Operator report:
+  "tenant, api_key both grey, budget orange — why is the color the
+  same for 2 categories?" The previous 5-tone semantic palette
+  (success / warning / danger / info / neutral) forced three
+  categories onto `neutral` grey. Added a 10-hue qualitative palette
+  to `useChartTheme` and assigned each known category to a distinct
+  slot (tenant = purple, api_key = teal, audit = pink, webhook = blue,
+  etc.). `policy` keeps red and `reservation` keeps green for their
+  semantic associations. Unknown categories use a deterministic
+  hash → slot so two unknowns never collide either.
+
+### Added
+
+- **Chart drill-down.** Every slice/segment on the Overview charts is
+  now clickable and navigates to the corresponding list view with the
+  filter pre-applied:
+  - Budget status donut → `BudgetsView?status=<ACTIVE|FROZEN|CLOSED>`
+    (Over-limit → `?filter=over_limit`).
+  - Budget utilization bar → `BudgetsView?filter=over_limit|has_debt`
+    or unfiltered for the Healthy segment.
+  - Events by category donut → `EventsView?category=<name>`.
+- **BaseChart — `slice-click` emit.** Shared wrapper forwards the
+  ECharts click payload (`seriesName`, `name`, `dataIndex`, `value`,
+  `componentType`) so each caller can map a click to a route
+  independently. Cursor switches to `pointer` on hover so the
+  interaction is discoverable.
+
+### Notes
+
+- Each chart title carries a muted "· click a slice/segment" hint so
+  operators know the charts are actionable.
+- No new API surface — all drill-downs reuse existing list-view URL
+  query contracts (`status`, `filter`, `category`).
+
+## [0.1.25.48] — 2026-04-22
+
+### Added
+
+- **Overview — two more ancillary charts.** Expanding the trial slice
+  from one chart to three, laid out as a 3-up grid beneath the counter
+  strip:
+  - **Budget fleet utilization** — horizontal stacked bar partitioning
+    `budget_counts.total` into Healthy / With-debt / Over-limit. Answers
+    "how much of the fleet is in trouble" separately from the by-status
+    mix in the donut beside it.
+  - **Events by category** — donut over `event_counts.by_category` with
+    tone-mapped colors per category (policy = danger, reservation =
+    success, webhook = info, etc.). Tells ops what class of activity
+    the runtime is emitting in the recent window.
+- **BaseChart — BarChart + GridComponent registered.** Tree-shaken
+  additions so the new horizontal bar renders without pulling the full
+  ECharts surface. No other views affected.
+
+### Notes
+
+- Each chart reads the same `/v1/admin/overview` payload already in
+  flight on the landing page — no new fetches.
+- Chart chunk grows from ~142 KB → ~165 KB gzip (BarChart +
+  GridComponent). OverviewView initial chunk 6.40 → 7.11 KB gzip.
+
+## [0.1.25.47] — 2026-04-22
+
+### Added
+
+- **Charting layer — trial slice.** Introduces `echarts` + `vue-echarts`
+  as the dashboard's visualization library (tree-shaken, lazy-loaded).
+  Adds a shared `BaseChart` wrapper (`src/components/BaseChart.vue`)
+  that any view can reuse, backed by a `useChartTheme` composable
+  (`src/composables/useChartTheme.ts`) that maps Tailwind status tokens
+  (success / warning / danger / info / neutral) to ECharts colors and
+  reactively switches palette on dark-mode toggle.
+- **Overview — budget status distribution donut.** The first chart: a
+  compact donut under the at-a-glance counter strip showing the share
+  of budgets in each lifecycle bucket (Active / Frozen / Over-limit /
+  Closed). Consumes the same `/v1/admin/overview` payload already in
+  flight — no new API request. Hides automatically when every slice
+  is zero (empty fleet) so an empty chart never surfaces.
+
+### Fixed
+
+- **BaseChart empty render.** The initial trial-slice shipped with the
+  inner `<v-chart>` inheriting a redundant inline style from the outer
+  wrapper. ECharts' autoresize measured zero height and the chart card
+  rendered its header only. Fixed by giving the `<v-chart>` explicit
+  `height: 100%; width: 100%` so it fills the sized outer container.
+- **Alpine 3.23.4 HIGH/CRITICAL CVEs.** The `nginx:1.29-alpine` base
+  image accumulated fixable HIGH/CRITICAL vulnerabilities overnight
+  that the Trivy gate refused. Added `apk upgrade --no-cache` in the
+  serve stage so each container build pulls the latest alpine patches
+  regardless of when upstream refloats the nginx tag.
+
+### Notes
+
+- ECharts is lazy-loaded in a separate chunk (~142 KB gzip) so the
+  Overview initial chunk stays at its prior ~6.4 KB gzip footprint.
+  The chart bundle downloads only when a chart renders.
+- No spec change. No admin change. First of a six-PR visualizations
+  roadmap (see `AUDIT.md` for the full slice plan).
+
 ## [0.1.25.46] — 2026-04-21
 
 ### Changed

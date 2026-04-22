@@ -9,9 +9,12 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# Serve stage — Alpine 3.23 ships patched openssl/libxml2/libpng/musl/zlib
-# closing the 57 HIGH/CRITICAL CVEs Trivy flagged against Alpine 3.21.3.
+# Serve stage — Alpine 3.23 base plus `apk upgrade` so each build pulls in
+# the latest alpine security patches. Without the upgrade step Trivy fails
+# any day a new HIGH/CRITICAL CVE is disclosed against the pinned minor
+# before upstream refloats the nginx:1.29-alpine tag.
 FROM nginx:1.29-alpine
+RUN apk update && apk upgrade --no-cache && rm -rf /var/cache/apk/*
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80

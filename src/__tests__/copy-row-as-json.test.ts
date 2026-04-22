@@ -56,6 +56,25 @@ vi.mock('../composables/useDebouncedRef', () => ({
   useDebouncedRef: <T>(source: { value: T }) => source,
 }))
 
+// WebhookDetailView (v0.1.25.51+) mounts charts; vue-echarts drives
+// a real canvas against jsdom and throws `Cannot set properties of
+// null (setting 'dpr')`. Stub both vue-echarts and the echarts
+// registrations so BaseChart mounts as an inert div — these tests
+// care about Copy-as-JSON wiring on the delivery-history table, not
+// chart pixels.
+vi.mock('vue-echarts', () => ({
+  default: { props: ['option'], template: '<div data-testid="v-chart-stub" />' },
+  THEME_KEY: Symbol('theme'),
+}))
+vi.mock('echarts/core', () => ({ use: () => {} }))
+vi.mock('echarts/renderers', () => ({ CanvasRenderer: {} }))
+vi.mock('echarts/charts', () => ({ PieChart: {}, BarChart: {} }))
+vi.mock('echarts/components', () => ({
+  TooltipComponent: {},
+  LegendComponent: {},
+  GridComponent: {},
+}))
+
 vi.mock('@tanstack/vue-virtual', async () => {
   const { computed, isRef } = await import('vue')
   return {
