@@ -34,6 +34,21 @@ UX work that does not advance spec alignment.
   (green/amber/red) stays; that signal lives with the row it
   describes.
 
+### Fixed
+
+- **Overview donut legend no longer overlaps pie on the 4-up grid.**
+  Going from 3-up to 4-up on `lg` shrank each card ~33% → ~25% of
+  viewport width. At that width a 4-item legend wraps onto two
+  lines and crashes into the pie. All four Overview donuts now use
+  `legend.type: 'scroll'` with tighter item spacing, chart height
+  bumped 180px → 200px for breathing room.
+- **All four Overview donuts share identical pie geometry.** The
+  shrink-radius fix above only caught one option because the others
+  live at a deeper indent inside `series: [{...}]` arrays; the
+  webhook donut ended up visibly smaller than its neighbors.
+  Radius `['48%', '68%']` + center `['50%', '40%']` now applied
+  uniformly.
+
 ## [0.1.25.51] — 2026-04-22
 
 ### Added

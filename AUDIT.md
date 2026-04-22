@@ -31,6 +31,13 @@ Newest at the top. Older entries preserved verbatim.
 | `src/views/WebhooksView.vue` | Donut card + supporting computeds / handler / `useChartTheme` / `defineAsyncComponent(BaseChart)` imports removed. Back to pre-v0.1.25.51 structure — filter card sits directly below the error banner. Row-level health dot preserved. |
 | `src/__tests__/WebhookCharts.test.ts` | `WebhooksView — fleet-health donut` describe replaced with `OverviewView — webhook fleet-health donut (relocated v0.1.25.52)` (5 tests). WebhookDetailView stat-row describe block unchanged (5 tests, still at 10 total). Added `getOverviewMock` / `listApiKeysMock` / `listAuditLogsMock` / `listBudgetsMock` so OverviewView mounts cleanly; `healthyOverview()` helper returns a valid `AdminOverviewResponse` with only the webhook slice varying per test. |
 
+**Late repairs (same release, follow-on commits).**
+
+| Commit | Trigger | Fix |
+|---|---|---|
+| `f76dcce` | Operator: *"Webhook legend on top of chart because it has 4 elements, so Failing is on top of pie chart. Event will probably have same problem."* | Donut legend overlapped pie on the new 4-up grid — each card shrank ~33% → ~25% wide, and a 4-item legend wraps onto two lines at that width. All four Overview donuts now use `legend.type: 'scroll'` with tighter item spacing (itemWidth 10 / itemHeight 8 / itemGap 10). Chart height bumped 180px → 200px. Pre-empts the predicted repeat on events-by-category. |
+| `4fe53fe` | Operator: *"Webhook fleet health pie chart smaller than other pie charts."* | The radius-shrink in `f76dcce` used `replace_all` on `radius: ['55%', '78%']`, but only the webhook option is written at 6-space indent. The other three options nest the pie config in `series: [{...}]` arrays at 8-space indent, so the replace skipped them. Webhook was the only pie that shrank. Corrected: radius `['48%', '68%']` + center `['50%', '40%']` applied uniformly. Lesson: a bare `replace_all` presumes a single canonical indent — `Grep`ping for every match before and after is the safeguard. |
+
 **Verification.** `npm run typecheck` clean. `npx vitest run src/__tests__/WebhookCharts.test.ts` → 10 passing. Full suite → 852 passing.
 
 ### 2026-04-22 — v0.1.25.51: Webhook visualizations — fleet-health donut + per-subscription stat row
