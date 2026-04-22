@@ -381,15 +381,18 @@ const CATEGORY_COLORS: Record<string, keyof typeof palette.value> = {
 const hasAnyChart = computed(() => {
   const donutSlices = (budgetStatusOption.value.series?.[0] as { data: unknown[] } | undefined)?.data?.length ?? 0
   const total = overview.value?.budget_counts?.total ?? 0
-  const evtCats = overview.value?.event_counts?.by_category
-    ? Object.values(overview.value.event_counts.by_category).some((v) => (v as number) > 0)
+  const ec = overview.value?.event_counts
+  const evtCats = ec?.by_category
+    ? Object.values(ec.by_category).some((v) => (v as number) > 0)
     : false
-  return donutSlices > 0 || total > 0 || evtCats
+  const evtTotal = (ec?.total_recent ?? 0) > 0
+  return donutSlices > 0 || total > 0 || evtCats || evtTotal
 })
 
 const eventsByCategoryOption = computed(() => {
-  const map = overview.value?.event_counts?.by_category
-  const slices = map
+  const ec = overview.value?.event_counts
+  const map = ec?.by_category
+  let slices = map
     ? Object.entries(map)
         .map(([name, value]) => {
           const tone = CATEGORY_COLORS[name.toLowerCase()] ?? 'neutral'
@@ -402,6 +405,20 @@ const eventsByCategoryOption = computed(() => {
         .filter((s) => s.value > 0)
         .sort((a, b) => b.value - a.value)
     : []
+  // Fallback: if we have events but no category breakdown (older admin
+  // versions, or a runtime that hasn't categorized yet), render a
+  // single "uncategorized" slice so the chart still shows *something*
+  // instead of disappearing. Operators reported "only see 2 charts"
+  // exactly because of this empty-by_category path.
+  if (slices.length === 0 && (ec?.total_recent ?? 0) > 0) {
+    slices = [
+      {
+        name: 'uncategorized',
+        value: ec!.total_recent,
+        itemStyle: { color: palette.value.neutral as string },
+      },
+    ]
+  }
   return {
     tooltip: {
       trigger: 'item' as const,

@@ -258,11 +258,21 @@ describe('OverviewView — events-by-category donut (v0.1.25.48)', () => {
     expect(w.find('[data-testid="events-by-category-donut"]').exists()).toBe(true)
   })
 
-  it('hides when event_counts.by_category is empty', async () => {
+  it('hides when event_counts.by_category is empty AND total_recent is 0', async () => {
     getOverviewMock.mockResolvedValue(healthyOverview({
       event_counts: { total_recent: 0, by_category: {} },
     }))
     const w = await mountOverview()
     expect(w.find('[data-testid="events-by-category-donut"]').exists()).toBe(false)
+  })
+
+  it('still renders a single uncategorized slice when by_category is empty but total_recent > 0', async () => {
+    // Fallback path: older admin versions or a runtime that has not yet
+    // categorized its events would otherwise hide the chart entirely.
+    getOverviewMock.mockResolvedValue(healthyOverview({
+      event_counts: { total_recent: 42, by_category: {} },
+    }))
+    const w = await mountOverview()
+    expect(w.find('[data-testid="events-by-category-donut"]').exists()).toBe(true)
   })
 })
