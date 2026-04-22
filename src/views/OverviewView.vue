@@ -341,11 +341,18 @@ const webhookHealthOption = computed(() => {
       borderColor: palette.value.tooltipBorder,
       textStyle: { color: palette.value.textPrimary },
     },
-    legend: { bottom: 0, textStyle: { color: palette.value.textMuted, fontSize: 11 } },
+    legend: {
+      bottom: 0,
+      type: 'scroll' as const,
+      itemWidth: 10,
+      itemHeight: 8,
+      itemGap: 10,
+      textStyle: { color: palette.value.textMuted, fontSize: 11 },
+    },
     series: [{
       type: 'pie' as const,
-      radius: ['55%', '78%'],
-      center: ['50%', '45%'],
+      radius: ['48%', '68%'],
+      center: ['50%', '40%'],
       avoidLabelOverlap: true,
       label: { show: false },
       labelLine: { show: false },
@@ -379,7 +386,14 @@ const budgetStatusOption = computed(() => {
       borderColor: palette.value.tooltipBorder,
       textStyle: { color: palette.value.textPrimary },
     },
-    legend: { bottom: 0, textStyle: { color: palette.value.textMuted, fontSize: 11 } },
+    legend: {
+      bottom: 0,
+      type: 'scroll' as const,
+      itemWidth: 10,
+      itemHeight: 8,
+      itemGap: 10,
+      textStyle: { color: palette.value.textMuted, fontSize: 11 },
+    },
     series: [
       {
         type: 'pie' as const,
@@ -453,7 +467,14 @@ const budgetUtilizationOption = computed(() => {
         return `${name}${band}: <b>${value}</b> (${pct}%)`
       },
     },
-    legend: { bottom: 0, textStyle: { color: palette.value.textMuted, fontSize: 11 } },
+    legend: {
+      bottom: 0,
+      type: 'scroll' as const,
+      itemWidth: 10,
+      itemHeight: 8,
+      itemGap: 10,
+      textStyle: { color: palette.value.textMuted, fontSize: 11 },
+    },
     series: [
       {
         type: 'pie' as const,
@@ -558,7 +579,14 @@ const eventsByCategoryOption = computed(() => {
         return `${name}: <b>${value}</b> (${pct}%)`
       },
     },
-    legend: { bottom: 0, textStyle: { color: palette.value.textMuted, fontSize: 11 } },
+    legend: {
+      bottom: 0,
+      type: 'scroll' as const,
+      itemWidth: 10,
+      itemHeight: 8,
+      itemGap: 10,
+      textStyle: { color: palette.value.textMuted, fontSize: 11 },
+    },
     series: [
       {
         type: 'pie' as const,
@@ -911,7 +939,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
           <BaseChart
             :option="budgetStatusOption"
             label="Budget status distribution donut chart — clickable"
-            height="180px"
+            height="200px"
             @slice-click="onBudgetStatusClick"
           />
         </div>
@@ -928,7 +956,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
           <BaseChart
             :option="budgetUtilizationOption"
             label="Budget fleet utilization donut chart — clickable"
-            height="180px"
+            height="200px"
             @slice-click="onBudgetUtilizationClick"
           />
         </div>
@@ -945,7 +973,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
           <BaseChart
             :option="webhookHealthOption"
             label="Webhook fleet health donut chart — clickable"
-            height="180px"
+            height="200px"
             @slice-click="onWebhookHealthClick"
           />
         </div>
@@ -962,7 +990,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
             v-if="eventsByCategoryOption.series[0].data.length > 0"
             :option="eventsByCategoryOption"
             label="Events by category donut chart — clickable"
-            height="180px"
+            height="200px"
             @slice-click="onEventsCategoryClick"
           />
           <div
