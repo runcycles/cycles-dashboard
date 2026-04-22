@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.47 (2026-04-22)
+**Current release:** v0.1.25.48 (2026-04-22)
 
 ## Baseline requirements
 
@@ -16,6 +16,57 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-22 — v0.1.25.48: Overview charts expanded (utilization bar + events-by-category)
+
+**Trigger.** Operator response after v0.1.25.47 landed: *"see one chart, we need at least 3 — status is fine, but also about budget utilization; recommend other 2 charts useful for ops."* Expand the Overview visualization row from one chart to three without requiring any new API surface.
+
+**Scope.** Two additional charts on OverviewView, laid out as a 3-up grid beneath the counter strip. Same `/v1/admin/overview` payload — no new fetches.
+
+| Surface | Change |
+|---|---|
+| `src/views/OverviewView.vue` | + `budgetUtilizationOption` (stacked horizontal bar — Healthy / With-debt / Over-limit across `budget_counts.total`). + `eventsByCategoryOption` (donut over `event_counts.by_category` with tone-mapped colors per category). + `hasAnyChart` guard so the wrapping grid hides when no chart inside it has data. Template switched from single `mb-6` card to `grid grid-cols-1 md:grid-cols-3 gap-4` row. |
+| `src/components/BaseChart.vue` | Register `BarChart` + `GridComponent` alongside the existing `PieChart`. Tooltip + Legend shared. |
+| `src/__tests__/BaseChart.test.ts` | +4 tests (utilization bar mount vs. empty-fleet skip, events-donut mount vs. empty-categories skip). |
+| `README.md` Visualizations section | Updated to describe the three Overview charts + revised bundle delta (~165 KB gz). |
+
+**Key design decisions.**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Budget utilization shape | Horizontal stacked bar, not a histogram | Shows "what fraction of the fleet is in trouble" in a single compact row — matches the donut's height next to it for visual parity. A utilization-by-percent histogram is the right shape for BudgetsView (per-row), not Overview (fleet aggregate). |
+| Utilization segmentation | Healthy / With-debt / Over-limit | Maps directly to the three operator-visible severity bands. `with_debt - over_limit` isolates the "has debt but still within cap" middle tier so over-limit doesn't double-count. |
+| Events donut category tones | Tone-mapped (policy = danger, reservation = success, webhook = info, audit/tenant = neutral, budget = warning, runtime = success) | Same mental model as the counter-strip chips — operators already associate policy/denial volume = red. |
+| Layout | 3-up grid, `md:grid-cols-3`, stacks on narrow | Keeps all three charts at the same 180px height so they read as one visual row, not a primary chart + two companions. |
+| Empty-state strategy | Each chart has its own `v-if` guard + a wrapping `hasAnyChart` so the grid row hides entirely on a brand-new environment | Avoids rendering an empty 3-column grid or a single lonely card. |
+
+**Rejected alternatives.**
+
+| Option | Why not |
+|---|---|
+| Per-unit allocated-vs-spent bar chart on Overview | Rich enough to deserve its own section on BudgetsView (Cut 2 of the roadmap). Would clutter the landing page and duplicate work. |
+| Top-N budgets by debt bar chart on Overview | Already covered by the debt-scopes attention card below; a bar chart would overlap without adding signal. |
+| Webhook fleet health donut on Overview | Planned for WebhooksView stat header (Cut 3); putting it on Overview would spread the operational picture too thin per view. |
+| Combining "events by category" into the existing counter-strip tile | Chip row already renders counts — the donut shows *proportions*, which is the complementary read. Keeping them side-by-side lets operators read both "how many events" and "what mix" without mode-switching. |
+
+**Edge cases.**
+
+| Case | Behavior |
+|---|---|
+| `budget_counts.total = 0` | Utilization bar `v-if`-skipped; donut + events donut may still render if they have data. |
+| `with_debt < over_limit` in a bad payload | Clamped to zero via `Math.max(0, …)` so the stacked bar never renders a negative segment. |
+| Single dominant event category | Donut renders a single full-circle slice; legend still shows its name. |
+| Dark-mode toggle | All three charts re-derive from `useChartTheme` palette identically. |
+
+**Tests.**
+
+| File | Count | Pins |
+|---|---|---|
+| `src/__tests__/BaseChart.test.ts` | 9 (was 5) | Added utilization-bar mount + empty-fleet skip; events-donut mount + empty-categories skip. |
+
+Full suite green. Bundle split: OverviewView 28.71 KB (gzip 7.11 KB), BaseChart chunk 494.38 KB (gzip 164.80 KB).
+
+**What's next.** PR 3: BudgetsView utilization histogram + top-N debt + per-unit bars (spec-unchanged). PR 4+: Webhooks fleet health, API-key expiry runway, Events stacked time-histogram.
 
 ### 2026-04-22 — v0.1.25.47: charting layer — trial slice (budget status donut)
 

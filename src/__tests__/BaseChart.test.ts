@@ -64,10 +64,11 @@ vi.mock('vue-echarts', () => ({
 }))
 vi.mock('echarts/core', () => ({ use: () => {} }))
 vi.mock('echarts/renderers', () => ({ CanvasRenderer: {} }))
-vi.mock('echarts/charts', () => ({ PieChart: {} }))
+vi.mock('echarts/charts', () => ({ PieChart: {}, BarChart: {} }))
 vi.mock('echarts/components', () => ({
   TooltipComponent: {},
   LegendComponent: {},
+  GridComponent: {},
 }))
 
 const FULL_CAPS: Capabilities = {
@@ -191,5 +192,77 @@ describe('OverviewView — budget-status donut (v0.1.25.47 trial chart)', () => 
     }))
     const w = await mountOverview()
     expect(w.find('[data-testid="budget-status-donut"]').exists()).toBe(true)
+  })
+})
+
+describe('OverviewView — budget utilization bar (v0.1.25.48)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    const auth = useAuthStore()
+    auth.apiKey = 'test-key'
+    auth.capabilities = FULL_CAPS
+    getOverviewMock.mockReset()
+    listApiKeysMock.mockReset()
+    listAuditLogsMock.mockReset()
+    listBudgetsMock.mockReset()
+    listTenantsMock.mockReset()
+    listWebhooksMock.mockReset()
+    listApiKeysMock.mockResolvedValue({ keys: [], has_more: false })
+    listAuditLogsMock.mockResolvedValue({ logs: [], has_more: false })
+    listBudgetsMock.mockResolvedValue({ ledgers: [], has_more: false })
+    listTenantsMock.mockResolvedValue({ tenants: [], has_more: false })
+    listWebhooksMock.mockResolvedValue({ subscriptions: [], has_more: false })
+  })
+
+  it('renders utilization bar when the fleet has at least one budget', async () => {
+    getOverviewMock.mockResolvedValue(healthyOverview({
+      budget_counts: { total: 5, active: 5, frozen: 0, closed: 0, over_limit: 1, with_debt: 2, by_unit: {} },
+    }))
+    const w = await mountOverview()
+    expect(w.find('[data-testid="budget-utilization-bar"]').exists()).toBe(true)
+  })
+
+  it('hides utilization bar on an empty fleet (total = 0)', async () => {
+    getOverviewMock.mockResolvedValue(healthyOverview({
+      budget_counts: { total: 0, active: 0, frozen: 0, closed: 0, over_limit: 0, with_debt: 0, by_unit: {} },
+    }))
+    const w = await mountOverview()
+    expect(w.find('[data-testid="budget-utilization-bar"]').exists()).toBe(false)
+  })
+})
+
+describe('OverviewView — events-by-category donut (v0.1.25.48)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    const auth = useAuthStore()
+    auth.apiKey = 'test-key'
+    auth.capabilities = FULL_CAPS
+    getOverviewMock.mockReset()
+    listApiKeysMock.mockReset()
+    listAuditLogsMock.mockReset()
+    listBudgetsMock.mockReset()
+    listTenantsMock.mockReset()
+    listWebhooksMock.mockReset()
+    listApiKeysMock.mockResolvedValue({ keys: [], has_more: false })
+    listAuditLogsMock.mockResolvedValue({ logs: [], has_more: false })
+    listBudgetsMock.mockResolvedValue({ ledgers: [], has_more: false })
+    listTenantsMock.mockResolvedValue({ tenants: [], has_more: false })
+    listWebhooksMock.mockResolvedValue({ subscriptions: [], has_more: false })
+  })
+
+  it('renders when event_counts.by_category has non-zero entries', async () => {
+    getOverviewMock.mockResolvedValue(healthyOverview({
+      event_counts: { total_recent: 10, by_category: { policy: 3, reservation: 7 } },
+    }))
+    const w = await mountOverview()
+    expect(w.find('[data-testid="events-by-category-donut"]').exists()).toBe(true)
+  })
+
+  it('hides when event_counts.by_category is empty', async () => {
+    getOverviewMock.mockResolvedValue(healthyOverview({
+      event_counts: { total_recent: 0, by_category: {} },
+    }))
+    const w = await mountOverview()
+    expect(w.find('[data-testid="events-by-category-donut"]').exists()).toBe(false)
   })
 })

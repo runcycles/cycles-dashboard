@@ -278,6 +278,159 @@ const budgetStatusOption = computed(() => {
   }
 })
 
+// Budget fleet utilization — horizontal stacked bar over
+// `budget_counts.total`. Segmentation: Over-limit (debt > overdraft
+// cap) → danger; With-debt (debt > 0 but within cap) → warning;
+// Healthy (remainder) → success. Answers "how much of the fleet is
+// healthy vs. in trouble" at a glance, separate from the
+// by-status mix in the donut beside it. Zero new fetches — same
+// `/overview` payload.
+const budgetUtilizationOption = computed(() => {
+  const bc = overview.value?.budget_counts
+  if (!bc || bc.total === 0) {
+    return { series: [{ type: 'bar' as const, data: [] }] }
+  }
+  const overLimit = bc.over_limit
+  const withDebt = Math.max(0, bc.with_debt - bc.over_limit)
+  const healthy = Math.max(0, bc.total - overLimit - withDebt)
+  return {
+    tooltip: {
+      trigger: 'item' as const,
+      backgroundColor: palette.value.tooltipBg,
+      borderColor: palette.value.tooltipBorder,
+      textStyle: { color: palette.value.textPrimary },
+      formatter: (params: unknown) => {
+        const p = Array.isArray(params) ? params[0] : params
+        const value = Number((p as { value?: unknown }).value ?? 0)
+        const seriesName = String((p as { seriesName?: string }).seriesName ?? '')
+        const pct = bc.total ? ((value / bc.total) * 100).toFixed(0) : '0'
+        return `${seriesName}: <b>${value}</b> (${pct}%)`
+      },
+    },
+    legend: { bottom: 0, textStyle: { color: palette.value.textMuted, fontSize: 11 } },
+    grid: { left: 8, right: 8, top: 12, bottom: 32, containLabel: false },
+    xAxis: { type: 'value' as const, max: bc.total, show: false },
+    yAxis: { type: 'category' as const, data: [''], show: false },
+    series: [
+      {
+        name: 'Healthy',
+        type: 'bar' as const,
+        stack: 'fleet',
+        data: [healthy],
+        itemStyle: { color: palette.value.success, borderRadius: [4, 0, 0, 4] },
+        barWidth: 28,
+        label: {
+          show: healthy > 0,
+          position: 'inside' as const,
+          formatter: '{c}',
+          color: '#ffffff',
+          fontWeight: 600,
+        },
+      },
+      {
+        name: 'With debt',
+        type: 'bar' as const,
+        stack: 'fleet',
+        data: [withDebt],
+        itemStyle: { color: palette.value.warning },
+        label: {
+          show: withDebt > 0,
+          position: 'inside' as const,
+          formatter: '{c}',
+          color: '#ffffff',
+          fontWeight: 600,
+        },
+      },
+      {
+        name: 'Over-limit',
+        type: 'bar' as const,
+        stack: 'fleet',
+        data: [overLimit],
+        itemStyle: { color: palette.value.danger, borderRadius: [0, 4, 4, 0] },
+        label: {
+          show: overLimit > 0,
+          position: 'inside' as const,
+          formatter: '{c}',
+          color: '#ffffff',
+          fontWeight: 600,
+        },
+      },
+    ],
+  }
+})
+
+// Events by category donut — what class of activity is the runtime
+// emitting in the recent window. Sourced from
+// `overview.event_counts.by_category` (already-aggregated). Operators
+// use this to sanity-check traffic mix: a sudden spike in "policy" or
+// "webhook" events vs. the usual "reservation" baseline is the kind
+// of thing that merits attention. Hidden when zero categories have
+// non-zero volume.
+const CATEGORY_COLORS: Record<string, keyof typeof palette.value> = {
+  policy: 'danger',
+  reservation: 'success',
+  webhook: 'info',
+  audit: 'neutral',
+  budget: 'warning',
+  tenant: 'neutral',
+  runtime: 'success',
+}
+// Wrapping-grid visibility: skip the row entirely when no chart
+// inside it has data, so we don't render an empty 3-column grid on
+// a brand-new environment.
+const hasAnyChart = computed(() => {
+  const donutSlices = (budgetStatusOption.value.series?.[0] as { data: unknown[] } | undefined)?.data?.length ?? 0
+  const total = overview.value?.budget_counts?.total ?? 0
+  const evtCats = overview.value?.event_counts?.by_category
+    ? Object.values(overview.value.event_counts.by_category).some((v) => (v as number) > 0)
+    : false
+  return donutSlices > 0 || total > 0 || evtCats
+})
+
+const eventsByCategoryOption = computed(() => {
+  const map = overview.value?.event_counts?.by_category
+  const slices = map
+    ? Object.entries(map)
+        .map(([name, value]) => {
+          const tone = CATEGORY_COLORS[name.toLowerCase()] ?? 'neutral'
+          return {
+            name,
+            value: value as number,
+            itemStyle: { color: palette.value[tone] as string },
+          }
+        })
+        .filter((s) => s.value > 0)
+        .sort((a, b) => b.value - a.value)
+    : []
+  return {
+    tooltip: {
+      trigger: 'item' as const,
+      backgroundColor: palette.value.tooltipBg,
+      borderColor: palette.value.tooltipBorder,
+      textStyle: { color: palette.value.textPrimary },
+      formatter: (params: unknown) => {
+        const p = Array.isArray(params) ? params[0] : params
+        const name = String((p as { name?: string }).name ?? '')
+        const value = Number((p as { value?: unknown }).value ?? 0)
+        const pct = Number((p as { percent?: number }).percent ?? 0)
+        return `${name}: <b>${value}</b> (${pct}%)`
+      },
+    },
+    legend: { bottom: 0, textStyle: { color: palette.value.textMuted, fontSize: 11 } },
+    series: [
+      {
+        type: 'pie' as const,
+        radius: ['55%', '78%'],
+        center: ['50%', '45%'],
+        avoidLabelOverlap: true,
+        label: { show: false },
+        labelLine: { show: false },
+        data: slices,
+      },
+    ],
+  }
+})
+
 // Denial breakdown by reason_code (v0.1.25.8+ server). The per-row
 // display is capped at 10 but the breakdown aggregates the full window,
 // so it's the honest "why are things getting denied" read when the
@@ -580,22 +733,60 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
         </div>
       </div>
 
-      <!-- Trial visualization (v0.1.25.47): budget status distribution.
-           Consumes overview.budget_counts — no new fetch. Renders only
-           when at least one slice is non-zero so an empty fleet doesn't
-           surface an empty chart. Height is capped so it stays a
-           lightweight ancillary visual, not a hero. -->
+      <!-- At-a-glance visualizations (v0.1.25.48). Three lightweight
+           ancillary charts that read the same `/overview` payload as
+           the counter strip above — no new fetches. Each one hides
+           itself when its backing data is empty so an empty fleet
+           never surfaces an empty chart. Layout is a 3-up grid on
+           wide screens, stacking vertically on narrow ones.
+             • Budget status distribution (donut) — lifecycle mix.
+             • Budget fleet utilization (stacked bar) — healthy vs.
+               with-debt vs. over-limit share of the fleet.
+             • Events by category (donut) — recent activity mix
+               across the event window. -->
       <div
-        v-if="budgetStatusOption.series[0].data.length > 0"
-        class="card p-3 mb-6"
-        data-testid="budget-status-donut"
+        v-if="hasAnyChart"
+        class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6"
+        data-testid="overview-charts"
       >
-        <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Budget status distribution</div>
-        <BaseChart
-          :option="budgetStatusOption"
-          label="Budget status distribution donut chart"
-          height="180px"
-        />
+        <div
+          v-if="budgetStatusOption.series[0].data.length > 0"
+          class="card p-3"
+          data-testid="budget-status-donut"
+        >
+          <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Budget status distribution</div>
+          <BaseChart
+            :option="budgetStatusOption"
+            label="Budget status distribution donut chart"
+            height="180px"
+          />
+        </div>
+
+        <div
+          v-if="overview.budget_counts.total > 0"
+          class="card p-3"
+          data-testid="budget-utilization-bar"
+        >
+          <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Budget fleet utilization</div>
+          <BaseChart
+            :option="budgetUtilizationOption"
+            label="Budget fleet utilization stacked bar chart"
+            height="180px"
+          />
+        </div>
+
+        <div
+          v-if="eventsByCategoryOption.series[0].data.length > 0"
+          class="card p-3"
+          data-testid="events-by-category-donut"
+        >
+          <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Events by category ({{ Math.round(overview.event_window_seconds / 60) }}m)</div>
+          <BaseChart
+            :option="eventsByCategoryOption"
+            label="Events by category donut chart"
+            height="180px"
+          />
+        </div>
       </div>
 
       <!-- WHAT NEEDS ATTENTION — 6 cards, alerts-first. Each card has a

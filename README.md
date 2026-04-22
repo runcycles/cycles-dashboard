@@ -186,9 +186,13 @@ Shared implementation: `src/composables/useTerminalAwareList.ts`.
 ## Visualizations
 
 The dashboard renders inline charts alongside the data tables via Apache
-ECharts (`vue-echarts`). The charting layer shipped in v0.1.25.47 as a
-trial slice (budget-status donut on Overview); subsequent slices extend
-it to Budgets / Webhooks / API Keys / Events.
+ECharts (`vue-echarts`). The charting layer landed as a trial slice in
+v0.1.25.47 (single donut) and expanded in v0.1.25.48 to three
+Overview charts: **Budget status distribution** (lifecycle donut),
+**Budget fleet utilization** (healthy / with-debt / over-limit stacked
+bar), and **Events by category** (donut over the recent event window).
+Subsequent slices extend the pattern to Budgets / Webhooks / API Keys /
+Events views.
 
 Shared building blocks:
 
@@ -198,8 +202,9 @@ Shared building blocks:
 | `src/composables/useChartTheme.ts` | Reactive palette mapping the Tailwind status tokens (success / warning / danger / info / neutral) plus axis / grid / tooltip colors to ECharts values. Re-derives on dark-mode toggle. |
 
 ECharts is lazy-loaded per-view via `defineAsyncComponent` so the chart
-bundle (~142 KB gzip) downloads only when a chart actually renders. No
-view's initial chunk pays the chart-library cost.
+bundle (~165 KB gzip after v0.1.25.48's BarChart + GridComponent
+additions) downloads only when a chart actually renders. No view's
+initial chunk pays the chart-library cost.
 
 Every chart reads data the view already fetched — no chart adds a
 network request. For the full six-slice roadmap and what each view is
@@ -313,7 +318,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.47
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.48
     restart: unless-stopped
     # No exposed ports — only accessible through Caddy
     depends_on:

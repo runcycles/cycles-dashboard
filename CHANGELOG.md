@@ -15,6 +15,32 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.48] — 2026-04-22
+
+### Added
+
+- **Overview — two more ancillary charts.** Expanding the trial slice
+  from one chart to three, laid out as a 3-up grid beneath the counter
+  strip:
+  - **Budget fleet utilization** — horizontal stacked bar partitioning
+    `budget_counts.total` into Healthy / With-debt / Over-limit. Answers
+    "how much of the fleet is in trouble" separately from the by-status
+    mix in the donut beside it.
+  - **Events by category** — donut over `event_counts.by_category` with
+    tone-mapped colors per category (policy = danger, reservation =
+    success, webhook = info, etc.). Tells ops what class of activity
+    the runtime is emitting in the recent window.
+- **BaseChart — BarChart + GridComponent registered.** Tree-shaken
+  additions so the new horizontal bar renders without pulling the full
+  ECharts surface. No other views affected.
+
+### Notes
+
+- Each chart reads the same `/v1/admin/overview` payload already in
+  flight on the landing page — no new fetches.
+- Chart chunk grows from ~142 KB → ~165 KB gzip (BarChart +
+  GridComponent). OverviewView initial chunk 6.40 → 7.11 KB gzip.
+
 ## [0.1.25.47] — 2026-04-22
 
 ### Added
