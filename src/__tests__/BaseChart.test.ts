@@ -1,0 +1,195 @@
+// PR 1 trial slice (v0.1.25.47): covers the BaseChart wrapper + the
+// budget-status donut on OverviewView. Keeps the wire-up changes
+// regression-pinned so future refactors don't silently break chart
+// mount, aria-label, or the visibility guard (skip render when all
+// slices are zero).
+
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { h as actualH, defineComponent } from 'vue'
+import { mount, flushPromises } from '@vue/test-utils'
+import { setActivePinia, createPinia } from 'pinia'
+import { useAuthStore } from '../stores/auth'
+import BaseChart from '../components/BaseChart.vue'
+import type { Capabilities, AdminOverviewResponse } from '../types'
+
+const getOverviewMock = vi.fn()
+const listApiKeysMock = vi.fn()
+const listAuditLogsMock = vi.fn()
+const listBudgetsMock = vi.fn()
+const listTenantsMock = vi.fn()
+const listWebhooksMock = vi.fn()
+
+vi.mock('../api/client', async () => {
+  const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
+  return {
+    ...actual,
+    getOverview: (...args: unknown[]) => getOverviewMock(...args),
+    listApiKeys: (...args: unknown[]) => listApiKeysMock(...args),
+    listAuditLogs: (...args: unknown[]) => listAuditLogsMock(...args),
+    listBudgets: (...args: unknown[]) => listBudgetsMock(...args),
+    listTenants: (...args: unknown[]) => listTenantsMock(...args),
+    listWebhooks: (...args: unknown[]) => listWebhooksMock(...args),
+  }
+})
+
+vi.mock('vue-router', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('vue-router')>()
+  return {
+    ...actual,
+    useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+    useRoute: () => ({ query: {}, params: {} }),
+    RouterLink: { props: ['to'], template: '<a><slot /></a>' },
+  }
+})
+
+vi.mock('../composables/usePolling', () => ({
+  usePolling: (fn: () => Promise<void> | void) => {
+    void fn()
+    return {
+      refresh: async () => { void fn() },
+      isLoading: { value: false },
+    }
+  },
+}))
+
+// vue-echarts uses a Canvas renderer which jsdom can't support. Stub
+// the component to a minimal div — we're validating the wrapper's
+// contract (props forwarded, aria-label present), not ECharts' render.
+vi.mock('vue-echarts', () => ({
+  default: defineComponent({
+    props: ['option'],
+    template: '<div data-testid="v-chart-stub" />',
+  }),
+  THEME_KEY: Symbol('theme'),
+}))
+vi.mock('echarts/core', () => ({ use: () => {} }))
+vi.mock('echarts/renderers', () => ({ CanvasRenderer: {} }))
+vi.mock('echarts/charts', () => ({ PieChart: {} }))
+vi.mock('echarts/components', () => ({
+  TooltipComponent: {},
+  LegendComponent: {},
+}))
+
+const FULL_CAPS: Capabilities = {
+  view_overview: true, view_budgets: true, view_events: true,
+  view_webhooks: true, view_audit: true, view_tenants: true,
+  view_api_keys: true, view_policies: true,
+  manage_budgets: true, manage_tenants: true, manage_api_keys: true,
+  manage_webhooks: true, manage_policies: true, manage_reservations: true,
+}
+
+function healthyOverview(overrides: Partial<AdminOverviewResponse> = {}): AdminOverviewResponse {
+  return {
+    as_of: '2026-04-17T12:00:00Z',
+    event_window_seconds: 3600,
+    tenant_counts: { total: 10, active: 10, suspended: 0, closed: 0 },
+    budget_counts: {
+      total: 5, active: 5, frozen: 0, closed: 0,
+      over_limit: 0, with_debt: 0, by_unit: {},
+    },
+    over_limit_scopes: [],
+    debt_scopes: [],
+    webhook_counts: { total: 3, active: 3, disabled: 0, with_failures: 0 },
+    failing_webhooks: [],
+    event_counts: { total_recent: 42, by_category: { runtime: 42 } },
+    recent_denials: [],
+    recent_expiries: [],
+    ...overrides,
+  }
+}
+
+async function mountOverview() {
+  const { default: OverviewView } = await import('../views/OverviewView.vue')
+  const w = mount(OverviewView, {
+    global: {
+      stubs: {
+        RouterLink: defineComponent({
+          props: { to: { type: null, required: false, default: null } },
+          inheritAttrs: false,
+          setup(props, { slots, attrs }) {
+            return () => {
+              const to = props.to as { name?: string } | string | null | undefined
+              const href = typeof to === 'string' ? to : (to?.name ?? '')
+              return actualH('a', { ...attrs, href }, slots.default?.())
+            }
+          },
+        }),
+      },
+    },
+  })
+  await flushPromises()
+  return w
+}
+
+describe('BaseChart — shared wrapper', () => {
+  it('forwards option prop and renders an aria-labelled region', () => {
+    const w = mount(BaseChart, {
+      props: {
+        option: { series: [{ type: 'pie', data: [] }] },
+        label: 'Sample chart',
+      },
+    })
+    const region = w.find('[role="img"]')
+    expect(region.exists()).toBe(true)
+    expect(region.attributes('aria-label')).toBe('Sample chart')
+    expect(w.find('[data-testid="v-chart-stub"]').exists()).toBe(true)
+  })
+
+  it('applies the custom height prop when provided', () => {
+    const w = mount(BaseChart, {
+      props: {
+        option: { series: [] },
+        label: 'Tall chart',
+        height: '400px',
+      },
+    })
+    const region = w.find('[role="img"]')
+    expect(region.attributes('style')).toContain('height: 400px')
+  })
+})
+
+describe('OverviewView — budget-status donut (v0.1.25.47 trial chart)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    const auth = useAuthStore()
+    auth.apiKey = 'test-key'
+    auth.capabilities = FULL_CAPS
+    getOverviewMock.mockReset()
+    listApiKeysMock.mockReset()
+    listAuditLogsMock.mockReset()
+    listBudgetsMock.mockReset()
+    listTenantsMock.mockReset()
+    listWebhooksMock.mockReset()
+    listApiKeysMock.mockResolvedValue({ keys: [], has_more: false })
+    listAuditLogsMock.mockResolvedValue({ logs: [], has_more: false })
+    listBudgetsMock.mockResolvedValue({ ledgers: [], has_more: false })
+    listTenantsMock.mockResolvedValue({ tenants: [], has_more: false })
+    listWebhooksMock.mockResolvedValue({ subscriptions: [], has_more: false })
+  })
+
+  it('renders the donut when budget_counts has non-zero slices', async () => {
+    getOverviewMock.mockResolvedValue(healthyOverview({
+      budget_counts: { total: 8, active: 5, frozen: 2, closed: 1, over_limit: 0, with_debt: 0, by_unit: {} },
+    }))
+    const w = await mountOverview()
+    const donut = w.find('[data-testid="budget-status-donut"]')
+    expect(donut.exists()).toBe(true)
+    expect(donut.find('[role="img"]').attributes('aria-label')).toBe('Budget status distribution donut chart')
+  })
+
+  it('hides the donut when every slice is zero (empty fleet)', async () => {
+    getOverviewMock.mockResolvedValue(healthyOverview({
+      budget_counts: { total: 0, active: 0, frozen: 0, closed: 0, over_limit: 0, with_debt: 0, by_unit: {} },
+    }))
+    const w = await mountOverview()
+    expect(w.find('[data-testid="budget-status-donut"]').exists()).toBe(false)
+  })
+
+  it('renders the donut when only over-limit is non-zero', async () => {
+    getOverviewMock.mockResolvedValue(healthyOverview({
+      budget_counts: { total: 1, active: 0, frozen: 0, closed: 0, over_limit: 1, with_debt: 0, by_unit: {} },
+    }))
+    const w = await mountOverview()
+    expect(w.find('[data-testid="budget-status-donut"]').exists()).toBe(true)
+  })
+})

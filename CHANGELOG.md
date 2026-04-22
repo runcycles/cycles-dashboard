@@ -15,6 +15,32 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.47] — 2026-04-22
+
+### Added
+
+- **Charting layer — trial slice.** Introduces `echarts` + `vue-echarts`
+  as the dashboard's visualization library (tree-shaken, lazy-loaded).
+  Adds a shared `BaseChart` wrapper (`src/components/BaseChart.vue`)
+  that any view can reuse, backed by a `useChartTheme` composable
+  (`src/composables/useChartTheme.ts`) that maps Tailwind status tokens
+  (success / warning / danger / info / neutral) to ECharts colors and
+  reactively switches palette on dark-mode toggle.
+- **Overview — budget status distribution donut.** The first chart: a
+  compact donut under the at-a-glance counter strip showing the share
+  of budgets in each lifecycle bucket (Active / Frozen / Over-limit /
+  Closed). Consumes the same `/v1/admin/overview` payload already in
+  flight — no new API request. Hides automatically when every slice
+  is zero (empty fleet) so an empty chart never surfaces.
+
+### Notes
+
+- ECharts is lazy-loaded in a separate chunk (~142 KB gzip) so the
+  Overview initial chunk stays at its prior ~6.4 KB gzip footprint.
+  The chart bundle downloads only when a chart renders.
+- No spec change. No admin change. First of a six-PR visualizations
+  roadmap (see `AUDIT.md` for the full slice plan).
+
 ## [0.1.25.46] — 2026-04-21
 
 ### Changed

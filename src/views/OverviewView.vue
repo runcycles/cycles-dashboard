@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import { usePolling } from '../composables/usePolling'
 import { getOverview, listApiKeys, listAuditLogs, listBudgets, listTenants, listWebhooks } from '../api/client'
 import type { AdminOverviewResponse, ApiKey, AuditLogEntry, BudgetLedger, WebhookSubscription } from '../types'
@@ -7,6 +7,12 @@ import PageHeader from '../components/PageHeader.vue'
 import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import WarningIcon from '../components/icons/WarningIcon.vue'
 import CheckCircleIcon from '../components/icons/CheckCircleIcon.vue'
+// Lazy-loaded to keep ECharts + vue-echarts out of the OverviewView
+// initial chunk. Charts render only after the `v-if` slice-count guard
+// passes, so the bundle split also delays the network fetch until the
+// chart is actually needed.
+const BaseChart = defineAsyncComponent(() => import('../components/BaseChart.vue'))
+import { useChartTheme } from '../composables/useChartTheme'
 import { formatTime } from '../utils/format'
 import { toMessage } from '../utils/errors'
 import { filterExpiringKeys, type ExpiringKey } from '../utils/expiringKeys'
@@ -231,6 +237,45 @@ const webhookPausedCount = computed<number>(() => {
   if (!overview.value) return 0
   const wc = overview.value.webhook_counts
   return Math.max(0, wc.total - wc.active - wc.disabled)
+})
+
+// Trial visualization (v0.1.25.47): budget status donut. Consumes the
+// already-fetched overview.budget_counts — no new request. The stat-strip
+// tile right above gives the authoritative numbers; this chart sits
+// beside it to visualize the distribution (what share of the fleet is
+// active vs. frozen vs. closed vs. over-limit). Colors match the
+// counter-strip chip palette so operators read one mental model.
+const { palette } = useChartTheme()
+const budgetStatusOption = computed(() => {
+  const bc = overview.value?.budget_counts
+  const slices = bc
+    ? [
+        { name: 'Active', value: bc.active, itemStyle: { color: palette.value.success } },
+        { name: 'Frozen', value: bc.frozen, itemStyle: { color: palette.value.warning } },
+        { name: 'Over-limit', value: bc.over_limit, itemStyle: { color: palette.value.danger } },
+        { name: 'Closed', value: bc.closed, itemStyle: { color: palette.value.neutral } },
+      ].filter((s) => s.value > 0)
+    : []
+  return {
+    tooltip: {
+      trigger: 'item' as const,
+      backgroundColor: palette.value.tooltipBg,
+      borderColor: palette.value.tooltipBorder,
+      textStyle: { color: palette.value.textPrimary },
+    },
+    legend: { bottom: 0, textStyle: { color: palette.value.textMuted, fontSize: 11 } },
+    series: [
+      {
+        type: 'pie' as const,
+        radius: ['55%', '78%'],
+        center: ['50%', '45%'],
+        avoidLabelOverlap: true,
+        label: { show: false },
+        labelLine: { show: false },
+        data: slices,
+      },
+    ],
+  }
 })
 
 // Denial breakdown by reason_code (v0.1.25.8+ server). The per-row
@@ -533,6 +578,24 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
             <span v-if="!Object.keys(overview.event_counts.by_category).length" class="muted-sm">no events</span>
           </div>
         </div>
+      </div>
+
+      <!-- Trial visualization (v0.1.25.47): budget status distribution.
+           Consumes overview.budget_counts — no new fetch. Renders only
+           when at least one slice is non-zero so an empty fleet doesn't
+           surface an empty chart. Height is capped so it stays a
+           lightweight ancillary visual, not a hero. -->
+      <div
+        v-if="budgetStatusOption.series[0].data.length > 0"
+        class="card p-3 mb-6"
+        data-testid="budget-status-donut"
+      >
+        <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Budget status distribution</div>
+        <BaseChart
+          :option="budgetStatusOption"
+          label="Budget status distribution donut chart"
+          height="180px"
+        />
       </div>
 
       <!-- WHAT NEEDS ATTENTION — 6 cards, alerts-first. Each card has a

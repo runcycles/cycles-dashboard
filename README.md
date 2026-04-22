@@ -69,7 +69,7 @@ Tier 1 incident-response actions available directly from the dashboard (capabili
 src/
 ├── api/           # API client (X-Admin-API-Key only)
 ├── components/    # Reusable UI: Sidebar, PageHeader, StatusBadge, SortHeader, EmptyState, etc.
-├── composables/   # usePolling, useSort, useDarkMode, useTerminalAwareList
+├── composables/   # usePolling, useSort, useDarkMode, useTerminalAwareList, useChartTheme
 ├── stores/        # Pinia: auth (introspect + capabilities)
 ├── views/         # 10 route views (login, overview, budgets, events, api-keys, webhooks, audit, tenants + detail views)
 └── types.ts       # TypeScript types matching governance spec schemas
@@ -183,6 +183,28 @@ Every top-level list view (Tenants, Budgets, Webhooks, API Keys) and the TenantD
 
 Shared implementation: `src/composables/useTerminalAwareList.ts`.
 
+## Visualizations
+
+The dashboard renders inline charts alongside the data tables via Apache
+ECharts (`vue-echarts`). The charting layer shipped in v0.1.25.47 as a
+trial slice (budget-status donut on Overview); subsequent slices extend
+it to Budgets / Webhooks / API Keys / Events.
+
+Shared building blocks:
+
+| File | Role |
+|---|---|
+| `src/components/BaseChart.vue` | Shared wrapper. Props: `option`, `label` (accessibility), `height`. Tree-shaken ECharts registrations — only chart types in use are bundled. |
+| `src/composables/useChartTheme.ts` | Reactive palette mapping the Tailwind status tokens (success / warning / danger / info / neutral) plus axis / grid / tooltip colors to ECharts values. Re-derives on dark-mode toggle. |
+
+ECharts is lazy-loaded per-view via `defineAsyncComponent` so the chart
+bundle (~142 KB gzip) downloads only when a chart actually renders. No
+view's initial chunk pays the chart-library cost.
+
+Every chart reads data the view already fetched — no chart adds a
+network request. For the full six-slice roadmap and what each view is
+expected to visualize, see `AUDIT.md` → *v0.1.25.47 charting layer*.
+
 ## Polling Strategy
 
 Each page manages its own polling lifecycle via the `usePolling` composable:
@@ -291,7 +313,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.46
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.47
     restart: unless-stopped
     # No exposed ports — only accessible through Caddy
     depends_on:

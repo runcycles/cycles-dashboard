@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.46 (2026-04-21)
+**Current release:** v0.1.25.47 (2026-04-22)
 
 ## Baseline requirements
 
@@ -16,6 +16,66 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-22 — v0.1.25.47: charting layer — trial slice (budget status donut)
+
+**Trigger.** Operator question: *"Our dashboard currently shows tables, info, config, but no charts, graphs, stats. What can we show within the current spec or do we need a spec change?"* Answer: a lot, within the current spec. This release is PR 1 of a six-PR visualizations roadmap — the trial slice that proves the wire-up before investing in view-specific charts.
+
+**Scope.** One chart (budget-status donut on OverviewView) plus the shared infrastructure to make the rest of the roadmap mechanical. No new API calls, no spec change.
+
+| Surface | Change |
+|---|---|
+| `package.json` | Add `echarts@^5`, `vue-echarts@^7`. Tree-shaken imports; only `PieChart` + `TooltipComponent` + `LegendComponent` + `CanvasRenderer` are registered in this slice. |
+| `src/components/BaseChart.vue` (new) | Shared wrapper. Props: `option: EChartsOption`, `label: string`, `height?: string`. Provides `THEME_KEY` from dark-mode state so every chart follows the app's current palette. |
+| `src/composables/useChartTheme.ts` (new) | Reactive palette: maps status tokens (`success`/`warning`/`danger`/`info`/`neutral`) plus axis/grid/text/tooltip colors to light and dark values. Re-derives on `isDark` flips. |
+| `src/views/OverviewView.vue` | `defineAsyncComponent(() => import('../components/BaseChart.vue'))` so ECharts lands in a separate chunk. New `budgetStatusOption` computed over `overview.budget_counts`. Template block between counter-strip and attention cards, `v-if="… data.length > 0"` to hide on empty fleet. |
+| `vitest.config.ts` + `src/__tests__/setup.ts` | Global `ResizeObserver` polyfill for jsdom (vue-echarts autoresize needs it). |
+| `src/__tests__/BaseChart.test.ts` (new) | 5 tests: wrapper forwards option/label/height, donut renders/hides by slice-count, aria-labelled region present. |
+| `src/__tests__/OverviewView.test.ts` | Add `vue-echarts` + `echarts/*` stubs so the existing 60+ tests don't hit Canvas under jsdom. |
+
+**Key design decisions.**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Library | Apache ECharts via `vue-echarts` | Tree-shakable, Apache-2.0, first-class Vue support, covers the full 6-PR roadmap (pie/bar/line/histogram/stacked-time). Chart.js too basic, Recharts React-first, ApexCharts heavier default. |
+| Renderer | `CanvasRenderer` | 4 KB smaller gzipped than SVG for pie-only. Re-evaluate if future slices bring many SVG-cheap charts. |
+| Theme source | Tailwind hex constants mirrored into a typed palette | Rebuilds on dark-mode toggle via `computed(() => isDark.value ? DARK : LIGHT)`. Avoids reading computed CSS variables at chart-init time (fragile across hydration). |
+| First chart | Budget status donut | `/overview` already fetched by every landing-page operator. Highest ROI demonstration with zero new network cost. |
+| Chart placement | Between counter strip and attention cards | Ancillary visual ("how is the fleet distributed") beneath the quick-jump nav but above the actionable alert row. Fixed compact height (180px) so it doesn't compete for attention. |
+| Lazy-load | Yes — async component | OverviewView initial chunk stays at ~6.4 KB gzip. ECharts lands in a dedicated ~142 KB gz chunk that downloads only when a chart first renders. |
+| Prop name | `label` (not `ariaLabel` or `aria-label`) | Vue 3 does not auto-camelCase `aria-label` attribute into the `ariaLabel` prop. Using `label` sidesteps the special-casing entirely. |
+
+**Rejected alternatives.**
+
+| Option | Why not |
+|---|---|
+| Chart.js | Weaker interactivity, harder to style consistently with dark-mode + status tokens. |
+| Recharts | React-first; the Vue adapter lags React releases and carries an extra dependency layer. |
+| D3 | Low-level. Would require writing a pie/bar/line abstraction ourselves — ECharts already is that abstraction. |
+| ApexCharts | Heavier default bundle and weaker tree-shake story for partial usage. |
+| Ship all six slices in one PR | Loses incrementalism: a regression in any one view would block the rest. The plan intentionally slices per-view for low-blast-radius PRs. |
+| Eagerly import BaseChart in the OverviewView bundle | Would have grown OverviewView from ~6.4 KB → ~181 KB gz (tested). Unacceptable for a view that's the landing page. |
+
+**Edge cases.**
+
+| Case | Behavior |
+|---|---|
+| Empty fleet (all budget_counts fields 0) | Donut block is `v-if`-skipped; no empty chart, no zero-data ECharts warning. |
+| Only one non-zero slice (e.g. only over-limit) | Donut renders that single slice full-circle with its legend entry. Pinned by test. |
+| Dark-mode toggle while donut is visible | `useChartTheme` palette recomputes, vue-echarts' `THEME_KEY` provided value flips, ECharts re-renders with the dark palette. |
+| jsdom unit tests (no Canvas) | `vue-echarts` + `echarts/*` are mocked per test file; a `ResizeObserver` polyfill in `setup.ts` covers the autoresize watcher. |
+| Operator never scrolls to the donut | ECharts chunk still lazy-loads on first render (it's within initial viewport above the fold). Below-the-fold views won't trigger it. |
+
+**Tests.**
+
+| File | Count | Pins |
+|---|---|---|
+| `src/__tests__/BaseChart.test.ts` | 5 | Wrapper aria-label + option forwarding + height; donut mount vs. skip vs. single-slice. |
+| `src/__tests__/OverviewView.test.ts` | 824 total (unchanged) | Added vue-echarts mock so the existing suite keeps passing without pulling Canvas under jsdom. |
+
+Full suite: 824/824 passing. Build green. Bundle split: OverviewView 25.55 KB (gzip 6.40 KB) initial, BaseChart-chunk 423.09 KB (gzip 142.05 KB) lazy.
+
+**What's next (roadmap — not in this release).** PR 2: Overview stat-strip with six KPI tiles inline. PR 3: Budget utilization histogram + top-N debt bars. PR 4: Webhook fleet health donut + per-subscription delivery detail charts. PR 5: API-key expiry runway. PR 6: Events stacked time-histogram. PR 7+: spec-side `/v1/admin/metrics` proposal to unlock p50/p95 latency and throughput buckets (outside this dashboard's scope).
 
 ### 2026-04-21 — v0.1.25.46: hide terminal-state rows by default across every list view
 

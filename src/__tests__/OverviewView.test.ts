@@ -50,6 +50,20 @@ vi.mock('../composables/usePolling', () => ({
   },
 }))
 
+// vue-echarts renders to Canvas, which jsdom can't support. Stub it —
+// these tests care about OverviewView's layout logic, not chart pixels.
+vi.mock('vue-echarts', () => ({
+  default: { props: ['option'], template: '<div data-testid="v-chart-stub" />' },
+  THEME_KEY: Symbol('theme'),
+}))
+vi.mock('echarts/core', () => ({ use: () => {} }))
+vi.mock('echarts/renderers', () => ({ CanvasRenderer: {} }))
+vi.mock('echarts/charts', () => ({ PieChart: {} }))
+vi.mock('echarts/components', () => ({
+  TooltipComponent: {},
+  LegendComponent: {},
+}))
+
 const FULL_CAPS: Capabilities = {
   view_overview: true, view_budgets: true, view_events: true,
   view_webhooks: true, view_audit: true, view_tenants: true,

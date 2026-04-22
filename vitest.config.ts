@@ -6,6 +6,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    setupFiles: ['./src/__tests__/setup.ts'],
     // Vitest's default discovery globs include **/*.spec.ts, which
     // picks up Playwright specs in tests/e2e/. Playwright uses a
     // different runner (@playwright/test, not Vitest); those files
