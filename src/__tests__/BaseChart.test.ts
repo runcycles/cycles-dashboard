@@ -32,11 +32,12 @@ vi.mock('../api/client', async () => {
   }
 })
 
+const pushMock = vi.fn()
 vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
   return {
     ...actual,
-    useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+    useRouter: () => ({ push: pushMock, replace: vi.fn() }),
     useRoute: () => ({ query: {}, params: {} }),
     RouterLink: { props: ['to'], template: '<a><slot /></a>' },
   }
@@ -175,7 +176,7 @@ describe('OverviewView — budget-status donut (v0.1.25.47 trial chart)', () => 
     const w = await mountOverview()
     const donut = w.find('[data-testid="budget-status-donut"]')
     expect(donut.exists()).toBe(true)
-    expect(donut.find('[role="img"]').attributes('aria-label')).toBe('Budget status distribution donut chart')
+    expect(donut.find('[role="img"]').attributes('aria-label')).toBe('Budget status distribution donut chart — clickable')
   })
 
   it('hides the donut when every slice is zero (empty fleet)', async () => {
@@ -279,5 +280,60 @@ describe('OverviewView — events-by-category donut (v0.1.25.48)', () => {
     }))
     const w = await mountOverview()
     expect(w.find('[data-testid="events-by-category-donut"]').exists()).toBe(true)
+  })
+})
+
+describe('OverviewView — chart drill-down (v0.1.25.49)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    const auth = useAuthStore()
+    auth.apiKey = 'test-key'
+    auth.capabilities = FULL_CAPS
+    pushMock.mockReset()
+    getOverviewMock.mockReset()
+    listApiKeysMock.mockReset()
+    listAuditLogsMock.mockReset()
+    listBudgetsMock.mockReset()
+    listTenantsMock.mockReset()
+    listWebhooksMock.mockReset()
+    listApiKeysMock.mockResolvedValue({ keys: [], has_more: false })
+    listAuditLogsMock.mockResolvedValue({ logs: [], has_more: false })
+    listBudgetsMock.mockResolvedValue({ ledgers: [], has_more: false })
+    listTenantsMock.mockResolvedValue({ tenants: [], has_more: false })
+    listWebhooksMock.mockResolvedValue({ subscriptions: [], has_more: false })
+    getOverviewMock.mockResolvedValue(healthyOverview({
+      budget_counts: { total: 10, active: 5, frozen: 2, closed: 1, over_limit: 2, with_debt: 3, by_unit: {} },
+      event_counts: { total_recent: 10, by_category: { policy: 4, reservation: 6 } },
+    }))
+  })
+
+  it('donut Frozen slice pushes to budgets?status=FROZEN', async () => {
+    const w = await mountOverview()
+    w.findComponent({ name: 'BaseChart' }).vm.$emit('slice-click', { name: 'Frozen' })
+    await flushPromises()
+    expect(pushMock).toHaveBeenCalledWith({ name: 'budgets', query: { status: 'FROZEN' } })
+  })
+
+  it('donut Over-limit slice pushes to budgets?filter=over_limit', async () => {
+    const w = await mountOverview()
+    w.findComponent({ name: 'BaseChart' }).vm.$emit('slice-click', { name: 'Over-limit' })
+    await flushPromises()
+    expect(pushMock).toHaveBeenCalledWith({ name: 'budgets', query: { filter: 'over_limit' } })
+  })
+
+  it('utilization With-debt segment pushes to budgets?filter=has_debt', async () => {
+    const w = await mountOverview()
+    const charts = w.findAllComponents({ name: 'BaseChart' })
+    charts[1].vm.$emit('slice-click', { seriesName: 'With debt' })
+    await flushPromises()
+    expect(pushMock).toHaveBeenCalledWith({ name: 'budgets', query: { filter: 'has_debt' } })
+  })
+
+  it('events donut category slice pushes to events?category=policy', async () => {
+    const w = await mountOverview()
+    const charts = w.findAllComponents({ name: 'BaseChart' })
+    charts[2].vm.$emit('slice-click', { name: 'policy' })
+    await flushPromises()
+    expect(pushMock).toHaveBeenCalledWith({ name: 'events', query: { category: 'policy' } })
   })
 })

@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.48 (2026-04-22)
+**Current release:** v0.1.25.49 (2026-04-22)
 
 ## Baseline requirements
 
@@ -16,6 +16,65 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-22 — v0.1.25.49: chart drill-down (slice-click → filtered list view)
+
+**Trigger.** Operator ask after v0.1.25.48 landed: *"Can we support drill down from charts, should be able to."* The three Overview charts had been read-only; operators expected clicks on a slice/segment to navigate to the filtered list view the same way counter-strip chips already do.
+
+**Scope.** Click-to-drill-down wired on all three Overview charts. No new API surface; drill-downs reuse the existing URL query contracts on BudgetsView (`status`, `filter`) and EventsView (`category`).
+
+| Surface | Change |
+|---|---|
+| `src/components/BaseChart.vue` | `defineEmits<{ 'slice-click': ChartClickParams }>()` forwarding the ECharts click payload. `cursor: pointer` on the inner `<v-chart>` so the interaction is discoverable. |
+| `src/views/OverviewView.vue` | `useRouter()` + three click handlers — `onBudgetStatusClick`, `onBudgetUtilizationClick`, `onEventsCategoryClick` — each mapping the clicked slice/segment name to `router.push({ name, query })`. Each chart card title gets a muted "· click a slice/segment" hint so the affordance is discoverable without a tooltip. |
+| `src/__tests__/BaseChart.test.ts` | +4 drill-down tests: donut Frozen/Over-limit → budgets routes, utilization With-debt → `filter=has_debt`, events policy slice → `events?category=policy`. Shared `pushMock` so handlers can be asserted against the vue-router stub. |
+
+**Click target → route table.**
+
+| Chart | Slice / segment | Route |
+|---|---|---|
+| Budget status donut | Active | `budgets?status=ACTIVE` |
+| Budget status donut | Frozen | `budgets?status=FROZEN` |
+| Budget status donut | Over-limit | `budgets?filter=over_limit` |
+| Budget status donut | Closed | `budgets?status=CLOSED` |
+| Utilization bar | Healthy | `budgets` (unfiltered) |
+| Utilization bar | With debt | `budgets?filter=has_debt` |
+| Utilization bar | Over-limit | `budgets?filter=over_limit` |
+| Events by category donut | `<name>` | `events?category=<name>` |
+| Events by category donut | uncategorized (fallback slice) | `events` (unfiltered) |
+
+**Key design decisions.**
+
+| Decision | Choice | Why |
+|---|---|---|
+| Click payload location | Emit from `BaseChart`, handle in `OverviewView` | The wrapper stays dumb about navigation — future views can wire their own drill-downs without touching the shared component. |
+| Discovery | Chart title suffix "· click a slice" + `cursor: pointer` | Charts don't have native clickability affordance. The hint is subtle (muted, small) so it doesn't compete with the data, but telegraphs interactivity at first glance. |
+| Over-limit donut target | `filter=over_limit` (not `status=OVER_LIMIT`) | There is no `OVER_LIMIT` budget status — it's a derived boolean from `debt > overdraft_limit` per spec. BudgetsView already exposes this as the `filter=over_limit` cross-tenant mode. |
+| Events "uncategorized" fallback | Routes to unfiltered EventsView | The synthesized slice doesn't map to a real category, so filtering would return empty. Send operators to the full recent window instead. |
+
+**Rejected alternatives.**
+
+| Option | Why not |
+|---|---|
+| Let ECharts `urlLink` handle navigation inline | Clashes with vue-router — a full reload instead of SPA navigation. Emit-up keeps us in the SPA. |
+| Modal drill-down inside the chart card | Would duplicate list-view rendering. Pushing to the list view reuses bulk actions, terminal-aware toggles, CSV export, etc. |
+| Drill-down on the utilization Healthy segment lands on `?status=ACTIVE` | Healthy is a derived segment (total − over_limit − with_debt), not the same as `status=ACTIVE`. Pushing unfiltered lets the operator see the whole picture and then apply their own cut. |
+
+**Edge cases.**
+
+| Case | Behavior |
+|---|---|
+| Click on a slice with `value = 0` (shouldn't exist — filtered upstream) | Handler still fires but the destination list would be empty; no harm. |
+| Click on the events "uncategorized" fallback slice | Routes to `EventsView` unfiltered (the fallback exists because no categorization is available, so no category filter would match). |
+| Click on chart legend / tooltip (not a slice) | ECharts emits a click with `componentType !== 'series'` — our handlers short-circuit because `name` won't match any known slice. No navigation. |
+
+**Tests.**
+
+| File | Count | Pins |
+|---|---|---|
+| `src/__tests__/BaseChart.test.ts` | 14 (was 10) | Added 4 drill-down assertions; updated the aria-label assertion for the new "— clickable" suffix. |
+
+Full suite: 833/833 passing.
 
 ### 2026-04-22 — v0.1.25.48: Overview charts expanded (utilization bar + events-by-category)
 

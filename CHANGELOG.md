@@ -15,6 +15,31 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.49] — 2026-04-22
+
+### Added
+
+- **Chart drill-down.** Every slice/segment on the Overview charts is
+  now clickable and navigates to the corresponding list view with the
+  filter pre-applied:
+  - Budget status donut → `BudgetsView?status=<ACTIVE|FROZEN|CLOSED>`
+    (Over-limit → `?filter=over_limit`).
+  - Budget utilization bar → `BudgetsView?filter=over_limit|has_debt`
+    or unfiltered for the Healthy segment.
+  - Events by category donut → `EventsView?category=<name>`.
+- **BaseChart — `slice-click` emit.** Shared wrapper forwards the
+  ECharts click payload (`seriesName`, `name`, `dataIndex`, `value`,
+  `componentType`) so each caller can map a click to a route
+  independently. Cursor switches to `pointer` on hover so the
+  interaction is discoverable.
+
+### Notes
+
+- Each chart title carries a muted "· click a slice/segment" hint so
+  operators know the charts are actionable.
+- No new API surface — all drill-downs reuse existing list-view URL
+  query contracts (`status`, `filter`, `category`).
+
 ## [0.1.25.48] — 2026-04-22
 
 ### Added

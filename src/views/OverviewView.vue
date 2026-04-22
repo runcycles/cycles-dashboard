@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { getOverview, listApiKeys, listAuditLogs, listBudgets, listTenants, listWebhooks } from '../api/client'
 import type { AdminOverviewResponse, ApiKey, AuditLogEntry, BudgetLedger, WebhookSubscription } from '../types'
@@ -246,6 +247,42 @@ const webhookPausedCount = computed<number>(() => {
 // active vs. frozen vs. closed vs. over-limit). Colors match the
 // counter-strip chip palette so operators read one mental model.
 const { palette } = useChartTheme()
+
+// Chart drill-down. Each slice/segment is a filter predicate — clicking
+// navigates to the corresponding list view with that filter pre-applied
+// via the router. Reuses the existing URL query contracts:
+//   - BudgetsView: ?status=ACTIVE|FROZEN|CLOSED and ?filter=over_limit|has_debt
+//   - EventsView:  ?category=<name>
+// Keeps the chart wrapper stateless; navigation lives with the view
+// that owns the data model.
+const router = useRouter()
+
+type ChartClickParams = { seriesName?: string; name?: string }
+
+function onBudgetStatusClick(p: ChartClickParams) {
+  const name = (p?.name ?? '').toLowerCase()
+  if (name === 'active') router.push({ name: 'budgets', query: { status: 'ACTIVE' } })
+  else if (name === 'frozen') router.push({ name: 'budgets', query: { status: 'FROZEN' } })
+  else if (name === 'closed') router.push({ name: 'budgets', query: { status: 'CLOSED' } })
+  else if (name === 'over-limit') router.push({ name: 'budgets', query: { filter: 'over_limit' } })
+}
+
+function onBudgetUtilizationClick(p: ChartClickParams) {
+  const name = (p?.seriesName ?? '').toLowerCase()
+  if (name === 'over-limit') router.push({ name: 'budgets', query: { filter: 'over_limit' } })
+  else if (name === 'with debt') router.push({ name: 'budgets', query: { filter: 'has_debt' } })
+  else if (name === 'healthy') router.push({ name: 'budgets' })
+}
+
+function onEventsCategoryClick(p: ChartClickParams) {
+  const name = p?.name ?? ''
+  if (name && name !== 'uncategorized') {
+    router.push({ name: 'events', query: { category: name } })
+  } else if (name === 'uncategorized') {
+    router.push({ name: 'events' })
+  }
+}
+
 const budgetStatusOption = computed(() => {
   const bc = overview.value?.budget_counts
   const slices = bc
@@ -764,11 +801,15 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
           class="card p-3"
           data-testid="budget-status-donut"
         >
-          <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Budget status distribution</div>
+          <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
+            Budget status distribution
+            <span class="muted text-xs font-normal">· click a slice</span>
+          </div>
           <BaseChart
             :option="budgetStatusOption"
-            label="Budget status distribution donut chart"
+            label="Budget status distribution donut chart — clickable"
             height="180px"
+            @slice-click="onBudgetStatusClick"
           />
         </div>
 
@@ -777,11 +818,15 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
           class="card p-3"
           data-testid="budget-utilization-bar"
         >
-          <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Budget fleet utilization</div>
+          <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
+            Budget fleet utilization
+            <span class="muted text-xs font-normal">· click a segment</span>
+          </div>
           <BaseChart
             :option="budgetUtilizationOption"
-            label="Budget fleet utilization stacked bar chart"
+            label="Budget fleet utilization stacked bar chart — clickable"
             height="180px"
+            @slice-click="onBudgetUtilizationClick"
           />
         </div>
 
@@ -789,12 +834,16 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
           class="card p-3"
           data-testid="events-by-category-donut"
         >
-          <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Events by category ({{ Math.round(overview.event_window_seconds / 60) }}m)</div>
+          <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
+            Events by category ({{ Math.round(overview.event_window_seconds / 60) }}m)
+            <span class="muted text-xs font-normal">· click a slice</span>
+          </div>
           <BaseChart
             v-if="eventsByCategoryOption.series[0].data.length > 0"
             :option="eventsByCategoryOption"
-            label="Events by category donut chart"
+            label="Events by category donut chart — clickable"
             height="180px"
+            @slice-click="onEventsCategoryClick"
           />
           <div
             v-else

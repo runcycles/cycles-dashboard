@@ -207,8 +207,12 @@ additions) downloads only when a chart actually renders. No view's
 initial chunk pays the chart-library cost.
 
 Every chart reads data the view already fetched — no chart adds a
-network request. For the full six-slice roadmap and what each view is
-expected to visualize, see `AUDIT.md` → *v0.1.25.47 charting layer*.
+network request. Charts are also **clickable**: slices and segments
+emit `slice-click` which the parent view maps to `router.push` with
+the corresponding list-view filter pre-applied (Budgets: `status` /
+`filter=over_limit|has_debt`; Events: `category`). For the full
+six-slice roadmap and what each view is expected to visualize, see
+`AUDIT.md` → *v0.1.25.47 charting layer*.
 
 ## Polling Strategy
 
@@ -318,7 +322,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.48
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.49
     restart: unless-stopped
     # No exposed ports — only accessible through Caddy
     depends_on:
