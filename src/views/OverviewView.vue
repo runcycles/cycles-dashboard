@@ -397,8 +397,8 @@ const budgetStatusOption = computed(() => {
     series: [
       {
         type: 'pie' as const,
-        radius: ['55%', '78%'],
-        center: ['50%', '45%'],
+        radius: ['48%', '68%'],
+        center: ['50%', '40%'],
         avoidLabelOverlap: true,
         label: { show: false },
         labelLine: { show: false },
@@ -478,8 +478,8 @@ const budgetUtilizationOption = computed(() => {
     series: [
       {
         type: 'pie' as const,
-        radius: ['55%', '78%'],
-        center: ['50%', '45%'],
+        radius: ['48%', '68%'],
+        center: ['50%', '40%'],
         avoidLabelOverlap: true,
         label: { show: false },
         labelLine: { show: false },
@@ -590,8 +590,8 @@ const eventsByCategoryOption = computed(() => {
     series: [
       {
         type: 'pie' as const,
-        radius: ['55%', '78%'],
-        center: ['50%', '45%'],
+        radius: ['48%', '68%'],
+        center: ['50%', '40%'],
         avoidLabelOverlap: true,
         label: { show: false },
         labelLine: { show: false },
