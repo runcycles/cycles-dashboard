@@ -77,6 +77,13 @@ Full suite: 824/824 passing. Build green. Bundle split: OverviewView 25.55 KB (g
 
 **What's next (roadmap — not in this release).** PR 2: Overview stat-strip with six KPI tiles inline. PR 3: Budget utilization histogram + top-N debt bars. PR 4: Webhook fleet health donut + per-subscription delivery detail charts. PR 5: API-key expiry runway. PR 6: Events stacked time-histogram. PR 7+: spec-side `/v1/admin/metrics` proposal to unlock p50/p95 latency and throughput buckets (outside this dashboard's scope).
 
+**Post-merge repairs (same release).**
+
+| Symptom | Root cause | Fix |
+|---|---|---|
+| Donut card header rendered but chart area stayed empty on operator dashboard. | The initial slice applied the same computed inline `style` to both the outer wrapper div and the inner `<v-chart>`. Vue-echarts' internal container received a redundant height that did not propagate to ECharts' own render div, so autoresize measured 0×0 and drew nothing. | `<v-chart>` now gets an explicit `style="height: 100%; width: 100%"`; the sized outer div is the only height source. |
+| `PR Container Scan` (Trivy HIGH/CRITICAL, ignore-unfixed) turned red on the feature branch while yesterday's main was green. | `nginx:1.29-alpine` floated to `alpine 3.23.4`, which accumulated fixable HIGH/CRITICAL CVEs overnight before upstream refloated the nginx tag. Trivy fails any build caught in that window. | Added `RUN apk update && apk upgrade --no-cache && rm -rf /var/cache/apk/*` to the serve stage so every container build pulls the latest alpine security patches, independent of how stale the pinned tag is. |
+
 ### 2026-04-21 — v0.1.25.46: hide terminal-state rows by default across every list view
 
 **Trigger.** Operator report: *"What is the default sort order for webhooks? Problem is when tenants are closed, DISABLED webhooks are visible first and user has to actively filter them out; since it's a terminal state, that means usability is a problem in default."*

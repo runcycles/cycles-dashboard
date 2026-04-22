@@ -29,6 +29,6 @@ const style = computed(() => ({ height: props.height ?? '200px', width: '100%' }
 
 <template>
   <div role="img" :aria-label="label" :style="style">
-    <v-chart :option="option" autoresize :style="style" />
+    <v-chart :option="option" autoresize style="height: 100%; width: 100%" />
   </div>
 </template>

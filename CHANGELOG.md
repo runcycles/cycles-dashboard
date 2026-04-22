@@ -33,6 +33,19 @@ UX work that does not advance spec alignment.
   flight — no new API request. Hides automatically when every slice
   is zero (empty fleet) so an empty chart never surfaces.
 
+### Fixed
+
+- **BaseChart empty render.** The initial trial-slice shipped with the
+  inner `<v-chart>` inheriting a redundant inline style from the outer
+  wrapper. ECharts' autoresize measured zero height and the chart card
+  rendered its header only. Fixed by giving the `<v-chart>` explicit
+  `height: 100%; width: 100%` so it fills the sized outer container.
+- **Alpine 3.23.4 HIGH/CRITICAL CVEs.** The `nginx:1.29-alpine` base
+  image accumulated fixable HIGH/CRITICAL vulnerabilities overnight
+  that the Trivy gate refused. Added `apk upgrade --no-cache` in the
+  serve stage so each container build pulls the latest alpine patches
+  regardless of when upstream refloats the nginx tag.
+
 ### Notes
 
 - ECharts is lazy-loaded in a separate chunk (~142 KB gzip) so the
