@@ -1117,6 +1117,13 @@ function rowTenantId(b: BudgetLedger): string {
     </PageHeader>
 
     <InlineErrorBanner v-if="error" :message="error" @dismiss="error = ''" />
+    <!-- M6: tenant-list fetch failure promoted to a top-banner so
+         operators notice it. Pre-fix it lived as tiny red text inside
+         the filter strip below the dropdown, easy to miss while
+         focusing on the main table — a dropdown stuck on "All tenants"
+         with no filtering options looked like the server just had one
+         tenant, not like something had failed. -->
+    <InlineErrorBanner v-if="tenantsError" :message="tenantsError" @dismiss="tenantsError = ''" />
 
 
     <!-- Detail mode -->
@@ -1218,7 +1225,8 @@ function rowTenantId(b: BudgetLedger): string {
               <option value="">All tenants</option>
               <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
             </select>
-            <p v-if="tenantsError" class="text-xs text-red-600 mt-1" role="alert">{{ tenantsError }}</p>
+            <!-- tenantsError surfaces in the top banner (M6). -->
+
           </div>
           <div>
             <label for="budget-status" class="form-label">Status</label>

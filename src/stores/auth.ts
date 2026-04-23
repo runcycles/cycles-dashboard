@@ -50,9 +50,19 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  // M11: single-flight guard. Router guard + App.vue's mount-time
+  // session checker both call restore() on cold load; pre-fix that
+  // issued two /v1/auth/introspect fetches in rapid succession, and
+  // if the first was slow the second could overwrite its capabilities
+  // write. Concurrent callers now await the same in-flight promise.
+  // Cleared on resolution so a subsequent (logically-next) restore
+  // fires a fresh fetch.
+  let inFlightRestore: Promise<boolean> | null = null
+
   // Restore session: check timeouts, then re-introspect
   async function restore(): Promise<boolean> {
     if (!apiKey.value) return false
+    if (inFlightRestore) return inFlightRestore
     const now = Date.now()
     const sessionStart = Number(sessionStorage.getItem(SESSION_START_KEY) || '0')
     const lastActivity = Number(sessionStorage.getItem(LAST_ACTIVITY_KEY) || '0')
@@ -67,7 +77,10 @@ export const useAuthStore = defineStore('auth', () => {
       logout()
       return false
     }
-    return login(apiKey.value)
+    inFlightRestore = login(apiKey.value).finally(() => {
+      inFlightRestore = null
+    })
+    return inFlightRestore
   }
 
   // Track user activity for idle timeout

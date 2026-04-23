@@ -254,4 +254,29 @@ describe('BudgetsView — cross-tenant list wire-up', () => {
     // TenantLink renders the tenant_id as visible text.
     expect(w.text()).toContain('acme-corp')
   })
+
+  // M6 regression-lock: a tenant-list fetch failure was previously
+  // surfaced as tiny red text under the disabled dropdown — easy to
+  // miss. It now renders in the shared top `InlineErrorBanner` and
+  // the inline version is removed.
+  it('M6: tenant-list fetch failure surfaces in the top banner, not inline', async () => {
+    listBudgetsMock.mockResolvedValue({ ledgers: [], has_more: false })
+    listTenantsMock.mockRejectedValue(new Error('network down'))
+    const { default: BudgetsView } = await import('../views/BudgetsView.vue')
+    const w = mount(BudgetsView, { global: stdMounts() })
+    await flushPromises(); await flushPromises()
+
+    // Top banner carries the error (component role="alert").
+    const banners = w.findAll('[data-testid="inline-error-banner"]')
+    const tenantBanner = banners.find(b => b.text().includes('Could not load tenant list'))
+    expect(tenantBanner).toBeTruthy()
+    expect(tenantBanner!.text()).toContain('network down')
+
+    // The inline `<p v-if="tenantsError">` under the dropdown is gone.
+    // Pre-fix that `<p>` carried both the "Could not load…" prefix and
+    // role="alert" — we removed it, so the error appears ONCE.
+    const inlineErrorTexts = w.findAll('p.text-xs.text-red-600')
+      .filter(p => p.text().includes('Could not load tenant list'))
+    expect(inlineErrorTexts).toHaveLength(0)
+  })
 })

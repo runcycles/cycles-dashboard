@@ -1,8 +1,31 @@
 import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
+import { fileURLToPath } from 'node:url'
+import { readFileSync } from 'node:fs'
+
+// Mirror the runtime `__APP_VERSION__` Vite `define` so components that
+// read it (Sidebar, LoginView) mount cleanly under test instead of
+// throwing ReferenceError.
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version: string }
 
 export default defineConfig({
   plugins: [vue()],
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
+  resolve: {
+    alias: {
+      // `/runcycles-logo.svg` is served at runtime by the production
+      // nginx static layer (it lives in public/). Under Vitest, Vite's
+      // plugin-vue transform tries to resolve the absolute-path
+      // template attribute against the project root via Node fs, which
+      // errors on Windows with "The argument 'filename' must be a
+      // file URL object…". Aliasing to a tiny stub svg during tests
+      // lets components like Sidebar and LoginView mount without
+      // pulling real public assets.
+      '/runcycles-logo.svg': fileURLToPath(new URL('./src/__tests__/fixtures/stub.svg', import.meta.url)),
+    },
+  },
   test: {
     environment: 'jsdom',
     globals: true,

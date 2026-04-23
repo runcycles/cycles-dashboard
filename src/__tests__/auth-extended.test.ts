@@ -118,6 +118,73 @@ describe('auth store — restore()', () => {
   })
 })
 
+describe('auth store — restore() single-flight (M11)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    sessionStorage.clear()
+    vi.restoreAllMocks()
+  })
+
+  it('two concurrent restore() calls fire only ONE introspect fetch', async () => {
+    // Pre-fix the router guard + App.vue's mount-time session checker
+    // both called restore() on cold load, which issued two
+    // /v1/auth/introspect fetches in rapid succession. The single-
+    // flight guard coalesces concurrent callers onto the same
+    // in-flight promise so only one network round-trip fires.
+    const mockResponse = {
+      ok: true,
+      json: () => Promise.resolve({
+        authenticated: true, auth_type: 'admin', permissions: ['*'],
+        capabilities: mockCapabilities,
+      }),
+    }
+    const fetchMock = vi.fn(() => new Promise<Response>(resolve => {
+      // Small delay so both callers are guaranteed to overlap.
+      setTimeout(() => resolve(mockResponse as Response), 10)
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const auth = useAuthStore()
+    // Bootstrap a valid apiKey without triggering login's own fetch.
+    auth.apiKey = 'test-key'
+    const now = Date.now()
+    sessionStorage.setItem('cycles_session_start', String(now - 60_000))
+    sessionStorage.setItem('cycles_last_activity', String(now - 60_000))
+
+    const [a, b] = await Promise.all([auth.restore(), auth.restore()])
+
+    expect(a).toBe(true)
+    expect(b).toBe(true)
+    // ONE fetch fired, both callers saw the same result.
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('a subsequent restore() after the first resolves fires a fresh fetch', async () => {
+    // Cache clears on resolution — a later restore() should introspect
+    // again, not read a stale cached promise.
+    const mockResponse = {
+      ok: true,
+      json: () => Promise.resolve({
+        authenticated: true, auth_type: 'admin', permissions: ['*'],
+        capabilities: mockCapabilities,
+      }),
+    }
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse as unknown as Response)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const auth = useAuthStore()
+    auth.apiKey = 'test-key'
+    const now = Date.now()
+    sessionStorage.setItem('cycles_session_start', String(now - 60_000))
+    sessionStorage.setItem('cycles_last_activity', String(now - 60_000))
+
+    await auth.restore()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await auth.restore()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+})
+
 describe('auth store — checkTimeout()', () => {
   beforeEach(() => {
     setActivePinia(createPinia())

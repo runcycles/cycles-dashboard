@@ -13,7 +13,7 @@
  * reservation is stuck).
  */
 import { ref, computed, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { usePolling } from '../composables/usePolling'
 import { POLL_FAST_MS } from '../composables/pollingConstants'
@@ -41,6 +41,7 @@ import { toMessage } from '../utils/errors'
 
 const toast = useToast()
 const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
 // No `manage_reservations` capability flag in the current introspect
 // response — default to allow. Older admin servers surface 401/403 at
@@ -53,7 +54,18 @@ const canManage = computed(() => auth.capabilities?.manage_reservations !== fals
 // an empty filter. Default the first tenant in the list once tenants
 // are loaded so the view has something to show without manual picking.
 const tenants = ref<Tenant[]>([])
-const tenantFilter = ref('')
+// M14: pre-select a tenant from `?tenant_id=` when present so the view
+// lands on the right scope on first mount (Overview drill-downs,
+// copy-pasted deep-links, operator-saved URLs). Without this every
+// visit required a manual tenant pick, which was extra friction for
+// the common "I want to look at acme's reservations" flow. Falls
+// through to the first-ACTIVE-tenant default below when the URL has
+// no tenant_id.
+const tenantFromQuery = (): string => {
+  const q = route.query.tenant_id
+  return typeof q === 'string' ? q : ''
+}
+const tenantFilter = ref(tenantFromQuery())
 // Accept ?status= from the URL so Overview-style drill-downs and shared
 // links land on the right filter. Falls back to 'ACTIVE' when absent or
 // invalid (the operationally-interesting default — active reservations
@@ -107,6 +119,19 @@ async function loadTenants() {
     // typically have no live reservations — picking one by accident
     // renders an empty table that looks broken. Fall back to the
     // first tenant of any status if none are ACTIVE.
+    //
+    // Skip this default when `?tenant_id=` pre-selected one already
+    // (M14). Also validate that a URL-supplied tenant actually exists
+    // in the list; an outdated/malformed link otherwise silently holds
+    // the dropdown on a non-existent value.
+    if (tenantFilter.value) {
+      const found = tenants.value.some(t => t.tenant_id === tenantFilter.value)
+      if (!found && tenants.value.length > 0) {
+        // URL tenant doesn't exist — drop to the default and clear the
+        // stale query param so reloading doesn't resurrect it.
+        tenantFilter.value = ''
+      }
+    }
     if (!tenantFilter.value && tenants.value.length > 0) {
       const firstActive = tenants.value.find((t) => t.status === 'ACTIVE')
       tenantFilter.value = (firstActive ?? tenants.value[0]).tenant_id
@@ -237,6 +262,20 @@ watch(exportError, (v) => { if (v) error.value = v })
 // misleading (an operator could "force-release" one that already
 // expired).
 watch([tenantFilter, statusFilter], () => { loadReservations() })
+
+// M14: keep the URL in sync with tenantFilter so the filtered view is
+// shareable. `replace` (not push) — filter changes shouldn't clutter
+// history; deep links + browser-back still restore the correct scope.
+watch(tenantFilter, (tenantId) => {
+  const current = typeof route.query.tenant_id === 'string' ? route.query.tenant_id : undefined
+  if (current === tenantId) return
+  router.replace({
+    query: {
+      ...route.query,
+      tenant_id: tenantId || undefined,
+    },
+  })
+})
 
 const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
   try {

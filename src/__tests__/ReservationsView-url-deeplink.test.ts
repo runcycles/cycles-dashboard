@@ -113,4 +113,42 @@ describe('ReservationsView — URL deep-link smoke', () => {
       expect(w.find('h1').exists()).toBe(true)
     })
   }
+
+  it('M14: pre-selects the tenant from ?tenant_id= and skips the first-ACTIVE default', async () => {
+    // Pre-fix ReservationsView ignored the URL and always defaulted to
+    // the first-ACTIVE tenant — a deep-link like
+    // /reservations?tenant_id=beta from an Overview drill-down landed
+    // on 'alpha' (alphabetic first) instead. Now the URL wins.
+    routeRef.query = { tenant_id: 'beta' }
+    listTenantsMock.mockResolvedValue({
+      tenants: [
+        { tenant_id: 'alpha', status: 'ACTIVE' },
+        { tenant_id: 'beta', status: 'ACTIVE' },
+      ],
+      has_more: false,
+    })
+    const { default: ReservationsView } = await import('../views/ReservationsView.vue')
+    mount(ReservationsView, stdMount())
+    await flushPromises()
+    // The polling callback calls listReservations with the filter.
+    const call = listReservationsMock.mock.calls.find(args => args[0] === 'beta')
+    expect(call).toBeDefined()
+  })
+
+  it('M14: drops a stale ?tenant_id= that no longer exists and falls back to default', async () => {
+    routeRef.query = { tenant_id: 'deleted-tenant' }
+    listTenantsMock.mockResolvedValue({
+      tenants: [{ tenant_id: 'acme', status: 'ACTIVE' }],
+      has_more: false,
+    })
+    const { default: ReservationsView } = await import('../views/ReservationsView.vue')
+    mount(ReservationsView, stdMount())
+    await flushPromises()
+    // Stale tenant_id is replaced by the first-ACTIVE default.
+    const call = listReservationsMock.mock.calls.find(args => args[0] === 'acme')
+    expect(call).toBeDefined()
+    // And no call under the stale id fired.
+    const staleCall = listReservationsMock.mock.calls.find(args => args[0] === 'deleted-tenant')
+    expect(staleCall).toBeUndefined()
+  })
 })

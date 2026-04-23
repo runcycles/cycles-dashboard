@@ -54,10 +54,17 @@ const shapeOk = computed(() => hasBulkAuditShape(props.operation, props.metadata
 
 // Sub-second renders as "Xms" (server round-trips are typically <1s);
 // >=1s renders as "X.XXs" so an operator scanning for outliers sees
-// the magnitude change immediately.
+// the magnitude change immediately. M16: locale-aware formatting —
+// pre-fix `.toFixed(2)` always used a `.` decimal, so operators in
+// locales that use `,` for decimals saw a mismatch against every
+// other number in the dashboard (which goes through Intl). Force en-US
+// for both pieces since the unit suffixes ("ms" / "s") are English.
+const DURATION_FORMATTER = new Intl.NumberFormat('en-US', {
+  minimumFractionDigits: 2, maximumFractionDigits: 2,
+})
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`
-  return `${(ms / 1000).toFixed(2)}s`
+  return `${DURATION_FORMATTER.format(ms / 1000)}s`
 }
 
 // Filter-echo entries. Keep falsy-but-meaningful values (false, 0) and
