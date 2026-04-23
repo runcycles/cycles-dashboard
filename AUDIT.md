@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.55 (2026-04-23)
+**Current release:** v0.1.25.56 (2026-04-23)
 
 ## Baseline requirements
 
@@ -16,6 +16,47 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-23 — v0.1.25.56: P2 a11y + M7 form-UX closeout
+
+Final batch from the v0.1.25.54 review plan. Closes the deferred
+accessibility and form-UX items. No spec change.
+
+**Changes.**
+
+| ID | Change | Files |
+|---|---|---|
+| M7 | TenantsView create form validates live; Submit disabled while invalid | `TenantsView.vue`, `FormDialog.vue` (new `submitDisabled` prop) |
+| M9 | `BaseChart` auto-renders an `sr-only` data table from pie-shaped options | `BaseChart.vue` |
+| M10 | `.chip:focus-visible` ring added, matches btn-pill convention | `style.css` |
+| M8 | Already implemented — added a regression-lock test | `a11y-sweep.test.ts` |
+
+**Verified-false during scoping.**
+
+- **M8 "RowActionsMenu has no arrow-key nav"** — the menu already
+  handles ArrowUp / ArrowDown / Home / End / Escape / Tab
+  (`RowActionsMenu.vue:155-184`). Test added to keep future refactors
+  honest.
+
+**Design notes.**
+
+- BaseChart's SR table auto-derives from `option.series[0].data` when
+  items are in the `{ name, value }` shape. All 5 clickable donuts
+  (4 Overview + 1 WebhookDetail) get a11y coverage with zero per-view
+  wiring. The attempts histogram (bar chart with bare-number `data`)
+  doesn't match the shape and stays at the chart-level aria-label
+  only — acceptable (it's a secondary visual; callers can pass
+  explicit `srData` if this becomes a complaint).
+- `FormDialog.submitDisabled` is a separate prop from `loading`
+  because the two semantics are distinct: `loading` blocks submit
+  during an in-flight request; `submitDisabled` gates on
+  form-validity. They're OR'd on the underlying `:disabled`.
+
+**Coverage.** +14 new tests across 2 new files. 924 total (was 896).
+
+**tsconfig note.** `tsconfig.app.json` now includes `node` in the
+`types` array so the M10 test can read `style.css` off disk via `fs`.
+Doesn't affect the runtime build — strictly a type-only addition.
 
 ### 2026-04-23 — v0.1.25.55: L-tier polish + coverage backfill
 

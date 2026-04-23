@@ -504,10 +504,32 @@ function openCreate() {
   showCreate.value = true
 }
 
+// M7 (form UX): live validation of the tenant-id input. Pre-fix the
+// regex check ran only in submitCreate() at click time, so an operator
+// who typed "Acme Corp" saw nothing wrong until they hit Submit —
+// HTML5 `pattern` validates on blur but the browser-native popup isn't
+// the same as visible error text. This computed mirrors the server-
+// side constraint exactly and drives both the inline error message
+// and the Submit button's disabled state. Submit-time check below
+// stays as a belt-and-suspenders fallback.
+const tenantIdFormatError = computed<string>(() => {
+  const v = createForm.value.tenant_id
+  if (v === '') return '' // don't scream at an empty field before typing
+  if (v.length < 3) return 'Tenant ID must be at least 3 characters'
+  if (v.length > 64) return 'Tenant ID must be 64 characters or fewer'
+  if (!/^[a-z0-9-]+$/.test(v)) return 'Tenant ID must contain only lowercase letters, numbers, and hyphens'
+  return ''
+})
+const canSubmitCreate = computed(() =>
+  !!createForm.value.tenant_id &&
+  !!createForm.value.name &&
+  !tenantIdFormatError.value,
+)
+
 async function submitCreate() {
   createError.value = ''
-  if (!/^[a-z0-9-]+$/.test(createForm.value.tenant_id)) {
-    createError.value = 'Tenant ID must contain only lowercase letters, numbers, and hyphens'
+  if (tenantIdFormatError.value) {
+    createError.value = tenantIdFormatError.value
     return
   }
   createLoading.value = true
@@ -1026,11 +1048,26 @@ const gridTemplate = computed(() =>
       @close="bulkResult = null"
     />
 
-    <FormDialog v-if="showCreate" title="Create Tenant" submit-label="Create Tenant" :loading="createLoading" :error="createError" @submit="submitCreate" @cancel="showCreate = false">
+    <FormDialog v-if="showCreate" title="Create Tenant" submit-label="Create Tenant" :loading="createLoading" :error="createError" :submit-disabled="!canSubmitCreate" @submit="submitCreate" @cancel="showCreate = false">
       <div>
         <label for="ct-id" class="form-label">Tenant ID</label>
-        <input id="ct-id" v-model="createForm.tenant_id" required pattern="^[a-z0-9-]+$" minlength="3" maxlength="64" class="form-input-mono" placeholder="acme-corp" />
-        <p class="muted-sm mt-0.5">Lowercase letters, numbers, and hyphens only</p>
+        <input
+          id="ct-id"
+          v-model="createForm.tenant_id"
+          required
+          pattern="^[a-z0-9-]+$"
+          minlength="3"
+          maxlength="64"
+          class="form-input-mono"
+          placeholder="acme-corp"
+          :aria-invalid="!!tenantIdFormatError || undefined"
+          aria-describedby="ct-id-hint ct-id-error"
+        />
+        <!-- M7 (form UX): live inline error. Always-visible hint shows
+             the constraint before typing; error message replaces the
+             hint tone once invalid input appears. -->
+        <p v-if="tenantIdFormatError" id="ct-id-error" class="text-xs text-red-600 mt-0.5" role="alert">{{ tenantIdFormatError }}</p>
+        <p v-else id="ct-id-hint" class="muted-sm mt-0.5">Lowercase letters, numbers, and hyphens only</p>
       </div>
       <div>
         <label for="ct-name" class="form-label">Display Name</label>

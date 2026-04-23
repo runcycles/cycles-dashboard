@@ -8,6 +8,13 @@ defineProps<{
   loading?: boolean
   error?: string
   wide?: boolean
+  // M7 (form UX): caller-controlled disabled state for the submit
+  // button. Lets a view gate Submit on its own validation predicate
+  // (e.g. live regex check on a tenant-id field) instead of waiting
+  // for click → submit-time validation → error bounce. `loading`
+  // continues to disable submit during in-flight requests; this prop
+  // is OR'd with it.
+  submitDisabled?: boolean
 }>()
 const emit = defineEmits<{ submit: []; cancel: [] }>()
 
@@ -35,7 +42,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
           <button type="button" @click="$emit('cancel')" class="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100 rounded hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer">Cancel</button>
           <button
             type="submit"
-            :disabled="loading"
+            :disabled="loading || submitDisabled"
             class="px-4 py-1.5 text-sm rounded cursor-pointer bg-gray-900 hover:bg-gray-800 text-white dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {{ loading ? 'Saving...' : (submitLabel || 'Save') }}
