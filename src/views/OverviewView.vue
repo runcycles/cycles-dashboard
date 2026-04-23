@@ -313,24 +313,27 @@ function onEventsCategoryClick(p: ChartClickParams) {
 // counts any webhook with `consecutive_failures ≥ 1` regardless
 // of status, so a PAUSED webhook with latent failures still
 // surfaces — matches the `?failing=1` URL filter semantics.
-type WebhookFleetSlices = { healthy: number; failing: number; paused: number; disabled: number }
+// v0.1.25.53: status-pure slices from server aggregates. Prior shape
+// (Healthy / Failing / Paused / Disabled) partitioned mutually-exclusively
+// with Failing taking precedence over status — so a PAUSED webhook with
+// consecutive_failures ≥ 1 was counted as Failing, not Paused. Result:
+// operator saw "6 paused" on the counter-strip chip but "5 Paused" on
+// the donut (tile = status only; donut = status-minus-failing-overlap).
+// Now both are status-only and sourced from the same server-side aggregate
+// (`webhook_counts`) — donut slices and chip numbers reconcile by
+// construction. Failing remains a separate counter-strip chip.
+type WebhookFleetSlices = { active: number; paused: number; disabled: number }
 const webhookFleetSlices = computed<WebhookFleetSlices>(() => {
-  const out: WebhookFleetSlices = { healthy: 0, failing: 0, paused: 0, disabled: 0 }
-  for (const w of failingWebhooksRaw.value) {
-    const failing = (w.consecutive_failures ?? 0) >= 1
-    if (w.status === 'DISABLED') out.disabled++
-    else if (failing) out.failing++
-    else if (w.status === 'PAUSED') out.paused++
-    else out.healthy++
-  }
-  return out
+  const wc = overview.value?.webhook_counts
+  if (!wc) return { active: 0, paused: 0, disabled: 0 }
+  const paused = Math.max(0, wc.total - wc.active - wc.disabled)
+  return { active: wc.active, paused, disabled: wc.disabled }
 })
 
 const webhookHealthOption = computed(() => {
   const f = webhookFleetSlices.value
   const slices = [
-    { name: 'Healthy', value: f.healthy, itemStyle: { color: palette.value.success } },
-    { name: 'Failing', value: f.failing, itemStyle: { color: palette.value.danger } },
+    { name: 'Active', value: f.active, itemStyle: { color: palette.value.success } },
     { name: 'Paused', value: f.paused, itemStyle: { color: palette.value.warning } },
     { name: 'Disabled', value: f.disabled, itemStyle: { color: palette.value.neutral } },
   ].filter(s => s.value > 0)
@@ -363,10 +366,9 @@ const webhookHealthOption = computed(() => {
 
 function onWebhookHealthClick(p: ChartClickParams) {
   const name = (p?.name ?? '').toLowerCase()
-  if (name === 'failing') router.push({ name: 'webhooks', query: { failing: '1' } })
+  if (name === 'active') router.push({ name: 'webhooks', query: { status: 'ACTIVE' } })
   else if (name === 'paused') router.push({ name: 'webhooks', query: { status: 'PAUSED' } })
   else if (name === 'disabled') router.push({ name: 'webhooks', query: { status: 'DISABLED' } })
-  else if (name === 'healthy') router.push({ name: 'webhooks', query: { status: 'ACTIVE' } })
 }
 
 const budgetStatusOption = computed(() => {
@@ -962,7 +964,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
         </div>
 
         <div
-          v-if="failingWebhooksRaw.length > 0"
+          v-if="overview.webhook_counts.total > 0"
           class="card p-3"
           data-testid="webhook-fleet-health-donut"
         >

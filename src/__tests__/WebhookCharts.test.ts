@@ -244,46 +244,64 @@ describe('OverviewView — webhook fleet-health donut (relocated v0.1.25.52)', (
     return card.exists() ? card.findComponent({ name: 'BaseChart' }) : null
   }
 
-  it('buckets webhooks into Healthy / Failing / Paused / Disabled', async () => {
-    const subs: WebhookSubscription[] = [
-      hook({ status: 'ACTIVE', consecutive_failures: 0 }),
-      hook({ status: 'ACTIVE', consecutive_failures: 0 }),
-      hook({ status: 'ACTIVE', consecutive_failures: 5 }),   // failing
-      hook({ status: 'PAUSED', consecutive_failures: 2 }),   // failing (paused + failures)
-      hook({ status: 'PAUSED', consecutive_failures: 0 }),   // paused
-      hook({ status: 'DISABLED', consecutive_failures: 10 }),
-    ]
-    listWebhooksMock.mockResolvedValue({ subscriptions: subs, has_more: false })
+  // v0.1.25.53: slices are now status-pure (Active / Paused / Disabled)
+  // and sourced from the server's `webhook_counts` aggregate. Pre-fix the
+  // donut partitioned mutually-exclusively with Failing taking precedence
+  // over PAUSED — so a PAUSED-AND-FAILING webhook was counted in Failing,
+  // not Paused, which disagreed with the counter-strip chip (status-only).
+  // Failing remains a separate counter-strip chip; the donut is fleet-
+  // status mix only, and reconciles with chip numbers by construction.
+  it('buckets from webhook_counts into Active / Paused / Disabled', async () => {
+    // total=6, active=3, disabled=1 → paused = max(0, 6-3-1) = 2.
+    // Note: PAUSED-and-failing rows are still counted as Paused (status-only).
+    getOverviewMock.mockResolvedValue(healthyOverview({
+      webhook_counts: { total: 6, active: 3, disabled: 1, with_failures: 2 },
+    }))
+    listWebhooksMock.mockResolvedValue({
+      subscriptions: [hook({ status: 'ACTIVE', consecutive_failures: 0 })],
+      has_more: false,
+    })
     const w = await mountOverview()
 
     const chart = findWebhookChart(w)
     expect(chart).toBeTruthy()
     const option = chart!.props('option') as { series: Array<{ data: Array<{ name: string; value: number }> }> }
     const byName = Object.fromEntries(option.series[0].data.map(s => [s.name, s.value]))
-    expect(byName['Healthy']).toBe(2)
-    expect(byName['Failing']).toBe(2)
-    expect(byName['Paused']).toBe(1)
+    expect(byName['Active']).toBe(3)
+    expect(byName['Paused']).toBe(2)
     expect(byName['Disabled']).toBe(1)
+    // No "Failing" slice — that signal lives on the counter-strip chip.
+    expect(byName['Failing']).toBeUndefined()
+    expect(byName['Healthy']).toBeUndefined()
   })
 
-  it('hides the card when there are no webhooks', async () => {
+  it('hides the card when the fleet is empty', async () => {
+    getOverviewMock.mockResolvedValue(healthyOverview({
+      webhook_counts: { total: 0, active: 0, disabled: 0, with_failures: 0 },
+    }))
     listWebhooksMock.mockResolvedValue({ subscriptions: [], has_more: false })
     const w = await mountOverview()
     expect(w.find('[data-testid="webhook-fleet-health-donut"]').exists()).toBe(false)
   })
 
-  it('drills to /webhooks?failing=1 when Failing slice clicked', async () => {
+  it('drills to /webhooks?status=ACTIVE when Active slice clicked', async () => {
+    getOverviewMock.mockResolvedValue(healthyOverview({
+      webhook_counts: { total: 1, active: 1, disabled: 0, with_failures: 0 },
+    }))
     listWebhooksMock.mockResolvedValue({
-      subscriptions: [hook({ status: 'ACTIVE', consecutive_failures: 3 })],
+      subscriptions: [hook({ status: 'ACTIVE', consecutive_failures: 0 })],
       has_more: false,
     })
     const w = await mountOverview()
-    findWebhookChart(w)!.vm.$emit('slice-click', { name: 'Failing' })
+    findWebhookChart(w)!.vm.$emit('slice-click', { name: 'Active' })
     await flushPromises()
-    expect(pushMock).toHaveBeenCalledWith({ name: 'webhooks', query: { failing: '1' } })
+    expect(pushMock).toHaveBeenCalledWith({ name: 'webhooks', query: { status: 'ACTIVE' } })
   })
 
   it('drills to /webhooks?status=DISABLED when Disabled slice clicked', async () => {
+    getOverviewMock.mockResolvedValue(healthyOverview({
+      webhook_counts: { total: 1, active: 0, disabled: 1, with_failures: 1 },
+    }))
     listWebhooksMock.mockResolvedValue({
       subscriptions: [hook({ status: 'DISABLED', consecutive_failures: 10 })],
       has_more: false,
@@ -295,6 +313,9 @@ describe('OverviewView — webhook fleet-health donut (relocated v0.1.25.52)', (
   })
 
   it('drills to /webhooks?status=PAUSED when Paused slice clicked', async () => {
+    getOverviewMock.mockResolvedValue(healthyOverview({
+      webhook_counts: { total: 2, active: 1, disabled: 0, with_failures: 0 },
+    }))
     listWebhooksMock.mockResolvedValue({
       subscriptions: [hook({ status: 'PAUSED', consecutive_failures: 0 })],
       has_more: false,

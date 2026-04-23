@@ -410,8 +410,12 @@ describe('OverviewView — chart drill-down (v0.1.25.49)', () => {
 
   it('events donut category slice pushes to events?category=policy', async () => {
     const w = await mountOverview()
-    const charts = w.findAllComponents({ name: 'BaseChart' })
-    charts[2].vm.$emit('slice-click', { name: 'policy' })
+    // Resolve by card instead of array index — v0.1.25.53 added the
+    // webhook-fleet-health card that now also renders when
+    // webhook_counts.total > 0, shifting the previous charts[2] index.
+    const eventsCard = w.find('[data-testid="events-by-category-donut"]')
+    const eventsChart = eventsCard.findComponent({ name: 'BaseChart' })
+    eventsChart.vm.$emit('slice-click', { name: 'policy' })
     await flushPromises()
     expect(pushMock).toHaveBeenCalledWith({ name: 'events', query: { category: 'policy' } })
   })

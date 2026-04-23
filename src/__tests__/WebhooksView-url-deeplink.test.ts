@@ -120,4 +120,36 @@ describe('WebhooksView — URL deep-link smoke', () => {
       expect(w.find('h1').exists()).toBe(true)
     })
   }
+
+  // v0.1.25.53 regression: Overview's "active" counter-strip tile drill-down
+  // (?status=ACTIVE) must forward status to the server so the list page isn't
+  // crowded by rows that client-side filter will throw away. Pre-fix, a fleet
+  // of 62 ACTIVE webhooks could show 12 because page 1 (default sort:
+  // consecutive_failures-desc) was dominated by DISABLED/failing rows.
+  it('forwards ?status=ACTIVE to listWebhooks as a server-side param', async () => {
+    routeRef.query = { status: 'ACTIVE' }
+    const { default: WebhooksView } = await import('../views/WebhooksView.vue')
+    mount(WebhooksView, stdMount())
+    await flushPromises()
+    const params = listWebhooksMock.mock.calls.at(-1)?.[0] as Record<string, string> | undefined
+    expect(params?.status).toBe('ACTIVE')
+  })
+
+  it('forwards ?status=PAUSED to listWebhooks as a server-side param', async () => {
+    routeRef.query = { status: 'PAUSED' }
+    const { default: WebhooksView } = await import('../views/WebhooksView.vue')
+    mount(WebhooksView, stdMount())
+    await flushPromises()
+    const params = listWebhooksMock.mock.calls.at(-1)?.[0] as Record<string, string> | undefined
+    expect(params?.status).toBe('PAUSED')
+  })
+
+  it('does not send status param when no filter is set', async () => {
+    routeRef.query = {}
+    const { default: WebhooksView } = await import('../views/WebhooksView.vue')
+    mount(WebhooksView, stdMount())
+    await flushPromises()
+    const params = listWebhooksMock.mock.calls.at(-1)?.[0] as Record<string, string> | undefined
+    expect(params?.status).toBeUndefined()
+  })
 })

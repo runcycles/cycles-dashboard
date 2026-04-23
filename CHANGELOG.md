@@ -15,6 +15,34 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.53] — 2026-04-22
+
+### Fixed
+
+- **Webhooks counter-strip "active" chip drill-down now matches the
+  tile number.** Operator-reported: tile showed 62 active but
+  `/webhooks?status=ACTIVE` only listed 12. Root cause: the tile
+  reads `webhook_counts.active` (a server-side scan across the
+  whole fleet) while the list page loaded one page of 50 sorted by
+  `consecutive_failures desc` and filtered `status === 'ACTIVE'`
+  client-side — DISABLED/failing rows dominated page 1, leaving
+  only 12 ACTIVE visible. WebhooksView now pushes `status=` to the
+  server via the spec's `listWebhookSubscriptions` `status` query
+  param, so polling / load-more / export all walk pages of
+  matching rows. Same fix benefits `?status=PAUSED` and
+  `?status=DISABLED`.
+- **Webhook fleet-health donut reconciles with counter-strip
+  chips.** Operator-reported: tile showed 6 paused, donut showed
+  5. Root cause: the donut partitioned mutually-exclusively with
+  "Failing" taking precedence over status — so a PAUSED-and-failing
+  webhook was counted in "Failing", not "Paused". Tile read
+  status-only; donut didn't. Donut slices are now status-pure
+  (Active / Paused / Disabled) and sourced from the server's
+  `webhook_counts` aggregate (same source the chip numbers use),
+  so they reconcile by construction. Failing remains a separate
+  counter-strip chip — that signal lives on the chip, not in the
+  status mix.
+
 ## [0.1.25.52] — 2026-04-22
 
 ### Changed

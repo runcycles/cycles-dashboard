@@ -192,6 +192,14 @@ function withListParams(params: Record<string, string> = {}): Record<string, str
   }
   const q = debouncedUrlFilter.value.trim()
   if (q && !q.includes('*')) params.search = q
+  // v0.1.25.53: push status to the server so the Overview counter-strip
+  // drill-downs reconcile. Pre-fix, `/webhooks?status=ACTIVE` loaded one
+  // page (default limit=50) sorted by consecutive_failures-desc and
+  // filtered client-side — so a tile showing "62 active" could drill into
+  // a list of ~12 because DISABLED rows crowded page 1. Spec's
+  // listWebhookSubscriptions accepts status natively; pushing it fixes
+  // polling, loadMore, and export in one go.
+  if (statusFilter.value) params.status = statusFilter.value
   return params
 }
 
@@ -558,8 +566,10 @@ const { refresh, isLoading } = usePolling(async () => {
 // the cursor stays aligned with the server's (sort_by, sort_dir,
 // search) tuple. Same rationale as useSort's onChange — the opaque
 // cursor is filter-scoped, so carrying it across a filter change
-// would 400.
-watch(debouncedUrlFilter, () => { refresh() })
+// would 400. v0.1.25.53: statusFilter is now also server-side, so the
+// same refetch-page-1 contract applies when the operator flips the
+// dropdown or the URL mirror lands a new status value.
+watch([debouncedUrlFilter, statusFilter], () => { refresh() })
 
 async function loadMore() {
   if (!nextCursor.value || loadingMore.value) return

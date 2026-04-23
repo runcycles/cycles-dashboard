@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.52 (2026-04-22)
+**Current release:** v0.1.25.53 (2026-04-22)
 
 ## Baseline requirements
 
@@ -16,6 +16,44 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-22 — v0.1.25.53: Webhook counter-strip, drill-downs, and donut reconciled
+
+**Triggers (two operator reports, same session).**
+
+1. *"problem is Webhooks active shows 62 but drill down only shows webhooks with active status which are only 12, so drill downs don't match what is shown in cards."*
+2. *"Webhook fleet health: shows 5 paused, but there are 6 paused."*
+
+Different surfaces, same underlying disease: each surface answered "how many X" with its own data source + partition rules. Fix: make every surface read from the same server aggregate and apply the same partition rules, so reconciliation is structural, not coincidental.
+
+**Root cause — drill-down (62 vs 12).** Asymmetric data sources.
+
+- Counter-strip "active" chip reads `overview.webhook_counts.active` — produced by the server's `AdminOverviewService.countWebhooks` walking every page (`listAllWebhooks` in `PAGE_SIZE=100` steps) and counting `status == ACTIVE`. Fleet-wide.
+- `/webhooks?status=ACTIVE` loaded ONE page via `listWebhooks(withListParams())` with default limit=50, default sort `consecutive_failures desc`, then applied `status==='ACTIVE'` **client-side**. DISABLED + failing rows dominate page 1; `useTerminalAwareList` hides DISABLED; ~12 survive.
+
+**Root cause — donut (5 vs 6 Paused).** Asymmetric partition rules.
+
+- Counter-strip chip counted Paused strictly by `status`. 6 PAUSED webhooks = 6.
+- Donut slices were mutually-exclusive `{healthy, failing, paused, disabled}` with Failing taking precedence over status. A PAUSED-and-failing webhook was counted in "Failing", not "Paused". 5 paused + 1 paused-and-failing routed elsewhere = 5.
+- Both internally consistent, but externally inconsistent with a chip labelled the same word. Prior release documented this as intentional — which in hindsight *is* the bug.
+
+**Fix — drill-down.** Push `status=` to the server on every list call. Spec's `listWebhookSubscriptions` has accepted `status=ACTIVE|PAUSED|DISABLED` since baseline; the UI simply never wired the dropdown / URL-mirrored filter into the request.
+
+**Fix — donut.** Slices are now status-pure `{active, paused, disabled}`, sourced from `overview.webhook_counts` (same aggregate the chips read). Paused = `max(0, total - active - disabled)`. Failing remains a counter-strip chip only. Donut = status mix; chip = failure overlay; separate axes, no pretense of single partition.
+
+**Scope.**
+
+| Surface | Change |
+|---|---|
+| `src/views/WebhooksView.vue` | `withListParams` appends `status=` when `statusFilter.value` is set. `watch([debouncedUrlFilter, statusFilter])` refreshes page 1 when dropdown / URL mirror lands a new status. Polling, `loadMore`, and export's `fetchPage` inherit automatically — all flow through `withListParams`. |
+| `src/views/OverviewView.vue` | `webhookFleetSlices` now returns `{active, paused, disabled}` from `overview.webhook_counts` (not a client-side reduce over a list page). `webhookHealthOption` slice labels: Active / Paused / Disabled. `onWebhookHealthClick` loses the `failing` branch. Card `v-if` switched from `failingWebhooksRaw.length > 0` to `overview.webhook_counts.total > 0` — the donut is a fleet-status mix; it renders for any non-empty fleet, not just failing ones. |
+| `src/__tests__/WebhooksView-url-deeplink.test.ts` | Three regression tests: `?status=ACTIVE` + `?status=PAUSED` both assert the last `listWebhooks` call carried server-side `status`; no-filter case asserts it's omitted. |
+| `src/__tests__/WebhookCharts.test.ts` | Five tests in `OverviewView — webhook fleet-health donut` describe rewritten for the new shape. Now seeded via `healthyOverview({ webhook_counts: {…} })` instead of `listWebhooksMock` subscriptions — matches the new data source. Asserts Active/Paused/Disabled labels; asserts Failing/Healthy are absent. |
+| `src/__tests__/BaseChart.test.ts` | Events-donut lookup changed from `charts[2]` array index to `data-testid="events-by-category-donut"`. The webhook card now renders in more scenarios (whenever `webhook_counts.total > 0`), which shifted the array index. |
+
+**Not in scope.** Server still has no `failing` filter on `listWebhookSubscriptions`, so `?failing=1` drill-down paginates client-side. Default sort is `consecutive_failures desc` — failing rows surface first, but `with_failures > 50` still needs Load-more. Flagged as follow-up; options are a spec-side `failing=1` param or a client-side cursor-walk-until-N-collected.
+
+**Verification.** `npm run typecheck` clean. `npx vitest run` → 66 files / 855 tests passing. Specifically: `WebhookCharts.test.ts` (10), `WebhooksView-url-deeplink.test.ts` (10, +3 new), `BaseChart.test.ts` (17).
 
 ### 2026-04-22 — v0.1.25.52: Relocate webhook fleet-health donut from WebhooksView → OverviewView
 
