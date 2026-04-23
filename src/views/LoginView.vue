@@ -96,8 +96,14 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="min-h-screen flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">
-    <div class="bg-white dark:bg-gray-900 rounded-lg shadow-md p-8 w-full max-w-sm">
+  <!-- min-h-dvh tracks the visible viewport on mobile Safari; previously
+       min-h-screen (= 100vh) left a dead strip behind the collapsing
+       address bar. px-3 on the smallest phones (iPhone SE 320w) leaves
+       the card ~296px wide, enough for the API-key input without
+       horizontal overflow; p-6 sm:p-8 trims dead space on small screens
+       without feeling cramped on desktop. -->
+  <div class="min-h-dvh flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-950 px-3 sm:px-4">
+    <div class="bg-white dark:bg-gray-900 rounded-lg shadow-md p-6 sm:p-8 w-full max-w-sm">
       <div class="flex items-center gap-3 mb-4">
         <img src="/runcycles-logo.svg" alt="Cycles" class="w-10 h-10" />
         <h1 class="text-xl font-semibold text-gray-900 dark:text-white">Cycles Admin</h1>

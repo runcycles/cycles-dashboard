@@ -81,11 +81,16 @@ const countLabel = computed(() => {
 </script>
 
 <template>
-  <div class="flex items-center justify-between mb-6">
-    <div class="flex items-center gap-3">
+  <!-- Responsive reflow (v0.1.25.58). On narrow viewports the title block
+       + actions (refresh, freshness pill, slotted buttons) don't fit on
+       one line — `flex-col` below sm: stacks them vertically; gap-3
+       preserves the rhythm. items-start on the outer flex prevents
+       vertical centering from cramping multi-line titles. -->
+  <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
+    <div class="flex items-start gap-3 min-w-0">
       <slot name="back" />
-      <div>
-        <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">{{ title }}</h1>
+      <div class="min-w-0">
+        <h1 class="text-xl sm:text-2xl font-semibold text-gray-900 dark:text-white truncate">{{ title }}</h1>
         <p v-if="subtitle" class="muted-sm font-mono mt-0.5">{{ subtitle }}</p>
         <p v-if="countLabel" class="muted-sm mt-0.5 tabular-nums">{{ countLabel }}</p>
         <!-- W6 (Phase 4): a11y row-count live region. Mirrors the
@@ -100,7 +105,7 @@ const countLabel = computed(() => {
         <span v-if="countLabel" class="sr-only" aria-live="polite" aria-atomic="true">{{ countLabel }}</span>
       </div>
     </div>
-    <div class="flex items-center gap-3">
+    <div class="flex items-center gap-2 sm:gap-3 flex-wrap">
       <!-- P1-M2 (revised): stale-only freshness pill. Only renders when
            the most recent tick is older than STALE_THRESHOLD_MS. Amber
            because its presence means "trust this data less" — the data

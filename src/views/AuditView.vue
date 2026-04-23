@@ -567,7 +567,13 @@ function measureRow(el: Element | { $el?: Element } | null) {
       :aria-rowcount="entries.length + 1"
       :aria-colcount="7"
     >
-     <div style="min-width: 1000px" class="flex flex-col flex-1 min-h-0">
+     <!-- v0.1.25.58: the min-width keeps table columns from collapsing
+          when the viewport is narrower than the table's natural width,
+          so the outer container can scroll horizontally instead. Dropped
+          from 1000px to 900px so iPad portrait (768px) reaches the
+          visually-lossless case with a single-finger scroll, not a
+          double-finger reflow. -->
+     <div style="min-width: 900px" class="flex flex-col flex-1 min-h-0">
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
         <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
           <div role="columnheader" class="table-cell"></div>

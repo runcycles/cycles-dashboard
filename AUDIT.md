@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.57 (2026-04-23)
+**Current release:** v0.1.25.58 (2026-04-23)
 
 ## Baseline requirements
 
@@ -16,6 +16,39 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-23 — v0.1.25.58: Mobile-responsive sweep
+
+User-requested audit outside the original v0.1.25.54 review plan.
+Three parallel Explore agents covered layout shell, list/detail
+views, and dialogs/forms; ~25 issues surfaced, 10 land in this
+release. No spec change.
+
+**Changes.**
+
+| Layer | Change | Files |
+|---|---|---|
+| Shell | Escape closes drawer; body scroll-lock; focus-return to hamburger | `AppLayout.vue` |
+| Shell | Hamburger sized to 44×44 with aria-expanded / aria-controls | `AppLayout.vue` |
+| Shell | Root uses `h-dvh` not `h-screen` (mobile Safari URL-bar) | `AppLayout.vue` |
+| Header | PageHeader reflows to column on narrow viewports | `PageHeader.vue` |
+| Feedback | InlineErrorBanner × is 32×32, not ~16×12 | `InlineErrorBanner.vue` |
+| Tables | AuditView `min-width: 1000px` → `900px` | `AuditView.vue` |
+| Menus | RowActionsMenu clamps to viewport horizontally | `RowActionsMenu.vue` |
+| Dialogs | FormDialog + ConfirmAction footers flex-wrap | `FormDialog.vue`, `ConfirmAction.vue` |
+| Auth | LoginView + NotFoundView fit 320w + use `min-h-dvh` | `LoginView.vue`, `NotFoundView.vue` |
+
+**Deferred.**
+
+| Item | Why deferred |
+|---|---|
+| Virtualized-table card-mode on phones | Structural refactor — the four list views with fixed column layouts need a mobile-specific render path. Current horizontal-scroll fallback is usable but not ideal. Worth its own release when prioritized. |
+| CommandPalette soft-keyboard viewport handling | Needs `visualViewport` event wiring; complex + rare on admin console |
+| TimeRangePicker popover horizontal overflow | Same pattern as the RowActionsMenu fix; bundle in a follow-up |
+| BulkAction preview/result dialog table overflow | Surface-specific; not common on mobile |
+
+**Coverage.** +7 new tests in `AppLayout-mobile-drawer.test.ts`.
+936 total (was 929). Typecheck clean.
 
 ### 2026-04-23 — v0.1.25.57: Correctness + debuggability sweep
 

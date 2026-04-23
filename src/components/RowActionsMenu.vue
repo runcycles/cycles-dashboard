@@ -87,18 +87,29 @@ function computePosition() {
 
 // Flip above the trigger if the natural below-placement would overflow
 // the viewport. Measured after the menu renders (otherwise we have no
-// height to check against).
+// height to check against). v0.1.25.58 adds the horizontal guard:
+// on narrow viewports (phones) an align="right" menu anchored to a
+// trigger near the left edge can overflow off the right edge; or vice
+// versa. Clamp to viewport bounds with an 8px margin either side.
 function adjustOverflow() {
   const m = menuEl.value
   const t = triggerEl.value
   if (!m || !t) return
   const mRect = m.getBoundingClientRect()
   const tRect = t.getBoundingClientRect()
+  // Vertical flip.
   if (mRect.bottom > window.innerHeight - 8) {
     menuStyle.value = {
       ...menuStyle.value,
       top: `${Math.max(8, tRect.top - mRect.height - 4)}px`,
     }
+  }
+  // Horizontal clamp. Only flip to the opposite edge when the natural
+  // placement would actually overflow — don't move menus that fit.
+  if (mRect.right > window.innerWidth - 8) {
+    menuStyle.value = { ...menuStyle.value, right: '8px', left: 'auto' }
+  } else if (mRect.left < 8) {
+    menuStyle.value = { ...menuStyle.value, left: '8px', right: 'auto' }
   }
 }
 

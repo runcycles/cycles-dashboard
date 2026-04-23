@@ -1,12 +1,35 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref } from 'vue'
+import { nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import Sidebar from './Sidebar.vue'
 import CommandPalette from './CommandPalette.vue'
 import { useCommandPalette } from '../composables/useCommandPalette'
 import HamburgerIcon from './icons/HamburgerIcon.vue'
 
 const sidebarOpen = ref(false)
+const hamburgerEl = ref<HTMLButtonElement | null>(null)
 const palette = useCommandPalette()
+
+// Mobile-drawer affordances (v0.1.25.58 responsive sweep).
+//   - Escape closes the drawer.
+//   - Body scroll is locked while the drawer is open, otherwise a mobile
+//     user can scroll the underlying list behind the dark overlay, which
+//     reads as a bug and lets them tap interactive elements through the
+//     backdrop.
+//   - Focus returns to the hamburger after close so keyboard flow stays
+//     coherent.
+function closeSidebar(returnFocus: boolean) {
+  if (!sidebarOpen.value) return
+  sidebarOpen.value = false
+  if (returnFocus) {
+    // nextTick so the drawer is actually dismissed before we move focus.
+    void nextTick().then(() => hamburgerEl.value?.focus({ preventScroll: true }))
+  }
+}
+
+watch(sidebarOpen, (open) => {
+  if (typeof document === 'undefined') return
+  document.body.style.overflow = open ? 'hidden' : ''
+})
 
 // W3: global Cmd/K (macOS) / Ctrl+K (other) opens the tenant palette.
 // Swallow the default browser shortcut (locks focus to the browser
@@ -26,6 +49,15 @@ function onGlobalKeydown(e: KeyboardEvent) {
     target instanceof HTMLTextAreaElement ||
     target?.isContentEditable === true
 
+  // Escape closes the mobile drawer first — if nothing is open, fall
+  // through so downstream modals / CommandPalette continue to own
+  // their own Escape handling.
+  if (e.key === 'Escape' && sidebarOpen.value) {
+    e.preventDefault()
+    closeSidebar(true)
+    return
+  }
+
   const key = e.key.toLowerCase()
   if ((e.metaKey || e.ctrlKey) && key === 'k') {
     e.preventDefault()
@@ -39,29 +71,47 @@ function onGlobalKeydown(e: KeyboardEvent) {
 }
 
 onMounted(() => window.addEventListener('keydown', onGlobalKeydown))
-onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKeydown))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onGlobalKeydown)
+  // Restore body scroll on unmount in case the view tore down while
+  // the drawer was still open.
+  if (typeof document !== 'undefined') document.body.style.overflow = ''
+})
 </script>
 
 <template>
-  <div class="flex h-screen bg-gray-50 dark:bg-gray-950">
+  <!-- h-dvh (dynamic viewport height) instead of h-screen so the layout
+       follows the real visible viewport on mobile Safari, which shrinks
+       as the URL bar appears. h-screen = 100vh includes the bar area
+       even when it's not visible, which previously clipped the mobile
+       header behind the chrome on iPhone landscape. -->
+  <div class="flex h-dvh bg-gray-50 dark:bg-gray-950">
     <a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:bg-white focus:px-4 focus:py-2 focus:rounded focus:shadow focus:text-sm focus:text-gray-900">Skip to main content</a>
 
     <!-- Mobile overlay -->
-    <div v-if="sidebarOpen" class="fixed inset-0 bg-black/40 z-30 md:hidden" @click="sidebarOpen = false" />
+    <div v-if="sidebarOpen" class="fixed inset-0 bg-black/40 z-30 md:hidden" @click="closeSidebar(true)" />
 
     <!-- Sidebar: hidden on mobile, visible on md+ -->
-    <div :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'" class="fixed inset-y-0 left-0 z-40 transition-transform duration-200 md:static md:translate-x-0">
-      <Sidebar @navigate="sidebarOpen = false" />
+    <div id="app-sidebar" :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'" class="fixed inset-y-0 left-0 z-40 transition-transform duration-200 md:static md:translate-x-0">
+      <Sidebar @navigate="closeSidebar(false)" />
     </div>
 
     <div class="flex-1 flex flex-col overflow-hidden">
-      <!-- Mobile header bar -->
-      <div class="md:hidden flex items-center gap-3 table-cell bg-gray-900 text-white shrink-0">
-        <button @click="sidebarOpen = true" aria-label="Open menu" class="cursor-pointer">
+      <!-- Mobile header bar. min-h-11 and explicit button padding give the
+           hamburger a ≥44×44 touch target (WCAG 2.1 AA). -->
+      <div class="md:hidden flex items-center gap-2 px-2 py-2 bg-gray-900 text-white shrink-0 min-h-11">
+        <button
+          ref="hamburgerEl"
+          @click="sidebarOpen = true"
+          aria-label="Open menu"
+          :aria-expanded="sidebarOpen"
+          aria-controls="app-sidebar"
+          class="cursor-pointer inline-flex items-center justify-center w-11 h-11 rounded hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
           <HamburgerIcon class="w-5 h-5" />
         </button>
-        <img src="/runcycles-logo.svg" alt="Cycles" class="w-6 h-6" />
-        <span class="text-sm font-semibold">Cycles Admin</span>
+        <img src="/runcycles-logo.svg" alt="Cycles" class="w-6 h-6 shrink-0" />
+        <span class="text-sm font-semibold truncate">Cycles Admin</span>
       </div>
 
       <!-- Phase 5 (table-layout unification): overflow-y-auto (not

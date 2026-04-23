@@ -15,6 +15,69 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.58] — 2026-04-23
+
+Mobile-responsive sweep. A focused audit turned up ~25 mobile issues
+across layout shell, list/detail views, dialogs, and forms; this
+release ships the highest-impact fixes. No spec advance. Bigger
+refactors (virtualized-table card-mode on phones, CommandPalette
+soft-keyboard handling) deferred to a follow-up.
+
+### Fixed
+
+- **Mobile drawer now closes on Escape and locks body scroll while
+  open.** Pre-fix operators on phones could scroll the underlying
+  list behind the dark overlay (reads as a bug) and had no keyboard
+  escape path. Focus returns to the hamburger on close for keyboard
+  coherence.
+- **Hamburger button meets WCAG 44×44 touch-target minimum.** Pre-fix
+  the bare icon was ~20×20 with no padding — common mis-tap target
+  on phones.
+- **PageHeader reflows to a column on narrow viewports.** The title
+  + freshness pill + refresh + slotted actions used to overflow the
+  viewport horizontally on phones < 640px. Stacks below `sm:`; title
+  truncates rather than pushing content off-screen.
+- **InlineErrorBanner dismiss (×) button is now 32×32** (was ~16×12)
+  so operators on phones can actually tap it.
+- **AuditView table `min-width` reduced from 1000px to 900px** so
+  iPad portrait (768w) and most tablets hit the single-axis scroll
+  path. Still enforces horizontal scroll on phones, but at a less
+  aggressive width.
+- **RowActionsMenu now clamps to the viewport horizontally.** The
+  kebab popover can no longer open off the right edge on narrow
+  screens; it flips to the opposite edge when the natural placement
+  would overflow.
+- **Dialog footers flex-wrap.** FormDialog + ConfirmAction footers
+  previously pushed Submit off the right edge when button labels
+  were long on 320w screens.
+- **LoginView + NotFoundView fit on 320w phones.** Responsive padding
+  (`p-6 sm:p-8`), smaller 404 text on phones (`text-5xl sm:text-6xl`),
+  and `min-h-dvh` (not `min-h-screen`) so iOS Safari address-bar
+  collapse doesn't leave dead strips.
+- **AppLayout root uses `h-dvh`** (dynamic viewport height) so the
+  layout tracks the visible viewport on mobile Safari.
+
+### Coverage
+
+- New test: `AppLayout-mobile-drawer.test.ts` (7 tests) — hamburger
+  touch target + aria wiring, Escape closes drawer, body scroll
+  locked while open, scroll restored on unmount, backdrop click,
+  h-dvh root, Escape pass-through when drawer closed.
+- Total: 936, was 929.
+
+### Deferred
+
+- Virtualized-table card-mode on phones (TenantsView, BudgetsView,
+  WebhooksView, ApiKeysView). Current behaviour is horizontal scroll
+  inside the table card; acceptable fallback but not ideal on 320w.
+- CommandPalette soft-keyboard handling (input scrolls out of view
+  when keyboard appears on mobile).
+- TimeRangePicker popover horizontal overflow (structural similar
+  to RowActionsMenu; didn't bundle because the component is smaller
+  surface-area).
+- BulkAction preview / result dialog table overflow on narrow
+  screens.
+
 ## [0.1.25.57] — 2026-04-23
 
 Correctness + debuggability sweep. Closes the remaining
