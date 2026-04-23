@@ -21,14 +21,16 @@ const attemptedPath = computed(() => route.fullPath)
 </script>
 
 <template>
-  <div class="max-w-md mx-auto py-16 text-center">
-    <p class="text-6xl font-semibold text-gray-300 dark:text-gray-700 tracking-tight">404</p>
+  <!-- Responsive text sizing — text-5xl on phones, text-6xl on sm+ —
+       so the 404 doesn't dominate the viewport on 320w screens. -->
+  <div class="max-w-md mx-auto py-10 sm:py-16 px-4 text-center">
+    <p class="text-5xl sm:text-6xl font-semibold text-gray-300 dark:text-gray-700 tracking-tight">404</p>
     <h1 class="mt-4 text-lg font-medium text-gray-900 dark:text-white">Page not found</h1>
     <p class="muted-sm mt-2">
       The URL you followed may be outdated or mistyped.
     </p>
     <p class="muted-sm mt-1 font-mono text-xs break-all">{{ attemptedPath }}</p>
-    <div class="mt-6 flex items-center justify-center gap-3">
+    <div class="mt-6 flex flex-wrap items-center justify-center gap-3">
       <button
         type="button"
         class="btn-pill-primary"

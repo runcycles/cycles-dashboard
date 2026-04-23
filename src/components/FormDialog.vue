@@ -38,7 +38,9 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
         <div class="space-y-3">
           <slot />
         </div>
-        <div class="flex justify-end gap-2 mt-5 pt-4 border-t border-gray-200 dark:border-gray-700">
+        <!-- flex-wrap so the footer reflows rather than pushing Submit
+             off the right edge on narrow phones with longer labels. -->
+        <div class="flex flex-wrap justify-end gap-2 mt-5 pt-4 border-t border-gray-200 dark:border-gray-700">
           <button type="button" @click="$emit('cancel')" class="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100 rounded hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer">Cancel</button>
           <button
             type="submit"

@@ -25,7 +25,7 @@ defineEmits<{ dismiss: [] }>()
       type="button"
       @click="$emit('dismiss')"
       aria-label="Dismiss error"
-      class="shrink-0 -mr-1 -my-1 px-2 py-0.5 rounded text-red-600 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/50 cursor-pointer text-lg leading-none"
+      class="shrink-0 inline-flex items-center justify-center w-8 h-8 -mr-1 rounded text-red-600 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 cursor-pointer text-xl leading-none"
     >×</button>
   </div>
 </template>

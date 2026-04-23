@@ -72,7 +72,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
         aria-live="polite"
         class="sr-only"
       >{{ loading ? `${confirmLabel} in progress, please wait` : '' }}</div>
-      <div class="flex justify-end gap-2">
+      <div class="flex flex-wrap justify-end gap-2">
         <button @click="$emit('cancel')" :disabled="loading" class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 rounded hover:bg-gray-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Cancel</button>
         <button
           ref="confirmBtn"
