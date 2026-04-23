@@ -3,6 +3,7 @@ import { ref, computed, watch, defineAsyncComponent } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
+import { POLL_FAST_MS } from '../composables/pollingConstants'
 import { useChartTheme } from '../composables/useChartTheme'
 // Lazy-loaded to keep ECharts + vue-echarts out of the detail-view
 // initial chunk. Stats panel hides itself when deliveries.length === 0
@@ -546,7 +547,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async (signal) => {
       error.value = toMessage(e)
     }
   }
-}, 30000)
+}, POLL_FAST_MS)
 
 async function loadMoreDeliveries() {
   if (!deliveriesNextCursor.value || deliveriesLoadingMore.value) return

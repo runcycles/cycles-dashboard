@@ -15,6 +15,41 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.55] — 2026-04-23
+
+Polish + coverage follow-up to v0.1.25.54. No spec advance; no
+user-facing behaviour change from the coverage work, two minor
+polish items visible to operators.
+
+### Added
+
+- **Shared polling-interval constants.** `POLL_FAST_MS` (30s),
+  `POLL_SLOW_MS` (60s), `POLL_EVENTS_MS` (15s) in a new
+  `composables/pollingConstants.ts`. Every polling view now imports
+  from this single source so future tuning (e.g. back off during an
+  incident) is one edit, not nine.
+
+### Changed
+
+- **`.form-label` is now `font-medium`.** In dense forms (TenantDetail
+  tabs, BudgetsView filter strip) labels previously rendered at the
+  same weight as body text, so operators missed required fields on
+  scan. Medium weight is the minimum uplift that separates label from
+  value without looking shouty.
+- **`RefreshButton` dark hover states.** Added `dark:hover:text-gray-100`
+  and `dark:hover:bg-gray-800` so the hover feedback isn't washed-out
+  on the dark theme.
+
+### Coverage
+
+- New tests: `useChartTheme.test.ts` (5 tests — palette selection,
+  reactive toggle, `statusColor` tracking, categorical length),
+  `useListExport-boundaries.test.ts` (5 tests — fast-path CSV/JSON,
+  maxRows abort, maxPages abort, filterFn seed-vs-page discrimination).
+- `usePolling.test.ts` extended with a regression-lock: `lastSuccessAt`
+  must stay `null` when a successful response lands post-unmount.
+  Total: 896 tests, all passing.
+
 ## [0.1.25.54] — 2026-04-23
 
 Dashboard-only UX & safety sweep. Triggered by a full-app review that

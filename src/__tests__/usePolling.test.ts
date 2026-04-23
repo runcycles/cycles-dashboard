@@ -209,6 +209,28 @@ describe('usePolling — cancellation & dedup', () => {
     harness.wrapper.unmount()
   })
 
+  it('lastSuccessAt stays null when a successful response lands AFTER unmount', async () => {
+    // Regression lock: the !mounted guard must sit between `await callback()`
+    // and the `lastSuccessAt.value = new Date()` assignment. Without it,
+    // a tick that resolves after the view unmounts would still mutate
+    // the ref — harmless visually, but a leak of post-unmount state.
+    let resolveFetch!: () => void
+    const inFlight = new Promise<void>(r => { resolveFetch = r })
+    const cb = vi.fn().mockImplementation(() => inFlight)
+
+    const harness = mountPolling(cb, 10_000)
+    await nextTick()
+    // Unmount while the tick is still awaiting.
+    harness.wrapper.unmount()
+    // Now let the fetch succeed.
+    resolveFetch()
+    await new Promise(r => setTimeout(r, 30))
+
+    // The success landed, but mounted=false by then — stamp should
+    // remain null.
+    expect(harness.lastSuccess()?.value).toBeNull()
+  })
+
   it('lastSuccessAt stays null after a failing tick', async () => {
     const cb = vi.fn().mockRejectedValue(new Error('boom'))
     const harness = mountPolling(cb, 10_000)

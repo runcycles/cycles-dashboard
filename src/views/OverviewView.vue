@@ -2,6 +2,7 @@
 import { computed, defineAsyncComponent, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
+import { POLL_FAST_MS } from '../composables/pollingConstants'
 import { getOverview, listApiKeys, listAuditLogs, listBudgets, listTenants, listWebhooks } from '../api/client'
 import type { AdminOverviewResponse, ApiKey, AuditLogEntry, BudgetLedger, WebhookSubscription } from '../types'
 import PageHeader from '../components/PageHeader.vue'
@@ -143,7 +144,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
   // but only error-banner; cards for the successful fetches still render.
   const firstFail = [ov, apiKeys, audit, atCap, frozen, closed, debt, webhooks].find(r => r.status === 'rejected')
   error.value = firstFail && firstFail.status === 'rejected' ? toMessage(firstFail.reason) : ''
-}, 30000)
+}, POLL_FAST_MS)
 
 // A row belongs on an "attention" card only if its owning tenant is
 // not CLOSED. Rows without a tenant_id (pre-v0.1.25.19 servers) are

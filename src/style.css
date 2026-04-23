@@ -26,7 +26,12 @@
 @layer components {
   /* ── Form controls ──────────────────────────────────────────────── */
 
-  .form-label       { @apply block text-xs mb-1; color: var(--color-gray-600); }
+  /* L6: font-medium. Pre-fix labels rendered at the same weight as body
+     text, so in dense forms (TenantDetail, BudgetsView filters) the
+     label/value pairs blurred together and operators missed required
+     fields. Medium-weight is the minimum uplift that separates label
+     from value without looking shouty. */
+  .form-label       { @apply block text-xs font-medium mb-1; color: var(--color-gray-600); }
   .dark .form-label { color: var(--color-gray-400); }
 
   .form-input       { @apply border border-gray-300 rounded px-2 py-1.5 text-sm w-full; }

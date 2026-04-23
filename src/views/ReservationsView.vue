@@ -16,6 +16,7 @@ import { ref, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { usePolling } from '../composables/usePolling'
+import { POLL_FAST_MS } from '../composables/pollingConstants'
 import { useSort } from '../composables/useSort'
 import { useListExport } from '../composables/useListExport'
 import { listReservations, releaseReservation, listTenants } from '../api/client'
@@ -243,7 +244,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
     await loadReservations()
     error.value = ''
   } catch (e) { error.value = toMessage(e) }
-}, 30_000)
+}, POLL_FAST_MS)
 
 // ─── Force-release flow ─────────────────────────────────────────────
 // Mirrors the budget-freeze confirm pattern: dialog shows scope +

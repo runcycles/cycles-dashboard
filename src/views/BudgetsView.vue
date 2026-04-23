@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
+import { POLL_SLOW_MS } from '../composables/pollingConstants'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useTerminalAwareList } from '../composables/useTerminalAwareList'
@@ -306,7 +307,7 @@ async function tick() {
   else { await loadTenants(); await loadList() }
 }
 
-const { refresh, isLoading, lastSuccessAt } = usePolling(tick, 60000)
+const { refresh, isLoading, lastSuccessAt } = usePolling(tick, POLL_SLOW_MS)
 
 // Budget freeze/unfreeze
 const pendingAction = ref<{ action: 'freeze' | 'unfreeze'; scope: string; unit: string } | null>(null)
