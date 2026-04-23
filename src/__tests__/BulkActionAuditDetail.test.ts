@@ -74,6 +74,21 @@ describe('BulkActionAuditDetail', () => {
     expect(w.text()).toContain('87ms')
   })
 
+  it('M16: seconds render with a dot decimal regardless of system locale', () => {
+    // Pre-fix `.toFixed(2)` always emitted "1.23s" — fine on en-US,
+    // broken in de-DE / fr-FR which use comma decimals for Intl. This
+    // module now forces en-US via Intl.NumberFormat so the dashboard's
+    // duration column stays consistent with Intl-formatted counts
+    // elsewhere (everything uses `.toLocaleString()`).
+    const w = mountWith({
+      operation: 'bulkActionBudgets',
+      metadata: { action: 'DEBIT', duration_ms: 1234, succeeded_ids: ['b-1'] },
+    })
+    const text = w.text()
+    expect(text).toContain('1.23s')
+    expect(text).not.toMatch(/1,23s/)
+  })
+
   it('falls back to noun-only header when action is absent', () => {
     const w = mountWith({
       operation: 'bulkActionWebhooks',

@@ -70,6 +70,34 @@ describe('fetchWithTimeout', () => {
       .rejects.toThrow(/timed out after 20ms/)
   })
 
+  it('M12: timeout error includes method + URL path', async () => {
+    // Pre-fix the timeout message was "Request timed out after 30000ms"
+    // with no hint which endpoint stalled — operators couldn't grep
+    // logs when one of 8 parallel Overview fetches hung. Now the
+    // error text carries the HTTP method and the URL pathname.
+    vi.stubGlobal('fetch', (_url: string, init: RequestInit) => {
+      return new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => {
+          reject(new DOMException('aborted', 'AbortError'))
+        })
+      })
+    })
+    await expect(fetchWithTimeout('http://localhost/v1/admin/overview', { method: 'GET' }, 20))
+      .rejects.toThrow(/GET \/v1\/admin\/overview/)
+  })
+
+  it('M12: timeout error path defaults to GET when method is omitted', async () => {
+    vi.stubGlobal('fetch', (_url: string, init: RequestInit) => {
+      return new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => {
+          reject(new DOMException('aborted', 'AbortError'))
+        })
+      })
+    })
+    await expect(fetchWithTimeout('http://localhost/v1/admin/tenants', {}, 20))
+      .rejects.toThrow(/GET \/v1\/admin\/tenants/)
+  })
+
   it('propagates non-abort errors unchanged', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')))
     await expect(fetchWithTimeout('http://x/y', {}, 1000))
@@ -419,6 +447,26 @@ describe('endpoint wrappers — smoke', () => {
       const body = JSON.parse(lastCall()[1].body)
       expect(body.idempotency_key).toBe('idem-k-123')
       expect(body).not.toHaveProperty('reason')
+    })
+
+    it('M13: logs a console.warn when a non-2xx response body is not JSON', async () => {
+      // Pre-fix the JSON parse failure was silently swallowed — both
+      // "backend returned a non-JSON 500 (proxy ate it)" and
+      // "backend returned a well-formed error" surfaced as the same
+      // opaque "API error: 500". The warn now surfaces parse failures
+      // in the console so devs can tell which bucket they're in.
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        json: () => Promise.reject(new SyntaxError('Unexpected token < in JSON at position 0')),
+      } as unknown as Response))
+      await expect(api.listTenants()).rejects.toMatchObject({ status: 500 })
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('[api] failed to parse 500 response as JSON'),
+        expect.stringContaining('Unexpected token'),
+      )
+      warnSpy.mockRestore()
     })
 
     it('listReservations propagates 400 INVALID_REQUEST as ApiError', async () => {

@@ -15,6 +15,71 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.57] — 2026-04-23
+
+Correctness + debuggability sweep. Closes the remaining
+medium-severity items from the v0.1.25.54 review plan
+(H6 / M6 / M11 / M12 / M13 / M14 / M16) plus the deferred
+Sidebar logout regression test. No spec advance.
+
+### Fixed
+
+- **Replay-events form: typed body + positive-number guard** (H6).
+  Pre-fix used `Record<string, unknown>` + `as any` on the server call;
+  an empty `max_events` field silently shoved `NaN` at the server.
+  Body is now typed as `ReplayEventsRequest`; invalid `max_events`
+  fails pre-flight with an inline error instead of the round-trip.
+- **Tenant-list failure banner** (M6). BudgetsView's tenant-dropdown
+  fetch failure used to render as tiny red text next to the disabled
+  dropdown — easy to miss. Now surfaces in the dismissible top
+  banner that every other error uses.
+- **Auth restore() is now single-flight** (M11). Router guard +
+  App.vue's mount-time session checker both called `restore()` on
+  cold load, issuing two `/v1/auth/introspect` fetches in rapid
+  succession. Concurrent callers now await the same in-flight
+  promise; subsequent calls fire a fresh fetch.
+- **Timeout error includes method + path** (M12). Pre-fix the
+  timeout message was "Request timed out after 30000ms" — operators
+  couldn't tell which of 8 parallel Overview fetches stalled. Now
+  reads e.g. "…30000ms: GET /v1/admin/overview" for log correlation.
+- **JSON parse failure surfaces in console** (M13). A non-2xx
+  response with a non-JSON body (nginx HTML error page, upstream
+  proxy fault) previously dissolved into the same opaque "API error:
+  500" as a legit empty error body. Parse failures now log a
+  `console.warn` with the underlying `SyntaxError` so devs can
+  distinguish the two buckets.
+- **ReservationsView respects `?tenant_id=`** (M14). Deep-links from
+  Overview drill-downs or copy-pasted URLs now pre-select the URL
+  tenant instead of falling through to the first-ACTIVE default.
+  Stale URL tenants (tenant was deleted) drop to the default and
+  clear the query param.
+- **Bulk-action duration uses locale-aware formatting** (M16).
+  `BulkActionAuditDetail`'s duration column used `.toFixed(2)` which
+  always emits `.` decimals — mismatched the `Intl.NumberFormat`-
+  based counts everywhere else in the dashboard on comma-decimal
+  locales. Forced to en-US for consistency with unit suffixes.
+
+### Tooling
+
+- `vitest.config.ts` gains a `resolve.alias` for
+  `/runcycles-logo.svg` → a test stub and a `define` for
+  `__APP_VERSION__`. Lets components that reference those mount under
+  jsdom without hitting Windows `file://` resolver errors. Required
+  for the deferred Sidebar logout flow test.
+
+### Coverage
+
+- New test: `Sidebar-logout.test.ts` (3 tests) — the P1-H8 logout
+  confirmation flow (deferred from .54; jsdom resource-loader
+  workaround in place now).
+- Extensions: `client.test.ts` (+3 M12/M13 tests),
+  `auth-extended.test.ts` (+2 M11 single-flight tests),
+  `BulkActionAuditDetail.test.ts` (+1 M16 locale test),
+  `ReservationsView-url-deeplink.test.ts` (+2 M14 pre-select tests).
+- Total (on this branch): 907 tests, was 896. With the .56 tests
+  also present on `main`, the combined total is higher — CI will
+  report the true count post-merge.
+
 ## [0.1.25.56] — 2026-04-23
 
 P2 accessibility + form-UX closeout. Last items from the v0.1.25.54

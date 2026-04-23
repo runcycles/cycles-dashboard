@@ -13,7 +13,7 @@ import { useListExport } from '../composables/useListExport'
 import { useSort } from '../composables/useSort'
 import { getWebhook, listDeliveries, updateWebhook, deleteWebhook, testWebhook, replayWebhookEvents, rotateWebhookSecret, ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import type { WebhookSubscription, WebhookDelivery, WebhookTestResponse } from '../types'
+import type { WebhookSubscription, WebhookDelivery, WebhookTestResponse, ReplayEventsRequest } from '../types'
 import { EVENT_TYPES, EVENT_CATEGORIES } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -491,11 +491,23 @@ async function submitReplay() {
   }
   replayLoading.value = true
   try {
-    const body: Record<string, unknown> = {}
+    // H6: properly typed body. Pre-fix used `Record<string, unknown>` +
+    // `as any` cast which would silently accept malformed max_events
+    // (e.g. NaN from an empty string) and shove it at the server. The
+    // typed intermediate lets TS narrow at each assignment.
+    const body: ReplayEventsRequest = {}
     if (replayForm.value.from) body.from = new Date(replayForm.value.from).toISOString()
     if (replayForm.value.to) body.to = new Date(replayForm.value.to).toISOString()
-    if (replayForm.value.max_events) body.max_events = Number(replayForm.value.max_events)
-    const res = await replayWebhookEvents(id, body as any)
+    if (replayForm.value.max_events) {
+      const n = Number(replayForm.value.max_events)
+      if (!Number.isFinite(n) || n <= 0) {
+        replayError.value = 'Max events must be a positive number'
+        replayLoading.value = false
+        return
+      }
+      body.max_events = n
+    }
+    const res = await replayWebhookEvents(id, body)
     // Leave banner visible until the user dismisses it — previous 5s
     // auto-clear was easy to miss when scrolled into deliveries list.
     replayResult.value = `${res.events_queued} events queued for replay`

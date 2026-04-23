@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.56 (2026-04-23)
+**Current release:** v0.1.25.57 (2026-04-23)
 
 ## Baseline requirements
 
@@ -16,6 +16,47 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-23 — v0.1.25.57: Correctness + debuggability sweep
+
+Closes the remaining medium-severity items from the v0.1.25.54 review
+plan plus the deferred Sidebar logout regression test. No spec change.
+
+Note: branched off `.55` while `.56` (P2 a11y, PR #128) was still in
+review. Landed cleanly after `.56` merged via a rebase — minimal
+overlap, just docs + version number conflicts.
+
+**Changes.**
+
+| ID | Change | Files |
+|---|---|---|
+| H6 | Replay body properly typed; invalid `max_events` fails pre-flight | `WebhookDetailView.vue` |
+| M6 | Tenant-list failure surfaces in the top banner, not inline filter text | `BudgetsView.vue` |
+| M11 | `auth.restore()` single-flight: coalesces concurrent cold-load callers | `stores/auth.ts` |
+| M12 | Timeout error message includes method + URL path | `api/client.ts` |
+| M13 | JSON-parse failure on error bodies logs `console.warn` | `api/client.ts` |
+| M14 | ReservationsView reads `?tenant_id=` and mirrors the filter to URL | `ReservationsView.vue` |
+| M16 | Bulk-action duration forced to en-US via `Intl.NumberFormat` | `BulkActionAuditDetail.vue` |
+
+**Plan items closed without code change.**
+
+- **M15** (closed-tenant exclusion staleness). The exclusion set
+  refreshes every 30s as part of the Overview poll; Vue's
+  `<router-view :key="$route.path">` remounts Overview on navigation,
+  so returning from TenantDetailView after a close triggers an
+  immediate fresh fetch. The residual window — operator stays on
+  Overview for 30s+ while another tab closes a tenant — is acceptable
+  and isn't worth a cross-view pinia store just to close.
+
+**Tooling.**
+
+- `vitest.config.ts` now aliases `/runcycles-logo.svg` to a stub and
+  defines `__APP_VERSION__`. Unblocks mounting Sidebar / LoginView
+  under jsdom on Windows (public-dir absolute-path references were
+  hitting `fs.resolve` errors). Required for the Sidebar logout flow
+  test deferred from .54.
+
+**Coverage.** +11 new tests across 1 new file + 4 extensions.
 
 ### 2026-04-23 — v0.1.25.56: P2 a11y + M7 form-UX closeout
 

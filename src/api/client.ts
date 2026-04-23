@@ -42,7 +42,17 @@ async function toApiError(res: Response): Promise<ApiError> {
   let body: unknown
   try {
     body = await res.json()
-  } catch {
+  } catch (parseErr) {
+    // M13: log the parse failure to console so devs can distinguish
+    // "backend returned a non-JSON 500 (proxy intercepted)" from
+    // "backend returned a well-formed error with no body." Pre-fix
+    // both paths produced the same opaque "API error: 500" in the UI
+    // with nothing for the operator to grep on.
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[api] failed to parse ${res.status} response as JSON:`,
+      parseErr instanceof Error ? parseErr.message : String(parseErr),
+    )
     return new ApiError(res.status, `API error: ${res.status}`)
   }
   if (body && typeof body === 'object') {
@@ -97,6 +107,15 @@ export async function fetchWithTimeout(
 ): Promise<Response> {
   const timeoutController = new AbortController()
   const timer = setTimeout(() => timeoutController.abort(), timeoutMs)
+  // M12: capture request identity for the timeout error message. Pre-fix,
+  // when one of 8 parallel Overview fetches timed out, the error read
+  // "Request timed out after 30000ms" with no hint which endpoint was
+  // slow — operators couldn't grep logs for the offending path.
+  const method = (init.method ?? 'GET').toUpperCase()
+  const urlPath = (() => {
+    try { return new URL(url).pathname }
+    catch { return url }
+  })()
   // If caller passed a signal, abort when *either* it fires OR the timeout
   // fires. Use a linked controller to merge the two.
   const externalSignal = init.signal ?? null
@@ -115,7 +134,7 @@ export async function fetchWithTimeout(
       // human-readable message; external abort (e.g. from usePolling on
       // unmount) rethrows the original so callers can detect it by name.
       if (timeoutController.signal.aborted && !externalSignal?.aborted) {
-        throw new Error(`Request timed out after ${timeoutMs}ms`)
+        throw new Error(`Request timed out after ${timeoutMs}ms: ${method} ${urlPath}`)
       }
       throw e
     }
