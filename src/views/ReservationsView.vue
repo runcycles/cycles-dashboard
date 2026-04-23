@@ -237,7 +237,7 @@ watch(exportError, (v) => { if (v) error.value = v })
 // expired).
 watch([tenantFilter, statusFilter], () => { loadReservations() })
 
-const { refresh, isLoading } = usePolling(async () => {
+const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
   try {
     if (tenants.value.length === 0) await loadTenants()
     await loadReservations()
@@ -366,6 +366,7 @@ const gridTemplate = computed(() =>
       :loaded="reservations.length"
       :has-more="hasMore"
       :loading="isLoading"
+      :last-updated-at="lastSuccessAt"
       @refresh="refresh"
     >
       <template #actions>

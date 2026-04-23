@@ -336,7 +336,7 @@ async function fetchKeysPage(cursor?: string): Promise<{
   }
 }
 
-const { refresh, isLoading } = usePolling(async () => {
+const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
   try {
     const tRes = await listTenants()
     tenants.value = tRes.tenants
@@ -469,6 +469,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
       item-noun="key"
       :loaded="sortedKeys.length"
       :loading="isLoading"
+      :last-updated-at="lastSuccessAt"
       @refresh="refresh"
     >
       <template #actions>

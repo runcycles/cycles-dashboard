@@ -751,7 +751,7 @@ function cancelEmergencyFreeze() {
 // on it (P0-C2).
 const initialLoadDone = ref(false)
 
-const { refresh, isLoading } = usePolling(async () => {
+const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
   // Skip polls while a rerun-cascade PATCH+refetch is in flight. Without
   // this, a poll tick that interleaves between the PATCH and its four
   // post-PATCH GETs can resolve after them and clobber the fresh state
@@ -833,7 +833,7 @@ const { refresh, isLoading } = usePolling(async () => {
 
 <template>
   <div>
-    <PageHeader title="Tenant Detail" :subtitle="tenant?.tenant_id" :loading="isLoading" @refresh="refresh">
+    <PageHeader title="Tenant Detail" :subtitle="tenant?.tenant_id" :loading="isLoading" :last-updated-at="lastSuccessAt" @refresh="refresh">
       <template #back>
         <button @click="goBack" :aria-label="parentFromQuery ? `Back to parent tenant ${parentFromQuery}` : 'Back to tenants'" class="muted hover:text-gray-700 cursor-pointer">
           <BackArrowIcon class="w-5 h-5" />
