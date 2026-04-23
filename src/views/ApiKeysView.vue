@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { usePolling } from '../composables/usePolling'
 import { useSort } from '../composables/useSort'
@@ -22,6 +23,7 @@ import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { writeClipboardJson } from '../utils/clipboard'
+import { filterExpiringKeys } from '../utils/expiringKeys'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import DownloadIcon from '../components/icons/DownloadIcon.vue'
@@ -39,11 +41,23 @@ interface KeyWithTenant extends ApiKey {
 }
 
 const auth = useAuthStore()
+const route = useRoute()
 const canManage = computed(() => auth.capabilities?.manage_api_keys !== false)
 const keys = ref<KeyWithTenant[]>([])
 const error = ref('')
 const filterStatus = ref('')
 const filterTenant = ref('')
+// v0.1.25.53: client-side URL filter for the Overview "Expiring keys"
+// drill-down. The admin spec has no server-side `expires_before` param
+// on listApiKeys (only `status=ACTIVE|REVOKED|EXPIRED`), so the
+// filter runs client-side on top of the loaded page. Same 7-day window
+// used by OverviewView's expiring-keys card — clicking "View all" on
+// that card should land on this view showing *those* keys, not the
+// whole fleet.
+const expiringWithin7d = ref(route.query.expiring_within_7d === '1')
+// Keep URL ↔ ref in sync across back/forward nav so the badge state
+// stays authoritative.
+watch(() => route.query.expiring_within_7d, (v) => { expiringWithin7d.value = v === '1' })
 // cycles-governance-admin v0.1.25.21: free-text `search` query param
 // on listApiKeys (case-insensitive substring match on key_id + name).
 // Debounced 200ms so a 20-char fragment doesn't fire 20 fetches. The
@@ -231,6 +245,13 @@ const filteredKeys = computed(() => {
   let result = keys.value
   if (filterStatus.value) result = result.filter(k => k.status === filterStatus.value)
   if (filterTenant.value) result = result.filter(k => k.tenant_id === filterTenant.value)
+  if (expiringWithin7d.value) {
+    // Reuse the shared helper so this view and the Overview card
+    // agree on what "expiring within 7d" means (ACTIVE-only, not
+    // already-expired, next 7 days from now).
+    const expiring = new Set(filterExpiringKeys(result).map(e => e.key.key_id))
+    result = result.filter(k => expiring.has(k.key_id))
+  }
   if (debouncedSearch.value) {
     const q = debouncedSearch.value.toLowerCase()
     result = result.filter(k =>
@@ -282,8 +303,8 @@ const statusCounts = computed(() => {
   return counts
 })
 
-const hasActiveFilters = computed(() => !!(filterStatus.value || filterTenant.value || debouncedSearch.value))
-function clearFilters() { filterStatus.value = ''; filterTenant.value = ''; search.value = '' }
+const hasActiveFilters = computed(() => !!(filterStatus.value || filterTenant.value || debouncedSearch.value || expiringWithin7d.value))
+function clearFilters() { filterStatus.value = ''; filterTenant.value = ''; search.value = ''; expiringWithin7d.value = false }
 
 function decorate(list: ApiKey[]): KeyWithTenant[] {
   return list.map((k) => ({ ...k, tenant_name: tenantsById.value.get(k.tenant_id)?.name }))
@@ -506,6 +527,19 @@ function closePermsViewer() { viewingPermsFor.value = null }
           <label for="keys-search" class="form-label">Search</label>
           <input id="keys-search" v-model="search" type="search" placeholder="key_id or name" class="border border-gray-300 rounded px-2 py-1.5 text-sm" aria-label="Search by key_id or name substring" />
         </div>
+        <span
+          v-if="expiringWithin7d"
+          class="inline-flex items-center gap-1 bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded px-2 py-1 dark:bg-amber-900/20 dark:border-amber-700 dark:text-amber-300"
+          data-testid="api-keys-expiring-filter-chip"
+        >
+          Expiring within 7d
+          <button
+            type="button"
+            class="ml-1 hover:text-amber-900 dark:hover:text-amber-100 cursor-pointer"
+            aria-label="Remove expiring-within-7d filter"
+            @click="expiringWithin7d = false"
+          >×</button>
+        </span>
         <button v-if="hasActiveFilters" @click="clearFilters" class="muted-sm hover:text-gray-700 cursor-pointer">Clear</button>
         <div v-if="isLoading" class="flex items-center">
           <Spinner class="w-4 h-4 muted" />

@@ -231,7 +231,7 @@ filter pre-applied. Current drill-down contracts:
 - Budget status donut → Budgets filtered by `status=ACTIVE|FROZEN|CLOSED` or `filter=over_limit`.
 - Budget fleet utilization donut → Budgets filtered by `utilization_min` / `utilization_max` (integer percent, 0–100). `BudgetsView` hydrates both params from the URL on mount.
 - Events by category donut → Events filtered by `category=<name>`.
-- Webhook fleet-health donut → Webhooks filtered by `status=ACTIVE|PAUSED|DISABLED` or `failing=1` (the Failing slice is orthogonal to status — a `PAUSED` webhook with `consecutive_failures ≥ 1` still counts as Failing so the chart and the `failing=1` filter match).
+- Webhook fleet-health donut → Webhooks filtered by `status=ACTIVE|PAUSED|DISABLED` or `failing=1` (the Failing slice is orthogonal to status — a `PAUSED` webhook with `consecutive_failures ≥ 1` still counts as Failing so the chart and the `failing=1` filter match). As of v0.1.25.53 `status=…` is pushed to the server (`listWebhookSubscriptions` `status` param) so drill-down counts reconcile with the Overview counter-strip tiles.
 - Delivery-outcome donut (WebhookDetailView) → local status filter on the history table, no route push.
 
 For the full six-slice roadmap and what each view is expected to
@@ -345,7 +345,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.52
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.53
     restart: unless-stopped
     # No exposed ports — only accessible through Caddy
     depends_on:

@@ -15,6 +15,62 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.53] — 2026-04-22
+
+### Fixed
+
+- **Webhooks counter-strip "active" chip drill-down now matches the
+  tile number.** Operator-reported: tile showed 62 active but
+  `/webhooks?status=ACTIVE` only listed 12. Root cause: the tile
+  reads `webhook_counts.active` (a server-side scan across the
+  whole fleet) while the list page loaded one page of 50 sorted by
+  `consecutive_failures desc` and filtered `status === 'ACTIVE'`
+  client-side — DISABLED/failing rows dominated page 1, leaving
+  only 12 ACTIVE visible. WebhooksView now pushes `status=` to the
+  server via the spec's `listWebhookSubscriptions` `status` query
+  param, so polling / load-more / export all walk pages of
+  matching rows. Same fix benefits `?status=PAUSED` and
+  `?status=DISABLED`.
+- **Webhook fleet-health donut reconciles with counter-strip
+  chips.** Operator-reported: tile showed 6 paused, donut showed
+  5. Root cause: the donut partitioned mutually-exclusively with
+  "Failing" taking precedence over status — so a PAUSED-and-failing
+  webhook was counted in "Failing", not "Paused". Tile read
+  status-only; donut didn't. Donut slices are now status-pure
+  (Active / Paused / Disabled) and sourced from the server's
+  `webhook_counts` aggregate (same source the chip numbers use),
+  so they reconcile by construction. Failing remains a separate
+  counter-strip chip — that signal lives on the chip, not in the
+  status mix.
+- **Overview utilization donut no longer undercounts large fleets.**
+  The at-or-near-cap fetch (`listBudgets?utilization_min=0.9`) is the
+  same set the utilization donut buckets from. Its `limit` was 500,
+  which under-sampled deployments with > 500 budgets at ≥ 90%
+  utilization. Bumped to 2000 — the admin spec defines no server-side
+  maximum on `limit`, so this is an order-of-magnitude headroom
+  increase at negligible cost.
+- **Events drill-down preserves the Overview time window.** The
+  Events tile header announces the window (e.g. "Events (60m)") but
+  the category chips and the "Events" link all routed to `/events`
+  with no `from`/`to` — operators landed on every event ever recorded
+  rather than the ones being summarized. All Events drill-downs from
+  Overview (tile header, total count, category chips, and the
+  fleet-chart category donut slices) now carry `from`/`to` query
+  params derived from `overview.event_window_seconds`. EventsView
+  already honors those params — no new spec surface.
+- **Expiring API keys drill-down now filters to the 7-day window.**
+  The Overview card shows "N keys expiring in 7d" and operators
+  clicking "View all" landed on the full fleet with no filter
+  applied. The link now carries `?expiring_within_7d=1` and
+  ApiKeysView honors it as a client-side filter using the same
+  `filterExpiringKeys` helper the card uses — the drill-down set is
+  identical to the card set. A dismissible chip on the filter bar
+  makes the active filter visible and reversible. The admin spec
+  has no server-side `expires_before` param on `listApiKeys` (only
+  `status=ACTIVE|REVOKED|EXPIRED`), so the filter runs client-side
+  on top of the loaded page, consistent with how the card itself
+  works.
+
 ## [0.1.25.52] — 2026-04-22
 
 ### Changed

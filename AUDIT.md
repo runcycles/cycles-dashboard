@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.52 (2026-04-22)
+**Current release:** v0.1.25.53 (2026-04-22)
 
 ## Baseline requirements
 
@@ -16,6 +16,62 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-22 — v0.1.25.53: Counter-strip / donut / drill-down reconciliation sweep
+
+**Triggers.** Two operator reports opened the release, followed by a user-requested audit ("check all cards, numbers, drill downs, make sure consistent, accurate") that surfaced three more instances of the same class of bug. All five land in this release.
+
+1. *"problem is Webhooks active shows 62 but drill down only shows webhooks with active status which are only 12, so drill downs don't match what is shown in cards."*
+2. *"Webhook fleet health: shows 5 paused, but there are 6 paused."*
+3. Audit-surfaced: utilization donut undercounted large fleets because its sampling fetch capped at 500 budgets.
+4. Audit-surfaced: Events tile says "(60m)" but category-chip drill-downs dropped `from`/`to`, landing on every event ever recorded.
+5. Audit-surfaced: Expiring Keys "View all" routed to unfiltered `/api-keys` — operator saw "7 expiring" then landed on the full fleet.
+
+All five are instances of the same disease: each surface answered "how many X" with its own data source or its own filter, and the number on the tile diverged from the number after the click. Fix pattern: wherever two surfaces display the same concept, they read from the same server aggregate and propagate the same filter into the drill-down URL — reconciliation is structural, not coincidental.
+
+**Root cause — drill-down (62 vs 12).** Asymmetric data sources.
+
+- Counter-strip "active" chip reads `overview.webhook_counts.active` — produced by the server's `AdminOverviewService.countWebhooks` walking every page (`listAllWebhooks` in `PAGE_SIZE=100` steps) and counting `status == ACTIVE`. Fleet-wide.
+- `/webhooks?status=ACTIVE` loaded ONE page via `listWebhooks(withListParams())` with default limit=50, default sort `consecutive_failures desc`, then applied `status==='ACTIVE'` **client-side**. DISABLED + failing rows dominate page 1; `useTerminalAwareList` hides DISABLED; ~12 survive.
+
+**Root cause — donut (5 vs 6 Paused).** Asymmetric partition rules.
+
+- Counter-strip chip counted Paused strictly by `status`. 6 PAUSED webhooks = 6.
+- Donut slices were mutually-exclusive `{healthy, failing, paused, disabled}` with Failing taking precedence over status. A PAUSED-and-failing webhook was counted in "Failing", not "Paused". 5 paused + 1 paused-and-failing routed elsewhere = 5.
+- Both internally consistent, but externally inconsistent with a chip labelled the same word. Prior release documented this as intentional — which in hindsight *is* the bug.
+
+**Root cause — utilization donut undercounts large fleets.** The at-or-near-cap fetch (`listBudgets?utilization_min=0.9&limit=500`) is the same set the utilization donut buckets (Healthy / Near cap / Over cap). `limit=500` was the fleet-histogram cap added when the chart was rewritten to read true utilization (v0.1.25.50). Deployments with > 500 budgets at ≥ 90% spent/allocated silently under-count the donut — the card badge ("View all") carries the right number, but the donut slices don't. Class-A symptom: two surfaces, one fetch, different sensitivity to pagination.
+
+**Root cause — Events drill-down drops the time window.** The Events tile header reads `overview.event_window_seconds` (e.g. "Events (60m)"), but every Events drill-down from Overview — tile header link, total count link, per-category chips, and the fleet-chart events-by-category donut slices — routed to `/events` with only `category` on the URL. EventsView defaults to its own window (typically wide-open), so the operator saw thousands of rows that post-dated the Overview window. EventsView already accepts RFC-3339 `from`/`to` query params (same ones TimeRangePicker emits); the Overview handler simply never normalized `now - event_window_seconds` into that contract. Class-A symptom with a filter axis: same concept, two windows, no propagation.
+
+**Root cause — Expiring Keys drill-down drops the expiring filter.** The Expiring Keys card shows "N keys expiring in 7d" sourced from `filterExpiringKeys` (ACTIVE, not already-expired, expires_at ≤ now+7d). "View all" routed to unfiltered `/api-keys` — operator saw the entire fleet. The admin spec has no server-side `expires_before` on `listApiKeys` (only `status=ACTIVE|REVOKED|EXPIRED`), so the filter has to run client-side somewhere. Card + drill-down should apply the *same* helper to the *same* set, not diverge by accident.
+
+**Fix — drill-down (62 vs 12).** Push `status=` to the server on every list call. Spec's `listWebhookSubscriptions` has accepted `status=ACTIVE|PAUSED|DISABLED` since baseline; the UI simply never wired the dropdown / URL-mirrored filter into the request.
+
+**Fix — donut (5 vs 6).** Slices are now status-pure `{active, paused, disabled}`, sourced from `overview.webhook_counts` (same aggregate the chips read). Paused = `max(0, total - active - disabled)`. Failing remains a counter-strip chip only. Donut = status mix; chip = failure overlay; separate axes, no pretense of single partition.
+
+**Fix — utilization donut sampling.** `listBudgets({ utilization_min: '0.9', limit: '2000' })`. Admin spec defines no maximum on `limit` — sampling at 2000 is an order-of-magnitude headroom increase at negligible cost. Deployments exceeding 2000 would still need a cursor-walk pass; flagged as follow-up (extremely rare in practice today).
+
+**Fix — events time window.** New `eventsTimeWindow` computed in `OverviewView.vue` normalizes `now - event_window_seconds` and "now" to ISO strings. New `eventsQuery(extra?)` helper merges `from`/`to` into any events drill-down. Wired into: `onEventsCategoryClick`, tile header link, tile total-count link, and per-category chip router-links.
+
+**Fix — expiring keys filter.** New URL param `?expiring_within_7d=1` on ApiKeysView, applied client-side over the loaded page using the *same* `filterExpiringKeys` helper the Overview card uses — set identity by construction. A dismissible chip on the filter bar makes the active filter visible and reversible. Overview "View all" link now carries the param.
+
+**Scope.**
+
+| Surface | Change |
+|---|---|
+| `src/views/WebhooksView.vue` | `withListParams` appends `status=` when `statusFilter.value` is set. `watch([debouncedUrlFilter, statusFilter])` refreshes page 1 when dropdown / URL mirror lands a new status. Polling, `loadMore`, and export's `fetchPage` inherit automatically — all flow through `withListParams`. |
+| `src/views/OverviewView.vue` | `webhookFleetSlices` returns `{active, paused, disabled}` from `overview.webhook_counts` (no client-side reduce). `webhookHealthOption` slice labels: Active / Paused / Disabled. `onWebhookHealthClick` loses the `failing` branch. Card `v-if` switched from `failingWebhooksRaw.length > 0` to `overview.webhook_counts.total > 0`. `listBudgets({ utilization_min, limit })` bumped 500 → 2000. New `eventsTimeWindow` / `eventsQuery` helpers; `onEventsCategoryClick` + tile header link + total-count link + per-category chip links all carry `from`/`to`. Expiring-Keys "View all" link carries `?expiring_within_7d=1`. |
+| `src/views/ApiKeysView.vue` | Reads `route.query.expiring_within_7d` into a ref; filters `filteredKeys` client-side via shared `filterExpiringKeys` helper; renders a dismissible "Expiring within 7d" chip on the filter bar; includes the filter in `hasActiveFilters` / `clearFilters`. Watcher keeps ref ↔ URL in sync across back/forward. |
+| `src/__tests__/WebhooksView-url-deeplink.test.ts` | Three regression tests: `?status=ACTIVE` + `?status=PAUSED` both assert the last `listWebhooks` call carried server-side `status`; no-filter case asserts it's omitted. |
+| `src/__tests__/WebhookCharts.test.ts` | Five tests in `OverviewView — webhook fleet-health donut` describe rewritten for the new shape (seeded via `healthyOverview({ webhook_counts })`; Active/Paused/Disabled asserted; Failing/Healthy asserted absent). |
+| `src/__tests__/BaseChart.test.ts` | Events-donut lookup changed from `charts[2]` array index to `data-testid="events-by-category-donut"`. Drill-down assertion relaxed to accept `from`/`to` on the payload (presence, not equality, since the values are wall-clock-relative). |
+| `src/__tests__/OverviewView.test.ts` | +4 tests: utilization-sample limit is `'2000'`; event-category chip carries from/to with `to - from === event_window_seconds`; tile header + total-count links also carry from/to; Expiring Keys "View all" carries `expiring_within_7d=1`. |
+| `src/__tests__/ApiKeysView-expiring-filter.test.ts` | New file, 4 tests: URL filter hides out-of-window rows; visible dismissible chip renders when active; absent URL param → no filter; dismiss clears the filter. |
+
+**Not in scope (follow-ups).** (a) Server still has no `failing` filter on `listWebhookSubscriptions`, so `?failing=1` drill-down paginates client-side. Default sort `consecutive_failures desc` surfaces failing rows first, but `with_failures > 50` still needs Load-more. Options: spec-side `failing=1` or a client-side cursor-walk-until-N-collected. (b) Deployments exceeding 2000 budgets at ≥ 90% utilization remain under-sampled on the donut — the cursor-walk follow-up applies here too. (c) The drill-down `?key_id=X` from the Expiring Keys row links still isn't honored by ApiKeysView (no URL-filter wiring beyond `expiring_within_7d`); row-level deep links are a separate pass.
+
+**Verification.** `npm run typecheck` clean. `npx vitest run` → 67 files / 863 tests passing (+8 new across the three fixes). Coverage stays ≥ 95%.
 
 ### 2026-04-22 — v0.1.25.52: Relocate webhook fleet-health donut from WebhooksView → OverviewView
 

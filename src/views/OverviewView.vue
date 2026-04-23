@@ -97,14 +97,18 @@ const { refresh, isLoading } = usePolling(async () => {
     // Budgets at or near cap (utilization ≥ 0.9). Catches
     // exhausted-without-debt (our blind spot), over-limit-via-debt,
     // AND the 90–99% range so operators can intervene before a
-    // budget actually blows rather than after. Limit 500 is the
+    // budget actually blows rather than after. Limit 2000 is the
     // fleet-histogram cap — the at-cap card slices to 5 for display,
     // but the utilization donut computes its Near-cap / Over-cap
     // buckets from this same set so it needs a representative sample
-    // of the fleet, not just the top 10. Deployments with > 500
-    // budgets at ≥ 90% utilization will under-count the donut; the
-    // card badge / "View all" link still carry the full audit.
-    listBudgets({ utilization_min: '0.9', limit: '500' }),
+    // of the fleet, not just the top 10. Bumped from 500 in
+    // v0.1.25.53 because large fleets (> 500 budgets ≥ 90%) were
+    // under-counting the donut; the spec has no server-side max on
+    // `limit`, so sampling at 2000 buys an order of magnitude more
+    // headroom at negligible cost. Deployments exceeding 2000 would
+    // still need a cursor-walk follow-up, but those are rare enough
+    // today that a sampling bump is the right scope-conscious fix.
+    listBudgets({ utilization_min: '0.9', limit: '2000' }),
     // Frozen budgets — scopes, not just a count. Lets the Frozen
     // Budgets card list the top 5 inline instead of a center link.
     listBudgets({ status: 'FROZEN', limit: '10' }),
@@ -295,12 +299,36 @@ function onBudgetUtilizationClick(p: ChartClickParams) {
   }
 }
 
+// v0.1.25.53: carry the Overview event window (`event_window_seconds`)
+// into the drill-down. Without it, an operator who reads "12 cycles.*
+// events in the last 5 minutes" and clicks the chip lands on an
+// unfiltered /events and sees thousands of older rows — the tile count
+// and the list length diverge. EventsView already honors `from`/`to`
+// RFC-3339 query params (same filter the TimeRangePicker emits), so
+// normalizing `now - event_window_seconds` into that contract is the
+// minimum change. Returns empty strings when the overview payload
+// hasn't loaded yet, in which case we omit the params from the URL.
+const eventsTimeWindow = computed<{ from: string; to: string }>(() => {
+  const secs = overview.value?.event_window_seconds
+  if (!secs || secs <= 0) return { from: '', to: '' }
+  const now = Date.now()
+  return {
+    from: new Date(now - secs * 1000).toISOString(),
+    to: new Date(now).toISOString(),
+  }
+})
+
+function eventsQuery(extra: Record<string, string> = {}): Record<string, string> {
+  const { from, to } = eventsTimeWindow.value
+  return { ...(from && { from }), ...(to && { to }), ...extra }
+}
+
 function onEventsCategoryClick(p: ChartClickParams) {
   const name = p?.name ?? ''
   if (name && name !== 'uncategorized') {
-    router.push({ name: 'events', query: { category: name } })
+    router.push({ name: 'events', query: eventsQuery({ category: name }) })
   } else if (name === 'uncategorized') {
-    router.push({ name: 'events' })
+    router.push({ name: 'events', query: eventsQuery() })
   }
 }
 
@@ -313,24 +341,27 @@ function onEventsCategoryClick(p: ChartClickParams) {
 // counts any webhook with `consecutive_failures ≥ 1` regardless
 // of status, so a PAUSED webhook with latent failures still
 // surfaces — matches the `?failing=1` URL filter semantics.
-type WebhookFleetSlices = { healthy: number; failing: number; paused: number; disabled: number }
+// v0.1.25.53: status-pure slices from server aggregates. Prior shape
+// (Healthy / Failing / Paused / Disabled) partitioned mutually-exclusively
+// with Failing taking precedence over status — so a PAUSED webhook with
+// consecutive_failures ≥ 1 was counted as Failing, not Paused. Result:
+// operator saw "6 paused" on the counter-strip chip but "5 Paused" on
+// the donut (tile = status only; donut = status-minus-failing-overlap).
+// Now both are status-only and sourced from the same server-side aggregate
+// (`webhook_counts`) — donut slices and chip numbers reconcile by
+// construction. Failing remains a separate counter-strip chip.
+type WebhookFleetSlices = { active: number; paused: number; disabled: number }
 const webhookFleetSlices = computed<WebhookFleetSlices>(() => {
-  const out: WebhookFleetSlices = { healthy: 0, failing: 0, paused: 0, disabled: 0 }
-  for (const w of failingWebhooksRaw.value) {
-    const failing = (w.consecutive_failures ?? 0) >= 1
-    if (w.status === 'DISABLED') out.disabled++
-    else if (failing) out.failing++
-    else if (w.status === 'PAUSED') out.paused++
-    else out.healthy++
-  }
-  return out
+  const wc = overview.value?.webhook_counts
+  if (!wc) return { active: 0, paused: 0, disabled: 0 }
+  const paused = Math.max(0, wc.total - wc.active - wc.disabled)
+  return { active: wc.active, paused, disabled: wc.disabled }
 })
 
 const webhookHealthOption = computed(() => {
   const f = webhookFleetSlices.value
   const slices = [
-    { name: 'Healthy', value: f.healthy, itemStyle: { color: palette.value.success } },
-    { name: 'Failing', value: f.failing, itemStyle: { color: palette.value.danger } },
+    { name: 'Active', value: f.active, itemStyle: { color: palette.value.success } },
     { name: 'Paused', value: f.paused, itemStyle: { color: palette.value.warning } },
     { name: 'Disabled', value: f.disabled, itemStyle: { color: palette.value.neutral } },
   ].filter(s => s.value > 0)
@@ -363,10 +394,9 @@ const webhookHealthOption = computed(() => {
 
 function onWebhookHealthClick(p: ChartClickParams) {
   const name = (p?.name ?? '').toLowerCase()
-  if (name === 'failing') router.push({ name: 'webhooks', query: { failing: '1' } })
+  if (name === 'active') router.push({ name: 'webhooks', query: { status: 'ACTIVE' } })
   else if (name === 'paused') router.push({ name: 'webhooks', query: { status: 'PAUSED' } })
   else if (name === 'disabled') router.push({ name: 'webhooks', query: { status: 'DISABLED' } })
-  else if (name === 'healthy') router.push({ name: 'webhooks', query: { status: 'ACTIVE' } })
 }
 
 const budgetStatusOption = computed(() => {
@@ -885,16 +915,16 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
              palette of category-coded chip styles for visual distinction. -->
         <div class="card p-3" data-testid="tile-events">
           <div class="flex justify-between items-baseline mb-1">
-            <router-link to="/events" class="text-sm font-medium text-gray-700 dark:text-gray-200 hover:underline">
+            <router-link :to="{ name: 'events', query: eventsQuery() }" class="text-sm font-medium text-gray-700 dark:text-gray-200 hover:underline">
               Events <span class="muted font-normal">({{ Math.round(overview.event_window_seconds / 60) }}m)</span>
             </router-link>
-            <router-link to="/events" class="text-lg font-semibold text-gray-900 dark:text-gray-100 hover:underline">{{ overview.event_counts.total_recent }}</router-link>
+            <router-link :to="{ name: 'events', query: eventsQuery() }" class="text-lg font-semibold text-gray-900 dark:text-gray-100 hover:underline">{{ overview.event_counts.total_recent }}</router-link>
           </div>
           <div class="flex flex-wrap gap-1">
             <router-link
               v-for="(count, cat) in overview.event_counts.by_category"
               :key="cat"
-              :to="{ name: 'events', query: { category: cat } }"
+              :to="{ name: 'events', query: eventsQuery({ category: String(cat) }) }"
               class="chip chip-category"
               :title="`${count} ${cat} events`"
             >{{ count }} {{ cat }}</router-link>
@@ -962,7 +992,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
         </div>
 
         <div
-          v-if="failingWebhooksRaw.length > 0"
+          v-if="overview.webhook_counts.total > 0"
           class="card p-3"
           data-testid="webhook-fleet-health-donut"
         >
@@ -1190,7 +1220,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
               Expiring API keys <span class="muted font-normal">(7d)</span>
               <span v-if="expiringTotal > 0" class="ml-1 badge-warning">{{ expiringTotal }}</span>
             </h2>
-            <router-link :to="{ name: 'api-keys' }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
+            <router-link :to="{ name: 'api-keys', query: { expiring_within_7d: '1' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
           <div v-if="expiringKeys.length === 0" class="text-sm muted py-4 text-center">No keys expiring in the next 7 days</div>
           <div
