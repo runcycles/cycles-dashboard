@@ -54,9 +54,23 @@ Added a regression-lock test in `EventsView-url-deeplink.test.ts`.
 Without this fix, the spec alignment would have landed the data
 type-correct but functionally inert.
 
-**Coverage.** +1 test (937 passing, was 936) locking the data-driven
-dropdown. Existing suite covers the rest of the filter-dropdown data
-flow; the new enum values participate without code-path changes.
+**Folded-in operator bug (OverviewView budget-utilization donut).**
+Operator-reported: the donut counted CLOSED-status budgets — which
+are spec-terminal (v0.1.25.29) and immutable. A CLOSED budget at
+120% inflated "Over cap"; all CLOSED budgets inflated "Healthy" via
+raw `budget_counts.total`. Both bucketing + total now exclude
+CLOSED. Same filter extends to the at-cap attention card so
+operators stop seeing actionless CLOSED rows there. FROZEN stays in
+— it's non-terminal. Added a regression-lock test in
+`BaseChart.test.ts` ("CLOSED budgets are excluded from Near/Over
+cap AND from the Healthy base"). Related closed-tenant filter on
+`atCapBudgetsFiltered` is preserved; the new filter is composed
+alongside it via a small `isNonTerminalBudget` helper.
+
+**Coverage.** +2 tests (938 passing, was 936). One for the dropdown
+data-drive, one for the donut CLOSED exclusion. Existing suite
+covers the rest of the filter flow; the new enum values participate
+without code-path changes.
 
 ### 2026-04-23 — v0.1.25.58: Mobile-responsive sweep
 

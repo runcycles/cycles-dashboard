@@ -50,6 +50,19 @@ webhook lifecycle events that cycles-server-admin `.39` now emits.
   category even after the enum landed. Dropdown now `v-for`s over
   the const array so future additions surface automatically. Caught
   during the review cycle, not in production.
+- **Budget fleet utilization donut included CLOSED budgets.**
+  Operator-reported: "shows budgets in terminal CLOSED state, should
+  show only budgets in non-terminal state." CLOSED is a spec-level
+  terminal budget status (v0.1.25.29 cascade) — the budget is
+  immutable, utilization is frozen at the close-time snapshot, and
+  operators can't act on it. Pre-fix a CLOSED budget at 120%
+  inflated the "Over cap" slice, and all CLOSED budgets inflated the
+  "Healthy" base (via raw `budget_counts.total`). Now both the
+  at-cap bucketing AND the Healthy total exclude CLOSED. FROZEN is
+  NOT terminal (operators can un-freeze) so it stays in the
+  utilization read per its actual spent/allocated. The at-cap
+  attention card also stops surfacing CLOSED rows — previously
+  operators saw them on the action queue with nothing they could do.
 
 ### Notes
 

@@ -262,6 +262,48 @@ describe('OverviewView — budget fleet utilization donut (v0.1.25.50)', () => {
     expect(w.find('[data-testid="budget-utilization-donut"]').exists()).toBe(false)
   })
 
+  it('v0.1.25.59: CLOSED budgets are excluded from Near/Over cap AND from the Healthy base', async () => {
+    // Operator-reported: "Budget fleet utilization donut shows budgets
+    // in terminal CLOSED state." Pre-fix the donut iterated raw
+    // atCapBudgets (no status filter on fetch) and computed
+    // Healthy = bc.total - near - over with raw bc.total (which
+    // includes bc.closed). So a CLOSED budget at 120% inflated
+    // Over cap; the Healthy base included terminal rows that can't
+    // meaningfully "be healthy." Fix: filter CLOSED from both sides.
+    function atCapWithStatus(scope: string, util: number, status: string) {
+      return { ...atCapLedger(scope, util), status }
+    }
+    getOverviewMock.mockResolvedValue(healthyOverview({
+      // 100 total: 95 ACTIVE + 5 CLOSED. Non-terminal = 95.
+      budget_counts: { total: 100, active: 95, frozen: 0, closed: 5, over_limit: 0, with_debt: 0, by_unit: {} },
+    }))
+    listBudgetsMock.mockImplementation((params: { utilization_min?: string }) => {
+      if (params?.utilization_min === '0.9') {
+        return Promise.resolve({
+          ledgers: [
+            atCapWithStatus('s/over',        1.10, 'ACTIVE'),  // 110% ACTIVE  → Over cap
+            atCapWithStatus('s/over-terminal', 1.20, 'CLOSED'), // 120% CLOSED  → EXCLUDED
+            atCapWithStatus('s/near',        0.95, 'ACTIVE'),  // 95% ACTIVE   → Near cap
+            atCapWithStatus('s/near-terminal', 0.95, 'CLOSED'), // 95% CLOSED   → EXCLUDED
+          ],
+          has_more: false,
+        })
+      }
+      return Promise.resolve({ ledgers: [], has_more: false })
+    })
+    const w = await mountOverview()
+    const vm = w.vm as unknown as {
+      budgetUtilizationOption: {
+        series: Array<{ data: Array<{ name: string; value: number }> }>
+      }
+    }
+    const slices = vm.budgetUtilizationOption.series[0].data
+    const byName = Object.fromEntries(slices.map((s) => [s.name, s.value]))
+    expect(byName['Over cap']).toBe(1)   // CLOSED 120% excluded
+    expect(byName['Near cap']).toBe(1)   // CLOSED 95% excluded
+    expect(byName['Healthy']).toBe(93)   // (100 total − 5 closed) − 1 − 1 = 93
+  })
+
   it('buckets by actual spent/allocated — a 113% budget with zero debt lands in Over cap, not Healthy', async () => {
     // The exact operator-reported regression: overdraft_limit absorbs
     // the overage so debt = 0 and the OLD chart counted this as
