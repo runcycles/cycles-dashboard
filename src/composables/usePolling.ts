@@ -4,6 +4,15 @@ import { ref, onMounted, onUnmounted } from 'vue'
  * Polling composable with cancellation, in-flight dedup, and jittered
  * backoff.
  *
+ * ### Logout + unmount coverage (P0-H4)
+ * Logout is handled transparently via the unmount cascade:
+ *   auth.logout() → auth.apiKey = '' → isAuthenticated flips false →
+ *   App.vue `v-if="isAuthenticated"` unmounts AppLayout → views unmount →
+ *   onUnmounted fires → `mounted = false` + activeController.abort().
+ * Any in-flight tick that resolves after this chain hits the `!mounted`
+ * guard and bails without mutating state or rescheduling. This is why
+ * usePolling doesn't need a separate "listen for logout" hook.
+ *
  * The callback receives an `AbortSignal` that is aborted when:
  *  - the component unmounts
  *  - a new tick is initiated (though the in-flight guard normally prevents
@@ -39,6 +48,11 @@ export function usePolling(
 ) {
   const isPolling = ref(true)
   const isLoading = ref(false)
+  // P1-M2: timestamp of the last successful tick so views can render
+  // "Last updated X ago" and flag stale data. null before the first
+  // success; only set on the happy path so polling failures (which
+  // trigger backoff) correctly leave the stamp stale.
+  const lastSuccessAt = ref<Date | null>(null)
   let timer: ReturnType<typeof setTimeout> | null = null
   let currentInterval = intervalMs
   const maxInterval = 300_000 // 5 min
@@ -86,6 +100,7 @@ export function usePolling(
       await callback(controller.signal)
       if (!mounted) return
       currentInterval = intervalMs
+      lastSuccessAt.value = new Date()
     } catch (e) {
       if (!mounted) return
       // Aborts are intentional (unmount, visibility change). Not a
@@ -140,7 +155,7 @@ export function usePolling(
     stop()
   })
 
-  return { isPolling, isLoading, refresh }
+  return { isPolling, isLoading, lastSuccessAt, refresh }
 }
 
 // Accepts both DOMException('AbortError') (from fetch) and plain

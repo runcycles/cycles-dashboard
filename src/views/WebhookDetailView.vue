@@ -10,7 +10,7 @@ import { useChartTheme } from '../composables/useChartTheme'
 const BaseChart = defineAsyncComponent(() => import('../components/BaseChart.vue'))
 import { useListExport } from '../composables/useListExport'
 import { useSort } from '../composables/useSort'
-import { getWebhook, listDeliveries, updateWebhook, deleteWebhook, testWebhook, replayWebhookEvents, rotateWebhookSecret } from '../api/client'
+import { getWebhook, listDeliveries, updateWebhook, deleteWebhook, testWebhook, replayWebhookEvents, rotateWebhookSecret, ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { WebhookSubscription, WebhookDelivery, WebhookTestResponse } from '../types'
 import { EVENT_TYPES, EVENT_CATEGORIES } from '../types'
@@ -19,6 +19,8 @@ import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
 import TenantLink from '../components/TenantLink.vue'
 import EmptyState from '../components/EmptyState.vue'
+import LoadingSkeleton from '../components/LoadingSkeleton.vue'
+import InlineErrorBanner from '../components/InlineErrorBanner.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import DownloadIcon from '../components/icons/DownloadIcon.vue'
@@ -43,6 +45,10 @@ const canManage = computed(() => auth.capabilities?.manage_webhooks !== false)
 const webhook = ref<WebhookSubscription | null>(null)
 const deliveries = ref<WebhookDelivery[]>([])
 const error = ref('')
+// P0-C2: distinguish "initial fetch pending" from "404" so the view can
+// render a skeleton or a dedicated not-found card instead of a blank page.
+const notFound = ref(false)
+const initialLoadDone = ref(false)
 const pendingAction = ref<'ACTIVE' | 'PAUSED' | 'reset' | null>(null)
 
 // Delivery-history pagination + filter (scale hardening). A busy
@@ -294,7 +300,7 @@ async function executeDelete() {
     await deleteWebhook(id)
     pendingDelete.value = false
     toast.success('Webhook deleted')
-    router.push('/webhooks')
+    router.push({ name: 'webhooks' })
   } catch (e) {
     const msg = toMessage(e)
     deleteError.value = msg
@@ -509,19 +515,37 @@ function buildDeliveryParams(): Record<string, string> {
 // don't keep re-opening the dialog if the user dismisses it.
 let editIntentApplied = false
 
-const { refresh, isLoading } = usePolling(async () => {
+const { refresh, isLoading, lastSuccessAt } = usePolling(async (signal) => {
   try {
-    webhook.value = await getWebhook(id)
+    const fetchedWebhook = await getWebhook(id)
+    // P0-H5: defensive abort-check between awaits. usePolling already
+    // aborts the signal on unmount and in-flight dedup prevents
+    // overlapping ticks, but forwarding the signal here means a late
+    // response from a cancelled tick can't sneak its write into a
+    // torn-down view or between two sequential reads in the same tick.
+    if (signal?.aborted) return
+    webhook.value = fetchedWebhook
     if (!editIntentApplied && route.query.action === 'edit' && webhook.value) {
       editIntentApplied = true
       openEdit()
     }
     const res = await listDeliveries(id, buildDeliveryParams())
+    if (signal?.aborted) return
     deliveries.value = res.deliveries
     deliveriesHasMore.value = !!res.has_more
     deliveriesNextCursor.value = res.next_cursor ?? ''
     error.value = ''
-  } catch (e) { error.value = toMessage(e) }
+    notFound.value = false
+    initialLoadDone.value = true
+  } catch (e) {
+    // P0-C2: 404 → dedicated not-found card, not a red banner.
+    if (e instanceof ApiError && e.status === 404) {
+      notFound.value = true
+      error.value = ''
+    } else {
+      error.value = toMessage(e)
+    }
+  }
 }, 30000)
 
 async function loadMoreDeliveries() {
@@ -660,14 +684,40 @@ watch(exportError, (v) => { if (v) error.value = v })
 
 <template>
   <div>
-    <PageHeader title="Webhook Detail" :subtitle="webhook?.name || webhook?.subscription_id" :loading="isLoading" @refresh="refresh">
+    <PageHeader title="Webhook Detail" :subtitle="webhook?.name || webhook?.subscription_id" :loading="isLoading" :last-updated-at="lastSuccessAt" @refresh="refresh">
       <template #back>
-        <button @click="router.push('/webhooks')" aria-label="Back to webhooks" class="muted hover:text-gray-700 cursor-pointer">
+        <button @click="router.push({ name: 'webhooks' })" aria-label="Back to webhooks" class="muted hover:text-gray-700 cursor-pointer">
           <BackArrowIcon class="w-5 h-5" />
         </button>
       </template>
     </PageHeader>
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
+    <InlineErrorBanner v-if="error" :message="error" @dismiss="error = ''" />
+
+    <!-- P0-C2: not-found card. A stale link / typo'd URL for a webhook
+         that doesn't exist (or was deleted) gets a clear "no such
+         webhook" panel rather than a blank page-body. -->
+    <div
+      v-if="notFound"
+      class="bg-white dark:bg-gray-900 rounded-lg shadow p-8 text-center"
+      data-testid="webhook-not-found"
+    >
+      <p class="text-lg font-medium text-gray-900 dark:text-white">Webhook not found</p>
+      <p class="muted-sm mt-2">
+        No webhook with ID <span class="font-mono">{{ id }}</span> exists or is visible to your session.
+      </p>
+      <button
+        type="button"
+        class="btn-pill-primary mt-4"
+        @click="router.push({ name: 'webhooks' })"
+      >Back to webhooks</button>
+    </div>
+
+    <!-- P0-C2: cold-load skeleton. -->
+    <LoadingSkeleton
+      v-else-if="!initialLoadDone && !error"
+      data-testid="webhook-initial-loading"
+    />
+
     <template v-if="webhook">
       <div class="bg-white rounded-lg shadow p-6 mb-4">
         <div class="flex items-center gap-3 mb-4 flex-wrap">

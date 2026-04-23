@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useRouter, useRoute } from 'vue-router'
 import { useDarkMode } from '../composables/useDarkMode'
 import { useCommandPalette } from '../composables/useCommandPalette'
+import ConfirmAction from './ConfirmAction.vue'
 import SearchIcon from './icons/SearchIcon.vue'
 import LogoutIcon from './icons/LogoutIcon.vue'
 import SunIcon from './icons/SunIcon.vue'
@@ -48,9 +49,25 @@ function isActive(itemRoute: string) {
 
 const emit = defineEmits<{ navigate: [] }>()
 
+// P1-H8: logout confirmation. Pre-fix, a stray click on the sidebar
+// logout button mid-edit ended the session and discarded any in-progress
+// form state — no way to recover unsaved work. The confirm dialog adds
+// one keystroke on the happy path (Enter) and prevents accidental
+// session loss on the unhappy path.
+const confirmingLogout = ref(false)
+
+function requestLogout() {
+  confirmingLogout.value = true
+}
+
+function cancelLogout() {
+  confirmingLogout.value = false
+}
+
 function logout() {
+  confirmingLogout.value = false
   auth.logout()
-  router.push('/login')
+  router.push({ name: 'login' })
 }
 </script>
 
@@ -100,7 +117,7 @@ function logout() {
     </nav>
     <div class="p-4 border-t border-gray-700 space-y-3">
       <div class="flex items-center justify-between">
-        <button @click="logout" aria-label="Logout" class="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors cursor-pointer">
+        <button @click="requestLogout" aria-label="Logout" class="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors cursor-pointer">
           <LogoutIcon class="w-4 h-4" />
           Logout
         </button>
@@ -111,5 +128,22 @@ function logout() {
       </div>
       <p class="text-xs text-gray-400">v{{ version }}</p>
     </div>
+    <!-- Teleport to <body> so the dialog escapes the AppLayout mobile-
+         sidebar wrapper's transform context. Pre-fix, the dialog's
+         `fixed inset-0` was scoped to that 224px-wide transformed
+         container (per CSS spec: a transformed ancestor becomes the
+         containing block for `position: fixed` descendants), which
+         rendered the modal pinned to the sidebar column instead of
+         centered on the viewport. -->
+    <Teleport to="body">
+      <ConfirmAction
+        v-if="confirmingLogout"
+        title="Log out?"
+        message="You can sign back in with your admin API key."
+        confirm-label="Log out"
+        @confirm="logout"
+        @cancel="cancelLogout"
+      />
+    </Teleport>
   </aside>
 </template>

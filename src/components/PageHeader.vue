@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import RefreshButton from './RefreshButton.vue'
+import { formatRelative } from '../utils/format'
 
 // V6 (Phase 3): optional result-count display. Pre-fix, operators
 // had no header-level readout of "how many rows in the current
@@ -27,8 +28,41 @@ const props = defineProps<{
   // isn't a regular plural: "log entry" → "log entries", "policy" →
   // "policies". Unused for regular nouns ("tenant", "webhook").
   itemNounPlural?: string
+  // P1-M2 (revised): stale-only freshness signal. Pre-fix the pill
+  // rendered "Updated just now" continuously during healthy polling —
+  // pure visual noise that readers learned to ignore. Now the pill is
+  // hidden when data is fresh and only surfaces (in amber) when the
+  // last successful tick is older than STALE_THRESHOLD_MS — i.e. a
+  // poll was missed. Absence = fresh; presence = "something's off,
+  // trust this data less." null → pill hidden (pre-first-success, or
+  // non-polling views).
+  lastUpdatedAt?: Date | null
 }>()
+
+// Longer than the longest polling interval in the app (60s across
+// Overview / Tenants / Webhooks / Budgets / TenantDetail, 30s for
+// Events / Reservations / WebhookDetail). Gives one full interval of
+// slack on the slowest poller before declaring data stale.
+const STALE_THRESHOLD_MS = 90_000
 defineEmits<{ refresh: [] }>()
+
+// P1-M2: ticking "now" so the relative label in `freshnessLabel` refreshes
+// without relying on the parent polling callback. 15s cadence matches
+// the resolution of formatRelative's minute-bucket bands and keeps the
+// re-render cost negligible.
+const nowTick = ref(Date.now())
+let freshnessTimer: ReturnType<typeof setInterval> | null = null
+onMounted(() => { freshnessTimer = setInterval(() => { nowTick.value = Date.now() }, 15_000) })
+onUnmounted(() => { if (freshnessTimer) clearInterval(freshnessTimer) })
+
+const freshnessLabel = computed(() => {
+  if (!props.lastUpdatedAt) return ''
+  // Touch nowTick so the computed re-evaluates on the interval.
+  void nowTick.value
+  const age = Date.now() - props.lastUpdatedAt.getTime()
+  if (age < STALE_THRESHOLD_MS) return ''
+  return formatRelative(props.lastUpdatedAt.toISOString())
+})
 
 const countLabel = computed(() => {
   if (props.loaded === undefined) return ''
@@ -67,6 +101,18 @@ const countLabel = computed(() => {
       </div>
     </div>
     <div class="flex items-center gap-3">
+      <!-- P1-M2 (revised): stale-only freshness pill. Only renders when
+           the most recent tick is older than STALE_THRESHOLD_MS. Amber
+           because its presence means "trust this data less" — the data
+           on screen is older than a single polling interval of slack.
+           Title carries the absolute timestamp for log correlation. -->
+      <span
+        v-if="freshnessLabel"
+        role="status"
+        class="text-xs text-amber-700 dark:text-amber-400 tabular-nums"
+        :title="lastUpdatedAt?.toString()"
+        data-testid="page-header-last-updated"
+      >Last updated {{ freshnessLabel }}</span>
       <RefreshButton v-if="loading !== undefined" :loading="loading ?? false" @click="$emit('refresh')" />
       <slot name="actions" />
     </div>

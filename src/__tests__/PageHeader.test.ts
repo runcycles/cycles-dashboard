@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import PageHeader from '../components/PageHeader.vue'
 
@@ -59,5 +59,50 @@ describe('PageHeader count label', () => {
     const live = wrapper.find('[aria-live="polite"]')
     expect(live.exists()).toBe(true)
     expect(live.text()).toContain('42 tenants')
+  })
+})
+
+// P1-M2 (revised) freshness pill. Stale-only signal — the pill is
+// INVISIBLE during healthy polling and appears (in amber) only when a
+// tick has been missed. Absence = fresh, presence = "trust this data
+// less." Regression-lock the stale threshold, the copy, the amber
+// styling, and the absolute-timestamp tooltip.
+describe('PageHeader freshness pill (P1-M2 revised)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-23T12:00:00Z'))
+  })
+  afterEach(() => { vi.useRealTimers() })
+
+  it('omits the pill when lastUpdatedAt is null', () => {
+    const wrapper = mount(PageHeader, {
+      props: { title: 'Overview', lastUpdatedAt: null },
+    })
+    expect(wrapper.find('[data-testid="page-header-last-updated"]').exists()).toBe(false)
+  })
+
+  it('hides the pill when data is fresh (age < 90s)', () => {
+    // 30 seconds ago — healthy polling interval.
+    const fresh = new Date(Date.now() - 30_000)
+    const wrapper = mount(PageHeader, {
+      props: { title: 'Overview', lastUpdatedAt: fresh },
+    })
+    expect(wrapper.find('[data-testid="page-header-last-updated"]').exists()).toBe(false)
+  })
+
+  it('shows the pill with amber styling when data is stale (age >= 90s)', () => {
+    // 15 minutes ago — well past the 90s threshold.
+    const stale = new Date('2026-04-23T11:45:00Z')
+    const wrapper = mount(PageHeader, {
+      props: { title: 'Overview', lastUpdatedAt: stale },
+    })
+    const pill = wrapper.find('[data-testid="page-header-last-updated"]')
+    expect(pill.exists()).toBe(true)
+    expect(pill.text()).toMatch(/Last updated .* ago/)
+    // Amber styling is load-bearing — it's the "trust this less" cue.
+    expect(pill.classes()).toContain('text-amber-700')
+    // Tooltip carries the absolute timestamp so operators can correlate
+    // with server-side audit entries.
+    expect(pill.attributes('title')).toBe(stale.toString())
   })
 })

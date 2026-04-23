@@ -84,7 +84,7 @@ const error = ref('')
 // All eight fetches parallelize; any individual failure degrades
 // gracefully (error banner, but other sections keep rendering so a
 // flaky audit endpoint doesn't blank out the whole landing page).
-const { refresh, isLoading } = usePolling(async () => {
+const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
   const [ov, apiKeys, audit, atCap, frozen, closed, debt, webhooks] = await Promise.allSettled([
     getOverview(),
     // Pull one page; client-side filter for 7d window. Fine even for
@@ -740,6 +740,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
       title="Overview"
       subtitle="What needs attention"
       :loading="isLoading"
+      :last-updated-at="lastSuccessAt"
       @refresh="refresh"
     />
 

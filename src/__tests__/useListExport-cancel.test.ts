@@ -68,6 +68,103 @@ describe('useListExport cancellation', () => {
     revokeObjectURLSpy.mockRestore()
   })
 
+  it('P0-C4: drops a late page when cancel fires mid-fetch', async () => {
+    // Pre-fix: cancel during an in-flight fetchPage was a no-op — the
+    // fetch completed, data was appended, and only the NEXT iteration
+    // noticed the abort. That's a correctness bug when the late page
+    // either (a) slips into the blob the user thought they cancelled,
+    // or (b) lands after the overlay has already closed.
+    const currentItems = ref<Row[]>([{ id: 'seed' }])
+    const hasMore = ref(true)
+    const nextCursor = ref('p2')
+
+    const createObjectURLSpy = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:noop')
+    const revokeObjectURLSpy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+
+    let resolveFirstPage!: (v: ReturnType<typeof makePage>) => void
+    const firstPagePromise = new Promise<ReturnType<typeof makePage>>(r => { resolveFirstPage = r })
+    let receivedSignal: AbortSignal | undefined
+    const fetchPage = vi.fn<(cursor: string, signal?: AbortSignal) => Promise<ReturnType<typeof makePage>>>()
+      .mockImplementation(async (_cursor, signal) => {
+        receivedSignal = signal
+        return firstPagePromise
+      })
+
+    const exp = useListExport<Row>({
+      itemNoun: 'thing',
+      currentItems,
+      hasMore,
+      nextCursor,
+      fetchPage,
+      columns: [{ header: 'id', value: r => r.id }],
+    })
+
+    exp.confirmExport('csv')
+    const promise = exp.executeExport()
+    await Promise.resolve()
+
+    // Signal was forwarded into fetchPage.
+    expect(receivedSignal).toBeDefined()
+    expect(receivedSignal?.aborted).toBe(false)
+
+    // Cancel while the page is still in flight.
+    exp.cancelRunningExport()
+    expect(receivedSignal?.aborted).toBe(true)
+
+    // Now the in-flight page resolves with "late" data. Composable must
+    // notice the aborted signal and drop it rather than append.
+    resolveFirstPage(makePage(['late'], true, 'p3'))
+    await promise
+
+    expect(exp.exportError.value).toBe('Export cancelled.')
+    expect(createObjectURLSpy).not.toHaveBeenCalled()
+
+    createObjectURLSpy.mockRestore()
+    revokeObjectURLSpy.mockRestore()
+  })
+
+  it('P0-C4: surfaces AbortError from fetchPage as a cancel, not a crash', async () => {
+    // When fetchPage rethrows an AbortError (what fetch() does when the
+    // signal aborts mid-request), we must treat it as cancellation —
+    // not surface "AbortError" as the export error text.
+    const currentItems = ref<Row[]>([{ id: 'seed' }])
+    const hasMore = ref(true)
+    const nextCursor = ref('p2')
+
+    const createObjectURLSpy = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:noop')
+    const revokeObjectURLSpy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+
+    const fetchPage = vi.fn<(cursor: string, signal?: AbortSignal) => Promise<ReturnType<typeof makePage>>>()
+      .mockImplementation(async (_cursor, signal) => {
+        // Simulate the real fetch() behaviour when aborted.
+        await Promise.resolve()
+        signal?.throwIfAborted?.()
+        // If not aborted yet, throw to simulate an abort that already fired.
+        throw new DOMException('aborted', 'AbortError')
+      })
+
+    const exp = useListExport<Row>({
+      itemNoun: 'thing',
+      currentItems,
+      hasMore,
+      nextCursor,
+      fetchPage,
+      columns: [{ header: 'id', value: r => r.id }],
+    })
+
+    exp.confirmExport('csv')
+    const promise = exp.executeExport()
+    await Promise.resolve()
+    exp.cancelRunningExport()
+    await promise
+
+    expect(exp.exportError.value).toBe('Export cancelled.')
+    expect(createObjectURLSpy).not.toHaveBeenCalled()
+
+    createObjectURLSpy.mockRestore()
+    revokeObjectURLSpy.mockRestore()
+  })
+
   it('completes normally when not cancelled', async () => {
     const currentItems = ref<Row[]>([{ id: 'seed' }])
     const hasMore = ref(true)

@@ -26,6 +26,8 @@ import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import LoadingSkeleton from '../components/LoadingSkeleton.vue'
+import InlineErrorBanner from '../components/InlineErrorBanner.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import DownloadIcon from '../components/icons/DownloadIcon.vue'
@@ -235,7 +237,7 @@ watch(exportError, (v) => { if (v) error.value = v })
 // expired).
 watch([tenantFilter, statusFilter], () => { loadReservations() })
 
-const { refresh, isLoading } = usePolling(async () => {
+const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
   try {
     if (tenants.value.length === 0) await loadTenants()
     await loadReservations()
@@ -364,6 +366,7 @@ const gridTemplate = computed(() =>
       :loaded="reservations.length"
       :has-more="hasMore"
       :loading="isLoading"
+      :last-updated-at="lastSuccessAt"
       @refresh="refresh"
     >
       <template #actions>
@@ -377,7 +380,7 @@ const gridTemplate = computed(() =>
         </button>
       </template>
     </PageHeader>
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
+    <InlineErrorBanner v-if="error" :message="error" @dismiss="error = ''" />
 
     <!-- Filters. Tenant is required; the server rejects admin list
          without it, so we enforce client-side too. Status defaults to
@@ -496,7 +499,13 @@ const gridTemplate = computed(() =>
 
       <!-- Empty state lives outside the virtualized body — the virtualizer
            only understands row-indexed content. -->
-      <div v-else-if="!loadingList">
+      <!-- P1-H3: wire the existing loadingList flag to a LoadingSkeleton
+           so the initial fetch no longer shows a blank panel below the
+           filter bar. EmptyState only renders once loading finishes. -->
+      <div v-else-if="loadingList" class="px-4 py-6">
+        <LoadingSkeleton />
+      </div>
+      <div v-else>
         <EmptyState
           :message="tenantFilter
             ? (statusFilter ? `No ${statusFilter} reservations for this tenant` : 'No reservations for this tenant')

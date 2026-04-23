@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useTerminalAwareList } from '../composables/useTerminalAwareList'
-import { getTenant, listTenants, listBudgets, listApiKeys, listPolicies, listWebhooks, updateTenantStatus, updateTenant, revokeApiKey, createApiKey, updateApiKey, createBudget, createPolicy, updatePolicy, freezeBudget } from '../api/client'
+import { getTenant, listTenants, listBudgets, listApiKeys, listPolicies, listWebhooks, updateTenantStatus, updateTenant, revokeApiKey, createApiKey, updateApiKey, createBudget, createPolicy, updatePolicy, freezeBudget, ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { Tenant, BudgetLedger, ApiKey, Policy, WebhookSubscription, ApiKeyCreateResponse, BudgetCreateRequest, PolicyCreateRequest, PolicyUpdateRequest } from '../types'
 import { COMMIT_OVERAGE_POLICIES, PERMISSIONS } from '../types'
@@ -13,6 +13,8 @@ import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import MaskedValue from '../components/MaskedValue.vue'
 import EmptyState from '../components/EmptyState.vue'
+import LoadingSkeleton from '../components/LoadingSkeleton.vue'
+import InlineErrorBanner from '../components/InlineErrorBanner.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
@@ -65,7 +67,7 @@ function goBack() {
   if (typeof window !== 'undefined' && window.history.length > 1) {
     router.back()
   } else {
-    router.push('/tenants')
+    router.push({ name: 'tenants' })
   }
 }
 
@@ -84,6 +86,12 @@ const policies = ref<Policy[]>([])
 // ACTIVE/SUSPENDED polls to keep per-tick cost bounded.
 const webhooks = ref<WebhookSubscription[]>([])
 const error = ref('')
+// P0-C2: distinguish "initial fetch pending" from "server returned 404" so
+// the view can render a skeleton vs. a dedicated not-found card instead of
+// a blank page. Generic errors still flow into `error.value` / the top
+// banner; 404 is special-cased because the banner phrasing ("failed to
+// load") misreads for a route that simply doesn't exist.
+const notFound = ref(false)
 const tab = ref<'budgets' | 'keys' | 'policies'>('budgets')
 
 // v0.1.25.46: hide terminal rows in the embedded sub-lists by default.
@@ -739,16 +747,18 @@ function cancelEmergencyFreeze() {
 // all four lists (tenant, budgets, keys, policies) are fetched in
 // parallel so tab counts are accurate from first paint. After, the
 // poll tick switches to lazy mode: only refreshes the active tab.
-let initialLoadDone = false
+// Promoted to a ref so the template can gate the initial LoadingSkeleton
+// on it (P0-C2).
+const initialLoadDone = ref(false)
 
-const { refresh, isLoading } = usePolling(async () => {
+const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
   // Skip polls while a rerun-cascade PATCH+refetch is in flight. Without
   // this, a poll tick that interleaves between the PATCH and its four
   // post-PATCH GETs can resolve after them and clobber the fresh state
   // with pre-PATCH data, re-showing the banner until the next tick.
   if (rerunCascadeLoading.value) return
   try {
-    if (!initialLoadDone) {
+    if (!initialLoadDone.value) {
       // Mount-time eager load: fetch everything so badge counts are
       // accurate immediately. One-time per component instance; the
       // cost for a 10k-key tenant is capped at this single fetch
@@ -767,8 +777,9 @@ const { refresh, isLoading } = usePolling(async () => {
       apiKeys.value = kRes.keys
       policies.value = pRes.policies
       webhooks.value = wRes.subscriptions
-      initialLoadDone = true
+      initialLoadDone.value = true
       error.value = ''
+      notFound.value = false
       return
     }
 
@@ -805,20 +816,56 @@ const { refresh, isLoading } = usePolling(async () => {
       apiKeys.value = kRes.keys
     }
     error.value = ''
-  } catch (e) { error.value = toMessage(e) }
+    notFound.value = false
+  } catch (e) {
+    // 404 is a distinct state, not a transient error. A missing tenant
+    // means the URL is stale or wrong; the user wants a clear "no such
+    // tenant" card, not a retry-hinting red banner.
+    if (e instanceof ApiError && e.status === 404) {
+      notFound.value = true
+      error.value = ''
+    } else {
+      error.value = toMessage(e)
+    }
+  }
 }, 60000)
 </script>
 
 <template>
   <div>
-    <PageHeader title="Tenant Detail" :subtitle="tenant?.tenant_id" :loading="isLoading" @refresh="refresh">
+    <PageHeader title="Tenant Detail" :subtitle="tenant?.tenant_id" :loading="isLoading" :last-updated-at="lastSuccessAt" @refresh="refresh">
       <template #back>
         <button @click="goBack" :aria-label="parentFromQuery ? `Back to parent tenant ${parentFromQuery}` : 'Back to tenants'" class="muted hover:text-gray-700 cursor-pointer">
           <BackArrowIcon class="w-5 h-5" />
         </button>
       </template>
     </PageHeader>
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
+    <InlineErrorBanner v-if="error" :message="error" @dismiss="error = ''" />
+
+    <!-- P0-C2: dedicated not-found card. Separate from the error banner
+         because a 404 is not a transient failure — the URL is wrong and
+         retry-then-refresh doesn't help. The "Back to tenants" button
+         uses goBack so a parent-scoped breadcrumb is preserved. -->
+    <div
+      v-if="notFound"
+      class="bg-white dark:bg-gray-900 rounded-lg shadow p-8 text-center"
+      data-testid="tenant-not-found"
+    >
+      <p class="text-lg font-medium text-gray-900 dark:text-white">Tenant not found</p>
+      <p class="muted-sm mt-2">
+        No tenant with ID <span class="font-mono">{{ id }}</span> exists or is visible to your session.
+      </p>
+      <button type="button" class="btn-pill-primary mt-4" @click="goBack">Back to tenants</button>
+    </div>
+
+    <!-- P0-C2: cold-load skeleton. Pre-fix, a slow first fetch left the
+         page blank below the header for 1–2s, indistinguishable from a
+         real failure. LoadingSkeleton matches the dense-counter +
+         list-shell shape of the loaded view. -->
+    <LoadingSkeleton
+      v-else-if="!initialLoadDone && !error"
+      data-testid="tenant-initial-loading"
+    />
 
     <!-- Tombstone banner: spec v0.1.25.29 Rule 2. A CLOSED tenant and
          everything it owns are permanently read-only; every mutating op

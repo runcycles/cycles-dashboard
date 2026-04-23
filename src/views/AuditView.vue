@@ -15,6 +15,8 @@ import MaskedValue from '../components/MaskedValue.vue'
 import TenantLink from '../components/TenantLink.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import LoadingSkeleton from '../components/LoadingSkeleton.vue'
+import InlineErrorBanner from '../components/InlineErrorBanner.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import TimeRangePicker from '../components/TimeRangePicker.vue'
@@ -381,7 +383,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
       </template>
     </PageHeader>
 
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
+    <InlineErrorBanner v-if="error" :message="error" @dismiss="error = ''" />
 
     <!-- Filter form: three 6-col rows at xl+, stacks to 2 cols below.
          Pre-v0.1.25.39 this was two rows, but adding Trace ID + Request
@@ -719,7 +721,12 @@ function measureRow(el: Element | { $el?: Element } | null) {
         <EmptyState message="No audit logs found" hint="Try a broader time range (e.g. Last 24h) or clear your filters" />
       </div>
 
-      <div v-else-if="loading" class="px-4 py-12 text-center muted">Loading...</div>
+      <!-- P1-H3: LoadingSkeleton replaces raw "Loading..." text so
+           AuditView matches the cold-load pattern used in the detail
+           views — consistent density, consistent motion. -->
+      <div v-else-if="loading" class="px-4 py-6">
+        <LoadingSkeleton />
+      </div>
      </div>
     </div>
 

@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.53 (2026-04-22)
+**Current release:** v0.1.25.54 (2026-04-23)
 
 ## Baseline requirements
 
@@ -16,6 +16,91 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-23 — v0.1.25.54: P0/P1 UX & safety sweep
+
+**Trigger.** User-requested full-app review ("review dashboard for bugs,
+UI/UX flow, identify gaps, inconsistencies, user experience and look and
+feel problems"). Three parallel Explore agents produced a ranked punch
+list; findings validated against code (2 false positives dropped). This
+release ships the P0 (correctness / data) + P1 (UX consistency) batches.
+Spec alignment unchanged; fourth-segment bump only.
+
+**Batches landed in one release.**
+
+| Tier | Scope | Count |
+|---|---|---|
+| P0 | Correctness / data integrity | 6 |
+| P1 | UX consistency + clarity | 9 |
+| Deferred | a11y (M8-M10), form UX (M7), L-tier polish, coverage backfill | — |
+
+**P0 changes.**
+
+| ID | Change | Files |
+|---|---|---|
+| C1 | Catch-all 404 route + `NotFoundView` | `router.ts`, `views/NotFoundView.vue` |
+| C2 | Detail views distinguish pending fetch vs 404 | `TenantDetailView.vue`, `WebhookDetailView.vue` |
+| C3 | VERIFIED FALSE — router guard already awaits capabilities via `isAuthenticated`; added invariant comment | `stores/auth.ts` |
+| C4 | `useListExport` threads AbortSignal into `fetchPage`, drops late pages | `composables/useListExport.ts` |
+| H4 | VERIFIED HANDLED — `usePolling`'s mounted-flag + abort-on-unmount + logout→unmount cascade cover this; doc-comment added | `composables/usePolling.ts` |
+| H5 | WebhookDetailView callback checks `signal.aborted` between the two sequential awaits | `views/WebhookDetailView.vue` |
+
+**P1 changes.**
+
+| ID | Change | Files |
+|---|---|---|
+| H1 | Named-route discipline (5 remaining path-strings) | Sidebar, TenantDetail, WebhookDetail, BudgetsView |
+| H2 | Per-route `document.title` via `meta.title` + afterEach | `router.ts` |
+| H3 | `LoadingSkeleton` on cold load for list views | Tenants, Webhooks, Events, Audit, Reservations |
+| H8 | Logout confirmation via `ConfirmAction` | `Sidebar.vue` |
+| M1 | `formatDateTime` / `formatTime` include short timezone marker | `utils/format.ts` |
+| M2 | `usePolling.lastSuccessAt` + `PageHeader` freshness pill | composable + PageHeader + 5 views |
+| M3 | Shared `InlineErrorBanner` with dismiss × (replaces 9 inline banners) | new component + 9 views |
+| M4 | BudgetsView `route.query.filter` watcher now re-runs `loadList` (resets cursor) | `BudgetsView.vue` |
+| M5 | BudgetsView all-tenants scope banner (non-cross-tenant-filter case) | `BudgetsView.vue` |
+
+**Verified-false findings (from agent reports; checked against code).**
+
+1. **Counter-strip vs webhook donut mismatch still present.** Not real
+   — v0.1.25.53 reconciled both to `overview.webhook_counts`
+   (`OverviewView.vue:344-358` has the explanatory comment +
+   `webhookFleetSlices` computed). Slices are status-only by
+   construction.
+2. **Sidebar hardcoded dark background is a dark-mode bug.** Not a bug
+   — always-dark sidebar is an intentional app-shell pattern (VS Code /
+   Linear / GitHub). Documented, not changed.
+
+**Coverage.** +4 new test files, +5 additions to existing specs. 884
+tests total (was 874). Strict ≥95% line coverage rule preserved.
+
+**Review-pass fixes (four-step pre-commit per memory rule).**
+
+| Pass | Finding | Fix |
+|---|---|---|
+| UI/UX | `LoadingSkeleton` bars had no dark-mode palette | Added `dark:bg-gray-700` / `dark:bg-gray-800` |
+| Code | `executeExport` outer catch could surface raw "AbortError" text | Detect AbortError in the catch, route to "Export cancelled." |
+| Test | `PageHeader` freshness pill had no assertion | Added pill presence/absence + title-attribute tests |
+| Test | `usePolling.lastSuccessAt` untested | Added success-sets-date / error-stays-null tests |
+| Test (deferred) | Sidebar logout flow (button → ConfirmAction → logout) | jsdom asset resolver blocks mounting `<img src="/runcycles-logo.svg">`; coverage remains adequate via `auth.test.ts` + `ConfirmAction.test.ts` |
+
+**Review false-positives (checked, dismissed).**
+
+- NotFoundView `btn-pill-*` buttons claimed to lack dark styles. False —
+  `style.css:282-294` defines `.dark .btn-pill-primary` and
+  `.dark .btn-pill-secondary`. No change.
+- Sidebar `ConfirmAction` placement inside `<aside>` flagged as a
+  stacking-context risk. False — matches the established convention
+  (TenantDetailView, BudgetsView do the same); `fixed inset-0 z-50`
+  escapes the parent layout.
+
+**Deferred to a future release.**
+
+| Bucket | Items |
+|---|---|
+| a11y | M8 row-actions keyboard nav, M9 chart SR equivalents, M10 chip focus-visible |
+| Form UX | M7 live regex validation, general form-level pattern review |
+| Polish (L-tier) | 14 items — shared poll-interval const, spinner dark-mode, `.form-label` weight, i18n readiness, etc. |
+| Coverage backfill | `useListExport` full-API test, `useChartTheme`, `useToast` timeout paths |
 
 ### 2026-04-22 — v0.1.25.53: Counter-strip / donut / drill-down reconciliation sweep
 

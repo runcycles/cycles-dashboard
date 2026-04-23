@@ -12,6 +12,12 @@ export const useAuthStore = defineStore('auth', () => {
   const apiKey = ref(sessionStorage.getItem(SESSION_KEY) || '')
   const capabilities = ref<Capabilities | null>(null)
 
+  // Both apiKey AND capabilities required. This is the load-bearing invariant
+  // behind capability gating in views: the router guard awaits this, so by
+  // the time a protected view mounts `capabilities` is always non-null.
+  // Views can therefore use `?.manage_X !== false` as a "undefined = allow"
+  // pattern without a null-capabilities render window (spec convention:
+  // undefined permits, only explicit false blocks).
   const isAuthenticated = computed(() => !!apiKey.value && !!capabilities.value)
 
   // Persist key to sessionStorage (survives refresh, cleared on tab close)

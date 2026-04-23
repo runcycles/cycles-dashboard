@@ -21,6 +21,8 @@ import TenantLink from '../components/TenantLink.vue'
 import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import LoadingSkeleton from '../components/LoadingSkeleton.vue'
+import InlineErrorBanner from '../components/InlineErrorBanner.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import DownloadIcon from '../components/icons/DownloadIcon.vue'
@@ -52,6 +54,11 @@ const canManage = computed(() => auth.capabilities?.manage_webhooks !== false)
 
 const webhooks = ref<WebhookSubscription[]>([])
 const tenants = ref<Tenant[]>([])
+// P1-H3: gates the cold-load skeleton. Flipped true after the first
+// successful poll tick; before then the template shows LoadingSkeleton
+// instead of an EmptyState that reads "No webhooks found" on what is
+// actually an in-flight fetch.
+const initialLoadDone = ref(false)
 const error = ref('')
 
 // R6 (scale-hardening): cursor pagination. Pre-fix, listWebhooks()'s
@@ -551,7 +558,7 @@ async function submitSecurityConfig() {
   finally { securityLoading.value = false }
 }
 
-const { refresh, isLoading } = usePolling(async () => {
+const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
   try {
     const [wRes, tRes] = await Promise.all([listWebhooks(withListParams()), listTenants()])
     webhooks.value = wRes.subscriptions
@@ -559,6 +566,7 @@ const { refresh, isLoading } = usePolling(async () => {
     nextCursor.value = wRes.next_cursor ?? ''
     tenants.value = tRes.tenants
     error.value = ''
+    initialLoadDone.value = true
   } catch (e) { error.value = toMessage(e) }
 }, 60000)
 
@@ -667,6 +675,7 @@ const gridTemplate = computed(() =>
       :loaded="sortedWebhooks.length"
       :has-more="hasMore"
       :loading="isLoading"
+      :last-updated-at="lastSuccessAt"
       @refresh="refresh"
     >
       <template #actions>
@@ -682,7 +691,7 @@ const gridTemplate = computed(() =>
         <button v-if="canManage" @click="openCreate" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Webhook</button>
       </template>
     </PageHeader>
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
+    <InlineErrorBanner v-if="error" :message="error" @dismiss="error = ''" />
 
     <!-- Tenant + URL filters. Tenant options sourced from the loaded
          webhook set so the dropdown only lists tenants that actually
@@ -878,6 +887,12 @@ const gridTemplate = computed(() =>
         </div>
       </div>
 
+      <!-- P1-H3: cold-load skeleton before first poll resolves — avoids
+           flashing "No webhooks found" on what's actually a pending
+           fetch. EmptyState takes over once initialLoadDone flips. -->
+      <div v-else-if="!initialLoadDone && !error" class="px-4 py-6">
+        <LoadingSkeleton />
+      </div>
       <div v-else>
         <EmptyState
           item-noun="webhook"

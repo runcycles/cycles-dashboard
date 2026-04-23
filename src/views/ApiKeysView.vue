@@ -18,6 +18,7 @@ import PageHeader from '../components/PageHeader.vue'
 import TenantLink from '../components/TenantLink.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import InlineErrorBanner from '../components/InlineErrorBanner.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
@@ -335,7 +336,7 @@ async function fetchKeysPage(cursor?: string): Promise<{
   }
 }
 
-const { refresh, isLoading } = usePolling(async () => {
+const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
   try {
     const tRes = await listTenants()
     tenants.value = tRes.tenants
@@ -468,6 +469,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
       item-noun="key"
       :loaded="sortedKeys.length"
       :loading="isLoading"
+      :last-updated-at="lastSuccessAt"
       @refresh="refresh"
     >
       <template #actions>
@@ -483,7 +485,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
       </template>
     </PageHeader>
 
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
+    <InlineErrorBanner v-if="error" :message="error" @dismiss="error = ''" />
 
     <!-- Summary -->
     <div v-if="keys.length > 0" class="flex gap-3 mb-4">
