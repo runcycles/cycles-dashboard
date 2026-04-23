@@ -213,6 +213,14 @@
   .chip-danger     { @apply bg-red-100 text-red-800 hover:bg-red-200; }
   .chip-neutral    { @apply bg-gray-100 text-gray-700 hover:bg-gray-200; }
   .chip-category   { @apply bg-blue-100 text-blue-800 hover:bg-blue-200; }
+  /* M10 (a11y): keyboard focus ring. Chips are frequently used as
+     clickable drill-downs (Overview counter-strip, donut legends).
+     Without an explicit :focus-visible style, tabbing through these
+     moved focus invisibly — keyboard-only operators lost their place.
+     Blue ring matches the btn-pill-* focus convention elsewhere in
+     the app. :focus-visible (not :focus) so mouse clicks don't
+     render the ring, only keyboard navigation. */
+  .chip:focus-visible { @apply outline-none ring-2 ring-blue-500 ring-offset-1; }
 }
 
 /* ── Dark overrides for component classes ────────────────────────────

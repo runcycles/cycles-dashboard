@@ -15,6 +15,56 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.56] — 2026-04-23
+
+P2 accessibility + form-UX closeout. Last items from the v0.1.25.54
+review plan; chart data becomes reachable to screen-reader users, the
+tenant-create form validates as you type, and clickable chips render
+a visible keyboard focus ring.
+
+### Added
+
+- **Screen-reader data table on `BaseChart`** (M9). Every chart now
+  renders an `sr-only` data table alongside the canvas so screen-
+  reader users get the same information sighted users see. Rows
+  auto-derive from `option.series[0].data` for pie-shaped charts (all
+  5 Overview / WebhookDetail donuts covered with zero per-view
+  changes); callers with non-standard data shapes can pass an
+  explicit `srData` prop.
+- **`.chip:focus-visible` ring** (M10). Clickable chips (Overview
+  donut legends, counter-strip chips) now render a blue focus ring on
+  keyboard navigation. Ring color matches the app-wide `btn-pill-*`
+  focus convention.
+- **Live form validation on Create Tenant** (M7). The `tenant_id`
+  input now shows inline red error text the instant an invalid
+  character is typed — previously operators saw nothing wrong until
+  they hit Submit. Submit button is disabled while validation fails;
+  input carries `aria-invalid` for SR announcement. An empty field
+  stays silent (no pre-typing scolding). `FormDialog` gains a
+  `submitDisabled` prop so any form can gate Submit on its own
+  validation predicate.
+
+### Regression-locked
+
+- **`RowActionsMenu` keyboard navigation** (M8). The review flagged
+  this as missing; inspection showed it was already implemented
+  (ArrowUp/Down/Home/End/Escape/Tab, lines 155-184). Added a
+  regression-lock test so a future refactor can't silently strip the
+  handlers.
+
+### Changed
+
+- `tsconfig.app.json` now includes `node` in `types` so the new
+  `a11y-sweep` test can read `style.css` off disk to verify rule
+  presence. Runtime build unaffected.
+
+### Coverage
+
+- New tests: `a11y-sweep.test.ts` (8 tests spanning M7/M8/M9/M10),
+  `TenantsView-create-validation.test.ts` (6 tests — empty field,
+  live error, min-length, aria-invalid, Submit gating, happy path).
+- Total: 924 tests, was 896.
+
 ## [0.1.25.55] — 2026-04-23
 
 Polish + coverage follow-up to v0.1.25.54. No spec advance; no
