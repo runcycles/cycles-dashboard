@@ -44,9 +44,19 @@ EventsView rendering, or API client wrappers — server tolerates
 unknown enum values and all new surface flows through the existing
 `listEvents` filter contract.
 
-**Coverage.** No new tests. Existing suite (936 passing) covers the
-filter-dropdown data flow; the new enum values participate without
-code-path changes.
+**Review-pass fix.** Test-review caught that `EventsView.vue:408-412`
+rendered the category dropdown from a **hardcoded** `<option>` list,
+not from `EVENT_CATEGORIES`. Adding `webhook` to the const array
+alone would not have surfaced it in the UI — the dropdown would have
+silently omitted the new category. Dropdown now `v-for`s over the
+const array (matching the pattern the Type datalist already used).
+Added a regression-lock test in `EventsView-url-deeplink.test.ts`.
+Without this fix, the spec alignment would have landed the data
+type-correct but functionally inert.
+
+**Coverage.** +1 test (937 passing, was 936) locking the data-driven
+dropdown. Existing suite covers the rest of the filter-dropdown data
+flow; the new enum values participate without code-path changes.
 
 ### 2026-04-23 — v0.1.25.58: Mobile-responsive sweep
 

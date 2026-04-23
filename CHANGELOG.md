@@ -41,6 +41,16 @@ webhook lifecycle events that cycles-server-admin `.39` now emits.
   new events to actually reach the dashboard end-to-end.
 - **Spec badge** `v0.1.25.31` → `v0.1.25.34`.
 
+### Fixed
+
+- **EventsView category dropdown was hardcoded** — silently drifted
+  from `EVENT_CATEGORIES`. Pre-fix, adding a new category to the
+  const array (as this release did for `webhook`) left the dropdown
+  stuck on the old list; operators couldn't filter on the new
+  category even after the enum landed. Dropdown now `v-for`s over
+  the const array so future additions surface automatically. Caught
+  during the review cycle, not in production.
+
 ### Notes
 
 - No code change to the `Event` interface — payload stays

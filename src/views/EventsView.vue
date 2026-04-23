@@ -9,7 +9,7 @@ import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useListExport } from '../composables/useListExport'
 import { listEvents } from '../api/client'
 import type { Event } from '../types'
-import { EVENT_TYPES } from '../types'
+import { EVENT_TYPES, EVENT_CATEGORIES } from '../types'
 import PageHeader from '../components/PageHeader.vue'
 import CopyJsonIcon from '../components/icons/CopyJsonIcon.vue'
 import DownloadIcon from '../components/icons/DownloadIcon.vue'
@@ -405,10 +405,16 @@ function measureRow(el: Element | { $el?: Element } | null) {
         </div>
         <div>
           <label for="ev-category" class="form-label">Category</label>
+          <!-- v0.1.25.59: render options from EVENT_CATEGORIES instead
+               of the hardcoded list we used to carry. Pre-fix the enum
+               and the dropdown drifted: spec v0.1.25.34 added `webhook`
+               to EventCategory and this dropdown silently omitted it
+               (types.ts updated, dropdown wasn't), so operators couldn't
+               filter on the 6 new webhook.* lifecycle events. Driving
+               from the const array keeps future additions in one place. -->
           <select id="ev-category" v-model="category" class="form-select w-full">
             <option value="">All</option>
-            <option>budget</option><option>reservation</option><option>tenant</option>
-            <option>api_key</option><option>policy</option><option>system</option>
+            <option v-for="c in EVENT_CATEGORIES" :key="c" :value="c">{{ c }}</option>
           </select>
         </div>
         <div>
