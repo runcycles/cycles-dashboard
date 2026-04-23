@@ -168,7 +168,21 @@ function utilizationOf(b: BudgetLedger): number {
 // Closed-tenant-filtered views. Each attention card derives from its
 // *Filtered* computed so the badge, banner axis count, and row list
 // all agree. Rows without tenant_id fall through (see isNotClosedTenant).
-const atCapBudgetsFiltered = computed<BudgetLedger[]>(() => atCapBudgets.value.filter(isNotClosedTenant))
+//
+// v0.1.25.59 also excludes CLOSED-status budgets here. CLOSED is a
+// spec-level terminal budget status (spec v0.1.25.29 cascade
+// semantics) — the budget is immutable, utilization is frozen at the
+// close-time snapshot, and operators can't act on it. Previously
+// these rows surfaced on the at-cap attention card (nothing to do
+// about them) AND skewed the fleet-utilization donut ("Over cap"
+// inflated by terminal budgets). FROZEN is NOT terminal — operators
+// can un-freeze — so frozen budgets stay in the utilization read.
+function isNonTerminalBudget(b: BudgetLedger): boolean {
+  return b.status !== 'CLOSED'
+}
+const atCapBudgetsFiltered = computed<BudgetLedger[]>(() =>
+  atCapBudgets.value.filter(b => isNotClosedTenant(b) && isNonTerminalBudget(b)),
+)
 const frozenBudgetsFiltered = computed<BudgetLedger[]>(() => frozenBudgets.value.filter(isNotClosedTenant))
 const debtBudgetsFiltered = computed<BudgetLedger[]>(() => debtBudgets.value.filter(isNotClosedTenant))
 const keysFiltered = computed<ApiKey[]>(() => keys.value.filter(isNotClosedTenant))
@@ -458,23 +472,33 @@ const budgetStatusOption = computed(() => {
 // matches the other two Overview donuts for visual consistency.
 const budgetUtilizationOption = computed(() => {
   const bc = overview.value?.budget_counts
-  if (!bc || bc.total === 0) {
+  // v0.1.25.59: exclude CLOSED budgets from the fleet-utilization read.
+  // They're terminal — spec v0.1.25.29 locks them immutable — so a
+  // CLOSED row at 110% utilization is not an actionable over-cap
+  // signal. Pre-fix they counted toward "Over cap" (via raw
+  // atCapBudgets) AND "Healthy" (via raw bc.total), skewing both
+  // buckets on deployments with long-running admins.
+  const nonTerminalTotal = Math.max(0, (bc?.total ?? 0) - (bc?.closed ?? 0))
+  if (!bc || nonTerminalTotal === 0) {
     return { series: [{ type: 'pie' as const, data: [] }] }
   }
-  // atCapBudgets is server-filtered to utilization ≥ 0.9. Bucket
-  // client-side: ≥1.0 → over cap; in [0.9, 1.0) → near cap.
+  // atCapBudgetsFiltered strips CLOSED (terminal) + closed-tenant
+  // children. Bucket the remainder: ≥1.0 → over cap; [0.9, 1.0) → near cap.
   let nearCap = 0
   let overCap = 0
-  for (const b of atCapBudgets.value) {
+  for (const b of atCapBudgetsFiltered.value) {
     if (utilizationOf(b) >= 1) overCap++
     else nearCap++
   }
-  // Healthy = total − (near + over). `bc.total` is a server aggregate
-  // that includes closed-tenant children, so this slightly over-counts
-  // Healthy vs. the cards' closed-tenant-filtered numbers — acceptable
-  // because the donut is the fleet-health read, not the attention read.
-  // Clamp to 0 in case of transient server/client skew.
-  const healthy = Math.max(0, bc.total - nearCap - overCap)
+  // Healthy = non-terminal total − (near + over). Clamp to 0 for
+  // transient server/client skew — the at-cap fetch and the
+  // overview aggregate are two separate queries and can momentarily
+  // disagree on edge-of-bucket budgets. `bc.total` still over-counts
+  // slightly vs the closed-tenant-filtered attention rows because
+  // the spec's budget_counts has no "non-closed-tenant" breakdown;
+  // that residual asymmetry is acceptable — the donut's unit is
+  // "non-terminal fleet", not "action queue".
+  const healthy = Math.max(0, nonTerminalTotal - nearCap - overCap)
   const slices = [
     { name: 'Healthy', value: healthy, itemStyle: { color: palette.value.success } },
     { name: 'Near cap', value: nearCap, itemStyle: { color: palette.value.warning } },

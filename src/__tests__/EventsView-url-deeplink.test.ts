@@ -123,4 +123,29 @@ describe('EventsView — URL deep-link smoke', () => {
       expect(w.find('h1').exists()).toBe(true)
     })
   }
+
+  // v0.1.25.59 regression-lock: the category dropdown must render
+  // every value from EVENT_CATEGORIES. Pre-fix it was a hardcoded
+  // HTML list that silently drifted when the enum grew — spec
+  // v0.1.25.34 added `webhook` to EVENT_CATEGORIES and the dropdown
+  // omitted it, so operators couldn't filter on the 6 new webhook.*
+  // lifecycle events. Dropdown now v-for's over the const array.
+  it('category dropdown renders every EVENT_CATEGORIES value', async () => {
+    const { EVENT_CATEGORIES } = await import('../types')
+    routeRef.query = {}
+    const { default: EventsView } = await import('../views/EventsView.vue')
+    const w = mount(EventsView, stdMount())
+    await flushPromises()
+    const options = w
+      .findAll('#ev-category option')
+      .map(o => o.attributes('value') ?? o.text())
+    // "All" placeholder + one option per category.
+    expect(options).toContain('')
+    for (const c of EVENT_CATEGORIES) {
+      expect(options).toContain(c)
+    }
+    // Specifically verify the v0.1.25.34 addition is present so a
+    // future hardcode regression fails here first, not in production.
+    expect(options).toContain('webhook')
+  })
 })
