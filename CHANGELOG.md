@@ -15,6 +15,42 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.59] — 2026-04-23
+
+Spec alignment v0.1.25.31 → v0.1.25.34. Additive only — no breaking
+wire changes, no new endpoints consumed. Dashboard surfaces the new
+webhook lifecycle events that cycles-server-admin `.39` now emits.
+
+### Added
+
+- **Webhook lifecycle events are now filterable in Events view.**
+  Six new `EventType` values (`webhook.created`, `webhook.updated`,
+  `webhook.paused`, `webhook.resumed`, `webhook.disabled`,
+  `webhook.deleted`) appear in the type datalist. Emitted by
+  cycles-server-admin `.39+` on create / update / delete / bulk
+  actions, and by cycles-server-events `.11+` when the dispatcher
+  auto-disables a webhook after consecutive-failure thresholds.
+- **New `webhook` category** in the EventsView category dropdown
+  (spec v0.1.25.34 enum expansion).
+
+### Changed
+
+- **`docker-compose.yml` + `docker-compose.prod.yml`** bumped:
+  `cycles-server-admin` `0.1.25.38` → `0.1.25.39`, 
+  `cycles-server-events` `0.1.25.10` → `0.1.25.11`. Required for the
+  new events to actually reach the dashboard end-to-end.
+- **Spec badge** `v0.1.25.31` → `v0.1.25.34`.
+
+### Notes
+
+- No code change to the `Event` interface — payload stays
+  `Record<string, unknown>` matching the existing pattern for tenant
+  lifecycle events.
+- Pre-`.39` admin servers continue to work; they just don't emit
+  the new events so the new filter values match zero rows. Per the
+  spec's forward-compat rule, servers tolerate unknown enum values
+  from newer clients.
+
 ## [0.1.25.58] — 2026-04-23
 
 Mobile-responsive sweep. A focused audit turned up ~25 mobile issues

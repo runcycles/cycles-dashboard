@@ -47,7 +47,7 @@ services:
     # trace_flags / traceparent_inbound_valid on WebhookDelivery so the
     # dashboard's cross-surface correlation (v0.1.25.39) works on
     # delivery rows.
-    image: ghcr.io/runcycles/cycles-server-events:0.1.25.10
+    image: ghcr.io/runcycles/cycles-server-events:0.1.25.11
     restart: unless-stopped
     ports:
       - "7980:7980"
@@ -71,7 +71,7 @@ services:
       - cycles
 
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.38
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.39
     restart: unless-stopped
     ports:
       - "7979:7979"

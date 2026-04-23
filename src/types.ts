@@ -451,11 +451,19 @@ export const EVENT_TYPES = [
   'api_key.created', 'api_key.revoked', 'api_key.expired', 'api_key.permissions_changed',
   'api_key.auth_failed', 'api_key.auth_failure_rate_spike',
   'policy.created', 'policy.updated', 'policy.deleted',
+  // Spec v0.1.25.33: webhook lifecycle events, emitted by cycles-server-admin
+  // on create/update/delete + bulk actions, and by cycles-server-events'
+  // dispatcher on auto-disable. Payload mirrors EventDataTenantLifecycle.
+  'webhook.created', 'webhook.updated', 'webhook.paused',
+  'webhook.resumed', 'webhook.disabled', 'webhook.deleted',
   'system.store_connection_lost', 'system.store_connection_restored', 'system.high_latency',
   'system.webhook_delivery_failed', 'system.webhook_test',
 ] as const
 
-export const EVENT_CATEGORIES = ['budget', 'tenant', 'api_key', 'policy', 'reservation', 'system'] as const
+// Spec v0.1.25.34 added `webhook` as an EventCategory so the .33 webhook.*
+// EventTypes pass server-side validation. Dashboard filter UI surfaces
+// this as a new "webhook" option in the EventsView category dropdown.
+export const EVENT_CATEGORIES = ['budget', 'tenant', 'api_key', 'policy', 'reservation', 'webhook', 'system'] as const
 
 // cycles-governance-admin v0.1.25.yaml ErrorCode enum. Used as the suggestion
 // set for the AuditView error_code filter datalist (v0.1.25.24 listAuditLogs

@@ -1,21 +1,52 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.58 (2026-04-23)
+**Current release:** v0.1.25.59 (2026-04-23)
 
 ## Baseline requirements
 
 | Component | Minimum | Shipped (compose) | Notes |
 |---|---|---|---|
 | cycles-server (runtime plane) | v0.1.25.8+ | v0.1.25.15 | `.13` bounds `listReservationsSorted` at `SORTED_HYDRATE_CAP=2000`. `.14` adds W3C Trace Context on the runtime plane (`X-Cycles-Trace-Id` response header, `trace_id` on runtime events + audit entries, MDC `traceId`). `.15` adds audit-log retention TTL (default 400 days, matches admin). All additive — no wire breakage. Pre-`.14` runtime rows carry no trace chip; dashboard tolerates the absence. |
-| cycles-admin (governance plane) | v0.1.25.17+ | v0.1.25.37 | `.18+` for `RESET_SPENT` funding. `.26+` for tenant/webhook filter-apply bulk. `.27+` for AuditView error_code / status_band / DSL-completeness filters. `.28+` for audit sentinel split. `.29+` for budgets bulk-action. `.30+` for structured bulk-action audit detail. `.31+` for W3C Trace Context cross-surface correlation (`trace_id` on Event/AuditLogEntry/WebhookDelivery; `trace_id` + `request_id` filter params on audit + events list endpoints). `.32` hardens cross-plane deserialization (`@JsonIgnoreProperties(ignoreUnknown=true)` on `Event` + `WebhookDelivery`) so runtime can ship additive fields without forcing an admin lockstep release — no wire change. `.35` ships spec v0.1.25.29 CASCADE SEMANTICS (Rule 1 tenant-close cascade + Rule 2 `TENANT_CLOSED` mutation guard, budgets + webhook-tenant create/update only); `.36` completes Rule 2 guard coverage across all admin-mutating endpoints (policies, api-keys, webhook-admin create/update/delete/test/replay, bulk-action per-row); retroactively conformant to spec v0.1.25.31 Mode B (flip-first-with-guarded-cascade). `.37` wires Rule 1(c) bounded-convergence into the close paths: `PATCH /v1/admin/tenants/{id} {"status":"CLOSED"}` on an already-CLOSED tenant no longer short-circuits — it re-runs the cascade idempotently over any non-terminal owned children. This is the admin-side counterpart to the dashboard `.44` Re-run cascade affordance; pre-`.37` admin silently no-op'd the re-close PATCH, so the button would succeed at the HTTP layer but drive no child convergence. Dashboard `.43+` renders the tombstone banner, cascade preview on CLOSE, and `_VIA_TENANT_CASCADE` chips; `.44+` adds the cascade-recovery banner + re-run affordance for operator-issued convergence per Rule 1(c). Pre-`.31` silently ignores the new filter params; rows simply render no trace chip. |
-| cycles-events (dispatch worker) | v0.1.25.6+ | v0.1.25.8 | `.8` matches protocol v0.1.25.28 — captures `trace_id` / `trace_flags` / `traceparent_inbound_valid` on `WebhookDelivery` and threads them into the outbound `traceparent` header on HTTP delivery. Dashboard renders the captured `trace_id` in the WebhookDetailView delivery row JSON and CSV export. |
-| Spec alignment | — | v0.1.25.31 | Pin moves on end-to-end support. v0.1.25.30 declared `409 TENANT_CLOSED` on the remaining mutating ops. v0.1.25.31 relaxed Rule 1 to permit Mode B (flip-first-with-guarded-cascade) alongside Mode A (atomic); reference admin `.36` implements Mode B. Dashboard wire surface unchanged. |
+| cycles-admin (governance plane) | v0.1.25.17+ | v0.1.25.39 | (prior notes preserved through `.37` — see release history.) `.38` is a security/polish release with no dashboard-visible wire change. `.39` implements spec v0.1.25.33 webhook lifecycle events — emits `webhook.{created,updated,paused,resumed,disabled,deleted}` on the `webhook` category on create / update / delete / bulk-action flows; dashboard `.59` surfaces these in EventsView filters. |
+| cycles-events (dispatch worker) | v0.1.25.6+ | v0.1.25.11 | `.8` captured trace context on `WebhookDelivery` (protocol v0.1.25.28). `.11` emits `webhook.disabled` on the dispatcher auto-disable path (spec v0.1.25.33) so the Events view now shows when a webhook gets auto-paused by consecutive-failure thresholds, not just when an operator pauses it. |
+| Spec alignment | — | v0.1.25.34 | Pin moves on end-to-end support. `.32` formalized per-row event emission for `bulkActionBudgets` / `bulkActionTenants` (docs-only, no wire change). `.33` added six `webhook.*` EventType values + `EventDataWebhookLifecycle` payload schema. `.34` expanded `EventCategory` enum to include `webhook` so the `.33` events pass server-side validation. All additive — pre-`.31` servers tolerate unknown enum values per the spec's forward-compat rule, so the dashboard is backwards-compatible with every deployed admin version. |
 
 **Pre-baseline compatibility:** dashboard `TenantLink.isSystem` accepts both legacy `<unauthenticated>` and new `__`-prefixed sentinels (shipped v0.1.25.31). Row-select bulk paths (Tenants/Webhooks suspend, Budgets freeze, Emergency-freeze) fan out per-row and work against any admin version.
 
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-23 — v0.1.25.59: Spec alignment v0.1.25.31 → v0.1.25.34
+
+Additive-only spec catch-up. Dashboard had been pinned to spec `.31`
+through nine dashboard-only UX releases (v0.1.25.54 → .58); the spec
+advanced three patches in parallel.
+
+**What the spec added.**
+
+| Spec | Change | Dashboard consequence |
+|---|---|---|
+| .32 | `bulkActionBudgets` / `bulkActionTenants` MUST emit one Event per mutated row | No code change — existing `EVENT_TYPES` already cover the emitted types; Events view picks up richer per-row audit automatically on any server ≥ .32 |
+| .33 | 6 new `EventType` values (`webhook.created/updated/paused/resumed/disabled/deleted`) + new `EventDataWebhookLifecycle` payload | Added the 6 values to `EVENT_TYPES` so operators can filter by them in EventsView's type datalist. Payload stays `Record<string, unknown>` — no structured renderer, matching the existing pattern for `EventDataTenantLifecycle`. |
+| .34 | `EventCategory` enum adds `webhook` | Added `'webhook'` to `EVENT_CATEGORIES` so the category dropdown surfaces it |
+
+**Code changes.**
+
+| File | Change |
+|---|---|
+| `src/types.ts:442-458` | `EVENT_TYPES` += 6 webhook.* entries; `EVENT_CATEGORIES` += `'webhook'` |
+| `docker-compose.yml` + `docker-compose.prod.yml` | cycles-server-admin `.38 → .39`; cycles-server-events `.10 → .11` — both needed so the new events are actually emitted end-to-end in dev + prod |
+| `README.md` | Spec badge `v0.1.25.31` → `v0.1.25.34` |
+
+**No code changes to** the Event interface (already untyped payload),
+EventsView rendering, or API client wrappers — server tolerates
+unknown enum values and all new surface flows through the existing
+`listEvents` filter contract.
+
+**Coverage.** No new tests. Existing suite (936 passing) covers the
+filter-dropdown data flow; the new enum values participate without
+code-path changes.
 
 ### 2026-04-23 — v0.1.25.58: Mobile-responsive sweep
 

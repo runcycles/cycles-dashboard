@@ -55,7 +55,7 @@ services:
     # release — bump in lockstep with protocol revisions that affect
     # WebhookDelivery. `.8` matches protocol v0.1.25.28 (trace_id /
     # trace_flags / traceparent_inbound_valid).
-    image: ghcr.io/runcycles/cycles-server-events:0.1.25.10
+    image: ghcr.io/runcycles/cycles-server-events:0.1.25.11
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
@@ -77,7 +77,7 @@ services:
       - cycles
 
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.38
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.39
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
