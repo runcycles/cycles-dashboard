@@ -128,13 +128,22 @@ function logout() {
       </div>
       <p class="text-xs text-gray-400">v{{ version }}</p>
     </div>
-    <ConfirmAction
-      v-if="confirmingLogout"
-      title="Log out?"
-      message="Any unsaved form changes in the current view will be lost."
-      confirm-label="Log out"
-      @confirm="logout"
-      @cancel="cancelLogout"
-    />
+    <!-- Teleport to <body> so the dialog escapes the AppLayout mobile-
+         sidebar wrapper's transform context. Pre-fix, the dialog's
+         `fixed inset-0` was scoped to that 224px-wide transformed
+         container (per CSS spec: a transformed ancestor becomes the
+         containing block for `position: fixed` descendants), which
+         rendered the modal pinned to the sidebar column instead of
+         centered on the viewport. -->
+    <Teleport to="body">
+      <ConfirmAction
+        v-if="confirmingLogout"
+        title="Log out?"
+        message="You can sign back in with your admin API key."
+        confirm-label="Log out"
+        @confirm="logout"
+        @cancel="cancelLogout"
+      />
+    </Teleport>
   </aside>
 </template>
