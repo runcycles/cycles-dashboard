@@ -76,9 +76,26 @@ Sidebar logout regression test. No spec advance.
   `auth-extended.test.ts` (+2 M11 single-flight tests),
   `BulkActionAuditDetail.test.ts` (+1 M16 locale test),
   `ReservationsView-url-deeplink.test.ts` (+2 M14 pre-select tests).
-- Total (on this branch): 907 tests, was 896. With the .56 tests
-  also present on `main`, the combined total is higher — CI will
-  report the true count post-merge.
+- Total (on this branch): 929 tests. Combined with the .56 tests
+  (previously on main) this is the full suite.
+
+### Review-pass additions
+
+- **Replay form caught a real v-model coercion bug during test
+  writing.** The initial H6 computed used `!raw` to short-circuit on
+  the empty-string case — which also evaluates true for `0` (Vue
+  auto-coerces `v-model` on `<input type="number">` to a number after
+  interaction). Tests exposed the regression; fix uses explicit
+  `raw === '' || raw === null` plus typed coercion. No pre-merge
+  breakage on `main`.
+- **Inline max-events error + `submitDisabled` wiring** now match the
+  M7 TenantsView pattern (renders below the field, aria-invalid on
+  the input, Submit gates on validity).
+- **Sidebar-logout test isolation.** Added `afterEach` that clears
+  `document.body` so Teleport fragments from a prior test can't leak
+  into the next.
+- **H6 + M6 regression-locks.** New test files cover the two diffs
+  the first-round review flagged as untested.
 
 ## [0.1.25.56] — 2026-04-23
 

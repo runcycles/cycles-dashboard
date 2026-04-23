@@ -476,6 +476,26 @@ const replayError = ref('')
 const replayForm = ref({ from: '', to: '', max_events: '100' })
 const replayResult = ref<string | null>(null)
 
+// Live inline validation on max_events. Matches the M7 pattern on
+// TenantsView — renders the error right below the offending input so
+// operators see the problem at the field, not only at the dialog
+// header after clicking Submit. Empty field stays silent.
+//
+// Vue auto-coerces v-model on `<input type="number">` so `raw` may be
+// a number (after interaction) or a string (initial "100"). Check
+// both the empty-string case AND the numeric cases. Using `!raw`
+// alone would have been wrong — `!0` is true and would silently let
+// a zero through.
+const replayMaxEventsError = computed<string>(() => {
+  const raw = replayForm.value.max_events as unknown
+  if (raw === '' || raw === null || raw === undefined) return ''
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isFinite(n) || n <= 0) return 'Must be a positive number'
+  if (n > 1000) return 'Must be 1000 or fewer'
+  return ''
+})
+const canSubmitReplay = computed(() => !replayMaxEventsError.value)
+
 async function submitReplay() {
   replayError.value = ''
   // Client-side range sanity check. Server will also reject, but a
@@ -489,24 +509,21 @@ async function submitReplay() {
       return
     }
   }
+  // Live-validation guard (H6). canSubmitReplay gates the button so
+  // this is a belt-and-suspenders check for keyboard submit paths.
+  if (!canSubmitReplay.value) {
+    replayError.value = replayMaxEventsError.value || 'Invalid input'
+    return
+  }
   replayLoading.value = true
   try {
     // H6: properly typed body. Pre-fix used `Record<string, unknown>` +
     // `as any` cast which would silently accept malformed max_events
-    // (e.g. NaN from an empty string) and shove it at the server. The
-    // typed intermediate lets TS narrow at each assignment.
+    // (e.g. NaN from an empty string) and shove it at the server.
     const body: ReplayEventsRequest = {}
     if (replayForm.value.from) body.from = new Date(replayForm.value.from).toISOString()
     if (replayForm.value.to) body.to = new Date(replayForm.value.to).toISOString()
-    if (replayForm.value.max_events) {
-      const n = Number(replayForm.value.max_events)
-      if (!Number.isFinite(n) || n <= 0) {
-        replayError.value = 'Max events must be a positive number'
-        replayLoading.value = false
-        return
-      }
-      body.max_events = n
-    }
+    if (replayForm.value.max_events) body.max_events = Number(replayForm.value.max_events)
     const res = await replayWebhookEvents(id, body)
     // Leave banner visible until the user dismisses it — previous 5s
     // auto-clear was easy to miss when scrolled into deliveries list.
@@ -1084,7 +1101,16 @@ watch(exportError, (v) => { if (v) error.value = v })
       @cancel="pendingDelete = false"
     />
 
-    <FormDialog v-if="showReplay" title="Replay Events" submit-label="Start Replay" :loading="replayLoading" :error="replayError" @submit="submitReplay" @cancel="showReplay = false">
+    <FormDialog
+      v-if="showReplay"
+      title="Replay Events"
+      submit-label="Start Replay"
+      :loading="replayLoading"
+      :error="replayError"
+      :submit-disabled="!canSubmitReplay"
+      @submit="submitReplay"
+      @cancel="showReplay = false"
+    >
       <p class="muted-sm">Re-delivers historical events to this webhook. May cause duplicate deliveries.</p>
       <div>
         <label for="rp-from" class="form-label">From</label>
@@ -1096,7 +1122,17 @@ watch(exportError, (v) => { if (v) error.value = v })
       </div>
       <div>
         <label for="rp-max" class="form-label">Max events (1–1000)</label>
-        <input id="rp-max" v-model="replayForm.max_events" type="number" min="1" max="1000" class="border border-gray-300 rounded px-2 py-1.5 text-sm w-32" />
+        <input
+          id="rp-max"
+          v-model="replayForm.max_events"
+          type="number"
+          min="1"
+          max="1000"
+          class="border border-gray-300 rounded px-2 py-1.5 text-sm w-32"
+          :aria-invalid="!!replayMaxEventsError || undefined"
+          aria-describedby="rp-max-error"
+        />
+        <p v-if="replayMaxEventsError" id="rp-max-error" class="text-xs text-red-600 mt-0.5" role="alert">{{ replayMaxEventsError }}</p>
       </div>
     </FormDialog>
 

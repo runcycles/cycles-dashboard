@@ -4,7 +4,7 @@
 // appears → Cancel leaves session intact / Confirm clears session and
 // routes to the named login route.
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { h as actualH, defineComponent } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
@@ -52,6 +52,14 @@ describe('Sidebar — logout confirmation (P1-H8)', () => {
     auth.apiKey = 'k'
     auth.capabilities = FULL_CAPS
     pushMock.mockReset()
+  })
+
+  // ConfirmAction teleports the dialog to <body>. If a previous test's
+  // wrapper.unmount() didn't fully detach the teleported fragment (edge
+  // cases in VTU + Teleport), querySelector in the next test would see
+  // a stale dialog. Wipe document.body between tests as a hard reset.
+  afterEach(() => {
+    document.body.innerHTML = ''
   })
 
   it('logout button click surfaces the confirm dialog and does NOT log out yet', async () => {
