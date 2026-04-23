@@ -15,6 +15,108 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.54] — 2026-04-23
+
+Dashboard-only UX & safety sweep. Triggered by a full-app review that
+produced a ranked bug list (Critical / High / Medium); this release
+ships the P0 (correctness / data integrity) and P1 (UX consistency)
+batches together. Spec alignment unchanged.
+
+### Added
+
+- **Catch-all 404 route + `NotFoundView`.** Mistyped URLs and stale
+  deep-links now render a "Page not found" card with the attempted
+  path and an Overview / Login CTA (adapts to auth state) instead of
+  a blank page. Public route so unauthenticated users aren't bounced
+  to login for a bad URL — matches the Gmail / Linear / GitHub
+  convention.
+- **Per-route `document.title`.** Each route declares `meta.title`; an
+  `afterEach` hook composes `<slug> – Cycles Admin Dashboard`. Fixes
+  the "every tab reads the same thing" problem when operators stack
+  tabs during incident triage.
+- **"Updated Xm ago" pill on polling views.** `usePolling` now exposes
+  `lastSuccessAt`; `PageHeader` renders a ticking freshness label next
+  to the refresh button (Overview, Tenants, Webhooks, Events, Budgets).
+  Absolute timestamp in the tooltip for exact log correlation.
+- **`LoadingSkeleton` on list-view cold loads.** Tenants, Webhooks,
+  Events, Audit, and Reservations previously showed `EmptyState`
+  ("No X found") during the first fetch — misleading on slow links.
+  Skeleton now shows until the initial poll tick resolves.
+- **Dedicated not-found state on detail views.** TenantDetailView and
+  WebhookDetailView differentiate "fetch in flight" (skeleton) from
+  "server returned 404" (not-found card) instead of rendering an empty
+  page in both cases.
+- **`InlineErrorBanner` with dismiss affordance.** Shared component
+  replaces nine identical inline `<p class="bg-red-50…">` banners
+  across the list/detail views; adds an explicit close (×) button so
+  operators can clear a one-off error without waiting for the next
+  successful poll.
+- **Logout confirmation dialog.** Sidebar Logout now routes through
+  `ConfirmAction` ("Any unsaved form changes will be lost") — prevents
+  accidental session loss mid-edit.
+- **"All tenants" scope banner in `BudgetsView`.** When no tenant is
+  selected and no cross-tenant filter is active, a subtle banner
+  explicitly states the scope and points at the bulk-action gate.
+
+### Fixed
+
+- **Export abort threads the `AbortSignal` to `fetchPage`.**
+  `useListExport` now forwards `abortExport.signal` into each page
+  fetch AND re-checks `signal.aborted` after the fetch resolves, so a
+  cancel click during an in-flight page discards the response instead
+  of appending it post-cancel. AbortError mid-fetch surfaces as
+  "Export cancelled" not a crash message.
+- **`BudgetsView` cursor reset on `filter=` change.** The route-query
+  filter watcher previously cleared selection but left `nextCursor`
+  scoped to the previous filter — a subsequent Load more would mix
+  rows across filters (or 400 on strict servers). Filter change now
+  re-runs `loadList` which clears cursor/hasMore up-front.
+- **`WebhookDetailView` polling aborts mid-tick.** The poll callback
+  now accepts the `AbortSignal` from `usePolling` and checks
+  `signal.aborted` between the webhook and deliveries fetches.
+  Defensive against a stale response sneaking a write into a
+  torn-down view.
+
+### Changed
+
+- **`formatDateTime` / `formatTime` include a short timezone marker.**
+  The server emits UTC ISO; the browser renders in local. Prior output
+  was ambiguous ("14:34" — local or UTC?). Output now includes the
+  short zone abbreviation (`PDT` / `UTC` / `GMT+2`) so local vs. UTC
+  is unambiguous when correlating with audit logs.
+- **Named-route discipline across navigation.** Replaced every
+  remaining `router.push('/path')` with `router.push({ name: '…' })`
+  (Sidebar logout, TenantDetail back, WebhookDetail back, BudgetsView
+  back) so a future path rename doesn't silently break navigation.
+- **`auth.isAuthenticated` invariant documented.** Now requires both
+  `apiKey` AND `capabilities`; the router guard awaits `restore()`
+  before allowing navigation, so protected views never mount with null
+  capabilities. Added comment explaining why `?.manage_X !== false`
+  is safe (no null-capabilities render window).
+- **`usePolling` logout-cascade invariant documented.** Logout flows
+  through `isAuthenticated` → layout unmount → `usePolling.onUnmounted`
+  → abort — no separate logout hook needed on the composable.
+
+### Coverage
+
+- New tests: `NotFoundView.test.ts`, `DetailView-not-found.test.ts`,
+  `InlineErrorBanner.test.ts`, `router-document-title.test.ts`;
+  `useListExport-cancel.test.ts` extended with mid-fetch cancel +
+  AbortError paths; `format.test.ts` extended to assert the timezone
+  marker; `PageHeader.test.ts` extended for the freshness pill;
+  `usePolling.test.ts` extended for `lastSuccessAt`.
+  Total: 884 tests, all passing.
+
+### Review pass (this release)
+
+- **`LoadingSkeleton` dark-mode palette.** Added `dark:bg-gray-700` /
+  `dark:bg-gray-800` on the skeleton bars — pre-fix the light-gray
+  placeholders looked washed-out against the dark-mode card surface.
+- **`useListExport.executeExport` outer-catch detects AbortError.**
+  Defensive: if an AbortError escapes `fetchAllForExport` via a non-
+  cancel code path (e.g. upstream library tearing down), the operator
+  now sees "Export cancelled." instead of raw "aborted" text.
+
 ## [0.1.25.53] — 2026-04-22
 
 ### Fixed

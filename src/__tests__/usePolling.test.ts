@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { defineComponent, h, nextTick } from 'vue'
+import type { Ref } from 'vue'
 import { mount } from '@vue/test-utils'
 import { usePolling } from '../composables/usePolling'
 
@@ -12,15 +13,21 @@ function mountPolling(
   intervalMs = 1000,
 ) {
   let refreshFn: (() => void) | null = null
+  let lastSuccessRef: Ref<Date | null> | null = null
   const Harness = defineComponent({
     setup() {
       const p = usePolling(cb, intervalMs)
       refreshFn = p.refresh
+      lastSuccessRef = p.lastSuccessAt
       return () => h('div', [String(p.isLoading.value)])
     },
   })
   const wrapper = mount(Harness)
-  return { wrapper, refresh: () => refreshFn?.() }
+  return {
+    wrapper,
+    refresh: () => refreshFn?.(),
+    lastSuccess: () => lastSuccessRef,
+  }
 }
 
 // Test the polling logic directly (not as a composable with lifecycle)
@@ -184,6 +191,32 @@ describe('usePolling — cancellation & dedup', () => {
     // that unmount still works cleanly — no dangling state.
     expect(cb).toHaveBeenCalledTimes(1)
     wrapper.unmount()
+  })
+
+  // P1-M2: lastSuccessAt drives the "Updated Xm ago" pill in PageHeader.
+  // Contract: set to a fresh Date on every successful tick; left
+  // untouched on a failed tick so the freshness label correctly
+  // indicates staleness. Also unused Ref warning killer — lint has
+  // flagged composable return shape drift before.
+  it('lastSuccessAt is set after a successful tick', async () => {
+    const cb = vi.fn().mockResolvedValue(undefined)
+    const harness = mountPolling(cb, 10_000)
+    await nextTick()
+    await new Promise(r => setTimeout(r, 10))
+    const last = harness.lastSuccess()
+    expect(last).not.toBeNull()
+    expect(last?.value).toBeInstanceOf(Date)
+    harness.wrapper.unmount()
+  })
+
+  it('lastSuccessAt stays null after a failing tick', async () => {
+    const cb = vi.fn().mockRejectedValue(new Error('boom'))
+    const harness = mountPolling(cb, 10_000)
+    await nextTick()
+    await new Promise(r => setTimeout(r, 10))
+    const last = harness.lastSuccess()
+    expect(last?.value).toBeNull()
+    harness.wrapper.unmount()
   })
 
   it('refresh() is a no-op while a tick is in flight', async () => {

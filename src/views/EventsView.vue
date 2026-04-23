@@ -16,6 +16,8 @@ import ChevronRightIcon from '../components/icons/ChevronRightIcon.vue'
 import TenantLink from '../components/TenantLink.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import LoadingSkeleton from '../components/LoadingSkeleton.vue'
+import InlineErrorBanner from '../components/InlineErrorBanner.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import TimeRangePicker from '../components/TimeRangePicker.vue'
@@ -28,6 +30,9 @@ const route = useRoute()
 const router = useRouter()
 
 const events = ref<Event[]>([])
+// P1-H3: gates the cold-load skeleton. Flipped true after the first
+// successful poll resolves.
+const initialLoadDone = ref(false)
 const hasMore = ref(false)
 const nextCursor = ref('')
 const loadingMore = ref(false)
@@ -165,6 +170,7 @@ async function load() {
       nextCursor.value = res.next_cursor ?? ''
     }
     error.value = ''
+    initialLoadDone.value = true
   } catch (e) { error.value = toMessage(e) }
 }
 
@@ -299,7 +305,7 @@ watch(exportError, (v) => { if (v) error.value = v })
 
 const hasActiveFilters = computed(() => !!(category.value || eventType.value || tenantId.value || scope.value || correlationId.value || traceId.value || requestId.value || search.value || fromDate.value || toDate.value))
 
-const { refresh, isLoading } = usePolling(load, 15000)
+const { refresh, isLoading, lastSuccessAt } = usePolling(load, 15000)
 
 // V1 virtualization (Phase 2c) — variable row heights via measureElement.
 // Collapsed rows are ~52px; expanded rows grow with metadata grid + JSON
@@ -350,6 +356,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
       :loaded="events.length"
       :has-more="hasMore"
       :loading="isLoading"
+      :last-updated-at="lastSuccessAt"
       @refresh="refresh"
     >
       <template #actions>
@@ -364,7 +371,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
       </template>
     </PageHeader>
 
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
+    <InlineErrorBanner v-if="error" :message="error" @dismiss="error = ''" />
 
     <!-- Filters. Instant-apply on change (selects) or 300ms-debounced
          (text inputs) — no separate "Filter" button to click. Form
@@ -576,6 +583,10 @@ function measureRow(el: Element | { $el?: Element } | null) {
         </div>
       </div>
 
+      <!-- P1-H3: cold-load skeleton. -->
+      <div v-else-if="!initialLoadDone && !error" class="px-4 py-6">
+        <LoadingSkeleton />
+      </div>
       <div v-else>
         <EmptyState
           item-noun="event"

@@ -26,8 +26,14 @@ export interface UseListExportOptions<T> {
   /**
    * Fetches a single cursor page. Called only on the multi-page slow path.
    * Implementations should return the server's raw shape translated into this uniform envelope.
+   *
+   * The `signal` arg is forwarded from the composable's AbortController so
+   * the in-flight request can be aborted mid-page when the operator hits
+   * Cancel — without it, a cancelled export would still wait for the
+   * current page to complete and quietly discard its contents. Optional
+   * for backward compatibility with call sites that don't accept signals.
    */
-  fetchPage: (cursor: string) => Promise<{ items: readonly T[]; hasMore: boolean; nextCursor: string }>
+  fetchPage: (cursor: string, signal?: AbortSignal) => Promise<{ items: readonly T[]; hasMore: boolean; nextCursor: string }>
   /** Column spec for CSV output. JSON export just serializes the raw items array. */
   columns: ReadonlyArray<ExportColumn<T>>
   /**
@@ -80,13 +86,10 @@ export function useListExport<T>(options: UseListExportOptions<T>) {
   const exporting = ref(false)
   const exportFetched = ref(0)
   const exportError = ref('')
-  // Cancellation: the multi-page export loop observes this ref and bails
-  // cleanly on the next iteration. Reset to null outside an active
-  // export; a live AbortController means the overlay's Cancel button
-  // should render. Not an AbortSignal threaded into fetch() directly
-  // because `fetchPage` doesn't accept one — the in-flight request
-  // still completes, but no subsequent page is fetched and no blob is
-  // assembled.
+  // Cancellation: the multi-page export loop observes this controller and
+  // bails cleanly on the next iteration. The signal is also threaded into
+  // fetchPage (P0-C4) so the in-flight request itself can abort rather
+  // than completing after cancel and having its payload silently dropped.
   let abortExport: AbortController | null = null
   const exportCancellable = ref(false)
 
@@ -114,7 +117,24 @@ export function useListExport<T>(options: UseListExportOptions<T>) {
         exportError.value = 'Export cancelled.'
         return null
       }
-      const page = await options.fetchPage(cursor)
+      let page: Awaited<ReturnType<typeof options.fetchPage>>
+      try {
+        page = await options.fetchPage(cursor, abortExport?.signal)
+      } catch (e) {
+        // AbortError mid-fetch is not a real failure — surface as cancel.
+        if (abortExport?.signal.aborted) {
+          exportError.value = 'Export cancelled.'
+          return null
+        }
+        throw e
+      }
+      // Double-check after fetchPage returns: cancel may have fired after
+      // the request completed but before we assembled the page. Without
+      // this, a late-arriving page would be appended post-cancel.
+      if (abortExport?.signal.aborted) {
+        exportError.value = 'Export cancelled.'
+        return null
+      }
       const matched = options.filterFn ? page.items.filter(options.filterFn) : page.items
       all.push(...matched)
       exportFetched.value = all.length
@@ -182,7 +202,19 @@ export function useListExport<T>(options: UseListExportOptions<T>) {
       if (format === 'csv') triggerDownload(csvFor(all), 'text/csv', 'csv')
       else triggerDownload(safeJsonStringify(all, 2), 'application/json', 'json')
     } catch (e) {
-      exportError.value = e instanceof Error ? e.message : String(e)
+      // Defensive: an AbortError that escapes fetchAllForExport (e.g. an
+      // upstream library aborting outside our cancel flow) should still
+      // read as "cancelled" to the operator, not as raw "aborted" /
+      // "AbortError" text. Pre-fix this would surface a misleading
+      // error string in the dialog.
+      if (
+        (e instanceof DOMException && e.name === 'AbortError') ||
+        (e instanceof Error && e.name === 'AbortError')
+      ) {
+        exportError.value = 'Export cancelled.'
+      } else {
+        exportError.value = e instanceof Error ? e.message : String(e)
+      }
     } finally {
       exporting.value = false
       exportCancellable.value = false

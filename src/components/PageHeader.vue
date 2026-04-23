@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import RefreshButton from './RefreshButton.vue'
+import { formatRelative } from '../utils/format'
 
 // V6 (Phase 3): optional result-count display. Pre-fix, operators
 // had no header-level readout of "how many rows in the current
@@ -27,8 +28,29 @@ const props = defineProps<{
   // isn't a regular plural: "log entry" → "log entries", "policy" →
   // "policies". Unused for regular nouns ("tenant", "webhook").
   itemNounPlural?: string
+  // P1-M2: surfaces "Last updated X ago" next to the refresh button on
+  // polling views so operators can tell at a glance whether they're
+  // looking at fresh data or a stale page after a network hiccup. null
+  // → pill hidden (pre-first-success, or non-polling views).
+  lastUpdatedAt?: Date | null
 }>()
 defineEmits<{ refresh: [] }>()
+
+// P1-M2: ticking "now" so the relative label in `freshnessLabel` refreshes
+// without relying on the parent polling callback. 15s cadence matches
+// the resolution of formatRelative's minute-bucket bands and keeps the
+// re-render cost negligible.
+const nowTick = ref(Date.now())
+let freshnessTimer: ReturnType<typeof setInterval> | null = null
+onMounted(() => { freshnessTimer = setInterval(() => { nowTick.value = Date.now() }, 15_000) })
+onUnmounted(() => { if (freshnessTimer) clearInterval(freshnessTimer) })
+
+const freshnessLabel = computed(() => {
+  if (!props.lastUpdatedAt) return ''
+  // Touch nowTick so the computed re-evaluates on the interval.
+  void nowTick.value
+  return formatRelative(props.lastUpdatedAt.toISOString())
+})
 
 const countLabel = computed(() => {
   if (props.loaded === undefined) return ''
@@ -67,6 +89,14 @@ const countLabel = computed(() => {
       </div>
     </div>
     <div class="flex items-center gap-3">
+      <!-- P1-M2: freshness pill. Title attribute carries the absolute
+           timestamp for operators who need exact correlation with logs. -->
+      <span
+        v-if="freshnessLabel"
+        class="muted-sm tabular-nums"
+        :title="lastUpdatedAt?.toString()"
+        data-testid="page-header-last-updated"
+      >Updated {{ freshnessLabel }}</span>
       <RefreshButton v-if="loading !== undefined" :loading="loading ?? false" @click="$emit('refresh')" />
       <slot name="actions" />
     </div>

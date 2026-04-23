@@ -10,11 +10,19 @@ function parse(iso: string | null | undefined): Date | null {
   return isNaN(d.getTime()) ? null : d
 }
 
+// P1-M1: timezone disambiguation. Server emits UTC ISO; the browser
+// renders in the user's local zone. Without a `timeZoneName` marker
+// operators can't tell whether "14:34" on the dashboard lines up with
+// "14:34 UTC" in the audit logs or "14:34 PDT" in their own timeline.
+// Appending the short zone name ("PDT", "UTC+2") is the
+// Gmail / Linear / Grafana convention — local for the reader, explicit
+// about which local.
 export function formatDateTime(iso: string | null | undefined): string {
   const d = parse(iso)
   if (!d) return EMPTY
   return d.toLocaleString(undefined, {
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit',
+    timeZoneName: 'short',
   })
 }
 
@@ -31,6 +39,7 @@ export function formatTime(iso: string | null | undefined): string {
   if (!d) return EMPTY
   return d.toLocaleTimeString(undefined, {
     hour: '2-digit', minute: '2-digit', second: '2-digit',
+    timeZoneName: 'short',
   })
 }
 

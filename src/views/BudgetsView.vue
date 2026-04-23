@@ -18,6 +18,7 @@ import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
 import TenantLink from '../components/TenantLink.vue'
 import EmptyState from '../components/EmptyState.vue'
+import InlineErrorBanner from '../components/InlineErrorBanner.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import DownloadIcon from '../components/icons/DownloadIcon.vue'
@@ -305,7 +306,7 @@ async function tick() {
   else { await loadTenants(); await loadList() }
 }
 
-const { refresh, isLoading } = usePolling(tick, 60000)
+const { refresh, isLoading, lastSuccessAt } = usePolling(tick, 60000)
 
 // Budget freeze/unfreeze
 const pendingAction = ref<{ action: 'freeze' | 'unfreeze'; scope: string; unit: string } | null>(null)
@@ -593,7 +594,18 @@ watch(
   [selectedTenant, filterStatus, filterUnit, filterScope, search, filterUtilMin, filterUtilMax],
   () => { selected.value = new Set() },
 )
-watch(() => route.query.filter, () => { selected.value = new Set() })
+// P1-M4: route.query.filter drives the server-side `over_limit` /
+// `has_debt` params (see buildListParams). Pre-fix, this watcher only
+// cleared the selection — the nextCursor stayed live, still scoped to
+// the previous filter. A subsequent Load-more click would send the old
+// cursor against the new filter, which the server rejects with a
+// filter-hash mismatch (and on lenient servers appends rows from the
+// wrong filter). Re-running loadList resets nextCursor/hasMore
+// up-front and re-fetches page 1 under the new filter.
+watch(() => route.query.filter, () => {
+  selected.value = new Set()
+  if (!isDetail.value) void loadList()
+})
 
 function toggleSelect(ledgerId: string) {
   const next = new Set(selected.value)
@@ -1083,10 +1095,11 @@ function rowTenantId(b: BudgetLedger): string {
       :loaded="!isDetail ? sortedBudgets.length : undefined"
       :has-more="!isDetail ? hasMore : undefined"
       :loading="isLoading"
+      :last-updated-at="lastSuccessAt"
       @refresh="refresh"
     >
       <template #back>
-        <button v-if="isDetail" @click="router.push('/budgets')" aria-label="Back to budgets" class="muted hover:text-gray-700 cursor-pointer">
+        <button v-if="isDetail" @click="router.push({ name: 'budgets' })" aria-label="Back to budgets" class="muted hover:text-gray-700 cursor-pointer">
           <BackArrowIcon class="w-5 h-5" />
         </button>
       </template>
@@ -1102,7 +1115,7 @@ function rowTenantId(b: BudgetLedger): string {
       </template>
     </PageHeader>
 
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
+    <InlineErrorBanner v-if="error" :message="error" @dismiss="error = ''" />
 
 
     <!-- Detail mode -->
@@ -1179,6 +1192,21 @@ function rowTenantId(b: BudgetLedger): string {
       <div v-if="isCrossTenantFilter" class="flex items-center gap-2 mb-4 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
         <span>Showing {{ activeFilter === 'over_limit' ? 'over-limit' : 'budgets with debt' }} across all tenants</span>
         <button @click="clearFilter" class="ml-auto text-xs text-blue-600 hover:underline cursor-pointer">Clear filter</button>
+      </div>
+
+      <!-- P1-M5: surfaces "all tenants" scope when no tenant is selected
+           and no cross-tenant filter is active. Prevents the soft
+           failure mode where an operator thinks they're looking at one
+           tenant's budgets but is actually seeing every tenant's —
+           per-row actions still auto-scope by budget, but bulk actions
+           are gated on tenant_id so this banner also explains why bulk
+           is disabled in this state. -->
+      <div
+        v-if="!isCrossTenantFilter && !selectedTenant && !isDetail"
+        class="flex items-center gap-2 mb-4 px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-600 dark:bg-gray-900 dark:border-gray-800 dark:text-gray-300"
+        data-testid="budgets-all-tenants-scope"
+      >
+        <span>Viewing budgets across all tenants. Pick a tenant to enable bulk actions.</span>
       </div>
 
       <div v-if="!isCrossTenantFilter" class="card p-4 mb-4">

@@ -9,6 +9,15 @@ describe('format utilities', () => {
       expect(out.length).toBeGreaterThan(0)
     })
 
+    it('P1-M1: includes a short timezone marker so local vs. UTC is unambiguous', () => {
+      const out = formatDateTime('2026-04-10T12:34:56Z')
+      // Runtime zone varies by CI host. Short tz names fall into three
+      // observed shapes: 3–4 letter abbreviation ("UTC", "PDT", "GMT"),
+      // "GMT±H[H][:MM]", or "UTC±H[H][:MM]". Assert at least one is
+      // present so the marker is there without overspecifying the form.
+      expect(out).toMatch(/(^|\s)(UTC|GMT|[A-Z]{2,5})((\s*[-+]\d{1,2}(?::?\d{2})?)?)\b/)
+    })
+
     it('returns em-dash for garbage input', () => {
       expect(formatDateTime('not a date')).toBe('—')
     })

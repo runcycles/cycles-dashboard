@@ -19,6 +19,8 @@ import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import LoadingSkeleton from '../components/LoadingSkeleton.vue'
+import InlineErrorBanner from '../components/InlineErrorBanner.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import DownloadIcon from '../components/icons/DownloadIcon.vue'
@@ -46,6 +48,10 @@ const auth = useAuthStore()
 const canManage = computed(() => auth.capabilities?.manage_tenants !== false)
 
 const tenants = ref<Tenant[]>([])
+// P1-H3: gates the cold-load skeleton. Set true after the first
+// successful poll so EmptyState doesn't flash "No tenants found" on a
+// pending fetch.
+const initialLoadDone = ref(false)
 const error = ref('')
 const search = ref('')
 
@@ -568,13 +574,14 @@ function withListParams(params: Record<string, string> = {}): Record<string, str
   return params
 }
 
-const { refresh, isLoading } = usePolling(async () => {
+const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
   try {
     const res = await listTenants(withListParams())
     tenants.value = res.tenants
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
     error.value = ''
+    initialLoadDone.value = true
   } catch (e) { error.value = toMessage(e) }
 }, 60000)
 
@@ -699,6 +706,7 @@ const gridTemplate = computed(() =>
       :loaded="sortedTenants.length"
       :has-more="hasMore"
       :loading="isLoading"
+      :last-updated-at="lastSuccessAt"
       @refresh="refresh"
     >
       <template v-if="parentFromQuery" #back>
@@ -722,7 +730,7 @@ const gridTemplate = computed(() =>
         <button v-if="canManage" @click="openCreate" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Tenant</button>
       </template>
     </PageHeader>
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg table-cell mb-4">{{ error }}</p>
+    <InlineErrorBanner v-if="error" :message="error" @dismiss="error = ''" />
 
     <!-- Search + parent filter. Wrapped in card to match the filter
          toolbars in BudgetsView / EventsView / AuditView / ApiKeysView
@@ -913,6 +921,10 @@ const gridTemplate = computed(() =>
         </div>
       </div>
 
+      <!-- P1-H3: cold-load skeleton. -->
+      <div v-else-if="!initialLoadDone && !error" class="px-4 py-6">
+        <LoadingSkeleton />
+      </div>
       <div v-else>
         <EmptyState
           item-noun="tenant"

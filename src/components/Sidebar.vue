@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useRouter, useRoute } from 'vue-router'
 import { useDarkMode } from '../composables/useDarkMode'
 import { useCommandPalette } from '../composables/useCommandPalette'
+import ConfirmAction from './ConfirmAction.vue'
 import SearchIcon from './icons/SearchIcon.vue'
 import LogoutIcon from './icons/LogoutIcon.vue'
 import SunIcon from './icons/SunIcon.vue'
@@ -48,9 +49,25 @@ function isActive(itemRoute: string) {
 
 const emit = defineEmits<{ navigate: [] }>()
 
+// P1-H8: logout confirmation. Pre-fix, a stray click on the sidebar
+// logout button mid-edit ended the session and discarded any in-progress
+// form state — no way to recover unsaved work. The confirm dialog adds
+// one keystroke on the happy path (Enter) and prevents accidental
+// session loss on the unhappy path.
+const confirmingLogout = ref(false)
+
+function requestLogout() {
+  confirmingLogout.value = true
+}
+
+function cancelLogout() {
+  confirmingLogout.value = false
+}
+
 function logout() {
+  confirmingLogout.value = false
   auth.logout()
-  router.push('/login')
+  router.push({ name: 'login' })
 }
 </script>
 
@@ -100,7 +117,7 @@ function logout() {
     </nav>
     <div class="p-4 border-t border-gray-700 space-y-3">
       <div class="flex items-center justify-between">
-        <button @click="logout" aria-label="Logout" class="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors cursor-pointer">
+        <button @click="requestLogout" aria-label="Logout" class="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors cursor-pointer">
           <LogoutIcon class="w-4 h-4" />
           Logout
         </button>
@@ -111,5 +128,13 @@ function logout() {
       </div>
       <p class="text-xs text-gray-400">v{{ version }}</p>
     </div>
+    <ConfirmAction
+      v-if="confirmingLogout"
+      title="Log out?"
+      message="Any unsaved form changes in the current view will be lost."
+      confirm-label="Log out"
+      @confirm="logout"
+      @cancel="cancelLogout"
+    />
   </aside>
 </template>
