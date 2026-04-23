@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.54 (2026-04-23)
+**Current release:** v0.1.25.55 (2026-04-23)
 
 ## Baseline requirements
 
@@ -16,6 +16,43 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-23 — v0.1.25.55: L-tier polish + coverage backfill
+
+Follow-up to `.54`. Closes the high-value items from the review's
+deferred L-tier plus the coverage backfill the strict ≥95% rule
+required. No spec advance; no behaviour change beyond the two visible
+polish items.
+
+**Changes.**
+
+| ID | Change | Files |
+|---|---|---|
+| L1 | Shared polling-interval constants replace 9 hardcoded literals | `composables/pollingConstants.ts` (new) + 9 views |
+| L6 | `.form-label` gains `font-medium` | `style.css` |
+| L8 | `RefreshButton` dark hover states wired | `components/RefreshButton.vue` |
+
+**L-tier items dropped on closer inspection (not real gaps).**
+
+| ID | Agent finding | Reality |
+|---|---|---|
+| L2 | `maxRows` hardcoded in `useListExport` | Already overrideable via `maxRows` option; no view needs a different value yet |
+| L3 | Export progress overlay lets table interaction through | `ExportProgressOverlay` already has a `fixed inset-0 bg-black/40` backdrop at z-50; clicks are blocked |
+| L5 | `.row-actions-separator` lacks dark variant | Already defined at `style.css:314` |
+| L13 | `editIntentApplied` module-level `let` persists across instances | It's in `<script setup>` scope (per-instance). `AppLayout` keys `<router-view :key="$route.path">`, so navigation between `/webhooks/A` → `/webhooks/B` remounts. Query-only transitions keep the flag, which is the correct "don't re-open edit dialog on poll tick" behaviour |
+| L9 / L10 / L11 / L12 / L14 | Token abstraction, prop-config, i18n, retry, import style | Premature abstractions — no near-term need, would add indirection with no payoff |
+
+**Coverage backfill.**
+
+| File | Status before | Status after |
+|---|---|---|
+| `useChartTheme.ts` | No spec | +5 tests (palette + reactive toggle + categorical length) |
+| `useListExport.ts` boundaries | Cancel-only coverage | +5 tests (fast-path CSV/JSON, maxRows/maxPages abort, filterFn discrimination) |
+| `usePolling.ts` stale-after-unmount | Not covered | +1 regression-lock (`lastSuccessAt` stays null post-unmount) |
+| `useToast.ts` | Agent flagged "no tests" | Already thoroughly covered — agent miss; no change |
+| `auth.ts` edge branches | Already thorough | No material gap; no change |
+
+Total: 896 tests, was 885. Strict ≥95% line-coverage rule preserved.
 
 ### 2026-04-23 — v0.1.25.54: P0/P1 UX & safety sweep
 

@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { usePolling } from '../composables/usePolling'
+import { POLL_SLOW_MS } from '../composables/pollingConstants'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useTerminalAwareList } from '../composables/useTerminalAwareList'
@@ -350,7 +351,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
     nextCursor.value = first.nextCursor
     error.value = ''
   } catch (e) { error.value = toMessage(e) }
-}, 60000)
+}, POLL_SLOW_MS)
 
 async function loadMore() {
   if (loadingMore.value || !nextCursor.value) return

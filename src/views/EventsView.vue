@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
+import { POLL_EVENTS_MS } from '../composables/pollingConstants'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useListExport } from '../composables/useListExport'
@@ -305,7 +306,7 @@ watch(exportError, (v) => { if (v) error.value = v })
 
 const hasActiveFilters = computed(() => !!(category.value || eventType.value || tenantId.value || scope.value || correlationId.value || traceId.value || requestId.value || search.value || fromDate.value || toDate.value))
 
-const { refresh, isLoading, lastSuccessAt } = usePolling(load, 15000)
+const { refresh, isLoading, lastSuccessAt } = usePolling(load, POLL_EVENTS_MS)
 
 // V1 virtualization (Phase 2c) — variable row heights via measureElement.
 // Collapsed rows are ~52px; expanded rows grow with metadata grid + JSON

@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
+import { POLL_SLOW_MS } from '../composables/pollingConstants'
 import { useTerminalAwareList } from '../composables/useTerminalAwareList'
 import { getTenant, listTenants, listBudgets, listApiKeys, listPolicies, listWebhooks, updateTenantStatus, updateTenant, revokeApiKey, createApiKey, updateApiKey, createBudget, createPolicy, updatePolicy, freezeBudget, ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
@@ -828,7 +829,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
       error.value = toMessage(e)
     }
   }
-}, 60000)
+}, POLL_SLOW_MS)
 </script>
 
 <template>

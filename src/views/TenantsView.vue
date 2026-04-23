@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRouter, useRoute } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
+import { POLL_SLOW_MS } from '../composables/pollingConstants'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useTerminalAwareList } from '../composables/useTerminalAwareList'
@@ -583,7 +584,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
     error.value = ''
     initialLoadDone.value = true
   } catch (e) { error.value = toMessage(e) }
-}, 60000)
+}, POLL_SLOW_MS)
 
 // Refetch page 1 whenever the debounced search changes so the cursor
 // stays aligned with the server's (sort_by, sort_dir, search) tuple.
