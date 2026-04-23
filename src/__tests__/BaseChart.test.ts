@@ -408,7 +408,7 @@ describe('OverviewView — chart drill-down (v0.1.25.49)', () => {
     })
   })
 
-  it('events donut category slice pushes to events?category=policy', async () => {
+  it('events donut category slice pushes to events with category + time window', async () => {
     const w = await mountOverview()
     // Resolve by card instead of array index — v0.1.25.53 added the
     // webhook-fleet-health card that now also renders when
@@ -417,7 +417,14 @@ describe('OverviewView — chart drill-down (v0.1.25.49)', () => {
     const eventsChart = eventsCard.findComponent({ name: 'BaseChart' })
     eventsChart.vm.$emit('slice-click', { name: 'policy' })
     await flushPromises()
-    expect(pushMock).toHaveBeenCalledWith({ name: 'events', query: { category: 'policy' } })
+    // v0.1.25.53 bug #3: drill-down now carries from/to derived from
+    // event_window_seconds so the events page shows the same window
+    // the Overview donut is summarizing.
+    const call = pushMock.mock.calls.at(-1)?.[0]
+    expect(call?.name).toBe('events')
+    expect(call?.query?.category).toBe('policy')
+    expect(typeof call?.query?.from).toBe('string')
+    expect(typeof call?.query?.to).toBe('string')
   })
 })
 

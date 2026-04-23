@@ -367,6 +367,19 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       expect(atCapCall?.utilization_min).toBe('0.9')
     })
 
+    // v0.1.25.53 bug #2: utilization-donut sample limit was 500 on large
+    // fleets → under-count. Bumped to 2000 to buy headroom without a
+    // cursor-walk pass. Regression pin: any future drop must be
+    // intentional and reflected here.
+    it('samples budgets at limit=2000 so the utilization donut is not undercounted on large fleets', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      await mountOverview()
+      const atCapCall = listBudgetsMock.mock.calls
+        .map(c => c[0] as Record<string, string>)
+        .find(p => p.utilization_min !== undefined)
+      expect(atCapCall?.limit).toBe('2000')
+    })
+
     it('calls listBudgets with status=FROZEN for the frozen-scopes fetch', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview())
       await mountOverview()
@@ -769,6 +782,23 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       expect(card.text()).toContain('No keys expiring in the next 7 days')
       expect(card.text()).not.toContain('expired-key')
     })
+
+    // v0.1.25.53 bug #4: "View all" on the expiring-keys card routed to
+    // /api-keys unfiltered — operator saw "7 expiring" then landed on
+    // the whole fleet. Now the link carries ?expiring_within_7d=1,
+    // which ApiKeysView honors as a client-side filter (spec has no
+    // server-side expires_before param).
+    it('Expiring Keys "View all" link carries expiring_within_7d=1', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      listApiKeysMock.mockResolvedValue({ keys: [], has_more: false })
+      const w = await mountOverview()
+      const card = w.find('[data-testid="expiring-keys-card"]')
+      const viewAll = card.findAll('a').find(a => a.text() === 'View all')
+      expect(viewAll).toBeDefined()
+      const parsed = JSON.parse(viewAll!.attributes('data-to') as string)
+      expect(parsed.name).toBe('api-keys')
+      expect(parsed.query?.expiring_within_7d).toBe('1')
+    })
   })
 
   // Cross-card consistency — every "what needs attention" card should
@@ -1099,6 +1129,56 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       const w = await mountOverview()
       const tile = w.find('[data-testid="tile-events"]')
       expect(tile.text()).toContain('no events')
+    })
+
+    // v0.1.25.53 bug #3: Events tile says "(60m)" but drill-down landed
+    // on unfiltered /events showing everything ever. Now the
+    // category-chip router-link AND the tile header/total links carry
+    // `from`/`to` query params normalized from `event_window_seconds`
+    // so the drill-down matches what the tile is summarizing.
+    it('Events tile chips carry from/to query params derived from event_window_seconds', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        event_window_seconds: 1800, // 30 minutes
+        event_counts: { total_recent: 7, by_category: { runtime: 7 } },
+      }))
+      const w = await mountOverview()
+      const tile = w.find('[data-testid="tile-events"]')
+      const chip = tile.find('.chip-category')
+      expect(chip.exists()).toBe(true)
+      const dataTo = chip.attributes('data-to')
+      expect(dataTo).toBeDefined()
+      const parsed = JSON.parse(dataTo as string)
+      expect(parsed.query.category).toBe('runtime')
+      expect(typeof parsed.query.from).toBe('string')
+      expect(typeof parsed.query.to).toBe('string')
+      // from/to must be parseable ISO strings and `to - from` must
+      // equal event_window_seconds (within a small tolerance for the
+      // test clock delta between the component computation and the
+      // assertion).
+      const fromMs = Date.parse(parsed.query.from)
+      const toMs = Date.parse(parsed.query.to)
+      expect(Number.isNaN(fromMs)).toBe(false)
+      expect(Number.isNaN(toMs)).toBe(false)
+      expect(Math.round((toMs - fromMs) / 1000)).toBe(1800)
+    })
+
+    it('Events tile "View all"-equivalent links also carry the time window', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        event_window_seconds: 3600,
+        event_counts: { total_recent: 12, by_category: { runtime: 12 } },
+      }))
+      const w = await mountOverview()
+      const tile = w.find('[data-testid="tile-events"]')
+      // Header and total links are <router-link :to="{ name: 'events', query: eventsQuery() }">.
+      // At least one must carry from/to (no category).
+      const links = tile.findAll('a[data-to]')
+        .map(a => JSON.parse(a.attributes('data-to') as string))
+        .filter(t => t && typeof t === 'object' && t.name === 'events' && !t.query?.category)
+      expect(links.length).toBeGreaterThan(0)
+      for (const l of links) {
+        expect(typeof l.query.from).toBe('string')
+        expect(typeof l.query.to).toBe('string')
+      }
     })
   })
 

@@ -42,6 +42,34 @@ UX work that does not advance spec alignment.
   so they reconcile by construction. Failing remains a separate
   counter-strip chip — that signal lives on the chip, not in the
   status mix.
+- **Overview utilization donut no longer undercounts large fleets.**
+  The at-or-near-cap fetch (`listBudgets?utilization_min=0.9`) is the
+  same set the utilization donut buckets from. Its `limit` was 500,
+  which under-sampled deployments with > 500 budgets at ≥ 90%
+  utilization. Bumped to 2000 — the admin spec defines no server-side
+  maximum on `limit`, so this is an order-of-magnitude headroom
+  increase at negligible cost.
+- **Events drill-down preserves the Overview time window.** The
+  Events tile header announces the window (e.g. "Events (60m)") but
+  the category chips and the "Events" link all routed to `/events`
+  with no `from`/`to` — operators landed on every event ever recorded
+  rather than the ones being summarized. All Events drill-downs from
+  Overview (tile header, total count, category chips, and the
+  fleet-chart category donut slices) now carry `from`/`to` query
+  params derived from `overview.event_window_seconds`. EventsView
+  already honors those params — no new spec surface.
+- **Expiring API keys drill-down now filters to the 7-day window.**
+  The Overview card shows "N keys expiring in 7d" and operators
+  clicking "View all" landed on the full fleet with no filter
+  applied. The link now carries `?expiring_within_7d=1` and
+  ApiKeysView honors it as a client-side filter using the same
+  `filterExpiringKeys` helper the card uses — the drill-down set is
+  identical to the card set. A dismissible chip on the filter bar
+  makes the active filter visible and reversible. The admin spec
+  has no server-side `expires_before` param on `listApiKeys` (only
+  `status=ACTIVE|REVOKED|EXPIRED`), so the filter runs client-side
+  on top of the loaded page, consistent with how the card itself
+  works.
 
 ## [0.1.25.52] — 2026-04-22
 
