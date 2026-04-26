@@ -15,6 +15,25 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.60] — 2026-04-26
+
+Chart-engine bump — no spec change, no admin-API surface delta.
+
+### Changed
+
+- **`echarts` 5.6.0 → 6.0.0** and **`vue-echarts` 7.0.3 → 8.0.1.**
+  Coordinated bump (Dependabot's standalone echarts PR was blocked by
+  vue-echarts 7's `echarts@^5.5.1` peer; vue-echarts 8 declares
+  `echarts@^6.0.0`). All chart construction, theme provisioning
+  (`THEME_KEY` + built-in `'light'`/`'dark'` strings), and modular
+  registration (`use([CanvasRenderer, PieChart, BarChart, …])`) are
+  source-compatible with v6. Slice colors are explicit on every series
+  in OverviewView so v6's default-theme palette change is invisible
+  here. The WebhookDetailView attempts histogram has an explicit
+  `grid` box (`top:16, right:16, bottom:24, left:32`) that v6's
+  anti-overflow layout respects unchanged. 938 tests pass; production
+  build succeeds.
+
 ## [0.1.25.59] — 2026-04-23
 
 Spec alignment v0.1.25.31 → v0.1.25.34. Additive only — no breaking

@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.59 (2026-04-23)
+**Current release:** v0.1.25.60 (2026-04-26)
 
 ## Baseline requirements
 
@@ -16,6 +16,32 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-04-26 — v0.1.25.60: echarts 6 + vue-echarts 8 upgrade
+
+Chart-engine major bump. No spec movement, no admin-API surface change, no behavioural change for operators.
+
+**Why now.** Dependabot opened PR #136 to bump `echarts` 5.6.0 → 6.0.0 standalone; CI failed with `ERESOLVE` because `vue-echarts@7.0.3` peer-deps `echarts@^5.5.1`. Bumping echarts alone is impossible — the two packages have to move together. `vue-echarts@8.0.1` declares `echarts@^6.0.0` and is otherwise API-compatible with our usage.
+
+**Code change.**
+
+| File | Change |
+|---|---|
+| `package.json` | `echarts ^5.6.0 → ^6.0.0`; `vue-echarts ^7.0.3 → ^8.0.1` |
+
+**No source-code changes required.** Verified by inspection:
+
+| Surface | v6 risk | Mitigation observed |
+|---|---|---|
+| `BaseChart.vue` modular `use([…])` registration | API surface unchanged | None needed |
+| `THEME_KEY` provide(`'light'`/`'dark'`) | built-in theme names retained in v6 | None needed |
+| `EChartsOption` import from `echarts/types/dist/shared` | path retained in v6 typings | None needed |
+| OverviewView donuts (3) — default-theme palette change | every slice sets explicit `itemStyle.color` from `palette` | None needed |
+| WebhookDetailView attempts histogram — v6 default `grid.outerBoundsMode` anti-overflow + `axisLabel.nameMoveOverlap` | explicit `grid: { top:16, right:16, bottom:24, left:32 }` already pins layout | None needed |
+
+**Validation gates.** Typecheck clean (`vue-tsc -b --noEmit`). Vitest 938 tests passing across 78 files. Production build succeeds; `BaseChart` chunk is 526.7 KB (gzip 176.7 KB), reflecting v6's larger core.
+
+**Follow-up to watch.** v6's `echarts/theme/v5.js` compatibility theme is available if any operator reports a visual regression we missed; not imported pre-emptively because slice colors are all explicit.
 
 ### 2026-04-23 — v0.1.25.59: Spec alignment v0.1.25.31 → v0.1.25.34
 
