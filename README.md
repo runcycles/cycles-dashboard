@@ -4,9 +4,11 @@
 [![Vue](https://img.shields.io/badge/vue-3-brightgreen)](https://vuejs.org)
 [![TypeScript](https://img.shields.io/badge/typescript-strict-blue)](https://www.typescriptlang.org)
 
-# Runcycles Admin Dashboard
+# Cycles Dashboard — AI agent budget and action enforcement observability
 
-Operational admin dashboard for the [Cycles Budget Governance System](https://github.com/runcycles/cycles-server-admin), aligned with [governance spec v0.1.25.34](https://github.com/runcycles/cycles-protocol/blob/main/cycles-governance-admin-v0.1.25.yaml).
+**Operations-first admin dashboard for the Cycles AI agent governance platform — visualize tenant budgets, action-authority enforcement, reservations, and webhook delivery in real time.** Multi-tenant by default, designed around operator workflows for incident response, not CRUD entity lists.
+
+Pairs with the [Cycles Admin API](https://github.com/runcycles/cycles-server-admin) and the [Cycles Server](https://github.com/runcycles/cycles-server) to provide end-to-end observability into agent spend, risk, and tool action enforcement. Aligned with [governance spec v0.1.25.34](https://github.com/runcycles/cycles-protocol/blob/main/cycles-governance-admin-v0.1.25.yaml).
 
 **Documentation:** [CHANGELOG](CHANGELOG.md) (downstream release notes) · [OPERATIONS](OPERATIONS.md) (production runbook) · [AUDIT](AUDIT.md) (engineering narrative).
 
