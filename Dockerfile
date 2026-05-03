@@ -9,11 +9,14 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# Serve stage — Alpine 3.23 base plus `apk upgrade` so each build pulls in
-# the latest alpine security patches. Without the upgrade step Trivy fails
-# any day a new HIGH/CRITICAL CVE is disclosed against the pinned minor
-# before upstream refloats the nginx:1.29-alpine tag.
-FROM nginx:1.29-alpine
+# Serve stage — pinned to Alpine 3.23 explicitly because nginx:1.29-alpine
+# (unpinned) was tracking an older Alpine where xz-libs and nghttp2-libs
+# fixes hadn't propagated. Alpine 3.23 has nghttp2 1.69.0-r0 and xz 5.8.3-r0,
+# both newer than the CVE-fix versions Trivy was waiting for.
+#
+# `apk upgrade` is still here so each build pulls in any subsequent Alpine
+# 3.23 patches without needing a Dockerfile bump.
+FROM nginx:1.29-alpine3.23
 RUN apk update && apk upgrade --no-cache && rm -rf /var/cache/apk/*
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
