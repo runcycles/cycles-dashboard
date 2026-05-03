@@ -51,8 +51,14 @@ jobs:
           push: false
           load: true
           tags: ghcr.io/runcycles/cycles-dashboard:scan-${{ github.event.pull_request.number || github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # no-cache + pull are critical for security scans: a cached
+          # `apk upgrade` layer will keep reporting old packages even after
+          # a base-image bump (witnessed in PR #157 — FROM was bumped to
+          # nginx:1.29-alpine3.23 but cached `apk upgrade` layer still
+          # served nghttp2 1.68.0/xz 5.8.2 from a months-old build).
+          # We want to scan what would actually be built today.
+          no-cache: true
+          pull: true
 
       - name: Trivy vulnerability scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
