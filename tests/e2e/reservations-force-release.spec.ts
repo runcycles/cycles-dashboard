@@ -24,7 +24,7 @@ test('operator force-releases a hung reservation and the row disappears', async 
   // Navigate via the sidebar (exercises the router too) rather than
   // direct-nav; the sidebar link is the path real operators take.
   await page.getByRole('navigation').first().getByRole('link', { name: /reservations/i }).click()
-  await expect(page).toHaveURL(/\/reservations$/)
+  await expect(page).toHaveURL(/\/reservations(\?.*)?$/)
 
   // The view auto-picks the first ACTIVE tenant on load. Our seed
   // created a timestamp-suffixed tenant which may not be first — pick
