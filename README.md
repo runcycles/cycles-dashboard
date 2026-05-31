@@ -101,7 +101,9 @@ Dashboard starts at `http://localhost:5173`. The Vite dev server splits the prox
 - `/v1/reservations*` → `localhost:7878` (cycles-server)
 - `/v1/*` (all others) → `localhost:7979` (cycles-server-admin)
 
-The same routing split is mirrored in `nginx.conf` for the production container.
+The same routing split is mirrored in `default.conf.template` for the
+production container, where the two upstreams are configurable via the
+`ADMIN_UPSTREAM` / `RUNTIME_UPSTREAM` environment variables.
 
 ### Development (full stack via Docker)
 
@@ -306,10 +308,12 @@ RUN npm run build
 # Serve
 FROM nginx:alpine
 COPY --from=build /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY default.conf.template /etc/nginx/templates/default.conf.template
+ENV ADMIN_UPSTREAM=http://cycles-admin:7979 \
+    RUNTIME_UPSTREAM=http://cycles-server:7878
 ```
 
-The nginx config handles SPA routing (`try_files $uri /index.html`) and reverse-proxies `/v1/` to the admin server.
+The nginx config handles SPA routing (`try_files $uri /index.html`) and reverse-proxies `/v1/` to the admin server (and `/v1/reservations/*` to the runtime server). It ships as an `envsubst` template so the `ADMIN_UPSTREAM` / `RUNTIME_UPSTREAM` upstreams can be retargeted at deploy time without rebuilding the image — see [OPERATIONS.md](OPERATIONS.md#reverse-proxy-wiring).
 
 ## Production Deployment
 
@@ -472,7 +476,7 @@ CORS only matters when the browser talks directly to the admin server (e.g., dur
 
 ### nginx hardening
 
-The default `nginx.conf` already includes these security headers:
+The default `default.conf.template` already includes these security headers:
 
 ```nginx
 # Security headers (included by default)
@@ -519,10 +523,12 @@ All production assets include Subresource Integrity (SRI) hashes via `vite-plugi
 | `REDIS_PASSWORD` | Recommended | (empty) | Redis authentication password |
 | `WEBHOOK_SECRET_ENCRYPTION_KEY` | Recommended | (empty) | AES-256-GCM key for webhook signing secrets at rest |
 | `DASHBOARD_CORS_ORIGIN` | Dev only | `http://localhost:5173` | CORS origin — only needed when browser calls admin server directly (not via nginx proxy) |
+| `ADMIN_UPSTREAM` | No | `http://cycles-admin:7979` | Governance-plane upstream for the dashboard container's bundled nginx proxy (`/v1/*` except reservations) |
+| `RUNTIME_UPSTREAM` | No | `http://cycles-server:7878` | Runtime-plane upstream for the bundled nginx proxy (`/v1/reservations/*`) |
 
-The dashboard itself has no server-side configuration — it's a static SPA. The admin server URL is configured via:
-- **Development:** Vite proxy in `vite.config.ts` (default: `localhost:7979`)
-- **Production:** nginx reverse proxy in `nginx.conf` (default: `cycles-admin:7979`)
+The dashboard itself has no application-level configuration — it's a static SPA. The two backend upstreams the bundled nginx proxy forwards to are configured via:
+- **Development:** Vite proxy in `vite.config.ts` (defaults: `localhost:7979` admin / `localhost:7878` runtime)
+- **Production:** `ADMIN_UPSTREAM` / `RUNTIME_UPSTREAM` env vars on the dashboard container (defaults: `cycles-admin:7979` / `cycles-server:7878`), substituted into `default.conf.template` at start — no rebuild needed
 
 ## Documentation
 

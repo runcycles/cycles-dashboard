@@ -19,6 +19,17 @@ RUN npm run build
 FROM nginx:1.29-alpine3.23
 RUN apk update && apk upgrade --no-cache && rm -rf /var/cache/apk/*
 COPY --from=build /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Ship the reverse-proxy config as an envsubst template. The stock nginx
+# entrypoint (20-envsubst-on-templates.sh) renders every
+# /etc/nginx/templates/*.template into /etc/nginx/conf.d/ at container
+# start, substituting only the env vars that are actually set — so the
+# ADMIN_UPSTREAM / RUNTIME_UPSTREAM placeholders below are filled while
+# nginx's own $host / $request_uri / $upstream variables are preserved.
+COPY default.conf.template /etc/nginx/templates/default.conf.template
+# Default upstreams match the bundled docker-compose service names, so the
+# image works out of the box. Override either var at deploy time to point
+# the bundled proxy at different admin / runtime hosts without rebuilding.
+ENV ADMIN_UPSTREAM=http://cycles-admin:7979 \
+    RUNTIME_UPSTREAM=http://cycles-server:7878
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]

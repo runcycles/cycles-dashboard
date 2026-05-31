@@ -24,7 +24,7 @@ on:
   # we don't want to add 3+ minutes of compose stack spin-up to every PR.
   pull_request:
     paths:
-      - 'nginx.conf'
+      - 'default.conf.template'
       - 'Dockerfile'
       - 'docker-compose*.yml'
       - 'src/api/client.ts'

@@ -1,12 +1,12 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.60 (2026-04-26)
+**Current release:** v0.1.25.61 (2026-05-31)
 
 ## Baseline requirements
 
 | Component | Minimum | Shipped (compose) | Notes |
 |---|---|---|---|
-| cycles-server (runtime plane) | v0.1.25.8+ | v0.1.25.15 | `.13` bounds `listReservationsSorted` at `SORTED_HYDRATE_CAP=2000`. `.14` adds W3C Trace Context on the runtime plane (`X-Cycles-Trace-Id` response header, `trace_id` on runtime events + audit entries, MDC `traceId`). `.15` adds audit-log retention TTL (default 400 days, matches admin). All additive — no wire breakage. Pre-`.14` runtime rows carry no trace chip; dashboard tolerates the absence. |
+| cycles-server (runtime plane) | v0.1.25.8+ | v0.1.25.17 | `.13` bounds `listReservationsSorted` at `SORTED_HYDRATE_CAP=2000`. `.14` adds W3C Trace Context on the runtime plane (`X-Cycles-Trace-Id` response header, `trace_id` on runtime events + audit entries, MDC `traceId`). `.15` adds audit-log retention TTL (default 400 days, matches admin). `.16`–`.17` are additive runtime-plane patches with no dashboard-visible wire change (reservations contract unchanged; the dashboard required no client changes and e2e passes against the pinned `.17` image). All additive — no wire breakage. Pre-`.14` runtime rows carry no trace chip; dashboard tolerates the absence. |
 | cycles-admin (governance plane) | v0.1.25.17+ | v0.1.25.39 | (prior notes preserved through `.37` — see release history.) `.38` is a security/polish release with no dashboard-visible wire change. `.39` implements spec v0.1.25.33 webhook lifecycle events — emits `webhook.{created,updated,paused,resumed,disabled,deleted}` on the `webhook` category on create / update / delete / bulk-action flows; dashboard `.59` surfaces these in EventsView filters. |
 | cycles-events (dispatch worker) | v0.1.25.6+ | v0.1.25.11 | `.8` captured trace context on `WebhookDelivery` (protocol v0.1.25.28). `.11` emits `webhook.disabled` on the dispatcher auto-disable path (spec v0.1.25.33) so the Events view now shows when a webhook gets auto-paused by consecutive-failure thresholds, not just when an operator pauses it. |
 | Spec alignment | — | v0.1.25.34 | Pin moves on end-to-end support. `.32` formalized per-row event emission for `bulkActionBudgets` / `bulkActionTenants` (docs-only, no wire change). `.33` added six `webhook.*` EventType values + `EventDataWebhookLifecycle` payload schema. `.34` expanded `EventCategory` enum to include `webhook` so the `.33` events pass server-side validation. All additive — pre-`.31` servers tolerate unknown enum values per the spec's forward-compat rule, so the dashboard is backwards-compatible with every deployed admin version. |
@@ -16,6 +16,26 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-05-31 — v0.1.25.61: configurable nginx upstreams (env-driven)
+
+Deployment-infra only. No client code, no spec movement, no admin-API surface change.
+
+**Why.** Issue #183: operators read the prod deploy as "build the dashboard, then stand up a separate reverse proxy to split `/v1/` traffic." The image already bundles that proxy — but the two upstream hostnames were hardcoded in `nginx.conf`, so retargeting them (split hosts, external endpoints) meant editing the file and rebuilding the image.
+
+**Rejected alternative.** The issue proposed `VITE_ADMIN_URL` / `VITE_RUNTIME_URL` driving direct cross-origin `fetch` from the client. Declined — `VITE_*` is baked at build time (one image per env, defeating the portable-artifact model), it requires relaxing CSP `connect-src 'self'` and turning on mandatory CORS + preflight for `X-Admin-API-Key` on both backends, and it sends the admin key cross-origin. Keeping the same-origin bundled proxy avoids all four.
+
+**Change.**
+
+| File | Change |
+|---|---|
+| `nginx.conf` → `default.conf.template` | Upstreams now `${ADMIN_UPSTREAM}` / `${RUNTIME_UPSTREAM}` placeholders |
+| `Dockerfile` | Copy template to `/etc/nginx/templates/`; bake `ENV` defaults (`cycles-admin:7979` / `cycles-server:7878`) |
+| `docker-compose.prod.yml` | Document the two vars on the `dashboard` service (`${VAR:-default}`) |
+
+**Mechanism.** Stock nginx entrypoint (`20-envsubst-on-templates.sh`) renders the template at start, substituting only env vars that are set — so `$host` / `$request_uri` / `$upstream` survive. Baked `ENV` defaults keep the image working out of the box; override at deploy time, no rebuild.
+
+**Validation.** Ran the real `nginx:1.29-alpine3.23` entrypoint with override upstreams (`ADMIN_UPSTREAM=https://admin.test:9999`, `RUNTIME_UPSTREAM=https://runtime.test:8888`): the entrypoint launched `20-envsubst-on-templates.sh` and `nginx -t` reported syntax OK / test successful on the rendered config. Separately replicated the entrypoint's `envsubst` step locally (var list from full environment) and confirmed both upstreams fill, all nginx runtime vars (`$upstream` / `$request_uri` / `$host` / …) are preserved, and zero `${…}` placeholders remain. No `src/` change, so the Vitest suite is unaffected.
 
 ### 2026-04-26 — v0.1.25.60: echarts 6 + vue-echarts 8 upgrade
 

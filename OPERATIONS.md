@@ -57,15 +57,32 @@ session-affinity requirement; the API key lives in the operator's browser
 
 ## Reverse-proxy wiring
 
-`nginx.conf` inside the container routes `/v1/*` to the two backend planes:
+The container bundles its own nginx reverse proxy — there is **no separate
+proxy to deploy**. `default.conf.template` inside the image routes `/v1/*` to
+the two backend planes:
 
-- `/v1/reservations/*` → `cycles-server:7878` (runtime plane)
-- `/v1/*` (everything else) → `cycles-admin:7979` (governance plane)
+- `/v1/reservations/*` → runtime plane (default `http://cycles-server:7878`)
+- `/v1/*` (everything else) → governance plane (default `http://cycles-admin:7979`)
 
-Service names resolve via Docker's internal DNS resolver (127.0.0.11). If you
-deploy the dashboard outside Docker, rewrite the `proxy_pass` targets to your
-admin and server hostnames. Both planes must be reachable from the dashboard
-container — the browser never calls them directly.
+The two upstreams are configurable at deploy time via environment variables —
+**no file edit and no image rebuild required:**
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `ADMIN_UPSTREAM` | `http://cycles-admin:7979` | Governance-plane base (`/v1/*` except reservations) |
+| `RUNTIME_UPSTREAM` | `http://cycles-server:7878` | Runtime-plane base (`/v1/reservations/*`) |
+
+The stock nginx entrypoint renders `default.conf.template` through `envsubst`
+at container start, filling these two placeholders while leaving nginx's own
+runtime variables (`$host`, `$request_uri`, `$upstream`, …) intact. Defaults
+match the bundled compose service names, so the image works out of the box;
+override them when the admin / runtime servers live on different hosts or
+ports (split deployments, external endpoints). Include the scheme — e.g.
+`ADMIN_UPSTREAM=https://admin.internal:7979`.
+
+Service names resolve via Docker's internal DNS resolver (127.0.0.11). Both
+planes must be reachable from the dashboard container — the browser never
+calls them directly, so no CORS or CSP changes are needed when retargeting.
 
 `proxy_pass` uses `$request_uri` (not a literal `/v1/` suffix) so the full
 original path + query string is preserved. Do not edit this. A prior regression
