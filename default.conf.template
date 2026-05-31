@@ -19,12 +19,22 @@ server {
     }
 
     # Reverse proxy API calls.
-    # Runtime-plane endpoints (reservations) go to cycles-server:7878.
-    # Everything else on /v1/* goes to cycles-admin:7979.
+    # Runtime-plane endpoints (reservations) go to the runtime server.
+    # Everything else on /v1/* goes to the admin server.
+    #
+    # Upstreams are injected at container start via envsubst from the
+    # ADMIN_UPSTREAM / RUNTIME_UPSTREAM environment variables (defaults
+    # baked into the Dockerfile: http://cycles-admin:7979 and
+    # http://cycles-server:7878). Override them to retarget the bundled
+    # proxy at deploy time — no file edit, no image rebuild. nginx's own
+    # runtime variables ($upstream, $request_uri, $host, …) are left
+    # untouched because the entrypoint only substitutes vars present in
+    # the environment.
+    #
     # Uses variables so nginx starts even if upstream is not yet resolvable.
     location ~ ^/v1/reservations(/|$) {
         resolver 127.0.0.11 valid=30s ipv6=off;
-        set $upstream http://cycles-server:7878;
+        set $upstream ${RUNTIME_UPSTREAM};
         proxy_pass $upstream$request_uri;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -33,7 +43,7 @@ server {
 
     location /v1/ {
         resolver 127.0.0.11 valid=30s ipv6=off;
-        set $upstream http://cycles-admin:7979;
+        set $upstream ${ADMIN_UPSTREAM};
         # $request_uri preserves the full original path + query string.
         # Must be used (not a literal /v1/ suffix) because nginx does not
         # perform automatic URI substitution on proxy_pass when the target

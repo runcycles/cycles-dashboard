@@ -18,7 +18,7 @@ on:
       - 'Dockerfile'
       - 'package.json'
       - 'package-lock.json'
-      - 'nginx.conf'
+      - 'default.conf.template'
       - '.github/workflows/pr-container-scan.yml'
   push:
     branches: [main]
@@ -26,7 +26,7 @@ on:
       - 'Dockerfile'
       - 'package.json'
       - 'package-lock.json'
-      - 'nginx.conf'
+      - 'default.conf.template'
       - '.github/workflows/pr-container-scan.yml'
 
 permissions: read-all

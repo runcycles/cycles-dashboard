@@ -16,6 +16,13 @@ services:
   dashboard:
     image: ghcr.io/runcycles/cycles-dashboard:0.1.25.42
     restart: unless-stopped
+    # The image bundles an nginx reverse proxy that splits /v1/* traffic
+    # between the two planes. These default to the compose service names,
+    # so they only need overriding when the admin / runtime servers live
+    # elsewhere (split hosts, external endpoints, non-default ports).
+    environment:
+      ADMIN_UPSTREAM: ${ADMIN_UPSTREAM:-http://cycles-admin:7979}
+      RUNTIME_UPSTREAM: ${RUNTIME_UPSTREAM:-http://cycles-server:7878}
     depends_on:
       cycles-admin:
         condition: service_healthy

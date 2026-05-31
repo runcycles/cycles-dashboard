@@ -15,6 +15,29 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.61] — 2026-05-31
+
+Deployment-only change — no spec change, no admin-API surface delta, no client behaviour change.
+
+### Added
+
+- **Configurable reverse-proxy upstreams via `ADMIN_UPSTREAM` / `RUNTIME_UPSTREAM`.**
+  The dashboard image bundles an nginx reverse proxy that splits `/v1/*`
+  traffic between the governance plane (`/v1/*`) and the runtime plane
+  (`/v1/reservations/*`). Those two upstream targets are now environment
+  variables instead of hardcoded hostnames, so the bundled proxy can be
+  retargeted at deploy time — **no file edit and no image rebuild.** Defaults
+  (`http://cycles-admin:7979` / `http://cycles-server:7878`) match the compose
+  service names, so existing deployments are unaffected. Include the scheme
+  when overriding, e.g. `ADMIN_UPSTREAM=https://admin.internal:7979`. See
+  [`OPERATIONS.md`](OPERATIONS.md#reverse-proxy-wiring).
+
+### Changed
+
+- `nginx.conf` is now shipped as `default.conf.template` and rendered by the
+  stock nginx entrypoint at container start. No action needed unless you
+  reference the old filename in a custom build.
+
 ## [0.1.25.60] — 2026-04-26
 
 Chart-engine bump — no spec change, no admin-API surface delta.
