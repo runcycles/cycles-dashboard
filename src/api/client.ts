@@ -554,7 +554,7 @@ export function listReservations(
 export const getReservation = (reservationId: string) =>
   get<import('../types').ReservationDetail>(
     `/v1/reservations/${reservationId}`,
-    { include: 'metadata,committed_metadata' },
+    { include: 'metadata,committed_metadata,evidence' },
   )
 
 // Force-release a reservation. Optional `reason` is passed through to

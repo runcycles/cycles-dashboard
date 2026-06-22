@@ -80,7 +80,7 @@ describe('Area A/C client wrappers — reservation projections, filters, evidenc
     await api.getReservation('r1')
     const url = lastUrl()
     expect(url.pathname).toBe('/v1/reservations/r1')
-    expect(url.searchParams.get('include')).toBe('metadata,committed_metadata')
+    expect(url.searchParams.get('include')).toBe('metadata,committed_metadata,evidence')
   })
 
   it('getEvidence → GET /v1/evidence/{id}', async () => {

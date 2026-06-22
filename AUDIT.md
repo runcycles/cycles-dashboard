@@ -1,12 +1,12 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.62 (2026-06-22)
+**Current release:** v0.1.25.63 (2026-06-22)
 
 ## Baseline requirements
 
 | Component | Minimum | Shipped (compose) | Notes |
 |---|---|---|---|
-| cycles-server (runtime plane) | v0.1.25.8+ | v0.1.25.36 | `.13` bounds `listReservationsSorted` at `SORTED_HYDRATE_CAP=2000`. `.14` adds W3C Trace Context on the runtime plane (`X-Cycles-Trace-Id` response header, `trace_id` on runtime events + audit entries, MDC `traceId`). `.15` adds audit-log retention TTL (default 400 days, matches admin). `.16`–`.17` are additive runtime-plane patches with no dashboard-visible wire change (reservations contract unchanged; the dashboard required no client changes and e2e passes against the pinned `.17` image). All additive — no wire breakage. Pre-`.14` runtime rows carry no trace chip; dashboard tolerates the absence. The `.62` Evidence viewer + reservation `committed_metadata`/window filters are additive runtime-plane reads — servers that don't publish `/v1/evidence` or the projections degrade gracefully (404 / omitted fields). Compose shipped pin moved `.17 → .36`: `.36` surfaces reservation `committed`/`finalized_at_ms`/metadata + the `include=` projection on `listReservations`, so the new Reservations columns/filters are exercisable against the shipped stack. Minimum stays `.8+` (graceful degradation below `.36`). |
+| cycles-server (runtime plane) | v0.1.25.8+ | v0.1.25.36 | `.13` bounds `listReservationsSorted` at `SORTED_HYDRATE_CAP=2000`. `.14` adds W3C Trace Context on the runtime plane (`X-Cycles-Trace-Id` response header, `trace_id` on runtime events + audit entries, MDC `traceId`). `.15` adds audit-log retention TTL (default 400 days, matches admin). `.16`–`.17` are additive runtime-plane patches with no dashboard-visible wire change (reservations contract unchanged; the dashboard required no client changes and e2e passes against the pinned `.17` image). All additive — no wire breakage. Pre-`.14` runtime rows carry no trace chip; dashboard tolerates the absence. The `.62` Evidence viewer + reservation `committed_metadata`/window filters are additive runtime-plane reads — servers that don't publish `/v1/evidence` or the projections degrade gracefully (404 / omitted fields). Compose shipped pin moved `.17 → .36`: `.36` surfaces reservation `committed`/`finalized_at_ms`/metadata + the `include=` projection on `listReservations`, so the new Reservations columns/filters are exercisable against the shipped stack. Minimum stays `.8+` (graceful degradation below `.36`). `.63` reservation→evidence links need `.37+` (the `include=evidence` projection / persisted refs); below that the `evidence` field is omitted and no links render. |
 | cycles-admin (governance plane) | v0.1.25.17+ | v0.1.25.39 | (prior notes preserved through `.37` — see release history.) `.38` is a security/polish release with no dashboard-visible wire change. `.39` implements spec v0.1.25.33 webhook lifecycle events — emits `webhook.{created,updated,paused,resumed,disabled,deleted}` on the `webhook` category on create / update / delete / bulk-action flows; dashboard `.59` surfaces these in EventsView filters. |
 | cycles-events (dispatch worker) | v0.1.25.6+ | v0.1.25.11 | `.8` captured trace context on `WebhookDelivery` (protocol v0.1.25.28). `.11` emits `webhook.disabled` on the dispatcher auto-disable path (spec v0.1.25.33) so the Events view now shows when a webhook gets auto-paused by consecutive-failure thresholds, not just when an operator pauses it. |
 | Spec alignment | — | v0.1.25.34 | Pin moves on end-to-end support. `.32` formalized per-row event emission for `bulkActionBudgets` / `bulkActionTenants` (docs-only, no wire change). `.33` added six `webhook.*` EventType values + `EventDataWebhookLifecycle` payload schema. `.34` expanded `EventCategory` enum to include `webhook` so the `.33` events pass server-side validation. All additive — pre-`.31` servers tolerate unknown enum values per the spec's forward-compat rule, so the dashboard is backwards-compatible with every deployed admin version. |
@@ -16,6 +16,23 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-06-22 — v0.1.25.63: link reservations to their evidence (no copy-paste)
+
+Consumes the `evidence` projection added in cycles-protocol v0.1.25.9 (#117) and
+implemented in cycles-server v0.1.25.37 (#205). Previously a reservation fetched
+later had no path to its signed envelope — the `cycles_evidence` ref rode only on
+the live reserve/commit/release response (the dashboard captured it only on its
+own force-release). Now `getReservation` requests `include=metadata,committed_metadata,evidence`
+and the reservation **detail dialog** renders one-click **View reserve / commit /
+release evidence** links straight to the Evidence viewer; the list `include`
+toggle also requests `evidence`. Types gain `ReservationEvidence` + the optional
+`evidence` field on `ReservationSummary`.
+
+Requires cycles-server **v0.1.25.37+** for the new field (PR #205) — older runtime
+servers omit `evidence` and no links render (graceful). Tests: client include
+assertion updated; `ReservationsView-advanced` +1 (detail dialog renders the
+per-artifact evidence links via the row kebab → View details flow).
 
 ### 2026-06-22 — v0.1.25.62: API-gap closure (reservations / policy+webhook config / evidence)
 

@@ -170,7 +170,7 @@ The dashboard uses `AdminKeyAuth` exclusively (`X-Admin-API-Key` header). No ten
 | `POST /v1/admin/webhooks/{subscription_id}/replay` | Webhook Detail | Replay historical events |
 | `POST /v1/admin/budgets/fund` | Budget Detail | Adjust allocation (RESET operation) |
 | `GET /v1/reservations` | Reservations | Tenant-scoped list; supports `include=`, created/expires/finalized ranges, Subject filters |
-| `GET /v1/reservations/{id}` | Reservations | Detail incl. `committed_metadata` / reserve metadata projections |
+| `GET /v1/reservations/{id}` | Reservations | Detail incl. `committed_metadata` / reserve metadata + `evidence` projections (one-click "View evidence" links; needs cycles-server v0.1.25.37+) |
 | `POST /v1/reservations/{id}/release` | Reservations | Force-release; response `cycles_evidence` surfaces a "View evidence" link |
 | `GET /v1/evidence/{evidence_id}` | Evidence | Public signed-envelope retrieval (runtime plane) |
 | `GET /v1/.well-known/cycles-jwks.json` | Evidence | Signer JWK Set for signer-key resolution (runtime plane) |
@@ -363,7 +363,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.62
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.63
     restart: unless-stopped
     # No exposed ports — only accessible through Caddy. nginx proxies
     # /v1/* to both planes; override the upstreams only for split hosts.

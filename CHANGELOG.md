@@ -15,6 +15,18 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.63] — 2026-06-22
+
+### Added
+
+- **Link reservations to their evidence (no copy-paste).** The reservation
+  detail dialog now shows one-click **View reserve / commit / release
+  evidence** links straight to the Evidence viewer, and the list `include`
+  toggle requests the new `evidence` projection. Consumes the runtime
+  `evidence` field added in cycles-protocol v0.1.25.9 — requires
+  **cycles-server v0.1.25.37+** (older servers simply omit the field and no
+  links render).
+
 ## [0.1.25.62] — 2026-06-22
 
 Gap-closure release — surfaces runtime/admin API capability that shipped in the

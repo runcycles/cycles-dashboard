@@ -175,7 +175,7 @@ function isoOrUndef(s: string): string | undefined {
 function buildFilterParams(): Omit<ListReservationsParams, 'limit' | 'cursor' | 'sort_by' | 'sort_dir'> {
   const p: Omit<ListReservationsParams, 'limit' | 'cursor' | 'sort_by' | 'sort_dir'> = {}
   if (statusFilter.value) p.status = statusFilter.value
-  if (includeMetadata.value) p.include = 'metadata,committed_metadata'
+  if (includeMetadata.value) p.include = 'metadata,committed_metadata,evidence'
   p.from = isoOrUndef(createdFrom.value)
   p.to = isoOrUndef(createdTo.value)
   p.expires_from = isoOrUndef(expiresFrom.value)
@@ -431,6 +431,18 @@ const detailError = ref('')
 const detailJson = computed(() =>
   detailReservation.value ? safeJsonStringify(detailReservation.value) : '',
 )
+// One-click evidence links for the detail dialog: the artifacts (reserve /
+// commit / release) the server recorded evidence for, in lifecycle order.
+const detailEvidenceLinks = computed(() => {
+  const ev = detailReservation.value?.evidence
+  if (!ev) return [] as { artifact: string; id: string }[]
+  const out: { artifact: string; id: string }[] = []
+  for (const artifact of ['reserve', 'commit', 'release'] as const) {
+    const id = ev[artifact]?.evidence_id
+    if (id) out.push({ artifact, id })
+  }
+  return out
+})
 
 async function openDetail(r: ReservationSummary) {
   detailReservation.value = r
@@ -889,6 +901,20 @@ const gridTemplate = computed(() =>
         </template>
         · scope <code class="font-mono text-xs">{{ detailReservation.scope_path }}</code>
       </p>
+      <!-- One-click evidence links (protocol v0.1.25.9, include=evidence) —
+           jump straight to the signed envelope without copy-pasting an id.
+           Present only when the server recorded evidence for the op. -->
+      <div v-if="detailEvidenceLinks.length">
+        <label class="form-label">Evidence</label>
+        <div class="flex flex-wrap gap-2">
+          <RouterLink
+            v-for="l in detailEvidenceLinks"
+            :key="l.artifact"
+            :to="{ name: 'evidence', query: { id: l.id } }"
+            class="text-xs px-2 py-1 rounded border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950 text-blue-800 dark:text-blue-200 hover:underline"
+          >View {{ l.artifact }} evidence →</RouterLink>
+        </div>
+      </div>
       <div>
         <label class="form-label">Full record (incl. metadata)</label>
         <pre class="text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded p-3 overflow-auto max-h-96">{{ detailJson }}</pre>

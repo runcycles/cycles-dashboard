@@ -94,7 +94,7 @@ describe('ReservationsView — advanced filters', () => {
     await flushPromises()
 
     const withInclude = listReservationsMock.mock.calls.find(
-      (args) => (args[1] as { include?: string })?.include === 'metadata,committed_metadata',
+      (args) => (args[1] as { include?: string })?.include === 'metadata,committed_metadata,evidence',
     )
     expect(withInclude).toBeDefined()
   })
@@ -118,6 +118,39 @@ describe('ReservationsView — advanced filters', () => {
     await new Promise((r) => setTimeout(r, 350))
     await flushPromises()
     expect(hasWorkspaceCall()).toBe(true)
+  })
+
+  it('detail dialog renders one-click evidence links from the reservation', async () => {
+    const row = {
+      reservation_id: 'res-ev', status: 'COMMITTED', scope_path: 'tenant:acme',
+      reserved: { unit: 'TOKENS', amount: 1000 }, created_at_ms: 1, expires_at_ms: 2,
+    }
+    listReservationsMock.mockResolvedValue({ reservations: [row], has_more: false })
+    getReservationMock.mockResolvedValue({
+      ...row,
+      evidence: {
+        reserve: { evidence_id: 'a'.repeat(64), cycles_evidence_url: 'http://h/v1/evidence/' + 'a'.repeat(64) },
+        commit: { evidence_id: 'b'.repeat(64), cycles_evidence_url: 'http://h/v1/evidence/' + 'b'.repeat(64) },
+      },
+    })
+    const { default: ReservationsView } = await import('../views/ReservationsView.vue')
+    const w = mount(ReservationsView, stdMount())
+    await flushPromises()
+
+    // Open the row's kebab menu, then click "View details".
+    const kebab = w.findAll('button').find(b => (b.attributes('aria-label') || '').startsWith('Actions for reservation'))
+    expect(kebab).toBeTruthy()
+    await kebab!.trigger('click')
+    const viewDetails = w.findAll('button, a').find(el => el.text() === 'View details')
+    expect(viewDetails).toBeTruthy()
+    await viewDetails!.trigger('click')
+    await flushPromises()
+
+    expect(getReservationMock).toHaveBeenCalledWith('res-ev')
+    const links = w.findAll('a').filter(a => a.text().includes('evidence'))
+    expect(links.map(l => l.text())).toEqual(
+      expect.arrayContaining(['View reserve evidence →', 'View commit evidence →']),
+    )
   })
 
   it('Clear resets advanced filters and the affordance appears only when active', async () => {

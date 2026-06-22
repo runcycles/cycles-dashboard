@@ -675,9 +675,23 @@ export interface ReservationSummary {
   // metadata.
   metadata?: Record<string, unknown>
   committed_metadata?: Record<string, unknown>
+  // protocol v0.1.25.9 (include=evidence): CyclesEvidence refs for this
+  // reservation's reserve/commit/release operations, keyed by artifact type —
+  // lets the UI link straight to the signed envelope without copy-pasting an
+  // evidence_id. Opt-in on list rows; always present on the detail fetch when
+  // recorded; absent when evidence emission is disabled server-side.
+  evidence?: ReservationEvidence
   // Kept opaque — see header comment.
   subject?: Record<string, unknown>
   action?: Record<string, unknown>
+}
+
+// protocol v0.1.25.9 — map of artifact type to the evidence ref emitted for
+// that operation on a reservation. CyclesEvidenceRef defined below.
+export interface ReservationEvidence {
+  reserve?: CyclesEvidenceRef
+  commit?: CyclesEvidenceRef
+  release?: CyclesEvidenceRef
 }
 
 // Detail is a structural superset of summary (same wire schema, fuller
