@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   emptyWebhookAdvancedForm,
   webhookAdvancedToRequest,
+  webhookAdvancedError,
   webhookToAdvancedForm,
 } from '../utils/webhookAdvanced'
 import type { WebhookSubscription } from '../types'
@@ -61,5 +62,26 @@ describe('webhookAdvanced converters', () => {
     const f = emptyWebhookAdvancedForm()
     f.budget_utilization = '   '
     expect(webhookAdvancedToRequest(f).thresholds).toBeUndefined()
+  })
+
+  describe('webhookAdvancedError', () => {
+    it('passes a valid (or empty) utilization list', () => {
+      expect(webhookAdvancedError(emptyWebhookAdvancedForm())).toBeNull()
+      const f = emptyWebhookAdvancedForm()
+      f.budget_utilization = '0.8, 0.95, 1.0'
+      expect(webhookAdvancedError(f)).toBeNull()
+    })
+
+    it('rejects a non-numeric utilization token', () => {
+      const f = emptyWebhookAdvancedForm()
+      f.budget_utilization = '0.8, nope'
+      expect(webhookAdvancedError(f)).toMatch(/not a number/)
+    })
+
+    it('rejects an out-of-range utilization value', () => {
+      const f = emptyWebhookAdvancedForm()
+      f.budget_utilization = '1.5'
+      expect(webhookAdvancedError(f)).toMatch(/between 0 and 1/)
+    })
   })
 })

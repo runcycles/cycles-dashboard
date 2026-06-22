@@ -32,6 +32,7 @@ import WebhookAdvancedFields from '../components/WebhookAdvancedFields.vue'
 import {
   emptyWebhookAdvancedForm,
   webhookAdvancedToRequest,
+  webhookAdvancedError,
   webhookToAdvancedForm,
 } from '../utils/webhookAdvanced'
 import SecretReveal from '../components/SecretReveal.vue'
@@ -459,6 +460,8 @@ async function submitEdit() {
   // previously-set field omits it (server keeps the old value); the form
   // supports setting/adjusting, not clearing (documented in AUDIT.md).
   if (JSON.stringify(editAdvanced.value) !== editAdvancedInitial.value) {
+    const advError = webhookAdvancedError(editAdvanced.value)
+    if (advError) { editError.value = advError; return }
     Object.assign(body, webhookAdvancedToRequest(editAdvanced.value))
   }
   if (Object.keys(body).length === 0) { editError.value = 'No changes to save'; return }

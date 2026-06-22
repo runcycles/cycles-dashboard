@@ -91,7 +91,7 @@ describe('EvidenceView', () => {
     expect(w.text()).toContain('Retry')
   })
 
-  it('resolves a signer key within its validity window', async () => {
+  it('resolves a signer key valid at the envelope issuance time', async () => {
     routeRef.query = { id: HEX64 }
     getEvidenceMock.mockResolvedValue(ENVELOPE)
     getEvidenceJwksMock.mockResolvedValue({
@@ -103,7 +103,28 @@ describe('EvidenceView', () => {
     await resolveBtn!.trigger('click')
     await flushPromises()
     expect(getEvidenceJwksMock).toHaveBeenCalled()
-    expect(w.text()).toContain('within its validity window')
+    expect(w.text()).toContain("valid at the envelope's issuance time")
+  })
+
+  it('validates against issuance time, not now — a since-retired key still resolves', async () => {
+    // Envelope issued at t=1700000000000. The key window [nbf, exp) covers
+    // issuance but exp is in the past relative to Date.now(), so a
+    // now-based check would wrongly flag it. Locks the audit-semantics fix.
+    routeRef.query = { id: HEX64 }
+    getEvidenceMock.mockResolvedValue(ENVELOPE)
+    getEvidenceJwksMock.mockResolvedValue({
+      keys: [{
+        kty: 'OKP', crv: 'Ed25519', x: 'xx', kid: 'key-1',
+        cycles_nbf_ms: 1_699_000_000_000,
+        cycles_exp_ms: 1_700_000_000_001, // expired ~2023, but > issued_at_ms
+      }],
+    })
+    const w = await mountView()
+    const resolveBtn = w.findAll('button').find(b => b.text().includes('Resolve signer key'))
+    await resolveBtn!.trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain("valid at the envelope's issuance time")
+    expect(w.text()).not.toContain('NOT valid')
   })
 
   it('reports when no signer key matches', async () => {

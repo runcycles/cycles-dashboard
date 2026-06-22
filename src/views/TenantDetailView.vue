@@ -323,7 +323,18 @@ async function submitCreateKey() {
 const editingKey = ref<ApiKey | null>(null)
 const editKeyLoading = ref(false)
 const editKeyError = ref('')
-const editKeyForm = ref({ name: '', permissions: [] as string[], scope_filter: '' })
+const editKeyForm = ref({ name: '', permissions: [] as string[], scope_filter: '', expires_at: '' })
+
+// ISO 8601 → datetime-local input value (local time, minute precision).
+// Mirrors ApiKeysView so the tenant-detail key editor can pre-fill the
+// expiry picker from a stored key.
+function keyIsoToLocalInput(iso: string | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
 
 function openEditKey(k: ApiKey) {
   // Drop any stored permission that isn't in the canonical set — same
@@ -336,6 +347,7 @@ function openEditKey(k: ApiKey) {
     name: k.name || '',
     permissions: kept,
     scope_filter: k.scope_filter?.join(', ') || '',
+    expires_at: keyIsoToLocalInput(k.expires_at),
   }
   editKeyError.value = ''
   editingKey.value = k
@@ -382,6 +394,12 @@ async function submitEditKey() {
       : []
     if (!sameKeyStringSet(scopes, original.scope_filter)) {
       body.scope_filter = scopes
+    }
+    // expires_at: send only when changed (normalized to ISO). Blank leaves
+    // the existing expiry unchanged — same semantics as ApiKeysView.
+    const newExpiry = editKeyForm.value.expires_at ? new Date(editKeyForm.value.expires_at).toISOString() : ''
+    if (newExpiry && newExpiry !== (original.expires_at ?? '')) {
+      body.expires_at = newExpiry
     }
     if (Object.keys(body).length === 0) {
       editingKey.value = null
@@ -1262,6 +1280,11 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
       <div>
         <label for="ek2-scope" class="form-label">Scope filter (comma-separated)</label>
         <input id="ek2-scope" v-model="editKeyForm.scope_filter" class="form-input-mono" />
+      </div>
+      <div>
+        <label for="ek2-expires" class="form-label">Expires at</label>
+        <input id="ek2-expires" v-model="editKeyForm.expires_at" type="datetime-local" class="form-input" />
+        <p class="muted-sm mt-0.5">Leave unchanged to keep the current expiry. Clearing the field does not remove an existing expiry.</p>
       </div>
     </FormDialog>
 

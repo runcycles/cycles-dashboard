@@ -102,7 +102,12 @@ async function resolveSigner() {
   try {
     const jwks = await getEvidenceJwks()
     const kid = signerKid(envelope.value.signer_did)
-    const now = Date.now()
+    // Audit semantics: validate the key against the envelope's ISSUANCE
+    // time, not "now". A key that was valid when it signed this envelope
+    // but has since been retired must still resolve as valid for the
+    // historical artifact — judging against Date.now() would wrongly flag
+    // legitimate old evidence as out-of-window.
+    const at = envelope.value.issued_at_ms
     const match = kid ? jwks.keys.find(k => k.kid === kid) : undefined
     if (!match) {
       signerResult.value = {
@@ -113,12 +118,12 @@ async function resolveSigner() {
       }
       return
     }
-    const ok = withinValidity(match, now)
+    const ok = withinValidity(match, at)
     signerResult.value = {
       found: true, withinWindow: ok, kid,
       message: ok
-        ? `Signer key "${kid}" is published and within its validity window.`
-        : `Signer key "${kid}" is published but OUTSIDE its validity window.`,
+        ? `Signer key "${kid}" was published and valid at the envelope's issuance time.`
+        : `Signer key "${kid}" is published but was NOT valid at the envelope's issuance time.`,
     }
   } catch (e) {
     signerResult.value = { found: false, withinWindow: false, message: toMessage(e) }
@@ -210,8 +215,9 @@ onMounted(() => { if (evidenceId.value) fetchEvidence() })
             : 'bg-amber-50 text-amber-800 border border-amber-200'"
         >{{ signerResult.message }}</p>
         <p class="muted-sm mt-1">
-          Confirms the signer key is published and currently valid. Full
-          Ed25519 signature verification is not yet performed in-browser.
+          Confirms the signer key is published and was valid at the envelope's
+          issuance time. Full Ed25519 signature verification is not yet
+          performed in-browser.
         </p>
       </div>
 

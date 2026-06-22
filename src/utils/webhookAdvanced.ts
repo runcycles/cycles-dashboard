@@ -56,6 +56,22 @@ function compact<T extends object>(o: T): T | undefined {
   return entries.length ? (Object.fromEntries(entries) as T) : undefined
 }
 
+// Validate the free-text fields before submit. Returns an error string,
+// or null when the form is acceptable. Only budget_utilization needs
+// this — it's a comma-separated text field, so a typo (e.g. "0.8, nope")
+// would otherwise be silently dropped by numListOrUndef and the webhook
+// saved without the intended threshold. The other numeric fields are
+// type=number inputs the browser constrains, so they don't need it.
+export function webhookAdvancedError(f: WebhookAdvancedForm): string | null {
+  const tokens = f.budget_utilization.split(/[\n,]/).map(x => x.trim()).filter(Boolean)
+  for (const t of tokens) {
+    const n = Number(t)
+    if (!Number.isFinite(n)) return `Budget utilization "${t}" is not a number.`
+    if (n < 0 || n > 1) return `Budget utilization "${t}" must be between 0 and 1.`
+  }
+  return null
+}
+
 export function webhookAdvancedToRequest(f: WebhookAdvancedForm): WebhookAdvancedRequest {
   const out: WebhookAdvancedRequest = {}
   const thresholds = compact<WebhookThresholdConfig>({

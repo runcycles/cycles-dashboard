@@ -35,7 +35,7 @@ import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
 import WebhookAdvancedFields from '../components/WebhookAdvancedFields.vue'
-import { emptyWebhookAdvancedForm, webhookAdvancedToRequest } from '../utils/webhookAdvanced'
+import { emptyWebhookAdvancedForm, webhookAdvancedToRequest, webhookAdvancedError } from '../utils/webhookAdvanced'
 import { writeClipboardJson } from '../utils/clipboard'
 import { useToast } from '../composables/useToast'
 import { useBulkActionPreview } from '../composables/useBulkActionPreview'
@@ -487,6 +487,8 @@ async function onSecretClose() {
 async function submitCreate() {
   createError.value = ''
   if (!createForm.value.event_types.length) { createError.value = 'Select at least one event type'; return }
+  const advError = webhookAdvancedError(createAdvanced.value)
+  if (advError) { createError.value = advError; return }
   createLoading.value = true
   try {
     const body: Record<string, unknown> = { url: createForm.value.url, event_types: createForm.value.event_types }
