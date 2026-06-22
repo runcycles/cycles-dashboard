@@ -14,9 +14,10 @@ services:
   cycles-server:
     # Runtime-plane server. Independent release cadence from dashboard +
     # cycles-server-admin — keep in sync with docker-compose.prod.yml.
-    # .36 surfaces reservation committed/finalized/metadata + include= on
-    # listReservations and serves /v1/evidence + JWKS (dashboard .62).
-    image: ghcr.io/runcycles/cycles-server:0.1.25.36
+    # .37 surfaces reservation committed/finalized/metadata, the include=
+    # projection (incl. include=evidence — the reservation->evidence link,
+    # dashboard .63) and serves /v1/evidence + JWKS.
+    image: ghcr.io/runcycles/cycles-server:0.1.25.37
     restart: unless-stopped
     ports:
       - "7878:7878"

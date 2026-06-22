@@ -33,13 +33,14 @@ services:
 
   cycles-server:
     # Runtime-plane server. Release cadence is independent of dashboard +
-    # cycles-server-admin. Bumped to .36 for dashboard 0.1.25.62: that is
-    # the version that surfaces reservation committed/finalized/metadata +
-    # the include= projection on listReservations, and serves /v1/evidence
-    # + the signer JWKS the Evidence view consumes. Older runtime servers
-    # still work — the dashboard degrades gracefully (fields omitted, 404
-    # on evidence) — but the new Reservations/Evidence surface needs .36+.
-    image: ghcr.io/runcycles/cycles-server:0.1.25.36
+    # cycles-server-admin. Pinned to .37 for dashboard 0.1.25.63: it
+    # surfaces reservation committed/finalized/metadata, the include=
+    # projection on listReservations — including include=evidence, the
+    # reservation->evidence link — and serves /v1/evidence + the signer
+    # JWKS the Evidence view consumes. Older runtime servers still work —
+    # the dashboard degrades gracefully (fields omitted, 404 on evidence) —
+    # but the full Reservations/Evidence surface needs .37+.
+    image: ghcr.io/runcycles/cycles-server:0.1.25.37
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
