@@ -1,12 +1,12 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.61 (2026-05-31)
+**Current release:** v0.1.25.62 (2026-06-22)
 
 ## Baseline requirements
 
 | Component | Minimum | Shipped (compose) | Notes |
 |---|---|---|---|
-| cycles-server (runtime plane) | v0.1.25.8+ | v0.1.25.17 | `.13` bounds `listReservationsSorted` at `SORTED_HYDRATE_CAP=2000`. `.14` adds W3C Trace Context on the runtime plane (`X-Cycles-Trace-Id` response header, `trace_id` on runtime events + audit entries, MDC `traceId`). `.15` adds audit-log retention TTL (default 400 days, matches admin). `.16`–`.17` are additive runtime-plane patches with no dashboard-visible wire change (reservations contract unchanged; the dashboard required no client changes and e2e passes against the pinned `.17` image). All additive — no wire breakage. Pre-`.14` runtime rows carry no trace chip; dashboard tolerates the absence. |
+| cycles-server (runtime plane) | v0.1.25.8+ | v0.1.25.17 | `.13` bounds `listReservationsSorted` at `SORTED_HYDRATE_CAP=2000`. `.14` adds W3C Trace Context on the runtime plane (`X-Cycles-Trace-Id` response header, `trace_id` on runtime events + audit entries, MDC `traceId`). `.15` adds audit-log retention TTL (default 400 days, matches admin). `.16`–`.17` are additive runtime-plane patches with no dashboard-visible wire change (reservations contract unchanged; the dashboard required no client changes and e2e passes against the pinned `.17` image). All additive — no wire breakage. Pre-`.14` runtime rows carry no trace chip; dashboard tolerates the absence. The `.62` Evidence viewer + reservation `committed_metadata`/window filters are additive runtime-plane reads — servers that don't publish `/v1/evidence` or the projections degrade gracefully (404 / omitted fields). |
 | cycles-admin (governance plane) | v0.1.25.17+ | v0.1.25.39 | (prior notes preserved through `.37` — see release history.) `.38` is a security/polish release with no dashboard-visible wire change. `.39` implements spec v0.1.25.33 webhook lifecycle events — emits `webhook.{created,updated,paused,resumed,disabled,deleted}` on the `webhook` category on create / update / delete / bulk-action flows; dashboard `.59` surfaces these in EventsView filters. |
 | cycles-events (dispatch worker) | v0.1.25.6+ | v0.1.25.11 | `.8` captured trace context on `WebhookDelivery` (protocol v0.1.25.28). `.11` emits `webhook.disabled` on the dispatcher auto-disable path (spec v0.1.25.33) so the Events view now shows when a webhook gets auto-paused by consecutive-failure thresholds, not just when an operator pauses it. |
 | Spec alignment | — | v0.1.25.34 | Pin moves on end-to-end support. `.32` formalized per-row event emission for `bulkActionBudgets` / `bulkActionTenants` (docs-only, no wire change). `.33` added six `webhook.*` EventType values + `EventDataWebhookLifecycle` payload schema. `.34` expanded `EventCategory` enum to include `webhook` so the `.33` events pass server-side validation. All additive — pre-`.31` servers tolerate unknown enum values per the spec's forward-compat rule, so the dashboard is backwards-compatible with every deployed admin version. |
@@ -16,6 +16,28 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-06-22 — v0.1.25.62: API-gap closure (reservations / policy+webhook config / evidence)
+
+Closes dashboard gaps against capability that already shipped in the servers. No governance-admin spec-badge move — the reservation/evidence surface is runtime-plane (`cycles-protocol-v0.yaml`); policy/webhook config was already in the admin spec.
+
+**Why.** A three-way diff (admin spec + runtime spec vs. the dashboard's client/types/views) found the dashboard behind on three fronts the servers expose.
+
+| Area | Gap closed | Surface |
+|---|---|---|
+| Reservations | `committed`, `finalized_at_ms`, reserve/commit metadata; `include=` projection; created/expires/finalized window + Subject filters | `client.listReservations` (new params), `getReservation` (include), `ReservationsView` (columns, detail dialog, Advanced filters) |
+| Policy | `caps` / `rate_limits` / `reservation_ttl_override` / effective window editing | `PolicyAdvancedFields.vue` + `utils/policyAdvanced.ts`, wired into create+edit in `TenantDetailView` |
+| Webhook | `thresholds` + `retry_policy` editing (were read-only opaque) | `WebhookAdvancedFields.vue` + `utils/webhookAdvanced.ts`, wired into `WebhooksView` create + `WebhookDetailView` edit |
+| Keys / tenants | apikey `expires_at`; tenant `max_reservation_extensions` + `reservation_expiry_policy` | `ApiKeysView`, `TenantsView`, `TenantDetailView` |
+| Evidence | envelope retrieval + signer-key resolution; force-release evidence link | `EvidenceView.vue` + route + sidebar; `getEvidence`/`getEvidenceJwks`; `/v1/evidence` + `/v1/.well-known/cycles-jwks.json` proxy route (runtime upstream) |
+
+**Verified non-issue.** Budget freeze/unfreeze/fund/update use `scope`+`unit` query params, matching the YAML (`updateBudget` at `cycles-governance-admin-v0.1.25.yaml:4314`) — not `ledger_id`. No change needed.
+
+**Reversed prior decision.** Webhook `thresholds`/`retry_policy` were deliberately kept opaque (read-only JSON) in earlier releases — now strongly typed and editable via a shared sub-form.
+
+**Limitations (documented, not bugs).** Advanced editors set/adjust but don't clear previously-set fields (PATCH replacement omits absent fields). Evidence viewer resolves the signer key + validity window but does not yet do full in-browser Ed25519 verification (needs JCS canonicalization — deferred).
+
+**Deferred.** v0.1.26 governance extensions (`observe_mode`, action quotas, allow/deny action kinds, `quota_health`/`deny_detail`) — would require moving the spec target to v0.1.26.
 
 ### 2026-05-31 — v0.1.25.61: configurable nginx upstreams (env-driven)
 

@@ -17,6 +17,7 @@ const routes = [
   { path: '/tenants', name: 'tenants', component: () => import('./views/TenantsView.vue'), meta: { title: 'Tenants' } },
   { path: '/tenants/:id', name: 'tenant-detail', component: () => import('./views/TenantDetailView.vue'), meta: { title: 'Tenant' } },
   { path: '/reservations', name: 'reservations', component: () => import('./views/ReservationsView.vue'), meta: { title: 'Reservations' } },
+  { path: '/evidence', name: 'evidence', component: () => import('./views/EvidenceView.vue'), meta: { title: 'Evidence' } },
   // Catch-all 404. Public so unauthenticated users aren't redirected to
   // /login for a mistyped URL — matches the GitHub/Linear/Gmail pattern
   // where a bad link shows "not found" regardless of session state.

@@ -113,6 +113,17 @@ probe "runtime plane /v1/reservations via proxy" GET \
 probe "Stage 3 admin-on-behalf-of webhooks" GET \
     "/v1/webhooks?tenant=example-tenant" subscriptions
 
+# 5b. Evidence route reachability (v0.1.25.62). A bogus 64-hex id routes
+#     through nginx's /v1/evidence location to the runtime plane and comes
+#     back as a structured error (400/404), not nginx's default HTML or
+#     the SPA index. Confirms the location block is wired and forwards to
+#     a backend. (It does not assert the upstream split byte-for-byte —
+#     both planes 4xx a bad id — that contract lives in the nginx config
+#     + the vite proxy unit expectations.)
+EXPECT_STATUS=4xx-or-5xx probe "evidence route via proxy" GET \
+    "/v1/evidence/$(printf 'a%.0s' {1..64})" "" -H "Accept: application/json"
+unset EXPECT_STATUS
+
 # 6. Unknown path returns a structured ErrorResponse, not Spring's bare
 #    "No static resource" text or nginx's default HTML error page. The
 #    exact status (404 vs 500) is server-implementation-dependent —

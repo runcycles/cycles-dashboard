@@ -29,8 +29,9 @@ Operations-first dashboard for monitoring and managing the Cycles budget enforce
 | **Events** | Correlation-first investigation tool with expandable detail rows |
 | **API Keys** | Cross-tenant key list with masked IDs, permissions, status filters |
 | **Webhooks** | Subscription health (green/yellow/red) + delivery history |
-| **Reservations** | Hung-reservation force-release during incident response (runtime-plane admin-on-behalf-of) |
+| **Reservations** | Hung-reservation force-release during incident response (runtime-plane admin-on-behalf-of); committed/finalized columns, metadata detail, time-range + Subject filters |
 | **Audit** | Compliance query tool with CSV/JSON export (manual-only, no auto-refresh) |
+| **Evidence** | Retrieve + inspect a signed evidence envelope by id; signer-key resolution against the published JWK Set (runtime-plane, public) |
 
 ### Operational Actions
 
@@ -63,7 +64,7 @@ Tier 1 incident-response actions available directly from the dashboard (capabili
 | **Delete webhook** | Webhook detail | Permanent deletion with confirmation |
 | **Test webhook** | Webhook detail | Sends synthetic test event, shows result inline |
 | **Replay events** | Webhook detail | Re-deliver events for a time range |
-| **Force release reservation** | Reservations | Runtime-plane admin-on-behalf-of — pre-filled `[INCIDENT_FORCE_RELEASE]` reason for audit grep-ability |
+| **Force release reservation** | Reservations | Runtime-plane admin-on-behalf-of — pre-filled `[INCIDENT_FORCE_RELEASE]` reason for audit grep-ability; surfaces a "View evidence" link when the server emits a `cycles_evidence` reference |
 
 ## Architecture
 
@@ -73,7 +74,7 @@ src/
 ├── components/    # Reusable UI: Sidebar, PageHeader, StatusBadge, SortHeader, EmptyState, etc.
 ├── composables/   # usePolling, useSort, useDarkMode, useTerminalAwareList, useChartTheme
 ├── stores/        # Pinia: auth (introspect + capabilities)
-├── views/         # 10 route views (login, overview, budgets, events, api-keys, webhooks, audit, tenants + detail views)
+├── views/         # route views (login, overview, budgets, events, api-keys, webhooks, audit, tenants, reservations, evidence + detail views)
 └── types.ts       # TypeScript types matching governance spec schemas
 ```
 
@@ -168,6 +169,11 @@ The dashboard uses `AdminKeyAuth` exclusively (`X-Admin-API-Key` header). No ten
 | `POST /v1/admin/webhooks/{subscription_id}/test` | Webhook Detail | Send test event |
 | `POST /v1/admin/webhooks/{subscription_id}/replay` | Webhook Detail | Replay historical events |
 | `POST /v1/admin/budgets/fund` | Budget Detail | Adjust allocation (RESET operation) |
+| `GET /v1/reservations` | Reservations | Tenant-scoped list; supports `include=`, created/expires/finalized ranges, Subject filters |
+| `GET /v1/reservations/{id}` | Reservations | Detail incl. `committed_metadata` / reserve metadata projections |
+| `POST /v1/reservations/{id}/release` | Reservations | Force-release; response `cycles_evidence` surfaces a "View evidence" link |
+| `GET /v1/evidence/{evidence_id}` | Evidence | Public signed-envelope retrieval (runtime plane) |
+| `GET /v1/.well-known/cycles-jwks.json` | Evidence | Signer JWK Set for signer-key resolution (runtime plane) |
 
 ## List conventions
 
@@ -351,7 +357,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.53
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.62
     restart: unless-stopped
     # No exposed ports — only accessible through Caddy
     depends_on:

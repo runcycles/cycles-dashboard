@@ -34,6 +34,8 @@ import BulkActionResultDialog from '../components/BulkActionResultDialog.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
+import WebhookAdvancedFields from '../components/WebhookAdvancedFields.vue'
+import { emptyWebhookAdvancedForm, webhookAdvancedToRequest } from '../utils/webhookAdvanced'
 import { writeClipboardJson } from '../utils/clipboard'
 import { useToast } from '../composables/useToast'
 import { useBulkActionPreview } from '../composables/useBulkActionPreview'
@@ -465,10 +467,12 @@ const showCreate = ref(false)
 const createLoading = ref(false)
 const createError = ref('')
 const createForm = ref({ url: '', name: '', event_types: [] as string[], tenant_id: '', scope_filter: '' })
+const createAdvanced = ref(emptyWebhookAdvancedForm())
 const createdWebhook = ref<WebhookCreateResponse | null>(null)
 
 function openCreate() {
   createForm.value = { url: '', name: '', event_types: [], tenant_id: '', scope_filter: '' }
+  createAdvanced.value = emptyWebhookAdvancedForm()
   createError.value = ''
   showCreate.value = true
 }
@@ -488,6 +492,7 @@ async function submitCreate() {
     const body: Record<string, unknown> = { url: createForm.value.url, event_types: createForm.value.event_types }
     if (createForm.value.name) body.name = createForm.value.name
     if (createForm.value.scope_filter) body.scope_filter = createForm.value.scope_filter
+    Object.assign(body, webhookAdvancedToRequest(createAdvanced.value))
     const res = await createWebhook(body as any, createForm.value.tenant_id || undefined)
     createdWebhook.value = res
     showCreate.value = false
@@ -1014,6 +1019,7 @@ const gridTemplate = computed(() =>
         <label for="cw-scope" class="form-label">Scope filter (optional)</label>
         <input id="cw-scope" v-model="createForm.scope_filter" class="form-input-mono" placeholder="tenant:acme/*" />
       </div>
+      <WebhookAdvancedFields :form="createAdvanced" id-prefix="cw-adv" />
     </FormDialog>
 
     <SecretReveal

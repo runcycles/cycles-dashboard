@@ -62,6 +62,10 @@ proxy to deploy**. `default.conf.template` inside the image routes `/v1/*` to
 the two backend planes:
 
 - `/v1/reservations/*` → runtime plane (default `http://cycles-server:7878`)
+- `/v1/evidence/*` and `/v1/.well-known/cycles-jwks.json` → runtime plane
+  (added v0.1.25.62 — the Evidence viewer fetches signed envelopes + signer
+  keys from the runtime server, same origin so the CSP `connect-src 'self'`
+  allows it)
 - `/v1/*` (everything else) → governance plane (default `http://cycles-admin:7979`)
 
 The two upstreams are configurable at deploy time via environment variables —
@@ -70,7 +74,7 @@ The two upstreams are configurable at deploy time via environment variables —
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `ADMIN_UPSTREAM` | `http://cycles-admin:7979` | Governance-plane base (`/v1/*` except reservations) |
-| `RUNTIME_UPSTREAM` | `http://cycles-server:7878` | Runtime-plane base (`/v1/reservations/*`) |
+| `RUNTIME_UPSTREAM` | `http://cycles-server:7878` | Runtime-plane base (`/v1/reservations/*`, `/v1/evidence/*`, `/v1/.well-known/cycles-jwks.json`) |
 
 The stock nginx entrypoint renders `default.conf.template` through `envsubst`
 at container start, filling these two placeholders while leaving nginx's own

@@ -135,7 +135,17 @@ function openCreate() {
 const editingKey = ref<KeyWithTenant | null>(null)
 const editLoading = ref(false)
 const editError = ref('')
-const editForm = ref({ name: '', permissions: [] as string[], scope_filter: '' })
+const editForm = ref({ name: '', permissions: [] as string[], scope_filter: '', expires_at: '' })
+
+// ISO 8601 → datetime-local input value (local time, minute precision).
+// Used to pre-fill the edit form's expiry picker from a stored key.
+function isoToLocalInput(iso: string | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
 
 async function copyKeyId(id: string) {
   try {
@@ -168,6 +178,7 @@ function openEdit(k: KeyWithTenant) {
     name: k.name || '',
     permissions: kept,
     scope_filter: k.scope_filter?.join(', ') || '',
+    expires_at: isoToLocalInput(k.expires_at),
   }
   editError.value = ''
   editingKey.value = k
@@ -229,6 +240,14 @@ async function submitEdit() {
       : []
     if (!sameStringSet(scopes, original.scope_filter)) {
       body.scope_filter = scopes
+    }
+    // expires_at: compare normalized ISO against the original. Sending it
+    // only when changed avoids re-stamping an unchanged expiry. The form
+    // can extend/shorten the expiry but does not clear it (blank = no
+    // change) — matching the other edit dialogs.
+    const newExpiry = editForm.value.expires_at ? new Date(editForm.value.expires_at).toISOString() : ''
+    if (newExpiry && newExpiry !== (original.expires_at ?? '')) {
+      body.expires_at = newExpiry
     }
     if (Object.keys(body).length === 0) {
       // Nothing to submit — close the dialog quietly.
@@ -751,6 +770,11 @@ function closePermsViewer() { viewingPermsFor.value = null }
       <div>
         <label for="ek-scope" class="form-label">Scope filter (comma-separated)</label>
         <input id="ek-scope" v-model="editForm.scope_filter" class="form-input-mono" />
+      </div>
+      <div>
+        <label for="ek-expires" class="form-label">Expires at</label>
+        <input id="ek-expires" v-model="editForm.expires_at" type="datetime-local" class="form-input" />
+        <p class="muted-sm mt-0.5">Leave unchanged to keep the current expiry. Clearing the field does not remove an existing expiry.</p>
       </div>
     </FormDialog>
 

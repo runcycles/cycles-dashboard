@@ -164,6 +164,28 @@ export interface EventListResponse {
 //
 // `signing_secret` is `writeOnly` per spec and never echoed on GET.
 // `headers` values are masked to `"********"` on GET (keys are preserved).
+
+// §WebhookThresholdConfig — alerting thresholds for threshold/rate-spike
+// events. Only meaningful when subscribed to the relevant event types.
+// Server applies documented defaults for omitted fields.
+export interface WebhookThresholdConfig {
+  budget_utilization?: number[]
+  burn_rate_multiplier?: number
+  burn_rate_window_seconds?: number
+  denial_rate_threshold?: number
+  expiry_rate_threshold?: number
+  auth_failure_rate_threshold?: number
+  rate_window_seconds?: number
+}
+
+// §WebhookRetryPolicy — delivery retry/backoff config.
+export interface WebhookRetryPolicy {
+  max_retries?: number
+  initial_delay_ms?: number
+  backoff_multiplier?: number
+  max_delay_ms?: number
+}
+
 export interface WebhookSubscription {
   subscription_id: string
   tenant_id: string
@@ -173,12 +195,11 @@ export interface WebhookSubscription {
   event_types: string[]
   event_categories?: string[]
   scope_filter?: string
-  // Opaque server-managed blobs — surfaced on the detail view as JSON
-  // but not edited via the dashboard (edit flow would need a dedicated
-  // builder; both are rarely set). Kept as `unknown`-typed records to
-  // avoid stale shape drift.
-  thresholds?: Record<string, unknown>
-  retry_policy?: Record<string, unknown>
+  // Alerting thresholds + delivery retry policy. Strongly typed (was
+  // opaque `Record`) so the create/edit forms can round-trip them —
+  // mirrors §WebhookThresholdConfig / §WebhookRetryPolicy.
+  thresholds?: WebhookThresholdConfig
+  retry_policy?: WebhookRetryPolicy
   // Custom headers: server masks values on GET (keys preserved). Edit
   // flow writes new keys but can't round-trip masked values back — the
   // form treats existing headers as read-only keys + an "Add header"
@@ -243,12 +264,23 @@ export interface WebhookDeliveryListResponse {
 }
 
 // Tenant types
+export const RESERVATION_EXPIRY_POLICIES = ['AUTO_RELEASE', 'MANUAL_CLEANUP', 'GRACE_ONLY'] as const
+export type ReservationExpiryPolicy = typeof RESERVATION_EXPIRY_POLICIES[number]
+
 export interface Tenant {
   tenant_id: string
   name: string
   status: string
   parent_tenant_id?: string
+  default_commit_overage_policy?: string
+  // Reservation-TTL governance (spec §Tenant). All optional — older
+  // servers and tenants created before these fields existed omit them.
+  default_reservation_ttl_ms?: number
+  max_reservation_ttl_ms?: number
+  max_reservation_extensions?: number
+  reservation_expiry_policy?: string
   created_at: string
+  updated_at?: string
 }
 
 export interface TenantListResponse {
@@ -258,13 +290,45 @@ export interface TenantListResponse {
 }
 
 // Policy types
+//
+// Caps / RateLimits / ReservationTtlOverride mirror the governance-admin
+// spec schemas (§Caps, §Policy.rate_limits, §ReservationTtlOverride). All
+// fields optional — a policy may set any subset. Numeric fields are the
+// raw spec units (ms, counts, tokens).
+export interface Caps {
+  max_tokens?: number
+  max_steps_remaining?: number
+  tool_allowlist?: string[]
+  tool_denylist?: string[]
+  cooldown_ms?: number
+}
+
+export interface RateLimits {
+  max_reservations_per_minute?: number
+  max_commits_per_minute?: number
+}
+
+export interface ReservationTtlOverride {
+  default_ttl_ms?: number
+  max_ttl_ms?: number
+  max_extensions?: number
+}
+
 export interface Policy {
   policy_id: string
   name: string
+  description?: string
   scope_pattern: string
   status: string
   priority?: number
+  caps?: Caps
+  commit_overage_policy?: string
+  rate_limits?: RateLimits
+  reservation_ttl_override?: ReservationTtlOverride
+  effective_from?: string
+  effective_until?: string
   created_at: string
+  updated_at?: string
 }
 
 export interface PolicyListResponse {
@@ -319,6 +383,9 @@ export interface ApiKeyUpdateRequest {
   description?: string
   permissions?: string[]
   scope_filter?: string[]
+  // ISO 8601. Spec allows rotating the expiry on an existing key; blank
+  // means "no change" (the form omits it when untouched).
+  expires_at?: string
   metadata?: Record<string, unknown>
 }
 
@@ -329,6 +396,9 @@ export interface TenantCreateRequest {
   metadata?: Record<string, string>
   default_commit_overage_policy?: string
   default_reservation_ttl_ms?: number
+  max_reservation_ttl_ms?: number
+  max_reservation_extensions?: number
+  reservation_expiry_policy?: string
 }
 
 export interface TenantUpdateRequest {
@@ -337,6 +407,9 @@ export interface TenantUpdateRequest {
   metadata?: Record<string, string>
   default_commit_overage_policy?: string
   default_reservation_ttl_ms?: number
+  max_reservation_ttl_ms?: number
+  max_reservation_extensions?: number
+  reservation_expiry_policy?: string
 }
 
 export interface WebhookCreateRequest {
@@ -505,14 +578,27 @@ export interface PolicyCreateRequest {
   description?: string
   scope_pattern: string
   priority?: number
+  caps?: Caps
   commit_overage_policy?: string
+  rate_limits?: RateLimits
+  reservation_ttl_override?: ReservationTtlOverride
+  effective_from?: string
+  effective_until?: string
 }
 
+// Replacement semantics per spec: a present field overwrites; an absent
+// field leaves the server value unchanged; an empty array/object clears.
 export interface PolicyUpdateRequest {
   name?: string
   description?: string
+  scope_pattern?: string
   priority?: number
+  caps?: Caps
   commit_overage_policy?: string
+  rate_limits?: RateLimits
+  reservation_ttl_override?: ReservationTtlOverride
+  effective_from?: string
+  effective_until?: string
   status?: string
 }
 
@@ -558,25 +644,99 @@ export interface AuditLogListResponse {
 export const RESERVATION_STATUSES = ['ACTIVE', 'COMMITTED', 'RELEASED', 'EXPIRED'] as const
 export type ReservationStatus = typeof RESERVATION_STATUSES[number]
 
-// Minimal shape — the runtime spec's ReservationSummary / ReservationDetail
-// carry more (Subject, Action, balances). Dashboard only renders what ops
-// need to identify and force-release hung reservations; extra fields are
-// kept opaque to stay resilient to spec additions.
+// Mirrors the runtime spec's ReservationSummary (cycles-protocol-v0.yaml).
+// Originally a minimal shape; widened (protocol v0.1.25.7/.8 + later
+// additive revisions) to carry the finalize/commit surface so the ops
+// view can answer "what did this reservation actually settle at" without
+// a second fetch. `subject`/`action` stay opaque — the dashboard renders
+// scope_path, not the structured Subject, and keeping them loose avoids
+// stale-shape drift on spec additions.
 export interface ReservationSummary {
   reservation_id: string
   status: ReservationStatus
   scope_path: string
-  reserved: { unit: string; amount: number }
+  reserved: Amount
   created_at_ms: number
   expires_at_ms: number
   idempotency_key?: string
   affected_scopes?: string[]
+  // protocol v0.1.25.8: actual committed amount, present on COMMITTED rows.
+  // Unconditional on list (NOT gated by `include`).
+  committed?: Amount
+  // protocol v0.1.25.8: wall-clock finalization time. Populated ONLY on
+  // COMMITTED / RELEASED rows (absent on ACTIVE / EXPIRED). The
+  // `finalized_from`/`finalized_to` filters key off this field.
+  finalized_at_ms?: number
+  // Opt-in projections (`include=metadata` / `include=committed_metadata`).
+  // Omitted from list responses unless the caller requested them; always
+  // present on the detail fetch when the underlying reserve/commit carried
+  // metadata.
+  metadata?: Record<string, unknown>
+  committed_metadata?: Record<string, unknown>
+  // Kept opaque — see header comment.
+  subject?: Record<string, unknown>
+  action?: Record<string, unknown>
 }
+
+// Detail is a structural superset of summary (same wire schema, fuller
+// projection). Aliased rather than re-declared so the two never drift.
+export type ReservationDetail = ReservationSummary
 
 export interface ReservationListResponse {
   reservations: ReservationSummary[]
   has_more?: boolean
   next_cursor?: string
+}
+
+// ─── Cryptographic evidence (cycles-protocol-v0.yaml) ───────────────
+// Reference object that rides on reserve / commit / release / decide /
+// error responses pointing at a signed evidence envelope. The runtime
+// plane computes evidence_id synchronously at decision time and signs +
+// stores the envelope asynchronously, so a freshly-returned id may 404
+// for a short window (consumers retry).
+export interface CyclesEvidenceRef {
+  evidence_id: string // sha256 content hash, 64 lowercase hex
+  cycles_evidence_url: string // {server_id}/evidence/{evidence_id}
+}
+
+// Signed envelope returned by GET /v1/evidence/{evidence_id}. The payload
+// shape varies by artifact_type; kept opaque (rendered as JSON) — the
+// dashboard verifies/audits, it doesn't re-derive the payload schema.
+export interface CyclesEvidenceEnvelope {
+  schema_version: string // const "cycles-evidence/v0.1"
+  artifact_type: string // decide | reserve | commit | release | error
+  server_id: string
+  signer_did: string
+  issued_at_ms: number
+  trace_id?: string
+  payload: Record<string, unknown>
+  evidence_id: string
+  signature: string // Ed25519, 128 hex
+}
+
+// Signer JWK Set (GET /v1/.well-known/cycles-jwks.json). Public keys only.
+export interface CyclesEvidenceJwk {
+  kty: string // "OKP"
+  crv: string // "Ed25519"
+  alg?: string // "EdDSA"
+  x: string // base64url raw 32-byte public key
+  kid: string
+  cycles_nbf_ms: number
+  cycles_exp_ms?: number | null
+  status?: string // active | retired (advisory)
+}
+
+export interface CyclesEvidenceJwks {
+  keys: CyclesEvidenceJwk[]
+}
+
+// Force-release response (runtime plane). cycles_evidence present when the
+// server emits evidence for the release.
+export interface ReleaseResponse {
+  status?: string
+  released?: Amount
+  balances?: unknown[]
+  cycles_evidence?: CyclesEvidenceRef
 }
 
 // cycles-governance-admin v0.1.25.21: server-side bulk-action endpoints

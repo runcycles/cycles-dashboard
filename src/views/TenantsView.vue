@@ -16,6 +16,7 @@ import { generateIdempotencyKey } from '../utils/idempotencyKey'
 import type { TenantBulkAction, TenantBulkFilter } from '../types'
 import { useAuthStore } from '../stores/auth'
 import type { Tenant } from '../types'
+import { COMMIT_OVERAGE_POLICIES, RESERVATION_EXPIRY_POLICIES } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
@@ -496,10 +497,20 @@ async function executeFilterBulk() {
 const showCreate = ref(false)
 const createLoading = ref(false)
 const createError = ref('')
-const createForm = ref({ tenant_id: '', name: '', parent_tenant_id: '' })
+const createForm = ref({
+  tenant_id: '', name: '', parent_tenant_id: '',
+  // Optional reservation-governance defaults (spec §Tenant). Blank → the
+  // server applies its own defaults.
+  default_commit_overage_policy: '', default_reservation_ttl_ms: '',
+  max_reservation_ttl_ms: '', max_reservation_extensions: '', reservation_expiry_policy: '',
+})
 
 function openCreate() {
-  createForm.value = { tenant_id: '', name: '', parent_tenant_id: '' }
+  createForm.value = {
+    tenant_id: '', name: '', parent_tenant_id: '',
+    default_commit_overage_policy: '', default_reservation_ttl_ms: '',
+    max_reservation_ttl_ms: '', max_reservation_extensions: '', reservation_expiry_policy: '',
+  }
   createError.value = ''
   showCreate.value = true
 }
@@ -536,6 +547,11 @@ async function submitCreate() {
   try {
     const body: Record<string, unknown> = { tenant_id: createForm.value.tenant_id, name: createForm.value.name }
     if (createForm.value.parent_tenant_id) body.parent_tenant_id = createForm.value.parent_tenant_id
+    if (createForm.value.default_commit_overage_policy) body.default_commit_overage_policy = createForm.value.default_commit_overage_policy
+    if (createForm.value.default_reservation_ttl_ms) body.default_reservation_ttl_ms = Number(createForm.value.default_reservation_ttl_ms)
+    if (createForm.value.max_reservation_ttl_ms) body.max_reservation_ttl_ms = Number(createForm.value.max_reservation_ttl_ms)
+    if (createForm.value.max_reservation_extensions) body.max_reservation_extensions = Number(createForm.value.max_reservation_extensions)
+    if (createForm.value.reservation_expiry_policy) body.reservation_expiry_policy = createForm.value.reservation_expiry_policy
     await createTenant(body as any)
     showCreate.value = false
     toast.success(`Tenant '${createForm.value.name}' created`)
@@ -1080,6 +1096,39 @@ const gridTemplate = computed(() =>
           <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
         </select>
       </div>
+      <details class="border-t border-gray-200 dark:border-gray-700 pt-3">
+        <summary class="text-sm font-medium text-gray-700 dark:text-gray-200 cursor-pointer">Reservation defaults (optional)</summary>
+        <div class="mt-3 space-y-3">
+          <div>
+            <label for="ct-overage" class="form-label">Default Commit Overage Policy</label>
+            <select id="ct-overage" v-model="createForm.default_commit_overage_policy" class="form-select w-full">
+              <option value="">Server default</option>
+              <option v-for="p in COMMIT_OVERAGE_POLICIES" :key="p" :value="p">{{ p }}</option>
+            </select>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label for="ct-ttl" class="form-label">Default Reservation TTL (ms)</label>
+              <input id="ct-ttl" v-model="createForm.default_reservation_ttl_ms" type="number" min="1000" max="86400000" class="form-input" placeholder="60000" />
+            </div>
+            <div>
+              <label for="ct-max-ttl" class="form-label">Max Reservation TTL (ms)</label>
+              <input id="ct-max-ttl" v-model="createForm.max_reservation_ttl_ms" type="number" min="1000" max="86400000" class="form-input" placeholder="3600000" />
+            </div>
+            <div>
+              <label for="ct-max-ext" class="form-label">Max Reservation Extensions</label>
+              <input id="ct-max-ext" v-model="createForm.max_reservation_extensions" type="number" min="0" step="1" class="form-input" placeholder="10" />
+            </div>
+            <div>
+              <label for="ct-expiry" class="form-label">Reservation Expiry Policy</label>
+              <select id="ct-expiry" v-model="createForm.reservation_expiry_policy" class="form-select w-full">
+                <option value="">Server default</option>
+                <option v-for="p in RESERVATION_EXPIRY_POLICIES" :key="p" :value="p">{{ p }}</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </details>
     </FormDialog>
 
     <ExportDialog

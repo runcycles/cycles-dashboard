@@ -7,8 +7,14 @@ import { useTerminalAwareList } from '../composables/useTerminalAwareList'
 import { getTenant, listTenants, listBudgets, listApiKeys, listPolicies, listWebhooks, updateTenantStatus, updateTenant, revokeApiKey, createApiKey, updateApiKey, createBudget, createPolicy, updatePolicy, freezeBudget, ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { Tenant, BudgetLedger, ApiKey, Policy, WebhookSubscription, ApiKeyCreateResponse, BudgetCreateRequest, PolicyCreateRequest, PolicyUpdateRequest } from '../types'
-import { COMMIT_OVERAGE_POLICIES, PERMISSIONS } from '../types'
+import { COMMIT_OVERAGE_POLICIES, PERMISSIONS, RESERVATION_EXPIRY_POLICIES } from '../types'
 import PermissionPicker from '../components/PermissionPicker.vue'
+import PolicyAdvancedFields from '../components/PolicyAdvancedFields.vue'
+import {
+  emptyPolicyAdvancedForm,
+  policyAdvancedToRequest,
+  policyToAdvancedForm,
+} from '../utils/policyAdvanced'
 import { validateScope } from '../utils/safe'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -247,15 +253,17 @@ async function executeKeyRevoke() {
 const showEditTenant = ref(false)
 const editTenantLoading = ref(false)
 const editTenantError = ref('')
-const editTenantForm = ref({ name: '', default_commit_overage_policy: '', default_reservation_ttl_ms: '', max_reservation_ttl_ms: '' })
+const editTenantForm = ref({ name: '', default_commit_overage_policy: '', default_reservation_ttl_ms: '', max_reservation_ttl_ms: '', max_reservation_extensions: '', reservation_expiry_policy: '' })
 
 function openEditTenant() {
   const t = tenant.value
   editTenantForm.value = {
     name: t?.name || '',
-    default_commit_overage_policy: (t as any)?.default_commit_overage_policy || '',
-    default_reservation_ttl_ms: (t as any)?.default_reservation_ttl_ms ? String((t as any).default_reservation_ttl_ms) : '',
-    max_reservation_ttl_ms: (t as any)?.max_reservation_ttl_ms ? String((t as any).max_reservation_ttl_ms) : '',
+    default_commit_overage_policy: t?.default_commit_overage_policy || '',
+    default_reservation_ttl_ms: t?.default_reservation_ttl_ms != null ? String(t.default_reservation_ttl_ms) : '',
+    max_reservation_ttl_ms: t?.max_reservation_ttl_ms != null ? String(t.max_reservation_ttl_ms) : '',
+    max_reservation_extensions: t?.max_reservation_extensions != null ? String(t.max_reservation_extensions) : '',
+    reservation_expiry_policy: t?.reservation_expiry_policy || '',
   }
   editTenantError.value = ''
   showEditTenant.value = true
@@ -269,6 +277,8 @@ async function submitEditTenant() {
     if (editTenantForm.value.default_commit_overage_policy) body.default_commit_overage_policy = editTenantForm.value.default_commit_overage_policy
     if (editTenantForm.value.default_reservation_ttl_ms) body.default_reservation_ttl_ms = Number(editTenantForm.value.default_reservation_ttl_ms)
     if (editTenantForm.value.max_reservation_ttl_ms) body.max_reservation_ttl_ms = Number(editTenantForm.value.max_reservation_ttl_ms)
+    if (editTenantForm.value.max_reservation_extensions) body.max_reservation_extensions = Number(editTenantForm.value.max_reservation_extensions)
+    if (editTenantForm.value.reservation_expiry_policy) body.reservation_expiry_policy = editTenantForm.value.reservation_expiry_policy
     await updateTenant(id, body as any)
     toast.success('Tenant updated')
     tenant.value = await getTenant(id)
@@ -486,6 +496,8 @@ const createPolicyForm = ref<{
   priority: '',
   commit_overage_policy: '',
 })
+// Advanced enforcement editor model (caps / rate limits / TTL / schedule).
+const createPolicyAdvanced = ref(emptyPolicyAdvancedForm())
 
 function openCreatePolicy() {
   createPolicyForm.value = {
@@ -495,6 +507,7 @@ function openCreatePolicy() {
     priority: '',
     commit_overage_policy: '',
   }
+  createPolicyAdvanced.value = emptyPolicyAdvancedForm()
   createPolicyError.value = ''
   showCreatePolicy.value = true
 }
@@ -526,6 +539,7 @@ async function submitCreatePolicy() {
   const prio = Number(createPolicyForm.value.priority)
   if (createPolicyForm.value.priority !== '' && Number.isFinite(prio)) body.priority = prio
   if (createPolicyForm.value.commit_overage_policy) body.commit_overage_policy = createPolicyForm.value.commit_overage_policy
+  Object.assign(body, policyAdvancedToRequest(createPolicyAdvanced.value))
   createPolicyLoading.value = true
   try {
     await createPolicy(id, body)
@@ -548,6 +562,11 @@ const editPolicyForm = ref<{
   priority: number | string
   commit_overage_policy: string
 }>({ name: '', description: '', priority: '', commit_overage_policy: '' })
+const editPolicyAdvanced = ref(emptyPolicyAdvancedForm())
+// Open the advanced section expanded when the policy already carries any
+// of that config so it's not hidden behind a disclosure the operator
+// might not notice.
+const editPolicyHasAdvanced = ref(false)
 
 function openEditPolicy(p: Policy) {
   editPolicyTarget.value = p
@@ -557,6 +576,8 @@ function openEditPolicy(p: Policy) {
     priority: p.priority ?? '',
     commit_overage_policy: '',
   }
+  editPolicyAdvanced.value = policyToAdvancedForm(p)
+  editPolicyHasAdvanced.value = !!(p.caps || p.rate_limits || p.reservation_ttl_override || p.effective_from || p.effective_until)
   editPolicyError.value = ''
   showEditPolicy.value = true
 }
@@ -576,6 +597,12 @@ async function submitEditPolicy() {
     body.priority = prio
   }
   if (editPolicyForm.value.commit_overage_policy) body.commit_overage_policy = editPolicyForm.value.commit_overage_policy
+  // Advanced enforcement uses spec replacement semantics: a present field
+  // overwrites. The editor is pre-filled from the policy, so re-sending is
+  // idempotent. NOTE: emptying a previously-set field omits it (server
+  // leaves it unchanged) — the form supports setting/adjusting, not
+  // clearing advanced config (documented in AUDIT.md).
+  Object.assign(body, policyAdvancedToRequest(editPolicyAdvanced.value))
   if (Object.keys(body).length === 0) {
     editPolicyError.value = 'No changes to save'
     return
@@ -1162,6 +1189,17 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
           <label for="et-max-ttl" class="form-label">Max Reservation TTL (ms)</label>
           <input id="et-max-ttl" v-model="editTenantForm.max_reservation_ttl_ms" type="number" min="1000" max="86400000" class="form-input" placeholder="3600000" />
         </div>
+        <div>
+          <label for="et-max-ext" class="form-label">Max Reservation Extensions</label>
+          <input id="et-max-ext" v-model="editTenantForm.max_reservation_extensions" type="number" min="0" step="1" class="form-input" placeholder="10" />
+        </div>
+        <div>
+          <label for="et-expiry" class="form-label">Reservation Expiry Policy</label>
+          <select id="et-expiry" v-model="editTenantForm.reservation_expiry_policy" class="form-select w-full">
+            <option value="">Inherit / unchanged</option>
+            <option v-for="p in RESERVATION_EXPIRY_POLICIES" :key="p" :value="p">{{ p }}</option>
+          </select>
+        </div>
       </div>
     </FormDialog>
 
@@ -1296,7 +1334,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
     </FormDialog>
 
     <!-- v0.1.25.20: Create Policy (admin-on-behalf-of) -->
-    <FormDialog v-if="showCreatePolicy" title="Create Policy" submit-label="Create" :loading="createPolicyLoading" :error="createPolicyError" @submit="submitCreatePolicy" @cancel="showCreatePolicy = false">
+    <FormDialog v-if="showCreatePolicy" wide title="Create Policy" submit-label="Create" :loading="createPolicyLoading" :error="createPolicyError" @submit="submitCreatePolicy" @cancel="showCreatePolicy = false">
       <div>
         <label for="cp-name" class="form-label">Name</label>
         <input id="cp-name" v-model="createPolicyForm.name" required maxlength="256" class="form-input" />
@@ -1323,10 +1361,11 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
           <option v-for="p in COMMIT_OVERAGE_POLICIES" :key="p" :value="p">{{ p }}</option>
         </select>
       </div>
+      <PolicyAdvancedFields :form="createPolicyAdvanced" id-prefix="cp-adv" />
     </FormDialog>
 
     <!-- v0.1.25.20: Edit Policy -->
-    <FormDialog v-if="showEditPolicy" title="Edit Policy" submit-label="Save Changes" :loading="editPolicyLoading" :error="editPolicyError" @submit="submitEditPolicy" @cancel="showEditPolicy = false">
+    <FormDialog v-if="showEditPolicy" wide title="Edit Policy" submit-label="Save Changes" :loading="editPolicyLoading" :error="editPolicyError" @submit="submitEditPolicy" @cancel="showEditPolicy = false">
       <div>
         <label for="ep-name" class="form-label">Name</label>
         <input id="ep-name" v-model="editPolicyForm.name" maxlength="256" class="form-input" />
@@ -1346,6 +1385,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
           <option v-for="p in COMMIT_OVERAGE_POLICIES" :key="p" :value="p">{{ p }}</option>
         </select>
       </div>
+      <PolicyAdvancedFields :form="editPolicyAdvanced" :start-open="editPolicyHasAdvanced" id-prefix="ep-adv" />
     </FormDialog>
   </div>
 </template>

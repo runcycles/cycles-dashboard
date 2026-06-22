@@ -19,9 +19,10 @@ import { usePolling } from '../composables/usePolling'
 import { POLL_FAST_MS } from '../composables/pollingConstants'
 import { useSort } from '../composables/useSort'
 import { useListExport } from '../composables/useListExport'
-import { listReservations, releaseReservation, listTenants } from '../api/client'
+import { listReservations, getReservation, releaseReservation, listTenants } from '../api/client'
+import type { ListReservationsParams } from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import type { ReservationSummary, Tenant } from '../types'
+import type { ReservationSummary, ReservationDetail, Tenant } from '../types'
 import { RESERVATION_STATUSES } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -31,11 +32,13 @@ import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import InlineErrorBanner from '../components/InlineErrorBanner.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
+import TimeRangePicker from '../components/TimeRangePicker.vue'
 import DownloadIcon from '../components/icons/DownloadIcon.vue'
 import FormDialog from '../components/FormDialog.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { writeClipboardJson } from '../utils/clipboard'
 import { formatDateTime, formatRelative } from '../utils/format'
+import { safeJsonStringify } from '../utils/safe'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 
@@ -79,6 +82,79 @@ const statusFilter = ref<string>(statusFromQuery.value ?? 'ACTIVE')
 watch(statusFromQuery, s => {
   if (s && statusFilter.value !== s) statusFilter.value = s
 })
+
+// ─── Advanced filters (protocol additive surface) ───────────────────
+// Three independent time windows, each bound to a different timestamp
+// field on the reservation (created / expires / finalized). Subject
+// filters narrow by the canonical Subject dimensions. The `include`
+// toggle opts the list into the metadata projections so Copy-as-JSON
+// and the detail dialog can show reserve/commit metadata without a
+// per-row fetch. All collapse under one "Advanced filters" disclosure
+// so the common tenant+status flow stays uncluttered.
+const showAdvanced = ref(false)
+// datetime-local strings ('' = unbounded), mirroring AuditView's
+// TimeRangePicker wiring. Converted to ISO 8601 at query-build time.
+const createdFrom = ref('')
+const createdTo = ref('')
+const expiresFrom = ref('')
+const expiresTo = ref('')
+const finalizedFrom = ref('')
+const finalizedTo = ref('')
+const createdRange = computed({
+  get: () => ({ from: createdFrom.value, to: createdTo.value }),
+  set: (v: { from: string; to: string }) => { createdFrom.value = v.from; createdTo.value = v.to },
+})
+const expiresRange = computed({
+  get: () => ({ from: expiresFrom.value, to: expiresTo.value }),
+  set: (v: { from: string; to: string }) => { expiresFrom.value = v.from; expiresTo.value = v.to },
+})
+const finalizedRange = computed({
+  get: () => ({ from: finalizedFrom.value, to: finalizedTo.value }),
+  set: (v: { from: string; to: string }) => { finalizedFrom.value = v.from; finalizedTo.value = v.to },
+})
+// Subject filters. Free-text — the server matches exact canonical values.
+const subjWorkspace = ref('')
+const subjApp = ref('')
+const subjWorkflow = ref('')
+const subjAgent = ref('')
+const subjToolset = ref('')
+// Opt-in metadata projection. Off by default — most triage doesn't need
+// it and it keeps list payloads lean.
+const includeMetadata = ref(false)
+
+// datetime-local → ISO 8601 (or undefined when blank). The client GET
+// helper drops empties too, but converting here keeps the wire value
+// well-formed and matches AuditView's approach.
+function isoOrUndef(s: string): string | undefined {
+  if (!s) return undefined
+  const d = new Date(s)
+  return isNaN(d.getTime()) ? undefined : d.toISOString()
+}
+
+// Single source of truth for the server-side filter tuple, shared by
+// loadReservations, loadMore, and the export fetchPage. Centralizing it
+// guarantees the cursor's filter hash never drifts between page 1 and
+// page 2+ (the server 400s on a mismatched tuple). Excludes limit/cursor
+// (callers add those) and sort (added from the live sort refs at call
+// time so a header click re-queries page 1).
+function buildFilterParams(): Omit<ListReservationsParams, 'limit' | 'cursor' | 'sort_by' | 'sort_dir'> {
+  const p: Omit<ListReservationsParams, 'limit' | 'cursor' | 'sort_by' | 'sort_dir'> = {}
+  if (statusFilter.value) p.status = statusFilter.value
+  if (includeMetadata.value) p.include = 'metadata,committed_metadata'
+  p.from = isoOrUndef(createdFrom.value)
+  p.to = isoOrUndef(createdTo.value)
+  p.expires_from = isoOrUndef(expiresFrom.value)
+  p.expires_to = isoOrUndef(expiresTo.value)
+  p.finalized_from = isoOrUndef(finalizedFrom.value)
+  p.finalized_to = isoOrUndef(finalizedTo.value)
+  if (subjWorkspace.value.trim()) p.workspace = subjWorkspace.value.trim()
+  if (subjApp.value.trim()) p.app = subjApp.value.trim()
+  if (subjWorkflow.value.trim()) p.workflow = subjWorkflow.value.trim()
+  if (subjAgent.value.trim()) p.agent = subjAgent.value.trim()
+  if (subjToolset.value.trim()) p.toolset = subjToolset.value.trim()
+  return p
+}
+
 const reservations = ref<ReservationSummary[]>([])
 const error = ref('')
 const loadingList = ref(false)
@@ -154,17 +230,12 @@ async function loadReservations() {
   nextCursor.value = ''
   hasMore.value = false
   try {
-    const params: {
-      status?: string
-      limit?: number
-      sort_by?: string
-      sort_dir?: 'asc' | 'desc'
-    } = {
+    const params: ListReservationsParams = {
+      ...buildFilterParams(),
       limit: PAGE_SIZE,
       sort_by: sortKey.value || undefined,
       sort_dir: sortKey.value ? sortDir.value : undefined,
     }
-    if (statusFilter.value) params.status = statusFilter.value
     const res = await listReservations(tenantFilter.value, params)
     reservations.value = res.reservations
     hasMore.value = !!res.has_more
@@ -178,22 +249,18 @@ async function loadMore() {
   if (!nextCursor.value || loadingMore.value || !tenantFilter.value) return
   loadingMore.value = true
   try {
-    // Pass the same sort tuple the server validates against the cursor.
-    // Omitting sort params on page 2+ under a sorted cursor would 400
-    // with INVALID_REQUEST (cursor-tuple mismatch per v0.1.25.12 spec).
-    const params: {
-      status?: string
-      limit?: number
-      cursor?: string
-      sort_by?: string
-      sort_dir?: 'asc' | 'desc'
-    } = {
+    // Pass the same filter + sort tuple the server validates against the
+    // cursor. Omitting sort params (or changing a window bound) on page 2+
+    // under a sorted cursor would 400 with INVALID_REQUEST (cursor-tuple
+    // mismatch per v0.1.25.12 spec) — buildFilterParams() guarantees the
+    // window/subject tuple matches page 1.
+    const params: ListReservationsParams = {
+      ...buildFilterParams(),
       limit: PAGE_SIZE,
       cursor: nextCursor.value,
       sort_by: sortKey.value || undefined,
       sort_dir: sortKey.value ? sortDir.value : undefined,
     }
-    if (statusFilter.value) params.status = statusFilter.value
     const res = await listReservations(tenantFilter.value, params)
     reservations.value = [...reservations.value, ...res.reservations]
     hasMore.value = !!res.has_more
@@ -225,22 +292,16 @@ const {
   nextCursor,
   fetchPage: async (cursor) => {
     if (!tenantFilter.value) return { items: [], hasMore: false, nextCursor: '' }
-    // Export pages must pass the same sort tuple bound to the cursor —
-    // the server validates the cursor's filter_hash against the current
-    // (sort_by, sort_dir, filters) tuple and 400s on mismatch.
-    const params: {
-      status?: string
-      limit?: number
-      cursor?: string
-      sort_by?: string
-      sort_dir?: 'asc' | 'desc'
-    } = {
+    // Export pages must pass the same filter + sort tuple bound to the
+    // cursor — the server validates the cursor's filter_hash against the
+    // current (sort_by, sort_dir, filters) tuple and 400s on mismatch.
+    const params: ListReservationsParams = {
+      ...buildFilterParams(),
       limit: PAGE_SIZE,
       cursor,
       sort_by: sortKey.value || undefined,
       sort_dir: sortKey.value ? sortDir.value : undefined,
     }
-    if (statusFilter.value) params.status = statusFilter.value
     const res = await listReservations(tenantFilter.value, params)
     return { items: res.reservations, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
   },
@@ -250,8 +311,10 @@ const {
     { header: 'status',           value: r => r.status },
     { header: 'reserved_amount',  value: r => r.reserved.amount },
     { header: 'reserved_unit',    value: r => r.reserved.unit },
+    { header: 'committed_amount', value: r => r.committed?.amount ?? '' },
     { header: 'created_at_ms',    value: r => r.created_at_ms },
     { header: 'expires_at_ms',    value: r => r.expires_at_ms },
+    { header: 'finalized_at_ms',  value: r => r.finalized_at_ms ?? '' },
   ],
 })
 
@@ -261,7 +324,11 @@ watch(exportError, (v) => { if (v) error.value = v })
 // cadence — reservations turn over quickly and a stale list is actively
 // misleading (an operator could "force-release" one that already
 // expired).
-watch([tenantFilter, statusFilter], () => { loadReservations() })
+watch([
+  tenantFilter, statusFilter, includeMetadata,
+  createdFrom, createdTo, expiresFrom, expiresTo, finalizedFrom, finalizedTo,
+  subjWorkspace, subjApp, subjWorkflow, subjAgent, subjToolset,
+], () => { loadReservations() })
 
 // M14: keep the URL in sync with tenantFilter so the filtered view is
 // shareable. `replace` (not push) — filter changes shouldn't clutter
@@ -315,6 +382,34 @@ async function copyReservationJson(r: ReservationSummary) {
   else toast.error('Copy failed — clipboard unavailable')
 }
 
+// ─── Detail view ────────────────────────────────────────────────────
+// Read-only dialog showing the full reservation, including the
+// reserve-time and commit-time metadata projections. Fetched fresh via
+// getReservation (which always requests include=metadata,committed_metadata)
+// so the operator sees the complete record even when the list wasn't
+// loaded with the include toggle on.
+const detailReservation = ref<ReservationDetail | null>(null)
+const detailLoading = ref(false)
+const detailError = ref('')
+const detailJson = computed(() =>
+  detailReservation.value ? safeJsonStringify(detailReservation.value) : '',
+)
+
+async function openDetail(r: ReservationSummary) {
+  detailReservation.value = r
+  detailError.value = ''
+  detailLoading.value = true
+  try {
+    detailReservation.value = await getReservation(r.reservation_id)
+  } catch (e) {
+    // Fall back to the row we already have — better a partial view than
+    // a hard error. Surface the fetch failure inline so it's not silent.
+    detailError.value = toMessage(e)
+  } finally {
+    detailLoading.value = false
+  }
+}
+
 async function submitRelease() {
   if (!pendingRelease.value || releaseLoading.value) return
   releaseError.value = ''
@@ -325,12 +420,17 @@ async function submitRelease() {
   // because the dialog disables the button during in-flight.
   const idempotencyKey = crypto.randomUUID()
   try {
-    await releaseReservation(
+    const res = await releaseReservation(
       pendingRelease.value.reservation_id,
       idempotencyKey,
       releaseReason.value.trim() || undefined,
     )
     toast.success(`Reservation ${pendingRelease.value.reservation_id} released`)
+    // Surface the signed evidence reference (when the server emits one)
+    // so the operator can capture/verify proof of the force-release for
+    // the incident record. Persisted in a dismissible banner rather than
+    // a transient toast so the link survives long enough to click.
+    releasedEvidence.value = res?.cycles_evidence ?? null
     pendingRelease.value = null
     await loadReservations()
   } catch (e) {
@@ -339,6 +439,10 @@ async function submitRelease() {
     releaseLoading.value = false
   }
 }
+
+// Evidence reference from the most recent force-release, shown in a
+// dismissible banner with a deep link into the Evidence viewer.
+const releasedEvidence = ref<import('../types').CyclesEvidenceRef | null>(null)
 
 function ageLabel(r: ReservationSummary): string {
   // Created-at as a relative string so ops can spot "stuck for 3h"
@@ -384,10 +488,14 @@ const totalHeight = computed(() => virtualizer.value.getTotalSize())
 // JIT scanner missing the pattern. Column 7 (actions) is 120px, not
 // 96px (the original <th class="w-24">), because "Force release" at
 // text-xs is ~75px and px-4 takes 32px of the cell — 96 was cutting it.
+// Columns: ID, Scope, Status, Reserved, Committed, Created, Expires,
+// Finalized, [Actions]. Committed + Finalized (protocol v0.1.25.8) land
+// next to their Reserved / Expires counterparts so the settle-vs-estimate
+// and finalize-vs-expiry comparisons read across one row.
 const gridTemplate = computed(() =>
   canManage.value
-    ? 'minmax(180px,1.5fr) minmax(200px,2fr) 110px 140px 140px 140px 120px'
-    : 'minmax(180px,1.5fr) minmax(200px,2fr) 110px 140px 140px 140px',
+    ? 'minmax(180px,1.5fr) minmax(180px,2fr) 110px 130px 130px 130px 130px 130px 120px'
+    : 'minmax(180px,1.5fr) minmax(180px,2fr) 110px 130px 130px 130px 130px 130px',
 )
 </script>
 
@@ -422,6 +530,23 @@ const gridTemplate = computed(() =>
     </PageHeader>
     <InlineErrorBanner v-if="error" :message="error" @dismiss="error = ''" />
 
+    <!-- Evidence reference from the last force-release. Signed proof the
+         operator can attach to the incident record / verify offline. -->
+    <div
+      v-if="releasedEvidence"
+      class="mb-4 flex items-center justify-between gap-3 rounded border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950 px-3 py-2 text-sm"
+    >
+      <span class="text-blue-800 dark:text-blue-200">
+        Signed evidence emitted for the release —
+        <RouterLink
+          :to="{ name: 'evidence', query: { id: releasedEvidence.evidence_id } }"
+          class="font-medium underline"
+        >View evidence</RouterLink>
+        <code class="ml-2 font-mono text-xs">{{ releasedEvidence.evidence_id.slice(0, 16) }}…</code>
+      </span>
+      <button class="muted-sm hover:text-gray-700 cursor-pointer" @click="releasedEvidence = null">Dismiss</button>
+    </div>
+
     <!-- Filters. Tenant is required; the server rejects admin list
          without it, so we enforce client-side too. Status defaults to
          ACTIVE because that's the operationally-interesting set.
@@ -442,11 +567,71 @@ const gridTemplate = computed(() =>
             <option v-for="s in RESERVATION_STATUSES" :key="s" :value="s">{{ s }}</option>
           </select>
         </div>
+        <div>
+          <button
+            type="button"
+            data-testid="res-advanced-toggle"
+            class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 cursor-pointer"
+            :aria-expanded="showAdvanced"
+            @click="showAdvanced = !showAdvanced"
+          >
+            {{ showAdvanced ? 'Hide' : 'Advanced' }} filters
+          </button>
+        </div>
         <p class="muted-sm flex-1 min-w-[16rem]">
           Default sort is Created (newest first). Click the Created header to flip
           to ascending — reservations past their grace window but still ACTIVE rise
           to the top, which is the fast way to find "hung" ones.
         </p>
+      </div>
+
+      <!-- Advanced filters (protocol additive surface). Collapsed by
+           default so the common tenant+status flow stays simple. Three
+           time windows each bind to a different timestamp field;
+           subject filters narrow by Subject dimensions; the include
+           toggle opts the list into the metadata projections. -->
+      <div v-if="showAdvanced" class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 space-y-4">
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div>
+            <label class="form-label">Created in range</label>
+            <TimeRangePicker id="res-created-range" v-model="createdRange" aria-label="Created time range" />
+          </div>
+          <div>
+            <label class="form-label">Expires in range</label>
+            <TimeRangePicker id="res-expires-range" v-model="expiresRange" aria-label="Expiry time range" />
+          </div>
+          <div>
+            <label class="form-label">Finalized in range</label>
+            <TimeRangePicker id="res-finalized-range" v-model="finalizedRange" aria-label="Finalized time range" />
+            <p class="muted-sm mt-0.5">Only COMMITTED / RELEASED rows carry a finalize time.</p>
+          </div>
+        </div>
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div>
+            <label for="res-subj-workspace" class="form-label">Workspace</label>
+            <input id="res-subj-workspace" v-model="subjWorkspace" class="form-input" placeholder="exact match" />
+          </div>
+          <div>
+            <label for="res-subj-app" class="form-label">App</label>
+            <input id="res-subj-app" v-model="subjApp" class="form-input" placeholder="exact match" />
+          </div>
+          <div>
+            <label for="res-subj-workflow" class="form-label">Workflow</label>
+            <input id="res-subj-workflow" v-model="subjWorkflow" class="form-input" placeholder="exact match" />
+          </div>
+          <div>
+            <label for="res-subj-agent" class="form-label">Agent</label>
+            <input id="res-subj-agent" v-model="subjAgent" class="form-input" placeholder="exact match" />
+          </div>
+          <div>
+            <label for="res-subj-toolset" class="form-label">Toolset</label>
+            <input id="res-subj-toolset" v-model="subjToolset" class="form-input" placeholder="exact match" />
+          </div>
+        </div>
+        <label class="flex items-center gap-2 text-sm cursor-pointer">
+          <input type="checkbox" v-model="includeMetadata" data-testid="res-include-metadata" />
+          Include reserve / commit metadata in the list (Copy-as-JSON shows it inline)
+        </label>
       </div>
     </div>
 
@@ -461,7 +646,7 @@ const gridTemplate = computed(() =>
       class="bg-white rounded-lg shadow overflow-hidden text-sm flex-1 min-h-0 flex flex-col"
       role="table"
       :aria-rowcount="reservations.length + 1"
-      :aria-colcount="canManage ? 7 : 6"
+      :aria-colcount="canManage ? 9 : 8"
     >
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
         <div
@@ -473,8 +658,11 @@ const gridTemplate = computed(() =>
           <SortHeader as="div" label="Scope" column="scope_path" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Reserved" column="reserved" :active-column="sortKey" :direction="sortDir" @sort="toggle" align="right" />
+          <!-- Committed / Finalized aren't server sort keys — plain headers. -->
+          <div role="columnheader" class="table-cell text-right" data-column="committed">Committed</div>
           <SortHeader as="div" label="Created" column="created_at_ms" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Expires" column="expires_at_ms" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <div role="columnheader" class="table-cell" data-column="finalized">Finalized</div>
           <div v-if="canManage" role="columnheader" class="table-cell" data-column="action"></div>
         </div>
       </div>
@@ -508,12 +696,30 @@ const gridTemplate = computed(() =>
               {{ sortedReservations[v.index].reserved.amount.toLocaleString() }}
               <span class="muted-sm">{{ sortedReservations[v.index].reserved.unit }}</span>
             </div>
+            <!-- Committed: present only on COMMITTED rows. Em-dash for
+                 ACTIVE/RELEASED/EXPIRED so the column reads cleanly. -->
+            <div role="cell" class="table-cell text-right tabular-nums">
+              <template v-if="sortedReservations[v.index].committed">
+                {{ sortedReservations[v.index].committed!.amount.toLocaleString() }}
+                <span class="muted-sm">{{ sortedReservations[v.index].committed!.unit }}</span>
+              </template>
+              <span v-else class="muted-sm">—</span>
+            </div>
             <div role="cell" class="table-cell muted-sm" :title="formatDateTime(new Date(sortedReservations[v.index].created_at_ms).toISOString())">
               {{ ageLabel(sortedReservations[v.index]) }}
             </div>
             <div role="cell" class="table-cell text-xs" :class="isExpired(sortedReservations[v.index]) && sortedReservations[v.index].status === 'ACTIVE' ? 'text-red-600 font-medium' : 'muted'">
               {{ formatRelative(new Date(sortedReservations[v.index].expires_at_ms).toISOString()) }}
               <span v-if="isExpired(sortedReservations[v.index]) && sortedReservations[v.index].status === 'ACTIVE'" class="ml-1" title="Past expiry — this reservation is overdue for cleanup">⚠</span>
+            </div>
+            <!-- Finalized: wall-clock settle time on COMMITTED/RELEASED. -->
+            <div role="cell" class="table-cell text-xs muted">
+              <template v-if="sortedReservations[v.index].finalized_at_ms">
+                <span :title="formatDateTime(new Date(sortedReservations[v.index].finalized_at_ms!).toISOString())">
+                  {{ formatRelative(new Date(sortedReservations[v.index].finalized_at_ms!).toISOString()) }}
+                </span>
+              </template>
+              <span v-else class="muted-sm">—</span>
             </div>
             <div v-if="canManage" role="cell" class="table-cell">
               <!-- Every state always shows Activity + Copy ID so the kebab
@@ -525,6 +731,7 @@ const gridTemplate = computed(() =>
               <RowActionsMenu
                 :aria-label="`Actions for reservation ${sortedReservations[v.index].reservation_id}`"
                 :items="[
+                  { label: 'View details', onClick: () => openDetail(sortedReservations[v.index]) },
                   { label: 'Activity', to: { name: 'audit', query: { resource_id: sortedReservations[v.index].reservation_id } } },
                   { label: 'Copy reservation ID', onClick: () => copyReservationId(sortedReservations[v.index].reservation_id) },
                   { label: 'Copy as JSON', onClick: () => copyReservationJson(sortedReservations[v.index]) },
@@ -607,6 +814,38 @@ const gridTemplate = computed(() =>
           Stored on the audit-log entry. Structured prefix like
           <code class="font-mono">[INCIDENT_FORCE_RELEASE]</code> makes later grep easier.
         </p>
+      </div>
+    </FormDialog>
+
+    <!-- Read-only detail. FormDialog with a Close submit (both Close and
+         Cancel dismiss) — reuses the focus-trap + escape handling. Shows
+         the full reservation incl. reserve-time + commit-time metadata,
+         fetched fresh so the projections are present even when the list
+         wasn't loaded with the include toggle on. -->
+    <FormDialog
+      v-if="detailReservation"
+      wide
+      title="Reservation detail"
+      submit-label="Close"
+      :error="detailError"
+      @submit="detailReservation = null"
+      @cancel="detailReservation = null"
+    >
+      <div class="flex items-center gap-2">
+        <code class="font-mono text-xs bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">{{ detailReservation.reservation_id }}</code>
+        <StatusBadge :status="detailReservation.status" />
+        <span v-if="detailLoading" class="muted-sm">Loading full record…</span>
+      </div>
+      <p class="muted-sm">
+        Reserved <strong>{{ detailReservation.reserved.amount.toLocaleString() }} {{ detailReservation.reserved.unit }}</strong>
+        <template v-if="detailReservation.committed">
+          · committed <strong>{{ detailReservation.committed.amount.toLocaleString() }} {{ detailReservation.committed.unit }}</strong>
+        </template>
+        · scope <code class="font-mono text-xs">{{ detailReservation.scope_path }}</code>
+      </p>
+      <div>
+        <label class="form-label">Full record (incl. metadata)</label>
+        <pre class="text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded p-3 overflow-auto max-h-96">{{ detailJson }}</pre>
       </div>
     </FormDialog>
 
