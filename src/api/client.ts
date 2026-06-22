@@ -482,20 +482,51 @@ export const updateWebhookSecurityConfig = (body: import('../types').WebhookSecu
 
 // Reservations use /v1/reservations (runtime plane), NOT /v1/admin/*.
 // Server interceptor accepts X-Admin-API-Key on this allowlisted subset.
+// Filter/projection params shared by listReservations and its export
+// fetchPage. All optional except the required `tenant` (passed
+// separately). The six window bounds and five subject filters are
+// additive parameters (cycles-protocol-v0.yaml §listReservations) —
+// older servers ignore unrecognized ones without error. Blank strings
+// are treated as unset both by the spec and by the GET helper (which
+// drops '' / null / undefined), so callers may pass through empties.
+export interface ListReservationsParams {
+  status?: string
+  limit?: number
+  cursor?: string
+  // v0.1.25.12 (cycles-server): server-side sort on GET /v1/reservations.
+  // Valid sort_by: reservation_id | tenant | scope_path | status | reserved
+  //              | created_at_ms  | expires_at_ms
+  // Valid sort_dir: asc | desc (server defaults to desc when sort_by is
+  // provided; omit both for legacy SCAN-order pagination).
+  sort_by?: string
+  sort_dir?: 'asc' | 'desc'
+  // Opt-in projection tokens, comma-separated (e.g. "metadata,committed_metadata").
+  // PROJECTION-ONLY — does not affect filtering/ordering/pagination; the
+  // cursor stays valid across include changes.
+  include?: string
+  // Time-range filters (NORMATIVE, additive). Each pair is ISO 8601 and
+  // binds to a specific timestamp field: from/to → created_at_ms;
+  // expires_* → expires_at_ms; finalized_* → finalized_at_ms (excludes
+  // ACTIVE/EXPIRED rows when either bound is supplied). AND-combined.
+  // NOTE: the cursor's filter hash folds all six bounds in — pages 2+ and
+  // export pages MUST replay the same tuple or the server 400s.
+  from?: string
+  to?: string
+  expires_from?: string
+  expires_to?: string
+  finalized_from?: string
+  finalized_to?: string
+  // Subject filters — canonical Subject fields (cycles-protocol-v0.yaml).
+  workspace?: string
+  app?: string
+  workflow?: string
+  agent?: string
+  toolset?: string
+}
+
 export function listReservations(
   tenantId: string,
-  params?: {
-    status?: string
-    limit?: number
-    cursor?: string
-    // v0.1.25.12 (cycles-server): server-side sort on GET /v1/reservations.
-    // Valid sort_by: reservation_id | tenant | scope_path | status | reserved
-    //              | created_at_ms  | expires_at_ms
-    // Valid sort_dir: asc | desc (server defaults to desc when sort_by is
-    // provided; omit both for legacy SCAN-order pagination).
-    sort_by?: string
-    sort_dir?: 'asc' | 'desc'
-  },
+  params?: ListReservationsParams,
 ): Promise<import('../types').ReservationListResponse> {
   const q: Record<string, string> = { tenant: tenantId }
   if (params?.status) q.status = params.status
@@ -503,11 +534,28 @@ export function listReservations(
   if (params?.cursor) q.cursor = params.cursor
   if (params?.sort_by) q.sort_by = params.sort_by
   if (params?.sort_dir) q.sort_dir = params.sort_dir
+  if (params?.include) q.include = params.include
+  // Window + subject filters. The GET helper drops empty strings, so a
+  // blank bound (from an unset date input) never reaches the server —
+  // matching the spec's blank-is-unset rule.
+  for (const k of [
+    'from', 'to', 'expires_from', 'expires_to', 'finalized_from', 'finalized_to',
+    'workspace', 'app', 'workflow', 'agent', 'toolset',
+  ] as const) {
+    const v = params?.[k]
+    if (v) q[k] = v
+  }
   return get<import('../types').ReservationListResponse>(`/v1/reservations`, q)
 }
 
+// Detail fetch requests both metadata projections so the expanded row /
+// detail panel can show reserve-time and commit-time metadata without a
+// follow-up call. Unknown include tokens are ignored by older servers.
 export const getReservation = (reservationId: string) =>
-  get<import('../types').ReservationSummary>(`/v1/reservations/${reservationId}`)
+  get<import('../types').ReservationDetail>(
+    `/v1/reservations/${reservationId}`,
+    { include: 'metadata,committed_metadata,evidence' },
+  )
 
 // Force-release a reservation. Optional `reason` is passed through to
 // the server (surfaced in the audit-log entry's metadata); the
@@ -519,9 +567,21 @@ export function releaseReservation(
   reservationId: string,
   idempotencyKey: string,
   reason?: string,
-): Promise<unknown> {
+): Promise<import('../types').ReleaseResponse> {
   const body: Record<string, unknown> = { idempotency_key: idempotencyKey }
   if (reason) body.reason = reason
-  return post<unknown>(`/v1/reservations/${reservationId}/release`, body)
+  return post<import('../types').ReleaseResponse>(`/v1/reservations/${reservationId}/release`, body)
 }
+
+// ─── Evidence (runtime plane, public) ───────────────────────────────
+// GET /v1/evidence/{id} is unauthenticated (the id is an unguessable
+// content hash) but routed through the same `/v1/*` proxy so the browser
+// stays same-origin. A transient 404 is expected right after a decision
+// (envelope signed asynchronously) — callers surface a retry affordance.
+export const getEvidence = (evidenceId: string) =>
+  get<import('../types').CyclesEvidenceEnvelope>(`/v1/evidence/${evidenceId}`)
+
+// Signer JWK Set for offline signature verification.
+export const getEvidenceJwks = () =>
+  get<import('../types').CyclesEvidenceJwks>(`/v1/.well-known/cycles-jwks.json`)
 

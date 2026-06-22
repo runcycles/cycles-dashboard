@@ -14,8 +14,19 @@ export default defineConfig({
   server: {
     proxy: {
       // Runtime-plane endpoints go to cycles-server (7878).
-      // Order matters: more-specific pattern first.
+      // Order matters: more-specific patterns first.
       '/v1/reservations': {
+        target: 'http://localhost:7878',
+        changeOrigin: true,
+      },
+      // Evidence envelope retrieval + signer JWKS are runtime-plane
+      // (cycles-server), not admin. Public endpoints, but routed through
+      // the same proxy so the dashboard stays same-origin.
+      '/v1/evidence': {
+        target: 'http://localhost:7878',
+        changeOrigin: true,
+      },
+      '/v1/.well-known/cycles-jwks.json': {
         target: 'http://localhost:7878',
         changeOrigin: true,
       },

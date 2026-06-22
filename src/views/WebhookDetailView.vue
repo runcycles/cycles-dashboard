@@ -28,6 +28,13 @@ import DownloadIcon from '../components/icons/DownloadIcon.vue'
 import BackArrowIcon from '../components/icons/BackArrowIcon.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
+import WebhookAdvancedFields from '../components/WebhookAdvancedFields.vue'
+import {
+  emptyWebhookAdvancedForm,
+  webhookAdvancedToRequest,
+  webhookAdvancedError,
+  webhookToAdvancedForm,
+} from '../utils/webhookAdvanced'
 import SecretReveal from '../components/SecretReveal.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { useToast } from '../composables/useToast'
@@ -354,12 +361,9 @@ async function executeRotate() {
 //
 // Covers every spec-editable field (cycles-governance-admin WebhookSubscription §2719):
 // name, description, url, event_types, event_categories, scope_filter,
-// disable_after_failures, metadata. `headers`, `thresholds`, and
-// `retry_policy` are returned by the server but not exposed as form
-// controls (headers values are masked on GET so the form cannot
-// round-trip them; thresholds/retry_policy are opaque server config
-// only rarely used in practice — surfaced as read-only JSON on the
-// detail page instead).
+// disable_after_failures, metadata, plus thresholds + retry_policy (via
+// the shared WebhookAdvancedFields editor). `headers` remain read-only:
+// their values are masked on GET so the form cannot round-trip them.
 //
 // Diff-before-patch: only the fields the operator actually changed go
 // into the PATCH body. Sending every field unconditionally would
@@ -385,6 +389,12 @@ interface EditForm {
 }
 const editForm = ref<EditForm>({ name: '', description: '', url: '', event_types: [], event_categories: [], scope_filter: '', disable_after_failures: '', metadata: '' })
 const editInitial = ref<EditForm | null>(null)
+// Thresholds + retry policy, edited via the shared WebhookAdvancedFields
+// component. Diffed against a frozen baseline the same way as editForm so
+// an unchanged advanced section never enters the PATCH body.
+const editAdvanced = ref(emptyWebhookAdvancedForm())
+const editAdvancedInitial = ref('')
+const editAdvancedHasConfig = ref(false)
 
 function snapshotForm(w: WebhookSubscription): EditForm {
   return {
@@ -407,6 +417,9 @@ function openEdit() {
   // both refs.
   editForm.value = snapshotForm(webhook.value)
   editInitial.value = snapshotForm(webhook.value)
+  editAdvanced.value = webhookToAdvancedForm(webhook.value)
+  editAdvancedInitial.value = JSON.stringify(editAdvanced.value)
+  editAdvancedHasConfig.value = !!(webhook.value.thresholds || webhook.value.retry_policy)
   editError.value = ''
   editMetadataError.value = ''
   showEdit.value = true
@@ -441,6 +454,15 @@ async function submitEdit() {
         body.metadata = parsed
       } catch { editMetadataError.value = 'Invalid JSON'; return }
     }
+  }
+  // Thresholds / retry policy: only touch the body when the advanced
+  // section actually changed. Replacement semantics — emptying a
+  // previously-set field omits it (server keeps the old value); the form
+  // supports setting/adjusting, not clearing (documented in AUDIT.md).
+  if (JSON.stringify(editAdvanced.value) !== editAdvancedInitial.value) {
+    const advError = webhookAdvancedError(editAdvanced.value)
+    if (advError) { editError.value = advError; return }
+    Object.assign(body, webhookAdvancedToRequest(editAdvanced.value))
   }
   if (Object.keys(body).length === 0) { editError.value = 'No changes to save'; return }
   editLoading.value = true
@@ -1221,6 +1243,7 @@ watch(exportError, (v) => { if (v) error.value = v })
           <span v-for="k in Object.keys(webhook.headers)" :key="k" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs font-mono">{{ k }}: ********</span>
         </div>
       </div>
+      <WebhookAdvancedFields :form="editAdvanced" :start-open="editAdvancedHasConfig" id-prefix="ew-adv" mode="edit" />
     </FormDialog>
   </div>
 </template>

@@ -41,6 +41,19 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 
+    # Evidence envelope retrieval + signer JWKS are runtime-plane
+    # (cycles-server), like reservations. Public endpoints; routed through
+    # the same proxy so the dashboard fetches them same-origin (the CSP
+    # connect-src 'self' otherwise blocks a cross-origin fetch).
+    location ~ ^/v1/(evidence(/|$)|\.well-known/cycles-jwks\.json$) {
+        resolver 127.0.0.11 valid=30s ipv6=off;
+        set $upstream ${RUNTIME_UPSTREAM};
+        proxy_pass $upstream$request_uri;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
     location /v1/ {
         resolver 127.0.0.11 valid=30s ipv6=off;
         set $upstream ${ADMIN_UPSTREAM};

@@ -15,7 +15,7 @@ import type { RowSelectBulkResponse } from '../utils/rowSelectBulkResult'
 import { generateIdempotencyKey } from '../utils/idempotencyKey'
 import type { WebhookBulkAction, WebhookBulkFilter } from '../types'
 import { useAuthStore } from '../stores/auth'
-import type { WebhookSubscription, WebhookCreateResponse, Tenant, WebhookSecurityConfig } from '../types'
+import type { WebhookSubscription, WebhookCreateRequest, WebhookCreateResponse, Tenant, WebhookSecurityConfig } from '../types'
 import { EVENT_TYPES } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import TenantLink from '../components/TenantLink.vue'
@@ -34,6 +34,8 @@ import BulkActionResultDialog from '../components/BulkActionResultDialog.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
+import WebhookAdvancedFields from '../components/WebhookAdvancedFields.vue'
+import { emptyWebhookAdvancedForm, webhookAdvancedToRequest, webhookAdvancedError } from '../utils/webhookAdvanced'
 import { writeClipboardJson } from '../utils/clipboard'
 import { useToast } from '../composables/useToast'
 import { useBulkActionPreview } from '../composables/useBulkActionPreview'
@@ -465,10 +467,12 @@ const showCreate = ref(false)
 const createLoading = ref(false)
 const createError = ref('')
 const createForm = ref({ url: '', name: '', event_types: [] as string[], tenant_id: '', scope_filter: '' })
+const createAdvanced = ref(emptyWebhookAdvancedForm())
 const createdWebhook = ref<WebhookCreateResponse | null>(null)
 
 function openCreate() {
   createForm.value = { url: '', name: '', event_types: [], tenant_id: '', scope_filter: '' }
+  createAdvanced.value = emptyWebhookAdvancedForm()
   createError.value = ''
   showCreate.value = true
 }
@@ -483,12 +487,15 @@ async function onSecretClose() {
 async function submitCreate() {
   createError.value = ''
   if (!createForm.value.event_types.length) { createError.value = 'Select at least one event type'; return }
+  const advError = webhookAdvancedError(createAdvanced.value)
+  if (advError) { createError.value = advError; return }
   createLoading.value = true
   try {
-    const body: Record<string, unknown> = { url: createForm.value.url, event_types: createForm.value.event_types }
+    const body: WebhookCreateRequest = { url: createForm.value.url, event_types: createForm.value.event_types }
     if (createForm.value.name) body.name = createForm.value.name
     if (createForm.value.scope_filter) body.scope_filter = createForm.value.scope_filter
-    const res = await createWebhook(body as any, createForm.value.tenant_id || undefined)
+    Object.assign(body, webhookAdvancedToRequest(createAdvanced.value))
+    const res = await createWebhook(body, createForm.value.tenant_id || undefined)
     createdWebhook.value = res
     showCreate.value = false
     toast.success('Webhook created')
@@ -1014,6 +1021,7 @@ const gridTemplate = computed(() =>
         <label for="cw-scope" class="form-label">Scope filter (optional)</label>
         <input id="cw-scope" v-model="createForm.scope_filter" class="form-input-mono" placeholder="tenant:acme/*" />
       </div>
+      <WebhookAdvancedFields :form="createAdvanced" id-prefix="cw-adv" mode="create" />
     </FormDialog>
 
     <SecretReveal

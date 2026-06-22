@@ -29,8 +29,9 @@ Operations-first dashboard for monitoring and managing the Cycles budget enforce
 | **Events** | Correlation-first investigation tool with expandable detail rows |
 | **API Keys** | Cross-tenant key list with masked IDs, permissions, status filters |
 | **Webhooks** | Subscription health (green/yellow/red) + delivery history |
-| **Reservations** | Hung-reservation force-release during incident response (runtime-plane admin-on-behalf-of) |
+| **Reservations** | Hung-reservation force-release during incident response (runtime-plane admin-on-behalf-of); committed/finalized columns, metadata detail, time-range + Subject filters |
 | **Audit** | Compliance query tool with CSV/JSON export (manual-only, no auto-refresh) |
+| **Evidence** | Retrieve + inspect a signed evidence envelope by id; signer-key resolution against the published JWK Set. Authenticated operator lookup — the underlying envelope retrieval is a public, content-addressed runtime API |
 
 ### Operational Actions
 
@@ -63,7 +64,7 @@ Tier 1 incident-response actions available directly from the dashboard (capabili
 | **Delete webhook** | Webhook detail | Permanent deletion with confirmation |
 | **Test webhook** | Webhook detail | Sends synthetic test event, shows result inline |
 | **Replay events** | Webhook detail | Re-deliver events for a time range |
-| **Force release reservation** | Reservations | Runtime-plane admin-on-behalf-of — pre-filled `[INCIDENT_FORCE_RELEASE]` reason for audit grep-ability |
+| **Force release reservation** | Reservations | Runtime-plane admin-on-behalf-of — pre-filled `[INCIDENT_FORCE_RELEASE]` reason for audit grep-ability; surfaces a "View evidence" link when the server emits a `cycles_evidence` reference |
 
 ## Architecture
 
@@ -73,7 +74,7 @@ src/
 ├── components/    # Reusable UI: Sidebar, PageHeader, StatusBadge, SortHeader, EmptyState, etc.
 ├── composables/   # usePolling, useSort, useDarkMode, useTerminalAwareList, useChartTheme
 ├── stores/        # Pinia: auth (introspect + capabilities)
-├── views/         # 10 route views (login, overview, budgets, events, api-keys, webhooks, audit, tenants + detail views)
+├── views/         # route views (login, overview, budgets, events, api-keys, webhooks, audit, tenants, reservations, evidence + detail views)
 └── types.ts       # TypeScript types matching governance spec schemas
 ```
 
@@ -97,9 +98,9 @@ npm install
 npm run dev
 ```
 
-Dashboard starts at `http://localhost:5173`. The Vite dev server splits the proxy:
-- `/v1/reservations*` → `localhost:7878` (cycles-server)
-- `/v1/*` (all others) → `localhost:7979` (cycles-server-admin)
+Dashboard starts at `http://localhost:5173`. The Vite dev server splits the proxy between the runtime and governance planes:
+- `/v1/reservations*`, `/v1/evidence*`, `/v1/.well-known/cycles-jwks.json` → `localhost:7878` (cycles-server, runtime plane)
+- `/v1/*` (everything else) → `localhost:7979` (cycles-server-admin, governance plane)
 
 The same routing split is mirrored in `default.conf.template` for the
 production container, where the two upstreams are configurable via the
@@ -168,6 +169,11 @@ The dashboard uses `AdminKeyAuth` exclusively (`X-Admin-API-Key` header). No ten
 | `POST /v1/admin/webhooks/{subscription_id}/test` | Webhook Detail | Send test event |
 | `POST /v1/admin/webhooks/{subscription_id}/replay` | Webhook Detail | Replay historical events |
 | `POST /v1/admin/budgets/fund` | Budget Detail | Adjust allocation (RESET operation) |
+| `GET /v1/reservations` | Reservations | Tenant-scoped list; supports `include=`, created/expires/finalized ranges, Subject filters |
+| `GET /v1/reservations/{id}` | Reservations | Detail incl. `committed_metadata` / reserve metadata + `evidence` projections (one-click "View evidence" links; needs cycles-server v0.1.25.37+) |
+| `POST /v1/reservations/{id}/release` | Reservations | Force-release; response `cycles_evidence` surfaces a "View evidence" link |
+| `GET /v1/evidence/{evidence_id}` | Evidence | Public signed-envelope retrieval (runtime plane) |
+| `GET /v1/.well-known/cycles-jwks.json` | Evidence | Signer JWK Set for signer-key resolution (runtime plane) |
 
 ## List conventions
 
@@ -313,7 +319,7 @@ ENV ADMIN_UPSTREAM=http://cycles-admin:7979 \
     RUNTIME_UPSTREAM=http://cycles-server:7878
 ```
 
-The nginx config handles SPA routing (`try_files $uri /index.html`) and reverse-proxies `/v1/` to the admin server (and `/v1/reservations/*` to the runtime server). It ships as an `envsubst` template so the `ADMIN_UPSTREAM` / `RUNTIME_UPSTREAM` upstreams can be retargeted at deploy time without rebuilding the image — see [OPERATIONS.md](OPERATIONS.md#reverse-proxy-wiring).
+The nginx config handles SPA routing (`try_files $uri /index.html`) and reverse-proxies `/v1/*` to the admin server, except the runtime-plane routes (`/v1/reservations/*`, `/v1/evidence/*`, `/v1/.well-known/cycles-jwks.json`) which go to the runtime server. It ships as an `envsubst` template so the `ADMIN_UPSTREAM` / `RUNTIME_UPSTREAM` upstreams can be retargeted at deploy time without rebuilding the image — see [OPERATIONS.md](OPERATIONS.md#reverse-proxy-wiring).
 
 ## Production Deployment
 
@@ -323,16 +329,24 @@ The nginx config handles SPA routing (`try_files $uri /index.html`) and reverse-
                      ┌─────────────┐
   Browser ──HTTPS──▶ │  TLS Proxy  │──HTTP──▶ Dashboard (nginx:80)
                      │ (Caddy/ALB) │                  │
-                     └─────────────┘           /v1/ proxy
-                                                      │
-                                               Admin Server (:7979)
-                                                      │
-                                                   Redis (:6379)
+                     └─────────────┘        /v1/ split-proxy
+                                              │              │
+              /v1/reservations, /v1/evidence, │              │ /v1/*
+              /v1/.well-known/cycles-jwks.json ▼              ▼ (everything else)
+                          Runtime Server (:7878)      Admin Server (:7979)
+                                      │                        │
+                                      └────────► Redis (:6379) ◄┘
 ```
 
-The dashboard is a static SPA served by nginx. API calls are reverse-proxied through the same nginx to the admin server. In production, a TLS-terminating proxy sits in front.
+The dashboard is a static SPA served by nginx. API calls are reverse-proxied through the same nginx to **two backend planes**: the **governance/admin server** (`:7979`, default — tenants, budgets, policies, webhooks, audit, introspect) and the **runtime server** (`:7878` — reservations, evidence, and the signer JWKS). Both must be reachable; the split is configured via `ADMIN_UPSTREAM` / `RUNTIME_UPSTREAM`. In production, a TLS-terminating proxy sits in front.
 
 ### docker-compose (production)
+
+This mirrors the canonical [`docker-compose.prod.yml`](docker-compose.prod.yml) —
+treat that file as the source of truth. The dashboard image bundles an nginx
+proxy that splits `/v1/*` between the **governance plane** (cycles-admin) and the
+**runtime plane** (cycles-server — reservations, evidence, JWKS), so **both**
+backends must be present and reachable.
 
 ```yaml
 services:
@@ -351,17 +365,23 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.53
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.63
     restart: unless-stopped
-    # No exposed ports — only accessible through Caddy
+    # No exposed ports — only accessible through Caddy. nginx proxies
+    # /v1/* to both planes; override the upstreams only for split hosts.
+    environment:
+      ADMIN_UPSTREAM: ${ADMIN_UPSTREAM:-http://cycles-admin:7979}
+      RUNTIME_UPSTREAM: ${RUNTIME_UPSTREAM:-http://cycles-server:7878}
     depends_on:
       cycles-admin:
+        condition: service_healthy
+      cycles-server:
         condition: service_healthy
     networks:
       - cycles
 
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.37
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.41
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
@@ -376,6 +396,48 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - cycles
+
+  # Runtime plane — serves /v1/reservations, /v1/evidence, and the signer
+  # JWKS the dashboard's Reservations + Evidence views consume. Pinned to
+  # .37: .36+ surfaces reservation committed/finalized/metadata, .37+ adds
+  # the include=evidence projection (reservation->evidence links). Older
+  # versions degrade gracefully (fields omitted, no links).
+  cycles-server:
+    image: ghcr.io/runcycles/cycles-server:0.1.25.37
+    restart: unless-stopped
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:?ADMIN_API_KEY must be set}
+      DASHBOARD_CORS_ORIGIN: ${DASHBOARD_ORIGIN:-https://admin.example.com}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7878/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - cycles
+
+  # Webhook-delivery worker (consumes events from Redis, fans out to
+  # subscriber endpoints).
+  cycles-events:
+    image: ghcr.io/runcycles/cycles-server-events:0.1.25.14
+    restart: unless-stopped
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:-}
     depends_on:
       redis:
         condition: service_healthy
@@ -429,7 +491,7 @@ docker compose -f docker-compose.prod.yml up -d
 | Concern | Development | Production |
 |---------|------------|------------|
 | **Dashboard URL** | `http://localhost:5173` | `https://admin.example.com` |
-| **API proxy** | Vite dev proxy → `localhost:7979` | nginx → `cycles-admin:7979` |
+| **API proxy** | Vite dev proxy → `localhost:7979` (admin) + `localhost:7878` (runtime: reservations/evidence/JWKS) | nginx → `cycles-admin:7979` + `cycles-server:7878` |
 | **TLS** | None (local only) | Required — admin key in headers |
 | **Admin key** | Any test value | Strong random key, rotated periodically |
 | **Redis password** | Empty (default) | Set via `REDIS_PASSWORD` |
@@ -523,8 +585,8 @@ All production assets include Subresource Integrity (SRI) hashes via `vite-plugi
 | `REDIS_PASSWORD` | Recommended | (empty) | Redis authentication password |
 | `WEBHOOK_SECRET_ENCRYPTION_KEY` | Recommended | (empty) | AES-256-GCM key for webhook signing secrets at rest |
 | `DASHBOARD_CORS_ORIGIN` | Dev only | `http://localhost:5173` | CORS origin — only needed when browser calls admin server directly (not via nginx proxy) |
-| `ADMIN_UPSTREAM` | No | `http://cycles-admin:7979` | Governance-plane upstream for the dashboard container's bundled nginx proxy (`/v1/*` except reservations) |
-| `RUNTIME_UPSTREAM` | No | `http://cycles-server:7878` | Runtime-plane upstream for the bundled nginx proxy (`/v1/reservations/*`) |
+| `ADMIN_UPSTREAM` | No | `http://cycles-admin:7979` | Governance-plane upstream for the dashboard container's bundled nginx proxy (`/v1/*` except the runtime routes below) |
+| `RUNTIME_UPSTREAM` | No | `http://cycles-server:7878` | Runtime-plane upstream for the bundled nginx proxy (`/v1/reservations/*`, `/v1/evidence/*`, `/v1/.well-known/cycles-jwks.json`) |
 
 The dashboard itself has no application-level configuration — it's a static SPA. The two backend upstreams the bundled nginx proxy forwards to are configured via:
 - **Development:** Vite proxy in `vite.config.ts` (defaults: `localhost:7979` admin / `localhost:7878` runtime)

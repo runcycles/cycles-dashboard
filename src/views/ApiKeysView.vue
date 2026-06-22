@@ -135,7 +135,17 @@ function openCreate() {
 const editingKey = ref<KeyWithTenant | null>(null)
 const editLoading = ref(false)
 const editError = ref('')
-const editForm = ref({ name: '', permissions: [] as string[], scope_filter: '' })
+const editForm = ref({ name: '', permissions: [] as string[], scope_filter: '', expires_at: '' })
+
+// ISO 8601 → datetime-local input value (local time, minute precision).
+// Used to pre-fill the edit form's expiry picker from a stored key.
+function isoToLocalInput(iso: string | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
 
 async function copyKeyId(id: string) {
   try {
@@ -168,6 +178,7 @@ function openEdit(k: KeyWithTenant) {
     name: k.name || '',
     permissions: kept,
     scope_filter: k.scope_filter?.join(', ') || '',
+    expires_at: isoToLocalInput(k.expires_at),
   }
   editError.value = ''
   editingKey.value = k
@@ -229,6 +240,15 @@ async function submitEdit() {
       : []
     if (!sameStringSet(scopes, original.scope_filter)) {
       body.scope_filter = scopes
+    }
+    // expires_at: the picker is minute-precision, so compare the current
+    // input string against the prefilled one (also minute-precision) rather
+    // than regenerated-ISO vs the original full ISO — otherwise a rename-only
+    // save would silently truncate a key expiring at e.g. 12:34:56Z down to
+    // 12:34:00Z. Only PATCH when the operator actually changed the control;
+    // blank = no change (the form can't clear an existing expiry).
+    if (editForm.value.expires_at && editForm.value.expires_at !== isoToLocalInput(original.expires_at)) {
+      body.expires_at = new Date(editForm.value.expires_at).toISOString()
     }
     if (Object.keys(body).length === 0) {
       // Nothing to submit — close the dialog quietly.
@@ -751,6 +771,11 @@ function closePermsViewer() { viewingPermsFor.value = null }
       <div>
         <label for="ek-scope" class="form-label">Scope filter (comma-separated)</label>
         <input id="ek-scope" v-model="editForm.scope_filter" class="form-input-mono" />
+      </div>
+      <div>
+        <label for="ek-expires" class="form-label">Expires at</label>
+        <input id="ek-expires" v-model="editForm.expires_at" type="datetime-local" class="form-input" />
+        <p class="muted-sm mt-0.5">Leave unchanged to keep the current expiry. Clearing the field does not remove an existing expiry.</p>
       </div>
     </FormDialog>
 

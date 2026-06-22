@@ -15,6 +15,83 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.63] — 2026-06-22
+
+### Added
+
+- **Link reservations to their evidence (no copy-paste).** The reservation
+  detail dialog now shows one-click **View reserve / commit / release
+  evidence** links straight to the Evidence viewer, and the list `include`
+  toggle requests the new `evidence` projection. Consumes the runtime
+  `evidence` field added in cycles-protocol v0.1.25.9 — requires
+  **cycles-server v0.1.25.37+** (older servers simply omit the field and no
+  links render).
+
+## [0.1.25.62] — 2026-06-22
+
+Gap-closure release — surfaces runtime/admin API capability that shipped in the
+servers but had no dashboard UI. No governance-admin spec-badge change (the
+reservation/evidence surface lives in `cycles-protocol-v0.yaml`; the policy /
+webhook config was already in `cycles-governance-admin-v0.1.25.yaml`).
+
+### Added
+
+- **Reservations: committed & finalized surface.** The Reservations view now
+  shows `committed` and `finalized_at_ms` columns and a read-only detail dialog
+  with reserve-time and commit-time metadata (`include=metadata,committed_metadata`).
+  Requires cycles-server v0.1.25.8+ (older servers simply omit the fields).
+- **Reservations: advanced filters.** Created / expires / finalized time-range
+  pickers and Subject filters (workspace / app / workflow / agent / toolset),
+  under an "Advanced filters" disclosure. Additive query params — ignored by
+  servers that don't support them.
+- **Policy enforcement config.** Create/Edit Policy now exposes `caps`
+  (token/step caps, tool allow/deny lists, cooldown), `rate_limits`,
+  `reservation_ttl_override`, and the `effective_from`/`effective_until` window.
+- **Webhook alerting & retry config.** Create/Edit Webhook now exposes
+  `thresholds` (utilization / burn-rate / denial / expiry / auth-failure rates)
+  and `retry_policy` (previously read-only JSON).
+- **API key & tenant fields.** API-key edit can adjust `expires_at`; tenant
+  create/edit exposes `max_reservation_extensions` and `reservation_expiry_policy`.
+- **Evidence viewer.** New **Evidence** page retrieves a signed evidence
+  envelope by id (`GET /v1/evidence/{id}`), renders the envelope, and resolves
+  the signer key against the published JWK Set. A force-release now surfaces a
+  "View evidence" deep link when the server emits one. Routed through the
+  runtime upstream (`RUNTIME_UPSTREAM`) — see [`OPERATIONS.md`](OPERATIONS.md#reverse-proxy-wiring).
+
+### UX details
+
+- Reservation Subject text filters are debounced (one fetch after typing stops,
+  not per keystroke); the Advanced-filters toggle shows an active-filter count
+  and a **Clear** button.
+- Policy/webhook advanced edit dialogs state in-line that clearing a field does
+  not remove existing config (replacement semantics). The webhook "blank uses
+  server defaults" hint now only shows in create mode.
+- Evidence lookup wording for a 404 covers both "not found" and "still being
+  signed" (with Retry + check-the-ID guidance), instead of implying it is always
+  transiently pending.
+
+### Deployment
+
+- **Runtime-plane baseline moved to `cycles-server:0.1.25.36`** (both
+  `docker-compose.yml` and `docker-compose.prod.yml`). `.36` surfaces reservation
+  `committed`/`finalized_at_ms`/metadata + the `include=` projection and serves
+  `/v1/evidence` + the signer JWKS — so the new Reservations/Evidence surface
+  works against the shipped stack. Older runtime servers still work (fields
+  omitted, evidence 404).
+- The production compose example in `README.md` now includes the runtime plane
+  (`cycles-server` + `cycles-events`) and the dashboard's `ADMIN_UPSTREAM` /
+  `RUNTIME_UPSTREAM` wiring — required for `/v1/reservations`, `/v1/evidence`,
+  and JWKS. `cycles-server-admin` bumped to `0.1.25.39` to match the baseline.
+
+### Known limitation
+
+- Policy/webhook advanced editors support setting and adjusting config; emptying
+  a previously-set field leaves the server value unchanged (replacement
+  semantics omit absent fields) — the edit dialogs now say so. Full Ed25519
+  signature verification in the Evidence viewer is not yet performed in-browser
+  (signer-key resolution against the JWK Set, validated at the envelope's
+  issuance time).
+
 ## [0.1.25.61] — 2026-05-31
 
 Deployment-only change — no spec change, no admin-API surface delta, no client behaviour change.
