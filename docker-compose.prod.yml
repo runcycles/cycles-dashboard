@@ -14,7 +14,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.62
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.63
     restart: unless-stopped
     # The image bundles an nginx reverse proxy that splits /v1/* traffic
     # between the two planes. These default to the compose service names,

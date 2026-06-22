@@ -210,7 +210,7 @@ watch(() => route.query.id, (raw) => {
           @click="fetchEvidence"
         >{{ loading ? 'Fetching…' : 'Fetch' }}</button>
       </div>
-      <p class="muted-sm mt-1">Evidence is public and content-addressed — the id alone retrieves the envelope.</p>
+      <p class="muted-sm mt-1">The envelope is content-addressed and served by an unauthenticated API — the id alone retrieves it (anyone can verify it offline). This page is an operator convenience inside the authenticated dashboard.</p>
     </div>
 
     <div v-if="loading" class="card p-4"><LoadingSkeleton /></div>

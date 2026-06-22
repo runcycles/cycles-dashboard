@@ -241,13 +241,14 @@ async function submitEdit() {
     if (!sameStringSet(scopes, original.scope_filter)) {
       body.scope_filter = scopes
     }
-    // expires_at: compare normalized ISO against the original. Sending it
-    // only when changed avoids re-stamping an unchanged expiry. The form
-    // can extend/shorten the expiry but does not clear it (blank = no
-    // change) — matching the other edit dialogs.
-    const newExpiry = editForm.value.expires_at ? new Date(editForm.value.expires_at).toISOString() : ''
-    if (newExpiry && newExpiry !== (original.expires_at ?? '')) {
-      body.expires_at = newExpiry
+    // expires_at: the picker is minute-precision, so compare the current
+    // input string against the prefilled one (also minute-precision) rather
+    // than regenerated-ISO vs the original full ISO — otherwise a rename-only
+    // save would silently truncate a key expiring at e.g. 12:34:56Z down to
+    // 12:34:00Z. Only PATCH when the operator actually changed the control;
+    // blank = no change (the form can't clear an existing expiry).
+    if (editForm.value.expires_at && editForm.value.expires_at !== isoToLocalInput(original.expires_at)) {
+      body.expires_at = new Date(editForm.value.expires_at).toISOString()
     }
     if (Object.keys(body).length === 0) {
       // Nothing to submit — close the dialog quietly.

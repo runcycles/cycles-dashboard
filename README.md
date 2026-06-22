@@ -31,7 +31,7 @@ Operations-first dashboard for monitoring and managing the Cycles budget enforce
 | **Webhooks** | Subscription health (green/yellow/red) + delivery history |
 | **Reservations** | Hung-reservation force-release during incident response (runtime-plane admin-on-behalf-of); committed/finalized columns, metadata detail, time-range + Subject filters |
 | **Audit** | Compliance query tool with CSV/JSON export (manual-only, no auto-refresh) |
-| **Evidence** | Retrieve + inspect a signed evidence envelope by id; signer-key resolution against the published JWK Set (runtime-plane, public) |
+| **Evidence** | Retrieve + inspect a signed evidence envelope by id; signer-key resolution against the published JWK Set. Authenticated operator lookup — the underlying envelope retrieval is a public, content-addressed runtime API |
 
 ### Operational Actions
 
@@ -405,7 +405,7 @@ services:
   # required for reservation committed/finalized/metadata; older versions
   # degrade gracefully (fields omitted).
   cycles-server:
-    image: ghcr.io/runcycles/cycles-server:0.1.25.36
+    image: ghcr.io/runcycles/cycles-server:0.1.25.37
     restart: unless-stopped
     environment:
       REDIS_HOST: redis

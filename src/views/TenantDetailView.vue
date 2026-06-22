@@ -398,11 +398,13 @@ async function submitEditKey() {
     if (!sameKeyStringSet(scopes, original.scope_filter)) {
       body.scope_filter = scopes
     }
-    // expires_at: send only when changed (normalized to ISO). Blank leaves
-    // the existing expiry unchanged — same semantics as ApiKeysView.
-    const newExpiry = editKeyForm.value.expires_at ? new Date(editKeyForm.value.expires_at).toISOString() : ''
-    if (newExpiry && newExpiry !== (original.expires_at ?? '')) {
-      body.expires_at = newExpiry
+    // expires_at: compare the minute-precision input against the prefilled
+    // value (not regenerated-ISO vs original full ISO) so a rename-only save
+    // doesn't silently truncate the original's seconds. Only send on a real
+    // change; blank leaves the existing expiry unchanged. (Same fix as
+    // ApiKeysView.)
+    if (editKeyForm.value.expires_at && editKeyForm.value.expires_at !== keyIsoToLocalInput(original.expires_at)) {
+      body.expires_at = new Date(editKeyForm.value.expires_at).toISOString()
     }
     if (Object.keys(body).length === 0) {
       editingKey.value = null
