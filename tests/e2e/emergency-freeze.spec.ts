@@ -37,7 +37,12 @@ test.beforeAll(async () => {
       allocated: { unit: 'USD_MICROCENTS', amount: 5_000_000 },
     },
   })
-  if (!res.ok()) {
+  // 409 DUPLICATE_RESOURCE means the budget already exists — from a prior
+  // attempt of this same run (Playwright re-runs beforeAll on retry) or a
+  // re-used seed tenant. Either way the precondition (a 2nd budget exists)
+  // is satisfied, so treat it as success. Without this, any first-attempt
+  // failure poisons every retry's setup and the test can never self-heal.
+  if (!res.ok() && res.status() !== 409) {
     throw new Error(`emergency-freeze setup: create 2nd budget failed: ${res.status()} ${await res.text()}`)
   }
   await ctx.dispose()
@@ -49,13 +54,11 @@ test('Emergency Freeze button sequentially freezes every ACTIVE budget for the t
   await loginAsAdmin(page)
   await page.goto(`/tenants/${fx.tenantId}`)
 
-  // Wait for the tenant detail load (tenant + budgets + keys + policies).
-  await page.waitForResponse(
-    (r) =>
-      r.url().includes(`/v1/admin/tenants/${fx.tenantId}`) &&
-      r.request().method() === 'GET',
-    { timeout: 10_000 },
-  )
+  // No raw waitForResponse for the tenant-detail GET here: registering it
+  // *after* goto() races the SPA's fetch (if the response lands first the
+  // wait hangs to its timeout — the original source of this test's flake).
+  // The button-visible assertion below already waits for the tenant +
+  // budgets to load and render, so it's both sufficient and race-free.
 
   // The Emergency Freeze button is only visible when there are N>0
   // ACTIVE budgets. Count is rendered in the button label: e.g.
