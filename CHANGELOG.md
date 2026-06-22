@@ -58,6 +58,19 @@ webhook config was already in `cycles-governance-admin-v0.1.25.yaml`).
   signed" (with Retry + check-the-ID guidance), instead of implying it is always
   transiently pending.
 
+### Deployment
+
+- **Runtime-plane baseline moved to `cycles-server:0.1.25.36`** (both
+  `docker-compose.yml` and `docker-compose.prod.yml`). `.36` surfaces reservation
+  `committed`/`finalized_at_ms`/metadata + the `include=` projection and serves
+  `/v1/evidence` + the signer JWKS — so the new Reservations/Evidence surface
+  works against the shipped stack. Older runtime servers still work (fields
+  omitted, evidence 404).
+- The production compose example in `README.md` now includes the runtime plane
+  (`cycles-server` + `cycles-events`) and the dashboard's `ADMIN_UPSTREAM` /
+  `RUNTIME_UPSTREAM` wiring — required for `/v1/reservations`, `/v1/evidence`,
+  and JWKS. `cycles-server-admin` bumped to `0.1.25.39` to match the baseline.
+
 ### Known limitation
 
 - Policy/webhook advanced editors support setting and adjusting config; emptying

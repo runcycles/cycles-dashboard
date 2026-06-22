@@ -584,6 +584,11 @@ const editPolicyForm = ref<{
   commit_overage_policy: string
 }>({ name: '', description: '', priority: '', commit_overage_policy: '' })
 const editPolicyAdvanced = ref(emptyPolicyAdvancedForm())
+// Frozen baseline of the advanced form at open — used to diff so an
+// unchanged advanced section never enters the PATCH body (mirrors the
+// webhook edit flow). Without this, editing only the name would re-send
+// caps/rate_limits/ttl, which the server may treat as replacement.
+const editPolicyAdvancedInitial = ref('')
 // Open the advanced section expanded when the policy already carries any
 // of that config so it's not hidden behind a disclosure the operator
 // might not notice.
@@ -598,6 +603,7 @@ function openEditPolicy(p: Policy) {
     commit_overage_policy: '',
   }
   editPolicyAdvanced.value = policyToAdvancedForm(p)
+  editPolicyAdvancedInitial.value = JSON.stringify(editPolicyAdvanced.value)
   editPolicyHasAdvanced.value = !!(p.caps || p.rate_limits || p.reservation_ttl_override || p.effective_from || p.effective_until)
   editPolicyError.value = ''
   showEditPolicy.value = true
@@ -619,11 +625,14 @@ async function submitEditPolicy() {
   }
   if (editPolicyForm.value.commit_overage_policy) body.commit_overage_policy = editPolicyForm.value.commit_overage_policy
   // Advanced enforcement uses spec replacement semantics: a present field
-  // overwrites. The editor is pre-filled from the policy, so re-sending is
-  // idempotent. NOTE: emptying a previously-set field omits it (server
-  // leaves it unchanged) — the form supports setting/adjusting, not
-  // clearing advanced config (documented in AUDIT.md).
-  Object.assign(body, policyAdvancedToRequest(editPolicyAdvanced.value))
+  // overwrites. Only touch the body when the advanced section actually
+  // changed, so a name-only edit doesn't re-send (and potentially clobber)
+  // caps/rate_limits/ttl. NOTE: emptying a previously-set field omits it
+  // (server leaves it unchanged) — the form sets/adjusts, it doesn't clear
+  // advanced config (surfaced in the edit dialog + documented in AUDIT.md).
+  if (JSON.stringify(editPolicyAdvanced.value) !== editPolicyAdvancedInitial.value) {
+    Object.assign(body, policyAdvancedToRequest(editPolicyAdvanced.value))
+  }
   if (Object.keys(body).length === 0) {
     editPolicyError.value = 'No changes to save'
     return

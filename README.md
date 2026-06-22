@@ -340,6 +340,12 @@ The dashboard is a static SPA served by nginx. API calls are reverse-proxied thr
 
 ### docker-compose (production)
 
+This mirrors the canonical [`docker-compose.prod.yml`](docker-compose.prod.yml) —
+treat that file as the source of truth. The dashboard image bundles an nginx
+proxy that splits `/v1/*` between the **governance plane** (cycles-admin) and the
+**runtime plane** (cycles-server — reservations, evidence, JWKS), so **both**
+backends must be present and reachable.
+
 ```yaml
 services:
   caddy:
@@ -359,15 +365,21 @@ services:
   dashboard:
     image: ghcr.io/runcycles/cycles-dashboard:0.1.25.62
     restart: unless-stopped
-    # No exposed ports — only accessible through Caddy
+    # No exposed ports — only accessible through Caddy. nginx proxies
+    # /v1/* to both planes; override the upstreams only for split hosts.
+    environment:
+      ADMIN_UPSTREAM: ${ADMIN_UPSTREAM:-http://cycles-admin:7979}
+      RUNTIME_UPSTREAM: ${RUNTIME_UPSTREAM:-http://cycles-server:7878}
     depends_on:
       cycles-admin:
+        condition: service_healthy
+      cycles-server:
         condition: service_healthy
     networks:
       - cycles
 
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.37
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.39
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
@@ -382,6 +394,47 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - cycles
+
+  # Runtime plane — serves /v1/reservations, /v1/evidence, and the signer
+  # JWKS the dashboard's Reservations + Evidence views consume. .36+ is
+  # required for reservation committed/finalized/metadata; older versions
+  # degrade gracefully (fields omitted).
+  cycles-server:
+    image: ghcr.io/runcycles/cycles-server:0.1.25.36
+    restart: unless-stopped
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:?ADMIN_API_KEY must be set}
+      DASHBOARD_CORS_ORIGIN: ${DASHBOARD_ORIGIN:-https://admin.example.com}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7878/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - cycles
+
+  # Webhook-delivery worker (consumes events from Redis, fans out to
+  # subscriber endpoints).
+  cycles-events:
+    image: ghcr.io/runcycles/cycles-server-events:0.1.25.11
+    restart: unless-stopped
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:-}
     depends_on:
       redis:
         condition: service_healthy

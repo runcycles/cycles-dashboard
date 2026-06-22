@@ -14,7 +14,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.42
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.62
     restart: unless-stopped
     # The image bundles an nginx reverse proxy that splits /v1/* traffic
     # between the two planes. These default to the compose service names,
@@ -33,9 +33,13 @@ services:
 
   cycles-server:
     # Runtime-plane server. Release cadence is independent of dashboard +
-    # cycles-server-admin — this tag intentionally lags the others. Only
-    # bump when a new runtime-plane feature requires it.
-    image: ghcr.io/runcycles/cycles-server:0.1.25.17
+    # cycles-server-admin. Bumped to .36 for dashboard 0.1.25.62: that is
+    # the version that surfaces reservation committed/finalized/metadata +
+    # the include= projection on listReservations, and serves /v1/evidence
+    # + the signer JWKS the Evidence view consumes. Older runtime servers
+    # still work — the dashboard degrades gracefully (fields omitted, 404
+    # on evidence) — but the new Reservations/Evidence surface needs .36+.
+    image: ghcr.io/runcycles/cycles-server:0.1.25.36
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
