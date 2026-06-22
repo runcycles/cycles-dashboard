@@ -277,7 +277,10 @@ async function submitEditTenant() {
     if (editTenantForm.value.default_commit_overage_policy) body.default_commit_overage_policy = editTenantForm.value.default_commit_overage_policy
     if (editTenantForm.value.default_reservation_ttl_ms) body.default_reservation_ttl_ms = Number(editTenantForm.value.default_reservation_ttl_ms)
     if (editTenantForm.value.max_reservation_ttl_ms) body.max_reservation_ttl_ms = Number(editTenantForm.value.max_reservation_ttl_ms)
-    if (editTenantForm.value.max_reservation_extensions) body.max_reservation_extensions = Number(editTenantForm.value.max_reservation_extensions)
+    // Explicit blank check, not a truthy guard: the type=number v-model
+    // coerces an entered 0 to the number 0 (falsy), and 0 is the natural
+    // "disable extensions" value an operator must be able to set.
+    if (String(editTenantForm.value.max_reservation_extensions).trim() !== '') body.max_reservation_extensions = Number(editTenantForm.value.max_reservation_extensions)
     if (editTenantForm.value.reservation_expiry_policy) body.reservation_expiry_policy = editTenantForm.value.reservation_expiry_policy
     await updateTenant(id, body as any)
     toast.success('Tenant updated')

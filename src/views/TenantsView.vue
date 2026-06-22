@@ -550,7 +550,10 @@ async function submitCreate() {
     if (createForm.value.default_commit_overage_policy) body.default_commit_overage_policy = createForm.value.default_commit_overage_policy
     if (createForm.value.default_reservation_ttl_ms) body.default_reservation_ttl_ms = Number(createForm.value.default_reservation_ttl_ms)
     if (createForm.value.max_reservation_ttl_ms) body.max_reservation_ttl_ms = Number(createForm.value.max_reservation_ttl_ms)
-    if (createForm.value.max_reservation_extensions) body.max_reservation_extensions = Number(createForm.value.max_reservation_extensions)
+    // Explicit blank check, not a truthy guard: the type=number v-model
+    // coerces an entered 0 to the number 0 (falsy), and 0 is the natural
+    // "disable extensions" value an operator must be able to set.
+    if (String(createForm.value.max_reservation_extensions).trim() !== '') body.max_reservation_extensions = Number(createForm.value.max_reservation_extensions)
     if (createForm.value.reservation_expiry_policy) body.reservation_expiry_policy = createForm.value.reservation_expiry_policy
     await createTenant(body as any)
     showCreate.value = false
