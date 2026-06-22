@@ -46,12 +46,26 @@ webhook config was already in `cycles-governance-admin-v0.1.25.yaml`).
   "View evidence" deep link when the server emits one. Routed through the
   runtime upstream (`RUNTIME_UPSTREAM`) — see [`OPERATIONS.md`](OPERATIONS.md#reverse-proxy-wiring).
 
+### UX details
+
+- Reservation Subject text filters are debounced (one fetch after typing stops,
+  not per keystroke); the Advanced-filters toggle shows an active-filter count
+  and a **Clear** button.
+- Policy/webhook advanced edit dialogs state in-line that clearing a field does
+  not remove existing config (replacement semantics). The webhook "blank uses
+  server defaults" hint now only shows in create mode.
+- Evidence lookup wording for a 404 covers both "not found" and "still being
+  signed" (with Retry + check-the-ID guidance), instead of implying it is always
+  transiently pending.
+
 ### Known limitation
 
 - Policy/webhook advanced editors support setting and adjusting config; emptying
   a previously-set field leaves the server value unchanged (replacement
-  semantics omit absent fields). Full Ed25519 signature verification in the
-  Evidence viewer is not yet performed in-browser (signer-key resolution only).
+  semantics omit absent fields) — the edit dialogs now say so. Full Ed25519
+  signature verification in the Evidence viewer is not yet performed in-browser
+  (signer-key resolution against the JWK Set, validated at the envelope's
+  issuance time).
 
 ## [0.1.25.61] — 2026-05-31
 

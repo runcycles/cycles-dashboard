@@ -62,8 +62,10 @@ async function fetchEvidence() {
     envelope.value = await getEvidence(id)
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) {
-      // Envelope is signed + stored asynchronously after the decision, so
-      // a 404 right after a force-release is expected and transient.
+      // A 404 is ambiguous: either the id is wrong/old, or the envelope
+      // is still being signed (stored asynchronously after the decision).
+      // We can't distinguish the two from the status alone, so the empty
+      // state covers both and offers retry + "check the id".
       notYetAvailable.value = true
     } else {
       error.value = toMessage(e)
@@ -175,8 +177,8 @@ onMounted(() => { if (evidenceId.value) fetchEvidence() })
          decision, so a just-created id may not be available yet. -->
     <div v-else-if="notYetAvailable" class="card p-6">
       <EmptyState
-        message="Evidence not available yet"
-        hint="The envelope is signed and stored asynchronously after the decision. If you just triggered the action, wait a moment and retry."
+        message="Not found, or not available yet"
+        hint="A 404 means either the id doesn't match a stored envelope, or the envelope is still being signed (it's stored asynchronously after the decision). If you just triggered the action, wait a moment and retry; otherwise double-check the evidence ID."
       />
       <div class="flex justify-center mt-3">
         <button class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 cursor-pointer" @click="fetchEvidence">Retry</button>

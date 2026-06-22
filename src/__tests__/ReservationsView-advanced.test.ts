@@ -98,4 +98,45 @@ describe('ReservationsView — advanced filters', () => {
     )
     expect(withInclude).toBeDefined()
   })
+
+  it('debounces subject-filter typing (no per-keystroke fetch)', async () => {
+    const { default: ReservationsView } = await import('../views/ReservationsView.vue')
+    const w = mount(ReservationsView, stdMount())
+    await flushPromises()
+    await w.find('[data-testid="res-advanced-toggle"]').trigger('click')
+
+    const hasWorkspaceCall = () => listReservationsMock.mock.calls.some(
+      (args) => (args[1] as { workspace?: string })?.workspace === 'prod',
+    )
+
+    await w.find('#res-subj-workspace').setValue('prod')
+    await flushPromises()
+    // Immediately after typing, the debounced reload has not fired yet.
+    expect(hasWorkspaceCall()).toBe(false)
+
+    // After the debounce window, exactly one reload carries the filter.
+    await new Promise((r) => setTimeout(r, 350))
+    await flushPromises()
+    expect(hasWorkspaceCall()).toBe(true)
+  })
+
+  it('Clear resets advanced filters and the affordance appears only when active', async () => {
+    const { default: ReservationsView } = await import('../views/ReservationsView.vue')
+    const w = mount(ReservationsView, stdMount())
+    await flushPromises()
+    await w.find('[data-testid="res-advanced-toggle"]').trigger('click')
+
+    // No active filters → no Clear button.
+    expect(w.find('[data-testid="res-clear-filters"]').exists()).toBe(false)
+
+    await w.find('[data-testid="res-include-metadata"]').setValue(true)
+    await flushPromises()
+    const clear = w.find('[data-testid="res-clear-filters"]')
+    expect(clear.exists()).toBe(true)
+
+    await clear.trigger('click')
+    await flushPromises()
+    expect((w.find('[data-testid="res-include-metadata"]').element as HTMLInputElement).checked).toBe(false)
+    expect(w.find('[data-testid="res-clear-filters"]').exists()).toBe(false)
+  })
 })

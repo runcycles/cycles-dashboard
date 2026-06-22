@@ -1387,7 +1387,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
           <option v-for="p in COMMIT_OVERAGE_POLICIES" :key="p" :value="p">{{ p }}</option>
         </select>
       </div>
-      <PolicyAdvancedFields :form="createPolicyAdvanced" id-prefix="cp-adv" />
+      <PolicyAdvancedFields :form="createPolicyAdvanced" id-prefix="cp-adv" mode="create" />
     </FormDialog>
 
     <!-- v0.1.25.20: Edit Policy -->
@@ -1411,7 +1411,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
           <option v-for="p in COMMIT_OVERAGE_POLICIES" :key="p" :value="p">{{ p }}</option>
         </select>
       </div>
-      <PolicyAdvancedFields :form="editPolicyAdvanced" :start-open="editPolicyHasAdvanced" id-prefix="ep-adv" />
+      <PolicyAdvancedFields :form="editPolicyAdvanced" :start-open="editPolicyHasAdvanced" id-prefix="ep-adv" mode="edit" />
     </FormDialog>
   </div>
 </template>

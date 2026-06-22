@@ -12,6 +12,10 @@ const props = defineProps<{
   form: WebhookAdvancedForm
   startOpen?: boolean
   idPrefix?: string
+  // 'create' → blank fields fall back to server defaults. 'edit' → blank
+  // leaves the existing value unchanged (PATCH omits absent fields); the
+  // helper copy switches accordingly so it isn't misleading.
+  mode?: 'create' | 'edit'
 }>()
 
 const open = ref(!!props.startOpen)
@@ -34,7 +38,14 @@ const pfx = props.idPrefix ?? 'wh-adv'
     <div v-if="open" class="mt-3 space-y-4">
       <fieldset class="space-y-2">
         <legend class="form-label">Thresholds</legend>
-        <p class="muted-sm">Only relevant when subscribed to threshold / rate-spike event types. Blank fields use server defaults.</p>
+        <p class="muted-sm">
+          Only relevant when subscribed to threshold / rate-spike event types.
+          <template v-if="mode === 'edit'">
+            Blank fields are left unchanged — clearing a field here does not reset
+            it to the server default (use the API to reset).
+          </template>
+          <template v-else>Blank fields use server defaults.</template>
+        </p>
         <div>
           <label :for="`${pfx}-util`" class="form-label">Budget utilization (fractions 0–1, comma-separated)</label>
           <input :id="`${pfx}-util`" v-model="form.budget_utilization" class="form-input-mono" placeholder="0.8, 0.95, 1.0" />

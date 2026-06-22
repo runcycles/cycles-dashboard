@@ -1243,7 +1243,7 @@ watch(exportError, (v) => { if (v) error.value = v })
           <span v-for="k in Object.keys(webhook.headers)" :key="k" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs font-mono">{{ k }}: ********</span>
         </div>
       </div>
-      <WebhookAdvancedFields :form="editAdvanced" :start-open="editAdvancedHasConfig" id-prefix="ew-adv" />
+      <WebhookAdvancedFields :form="editAdvanced" :start-open="editAdvancedHasConfig" id-prefix="ew-adv" mode="edit" />
     </FormDialog>
   </div>
 </template>

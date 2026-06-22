@@ -16,6 +16,9 @@ const props = defineProps<{
   // carries advanced config so it's visible without a click).
   startOpen?: boolean
   idPrefix?: string
+  // 'edit' surfaces a note that clearing a field here does not remove
+  // existing config (PATCH replacement omits absent fields).
+  mode?: 'create' | 'edit'
 }>()
 
 const open = ref(!!props.startOpen)
@@ -36,6 +39,11 @@ const pfx = props.idPrefix ?? 'pol-adv'
     </button>
 
     <div v-if="open" class="mt-3 space-y-4">
+      <p v-if="mode === 'edit'" class="text-xs rounded px-3 py-2 bg-amber-50 text-amber-800 border border-amber-200">
+        Editing updates the fields you change. Clearing a field here does
+        <strong>not</strong> remove existing config — the save omits empty fields,
+        so the server keeps the previous value. Use the API to clear a cap or limit.
+      </p>
       <fieldset class="space-y-2">
         <legend class="form-label">Caps</legend>
         <div class="grid gap-3 sm:grid-cols-3">

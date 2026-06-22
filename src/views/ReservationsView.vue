@@ -16,6 +16,7 @@ import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { usePolling } from '../composables/usePolling'
+import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { POLL_FAST_MS } from '../composables/pollingConstants'
 import { useSort } from '../composables/useSort'
 import { useListExport } from '../composables/useListExport'
@@ -121,6 +122,37 @@ const subjToolset = ref('')
 // Opt-in metadata projection. Off by default — most triage doesn't need
 // it and it keeps list payloads lean.
 const includeMetadata = ref(false)
+
+// Subject filters are free-text exact-match — debounce the reload so a
+// typed value like "billing" fires one fetch after typing stops, not one
+// per keystroke (which flickered the table and hammered the backend). The
+// discrete controls (status / include / time-range pickers) re-query
+// immediately since they change in one action.
+const subjectKey = computed(() =>
+  [subjWorkspace.value, subjApp.value, subjWorkflow.value, subjAgent.value, subjToolset.value].join(''),
+)
+const debouncedSubjectKey = useDebouncedRef(subjectKey, 300)
+
+// Any advanced filter set? Drives the "Clear" affordance + a count badge
+// so the operator can see (and undo) a filter that's narrowing the list.
+const activeAdvancedCount = computed(() => {
+  let n = 0
+  if (createdFrom.value || createdTo.value) n++
+  if (expiresFrom.value || expiresTo.value) n++
+  if (finalizedFrom.value || finalizedTo.value) n++
+  for (const v of [subjWorkspace, subjApp, subjWorkflow, subjAgent, subjToolset]) if (v.value.trim()) n++
+  if (includeMetadata.value) n++
+  return n
+})
+
+function clearAdvancedFilters() {
+  createdFrom.value = ''; createdTo.value = ''
+  expiresFrom.value = ''; expiresTo.value = ''
+  finalizedFrom.value = ''; finalizedTo.value = ''
+  subjWorkspace.value = ''; subjApp.value = ''
+  subjWorkflow.value = ''; subjAgent.value = ''; subjToolset.value = ''
+  includeMetadata.value = false
+}
 
 // datetime-local → ISO 8601 (or undefined when blank). The client GET
 // helper drops empties too, but converting here keeps the wire value
@@ -324,11 +356,13 @@ watch(exportError, (v) => { if (v) error.value = v })
 // cadence — reservations turn over quickly and a stale list is actively
 // misleading (an operator could "force-release" one that already
 // expired).
+// Discrete controls re-query immediately; subject text fields re-query via
+// the debounced key below so per-keystroke fetches don't flicker the table.
 watch([
   tenantFilter, statusFilter, includeMetadata,
   createdFrom, createdTo, expiresFrom, expiresTo, finalizedFrom, finalizedTo,
-  subjWorkspace, subjApp, subjWorkflow, subjAgent, subjToolset,
 ], () => { loadReservations() })
+watch(debouncedSubjectKey, () => { loadReservations() })
 
 // M14: keep the URL in sync with tenantFilter so the filtered view is
 // shareable. `replace` (not push) — filter changes shouldn't clutter
@@ -567,7 +601,7 @@ const gridTemplate = computed(() =>
             <option v-for="s in RESERVATION_STATUSES" :key="s" :value="s">{{ s }}</option>
           </select>
         </div>
-        <div>
+        <div class="flex items-end gap-2">
           <button
             type="button"
             data-testid="res-advanced-toggle"
@@ -575,7 +609,16 @@ const gridTemplate = computed(() =>
             :aria-expanded="showAdvanced"
             @click="showAdvanced = !showAdvanced"
           >
-            {{ showAdvanced ? 'Hide' : 'Advanced' }} filters
+            {{ showAdvanced ? 'Hide' : 'Advanced' }} filters<span v-if="activeAdvancedCount"> ({{ activeAdvancedCount }})</span>
+          </button>
+          <button
+            v-if="activeAdvancedCount"
+            type="button"
+            data-testid="res-clear-filters"
+            class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 cursor-pointer"
+            @click="clearAdvancedFilters"
+          >
+            Clear
           </button>
         </div>
         <p class="muted-sm flex-1 min-w-[16rem]">

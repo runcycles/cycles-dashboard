@@ -1021,7 +1021,7 @@ const gridTemplate = computed(() =>
         <label for="cw-scope" class="form-label">Scope filter (optional)</label>
         <input id="cw-scope" v-model="createForm.scope_filter" class="form-input-mono" placeholder="tenant:acme/*" />
       </div>
-      <WebhookAdvancedFields :form="createAdvanced" id-prefix="cw-adv" />
+      <WebhookAdvancedFields :form="createAdvanced" id-prefix="cw-adv" mode="create" />
     </FormDialog>
 
     <SecretReveal
