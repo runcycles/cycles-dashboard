@@ -319,7 +319,7 @@ ENV ADMIN_UPSTREAM=http://cycles-admin:7979 \
     RUNTIME_UPSTREAM=http://cycles-server:7878
 ```
 
-The nginx config handles SPA routing (`try_files $uri /index.html`) and reverse-proxies `/v1/` to the admin server (and `/v1/reservations/*` to the runtime server). It ships as an `envsubst` template so the `ADMIN_UPSTREAM` / `RUNTIME_UPSTREAM` upstreams can be retargeted at deploy time without rebuilding the image — see [OPERATIONS.md](OPERATIONS.md#reverse-proxy-wiring).
+The nginx config handles SPA routing (`try_files $uri /index.html`) and reverse-proxies `/v1/*` to the admin server, except the runtime-plane routes (`/v1/reservations/*`, `/v1/evidence/*`, `/v1/.well-known/cycles-jwks.json`) which go to the runtime server. It ships as an `envsubst` template so the `ADMIN_UPSTREAM` / `RUNTIME_UPSTREAM` upstreams can be retargeted at deploy time without rebuilding the image — see [OPERATIONS.md](OPERATIONS.md#reverse-proxy-wiring).
 
 ## Production Deployment
 
@@ -329,14 +329,16 @@ The nginx config handles SPA routing (`try_files $uri /index.html`) and reverse-
                      ┌─────────────┐
   Browser ──HTTPS──▶ │  TLS Proxy  │──HTTP──▶ Dashboard (nginx:80)
                      │ (Caddy/ALB) │                  │
-                     └─────────────┘           /v1/ proxy
-                                                      │
-                                               Admin Server (:7979)
-                                                      │
-                                                   Redis (:6379)
+                     └─────────────┘        /v1/ split-proxy
+                                              │              │
+              /v1/reservations, /v1/evidence, │              │ /v1/*
+              /v1/.well-known/cycles-jwks.json ▼              ▼ (everything else)
+                          Runtime Server (:7878)      Admin Server (:7979)
+                                      │                        │
+                                      └────────► Redis (:6379) ◄┘
 ```
 
-The dashboard is a static SPA served by nginx. API calls are reverse-proxied through the same nginx to the admin server. In production, a TLS-terminating proxy sits in front.
+The dashboard is a static SPA served by nginx. API calls are reverse-proxied through the same nginx to **two backend planes**: the **governance/admin server** (`:7979`, default — tenants, budgets, policies, webhooks, audit, introspect) and the **runtime server** (`:7878` — reservations, evidence, and the signer JWKS). Both must be reachable; the split is configured via `ADMIN_UPSTREAM` / `RUNTIME_UPSTREAM`. In production, a TLS-terminating proxy sits in front.
 
 ### docker-compose (production)
 
@@ -401,9 +403,10 @@ services:
       - cycles
 
   # Runtime plane — serves /v1/reservations, /v1/evidence, and the signer
-  # JWKS the dashboard's Reservations + Evidence views consume. .36+ is
-  # required for reservation committed/finalized/metadata; older versions
-  # degrade gracefully (fields omitted).
+  # JWKS the dashboard's Reservations + Evidence views consume. Pinned to
+  # .37: .36+ surfaces reservation committed/finalized/metadata, .37+ adds
+  # the include=evidence projection (reservation->evidence links). Older
+  # versions degrade gracefully (fields omitted, no links).
   cycles-server:
     image: ghcr.io/runcycles/cycles-server:0.1.25.37
     restart: unless-stopped
