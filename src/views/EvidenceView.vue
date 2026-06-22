@@ -91,6 +91,34 @@ function signerKid(signerDid: string): string | undefined {
   return hash >= 0 ? signerDid.slice(hash + 1) : undefined
 }
 
+// Decode a JWK's base64url `x` (raw 32-byte Ed25519 public key) to lowercase
+// hex, for matching a raw-hex signer_did. Returns '' on malformed input.
+function jwkPublicHex(x: string): string {
+  try {
+    const b64 = x.replace(/-/g, '+').replace(/_/g, '/')
+    const bin = atob(b64)
+    let h = ''
+    for (let i = 0; i < bin.length; i++) h += bin.charCodeAt(i).toString(16).padStart(2, '0')
+    return h
+  } catch {
+    return ''
+  }
+}
+
+// Resolve the JWK that signed this envelope. signer_did comes in two
+// forms: a did:cycles with a `#kid` fragment (match by kid), or a raw
+// 64-hex public key (match the JWK whose `x` decodes to it). Returns the
+// match + a display kid, or undefined.
+function findSignerJwk(signerDid: string, keys: CyclesEvidenceJwk[]): CyclesEvidenceJwk | undefined {
+  const kid = signerKid(signerDid)
+  if (kid) return keys.find(k => k.kid === kid)
+  if (/^[0-9a-f]{64}$/i.test(signerDid)) {
+    const did = signerDid.toLowerCase()
+    return keys.find(k => jwkPublicHex(k.x) === did)
+  }
+  return undefined
+}
+
 function withinValidity(jwk: CyclesEvidenceJwk, nowMs: number): boolean {
   if (jwk.cycles_nbf_ms != null && nowMs < jwk.cycles_nbf_ms) return false
   if (jwk.cycles_exp_ms != null && nowMs >= jwk.cycles_exp_ms) return false
@@ -103,29 +131,27 @@ async function resolveSigner() {
   signerResult.value = null
   try {
     const jwks = await getEvidenceJwks()
-    const kid = signerKid(envelope.value.signer_did)
     // Audit semantics: validate the key against the envelope's ISSUANCE
     // time, not "now". A key that was valid when it signed this envelope
     // but has since been retired must still resolve as valid for the
     // historical artifact — judging against Date.now() would wrongly flag
     // legitimate old evidence as out-of-window.
     const at = envelope.value.issued_at_ms
-    const match = kid ? jwks.keys.find(k => k.kid === kid) : undefined
+    // Handles both signer_did forms: did:cycles#kid and raw 64-hex.
+    const match = findSignerJwk(envelope.value.signer_did, jwks.keys)
     if (!match) {
       signerResult.value = {
-        found: false, withinWindow: false, kid,
-        message: kid
-          ? `No published signer key with kid "${kid}".`
-          : 'signer_did carries no key id fragment — cannot resolve against the JWK Set.',
+        found: false, withinWindow: false,
+        message: 'No published signer key matches the envelope signer_did.',
       }
       return
     }
     const ok = withinValidity(match, at)
     signerResult.value = {
-      found: true, withinWindow: ok, kid,
+      found: true, withinWindow: ok, kid: match.kid,
       message: ok
-        ? `Signer key "${kid}" was published and valid at the envelope's issuance time.`
-        : `Signer key "${kid}" is published but was NOT valid at the envelope's issuance time.`,
+        ? `Signer key "${match.kid}" was published and valid at the envelope's issuance time.`
+        : `Signer key "${match.kid}" is published but was NOT valid at the envelope's issuance time.`,
     }
   } catch (e) {
     signerResult.value = { found: false, withinWindow: false, message: toMessage(e) }

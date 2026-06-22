@@ -130,6 +130,24 @@ describe('EvidenceView', () => {
     expect(w.text()).not.toContain('NOT valid')
   })
 
+  it('resolves a raw-hex signer_did against the JWK Set (no #kid fragment)', async () => {
+    // This is what the runtime server actually emits: signer_did is a raw
+    // 64-hex public key, and the JWK is matched by decoding its base64url x.
+    const hex = 'ab'.repeat(32)
+    const x = Buffer.from(hex, 'hex').toString('base64url')
+    routeRef.query = { id: HEX64 }
+    getEvidenceMock.mockResolvedValue({ ...ENVELOPE, signer_did: hex })
+    getEvidenceJwksMock.mockResolvedValue({
+      keys: [{ kty: 'OKP', crv: 'Ed25519', x, kid: 'raw-key', cycles_nbf_ms: 0, cycles_exp_ms: null }],
+    })
+    const w = await mountView()
+    const resolveBtn = w.findAll('button').find(b => b.text().includes('Resolve signer key'))
+    await resolveBtn!.trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain('raw-key')
+    expect(w.text()).toContain("valid at the envelope's issuance time")
+  })
+
   it('reports when no signer key matches', async () => {
     routeRef.query = { id: HEX64 }
     getEvidenceMock.mockResolvedValue(ENVELOPE)
