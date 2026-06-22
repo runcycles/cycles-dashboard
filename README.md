@@ -98,9 +98,9 @@ npm install
 npm run dev
 ```
 
-Dashboard starts at `http://localhost:5173`. The Vite dev server splits the proxy:
-- `/v1/reservations*` → `localhost:7878` (cycles-server)
-- `/v1/*` (all others) → `localhost:7979` (cycles-server-admin)
+Dashboard starts at `http://localhost:5173`. The Vite dev server splits the proxy between the runtime and governance planes:
+- `/v1/reservations*`, `/v1/evidence*`, `/v1/.well-known/cycles-jwks.json` → `localhost:7878` (cycles-server, runtime plane)
+- `/v1/*` (everything else) → `localhost:7979` (cycles-server-admin, governance plane)
 
 The same routing split is mirrored in `default.conf.template` for the
 production container, where the two upstreams are configurable via the
@@ -491,7 +491,7 @@ docker compose -f docker-compose.prod.yml up -d
 | Concern | Development | Production |
 |---------|------------|------------|
 | **Dashboard URL** | `http://localhost:5173` | `https://admin.example.com` |
-| **API proxy** | Vite dev proxy → `localhost:7979` | nginx → `cycles-admin:7979` |
+| **API proxy** | Vite dev proxy → `localhost:7979` (admin) + `localhost:7878` (runtime: reservations/evidence/JWKS) | nginx → `cycles-admin:7979` + `cycles-server:7878` |
 | **TLS** | None (local only) | Required — admin key in headers |
 | **Admin key** | Any test value | Strong random key, rotated periodically |
 | **Redis password** | Empty (default) | Set via `REDIS_PASSWORD` |
@@ -585,8 +585,8 @@ All production assets include Subresource Integrity (SRI) hashes via `vite-plugi
 | `REDIS_PASSWORD` | Recommended | (empty) | Redis authentication password |
 | `WEBHOOK_SECRET_ENCRYPTION_KEY` | Recommended | (empty) | AES-256-GCM key for webhook signing secrets at rest |
 | `DASHBOARD_CORS_ORIGIN` | Dev only | `http://localhost:5173` | CORS origin — only needed when browser calls admin server directly (not via nginx proxy) |
-| `ADMIN_UPSTREAM` | No | `http://cycles-admin:7979` | Governance-plane upstream for the dashboard container's bundled nginx proxy (`/v1/*` except reservations) |
-| `RUNTIME_UPSTREAM` | No | `http://cycles-server:7878` | Runtime-plane upstream for the bundled nginx proxy (`/v1/reservations/*`) |
+| `ADMIN_UPSTREAM` | No | `http://cycles-admin:7979` | Governance-plane upstream for the dashboard container's bundled nginx proxy (`/v1/*` except the runtime routes below) |
+| `RUNTIME_UPSTREAM` | No | `http://cycles-server:7878` | Runtime-plane upstream for the bundled nginx proxy (`/v1/reservations/*`, `/v1/evidence/*`, `/v1/.well-known/cycles-jwks.json`) |
 
 The dashboard itself has no application-level configuration — it's a static SPA. The two backend upstreams the bundled nginx proxy forwards to are configured via:
 - **Development:** Vite proxy in `vite.config.ts` (defaults: `localhost:7979` admin / `localhost:7878` runtime)
