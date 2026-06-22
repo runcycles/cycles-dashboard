@@ -419,6 +419,8 @@ export interface WebhookCreateRequest {
   name?: string
   description?: string
   scope_filter?: string
+  thresholds?: WebhookThresholdConfig
+  retry_policy?: WebhookRetryPolicy
   signing_secret?: string
   headers?: Record<string, string>
   disable_after_failures?: number

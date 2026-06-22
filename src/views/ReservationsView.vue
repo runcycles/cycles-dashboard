@@ -129,7 +129,10 @@ const includeMetadata = ref(false)
 // discrete controls (status / include / time-range pickers) re-query
 // immediately since they change in one action.
 const subjectKey = computed(() =>
-  [subjWorkspace.value, subjApp.value, subjWorkflow.value, subjAgent.value, subjToolset.value].join(''),
+  // JSON-encode the tuple rather than concatenate — a plain join would make
+  // e.g. {workspace:'ab'} and {workspace:'a',app:'b'} collide on one key, so a
+  // change between those two would not re-trigger the fetch.
+  JSON.stringify([subjWorkspace.value, subjApp.value, subjWorkflow.value, subjAgent.value, subjToolset.value]),
 )
 const debouncedSubjectKey = useDebouncedRef(subjectKey, 300)
 

@@ -18,7 +18,7 @@
  * over, which is deferred. The UI labels this precisely so it never
  * claims more assurance than it delivers.
  */
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getEvidence, getEvidenceJwks, ApiError } from '../api/client'
 import type { CyclesEvidenceEnvelope, CyclesEvidenceJwk } from '../types'
@@ -145,6 +145,22 @@ async function copyEnvelope() {
 }
 
 onMounted(() => { if (evidenceId.value) fetchEvidence() })
+
+// /evidence is a single route, so navigating between ?id=A and ?id=B (or
+// back to bare /evidence) reuses this component and onMounted does NOT
+// re-run. Sync the input + state off the query and re-fetch so the view
+// never shows a stale envelope for a different id. The early-return guards
+// against the self-trigger from fetchEvidence()'s own router.replace.
+watch(() => route.query.id, (raw) => {
+  const next = typeof raw === 'string' ? raw : ''
+  if (next === evidenceId.value) return
+  evidenceId.value = next
+  envelope.value = null
+  error.value = ''
+  notYetAvailable.value = false
+  signerResult.value = null
+  if (next) fetchEvidence()
+})
 </script>
 
 <template>

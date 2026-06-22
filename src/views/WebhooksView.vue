@@ -15,7 +15,7 @@ import type { RowSelectBulkResponse } from '../utils/rowSelectBulkResult'
 import { generateIdempotencyKey } from '../utils/idempotencyKey'
 import type { WebhookBulkAction, WebhookBulkFilter } from '../types'
 import { useAuthStore } from '../stores/auth'
-import type { WebhookSubscription, WebhookCreateResponse, Tenant, WebhookSecurityConfig } from '../types'
+import type { WebhookSubscription, WebhookCreateRequest, WebhookCreateResponse, Tenant, WebhookSecurityConfig } from '../types'
 import { EVENT_TYPES } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import TenantLink from '../components/TenantLink.vue'
@@ -491,11 +491,11 @@ async function submitCreate() {
   if (advError) { createError.value = advError; return }
   createLoading.value = true
   try {
-    const body: Record<string, unknown> = { url: createForm.value.url, event_types: createForm.value.event_types }
+    const body: WebhookCreateRequest = { url: createForm.value.url, event_types: createForm.value.event_types }
     if (createForm.value.name) body.name = createForm.value.name
     if (createForm.value.scope_filter) body.scope_filter = createForm.value.scope_filter
     Object.assign(body, webhookAdvancedToRequest(createAdvanced.value))
-    const res = await createWebhook(body as any, createForm.value.tenant_id || undefined)
+    const res = await createWebhook(body, createForm.value.tenant_id || undefined)
     createdWebhook.value = res
     showCreate.value = false
     toast.success('Webhook created')

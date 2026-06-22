@@ -1,6 +1,7 @@
 // EvidenceView: fetch + render, transient-404 retry affordance, malformed
 // id guard, and signer-key resolution against a JWK Set.
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { reactive } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '../stores/auth'
@@ -18,7 +19,9 @@ vi.mock('../api/client', async () => {
   }
 })
 
-const routeRef: { query: Record<string, string> } = { query: {} }
+// Reactive so the component's watch(() => route.query.id) fires when a
+// test mutates the query (query-only navigation reuses the component).
+const routeRef = reactive<{ query: Record<string, string> }>({ query: {} })
 const replaceMock = vi.fn()
 vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
@@ -136,5 +139,35 @@ describe('EvidenceView', () => {
     await resolveBtn!.trigger('click')
     await flushPromises()
     expect(w.text()).toContain('No published signer key')
+  })
+
+  it('re-fetches and refreshes state on query-only navigation (id A → id B)', async () => {
+    const idA = 'a'.repeat(64)
+    const idB = 'b'.repeat(64)
+    routeRef.query = { id: idA }
+    getEvidenceMock.mockImplementation((id: string) =>
+      Promise.resolve({ ...ENVELOPE, evidence_id: id, artifact_type: id === idB ? 'commit' : 'release' }),
+    )
+    const w = await mountView()
+    expect(getEvidenceMock).toHaveBeenLastCalledWith(idA)
+    expect(w.text()).toContain('release envelope')
+
+    // Query-only navigation — the component is reused, onMounted does not re-run.
+    routeRef.query = { id: idB }
+    await flushPromises()
+    expect(getEvidenceMock).toHaveBeenLastCalledWith(idB)
+    expect(w.text()).toContain('commit envelope')
+  })
+
+  it('clears the envelope when navigating back to bare /evidence', async () => {
+    routeRef.query = { id: HEX64 }
+    getEvidenceMock.mockResolvedValue(ENVELOPE)
+    const w = await mountView()
+    expect(w.text()).toContain('release envelope')
+
+    routeRef.query = {}
+    await flushPromises()
+    expect(w.text()).not.toContain('release envelope')
+    expect(w.text()).toContain('No envelope loaded')
   })
 })
