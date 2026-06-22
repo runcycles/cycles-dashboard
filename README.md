@@ -379,7 +379,7 @@ services:
       - cycles
 
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.39
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.41
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
@@ -428,7 +428,7 @@ services:
   # Webhook-delivery worker (consumes events from Redis, fans out to
   # subscriber endpoints).
   cycles-events:
-    image: ghcr.io/runcycles/cycles-server-events:0.1.25.11
+    image: ghcr.io/runcycles/cycles-server-events:0.1.25.14
     restart: unless-stopped
     environment:
       REDIS_HOST: redis

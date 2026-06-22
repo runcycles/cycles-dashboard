@@ -65,9 +65,11 @@ services:
     # Redis and fans them out to registered webhook endpoints. Keep
     # pinned to the version published alongside the current cycles-admin
     # release — bump in lockstep with protocol revisions that affect
-    # WebhookDelivery. `.8` matches protocol v0.1.25.28 (trace_id /
-    # trace_flags / traceparent_inbound_valid).
-    image: ghcr.io/runcycles/cycles-server-events:0.1.25.11
+    # WebhookDelivery. `.14` ("CyclesEvidence signing tier") adds the
+    # evidence-envelope signer (consumes evidence:pending) on top of the
+    # trace_id / trace_flags / traceparent_inbound_valid WebhookDelivery
+    # fields — needed for the Evidence viewer when evidence emission is on.
+    image: ghcr.io/runcycles/cycles-server-events:0.1.25.14
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
@@ -89,7 +91,7 @@ services:
       - cycles
 
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.39
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.41
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
