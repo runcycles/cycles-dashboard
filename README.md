@@ -408,7 +408,7 @@ services:
   # the include=evidence projection (reservation->evidence links). Older
   # versions degrade gracefully (fields omitted, no links).
   cycles-server:
-    image: ghcr.io/runcycles/cycles-server:0.1.25.37
+    image: ghcr.io/runcycles/cycles-server:0.1.25.38
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
@@ -431,7 +431,7 @@ services:
   # Webhook-delivery worker (consumes events from Redis, fans out to
   # subscriber endpoints).
   cycles-events:
-    image: ghcr.io/runcycles/cycles-server-events:0.1.25.14
+    image: ghcr.io/runcycles/cycles-server-events:0.1.25.15
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
