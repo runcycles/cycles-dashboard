@@ -1,5 +1,12 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   dashboard:
+    logging: *default-logging
     build: .
     ports:
       - "8080:80"
@@ -12,6 +19,7 @@ services:
       - cycles
 
   cycles-server:
+    logging: *default-logging
     # Runtime-plane server. Independent release cadence from dashboard +
     # cycles-server-admin — keep in sync with docker-compose.prod.yml.
     # .37 surfaces reservation committed/finalized/metadata, the include=
@@ -43,6 +51,7 @@ services:
       - cycles
 
   cycles-events:
+    logging: *default-logging
     # Event-dispatch / webhook delivery worker. Consumes events emitted
     # by cycles-admin and cycles-server from Redis and fans them out
     # to registered webhook endpoints. Independent release cadence.
@@ -76,6 +85,7 @@ services:
       - cycles
 
   cycles-admin:
+    logging: *default-logging
     image: ghcr.io/runcycles/cycles-server-admin:0.1.25.41
     restart: unless-stopped
     ports:
@@ -104,6 +114,7 @@ services:
       - cycles
 
   redis:
+    logging: *default-logging
     image: redis:7-alpine
     ports:
       - "6379:6379"

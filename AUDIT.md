@@ -17,6 +17,10 @@
 
 Newest at the top. Older entries preserved verbatim.
 
+### 2026-06-23 — Docker log rotation defaults on compose files (no version bump)
+
+Deployment-infra only. `docker-compose.yml` and `docker-compose.prod.yml` gain a shared `x-logging` anchor (`json-file`, `max-size: 10m`, `max-file: 5`) referenced by every service. Previously no compose file declared a logging driver, so containers inherited Docker's default UNBOUNDED `json-file` logs — a slow disk-exhaustion path on long-running deployments. Caps each container at 5×10 MB = 50 MB with rotation. No client code, spec, or wire change; takes effect on containers (re)created from these files. `docker compose config` validates clean. (The untracked local `docker-compose.override.yml` is out of scope — not a repo file.)
+
 ### 2026-06-22 — v0.1.25.63: link reservations to their evidence (no copy-paste)
 
 Consumes the `evidence` projection added in cycles-protocol v0.1.25.9 (#117) and
