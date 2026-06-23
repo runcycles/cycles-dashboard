@@ -1,5 +1,12 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   caddy:
+    logging: *default-logging
     image: caddy:2-alpine
     restart: unless-stopped
     ports:
@@ -14,6 +21,7 @@ services:
       - cycles
 
   dashboard:
+    logging: *default-logging
     image: ghcr.io/runcycles/cycles-dashboard:0.1.25.63
     restart: unless-stopped
     # The image bundles an nginx reverse proxy that splits /v1/* traffic
@@ -32,6 +40,7 @@ services:
       - cycles
 
   cycles-server:
+    logging: *default-logging
     # Runtime-plane server. Release cadence is independent of dashboard +
     # cycles-server-admin. Pinned to .37 for dashboard 0.1.25.63: it
     # surfaces reservation committed/finalized/metadata, the include=
@@ -61,6 +70,7 @@ services:
       - cycles
 
   cycles-events:
+    logging: *default-logging
     # Event-dispatch / webhook delivery worker. Consumes events from
     # Redis and fans them out to registered webhook endpoints. Keep
     # pinned to the version published alongside the current cycles-admin
@@ -91,6 +101,7 @@ services:
       - cycles
 
   cycles-admin:
+    logging: *default-logging
     image: ghcr.io/runcycles/cycles-server-admin:0.1.25.41
     restart: unless-stopped
     environment:
@@ -115,6 +126,7 @@ services:
       - cycles
 
   redis:
+    logging: *default-logging
     image: redis:7-alpine
     restart: unless-stopped
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
