@@ -24,8 +24,10 @@ services:
     # cycles-server-admin — keep in sync with docker-compose.prod.yml.
     # .37 surfaces reservation committed/finalized/metadata, the include=
     # projection (incl. include=evidence — the reservation->evidence link,
-    # dashboard .63) and serves /v1/evidence + JWKS.
-    image: ghcr.io/runcycles/cycles-server:0.1.25.37
+    # dashboard .63) and serves /v1/evidence + JWKS. .38: with evidence NOT
+    # configured (this bundled stack's default) the producer no longer
+    # queues evidence source records — keeps evidence:pending quiet.
+    image: ghcr.io/runcycles/cycles-server:0.1.25.38
     restart: unless-stopped
     ports:
       - "7878:7878"
@@ -60,8 +62,10 @@ services:
     # configured — needed for the Evidence viewer to resolve a real
     # envelope. It also carries the trace_id / trace_flags /
     # traceparent_inbound_valid WebhookDelivery fields the dashboard's
-    # cross-surface correlation reads.
-    image: ghcr.io/runcycles/cycles-server-events:0.1.25.14
+    # cross-surface correlation reads. `.15`: gates the signer on evidence
+    # config (no dead-lettering / evidence:failed noise when unconfigured,
+    # this stack's default) and fixes a retention-scan WRONGTYPE error.
+    image: ghcr.io/runcycles/cycles-server-events:0.1.25.15
     restart: unless-stopped
     ports:
       - "7980:7980"

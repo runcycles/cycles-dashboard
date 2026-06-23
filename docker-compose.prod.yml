@@ -42,14 +42,15 @@ services:
   cycles-server:
     logging: *default-logging
     # Runtime-plane server. Release cadence is independent of dashboard +
-    # cycles-server-admin. Pinned to .37 for dashboard 0.1.25.63: it
+    # cycles-server-admin. Pinned to .38 for dashboard 0.1.25.63: it
     # surfaces reservation committed/finalized/metadata, the include=
     # projection on listReservations — including include=evidence, the
     # reservation->evidence link — and serves /v1/evidence + the signer
     # JWKS the Evidence view consumes. Older runtime servers still work —
     # the dashboard degrades gracefully (fields omitted, 404 on evidence) —
-    # but the full Reservations/Evidence surface needs .37+.
-    image: ghcr.io/runcycles/cycles-server:0.1.25.37
+    # but the full Reservations/Evidence surface needs .37+. .38 also
+    # stops queuing evidence source records when evidence is unconfigured.
+    image: ghcr.io/runcycles/cycles-server:0.1.25.38
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
@@ -79,7 +80,9 @@ services:
     # evidence-envelope signer (consumes evidence:pending) on top of the
     # trace_id / trace_flags / traceparent_inbound_valid WebhookDelivery
     # fields — needed for the Evidence viewer when evidence emission is on.
-    image: ghcr.io/runcycles/cycles-server-events:0.1.25.14
+    # `.15` gates the signer on evidence config (no dead-letter / failed-queue
+    # noise when unconfigured) + fixes a retention-scan WRONGTYPE error.
+    image: ghcr.io/runcycles/cycles-server-events:0.1.25.15
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
