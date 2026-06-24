@@ -406,7 +406,10 @@ services:
   # JWKS the dashboard's Reservations + Evidence views consume. Pinned to
   # .37: .36+ surfaces reservation committed/finalized/metadata, .37+ adds
   # the include=evidence projection (reservation->evidence links). Older
-  # versions degrade gracefully (fields omitted, no links).
+  # versions degrade gracefully (fields omitted, no links). Evidence signing
+  # is not enabled by the default compose file; use docker-compose.override.yml
+  # for the local demo identity, or set the CyclesEvidence env vars on both
+  # cycles-server and cycles-events in your deployment.
   cycles-server:
     image: ghcr.io/runcycles/cycles-server:0.1.25.38
     restart: unless-stopped
@@ -587,6 +590,9 @@ All production assets include Subresource Integrity (SRI) hashes via `vite-plugi
 | `DASHBOARD_CORS_ORIGIN` | Dev only | `http://localhost:5173` | CORS origin — only needed when browser calls admin server directly (not via nginx proxy) |
 | `ADMIN_UPSTREAM` | No | `http://cycles-admin:7979` | Governance-plane upstream for the dashboard container's bundled nginx proxy (`/v1/*` except the runtime routes below) |
 | `RUNTIME_UPSTREAM` | No | `http://cycles-server:7878` | Runtime-plane upstream for the bundled nginx proxy (`/v1/reservations/*`, `/v1/evidence/*`, `/v1/.well-known/cycles-jwks.json`) |
+| `EVIDENCE_SERVER_ID` / `EVIDENCE_SIGNING_SIGNER_DID` | Evidence only | (empty) | Backend `cycles-server` + `cycles-events` identity values required for signed evidence; must be byte-identical on both services. |
+| `EVIDENCE_SIGNING_PRIVATE_KEY_HEX` | Evidence only | (empty) | Backend `cycles-events` private Ed25519 signing seed. Never set on `cycles-server` or the dashboard container. |
+| `EVIDENCE_SIGNING_KID` | Evidence JWKS only | derived | Backend `cycles-server` public JWK `kid` label for `/v1/.well-known/cycles-jwks.json`; optional and not used by `cycles-events`. |
 
 The dashboard itself has no application-level configuration — it's a static SPA. The two backend upstreams the bundled nginx proxy forwards to are configured via:
 - **Development:** Vite proxy in `vite.config.ts` (defaults: `localhost:7979` admin / `localhost:7878` runtime)
