@@ -35,5 +35,5 @@ EXPOSE 80
 # Liveness: nginx serves the SPA shell. Drives the compose/orchestrator
 # healthcheck so a crashed nginx is detected and restarted.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget --spider -q http://localhost/ || exit 1
+    CMD wget --spider -q http://127.0.0.1/ || exit 1
 CMD ["nginx", "-g", "daemon off;"]

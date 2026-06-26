@@ -24,8 +24,23 @@ UX work that does not advance spec alignment.
   `0.1.25.20` (compose + README). All intervening server releases are
   additive/operational — no dashboard-visible wire change, no client code change.
 - Added an nginx container healthcheck (Dockerfile `HEALTHCHECK` + a `healthcheck`
-  block on the dashboard compose service) so a crashed dashboard is detected and
-  restarted, matching the sibling services.
+  block on the dashboard compose service, probing `127.0.0.1` to avoid IPv6
+  localhost ambiguity) so a crashed dashboard is detected and restarted,
+  matching the sibling services.
+- Aligned bundled backend healthchecks with the hardened server fleet by probing
+  `/actuator/health/readiness` for runtime/admin/events instead of the aggregate
+  actuator health endpoint.
+- Hardened production compose defaults: Redis password is required, Redis
+  healthcheck authenticates, webhook-secret encryption is required for the
+  admin/events pair, runtime SpringDoc is disabled, and high-cardinality tenant
+  metrics are off by default.
+- Tightened the Caddy production wrapper: the local `Caddyfile` is ignored by
+  git while `Caddyfile.example` remains the committed template, and Caddy now
+  waits for the dashboard healthcheck before starting.
+- Corrected production deployment docs so generated secrets are written to
+  `.env` instead of literal shell substitutions, and clarified that
+  `DASHBOARD_ORIGIN` configures backend CORS in the bundled prod stack.
+- Synced `package-lock.json` to the `0.1.25.64` package version.
 
 ## [0.1.25.63] — 2026-06-22
 

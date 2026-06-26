@@ -129,6 +129,9 @@ cp Caddyfile.example Caddyfile   # edit domain
 docker compose -f docker-compose.prod.yml up -d
 ```
 
+`Caddyfile` is local deployment configuration and is intentionally ignored by
+git; keep `Caddyfile.example` as the committed template.
+
 Only ports 443 and 80 are exposed. All internal services (dashboard, admin server, Redis) communicate over the Docker network.
 
 ## Authentication
@@ -360,13 +363,20 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy-data:/data
     depends_on:
-      - dashboard
+      dashboard:
+        condition: service_healthy
     networks:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.63
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.64
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
     # No exposed ports — only accessible through Caddy. nginx proxies
     # /v1/* to both planes; override the upstreams only for split hosts.
     environment:
@@ -386,12 +396,14 @@ services:
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
       ADMIN_API_KEY: ${ADMIN_API_KEY:?ADMIN_API_KEY must be set}
-      WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:-}
+      WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:?WEBHOOK_SECRET_ENCRYPTION_KEY must be set}
+      WEBHOOK_SECRET_ENCRYPTION_REQUIRED: "true"
+      JAVA_OPTS: "-XX:MaxRAMPercentage=75 -XX:+UseG1GC -XX:+UseStringDeduplication"
       DASHBOARD_CORS_ORIGIN: ${DASHBOARD_ORIGIN:-https://admin.example.com}
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7979/actuator/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7979/actuator/health/readiness"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -416,11 +428,15 @@ services:
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
       ADMIN_API_KEY: ${ADMIN_API_KEY:?ADMIN_API_KEY must be set}
+      JAVA_OPTS: "-XX:MaxRAMPercentage=75 -XX:+UseG1GC -XX:+UseStringDeduplication"
+      CYCLES_METRICS_TENANT_TAG_ENABLED: "false"
+      SPRINGDOC_API_DOCS_ENABLED: "false"
+      SPRINGDOC_SWAGGER_UI_ENABLED: "false"
       DASHBOARD_CORS_ORIGIN: ${DASHBOARD_ORIGIN:-https://admin.example.com}
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7878/actuator/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7878/actuator/health/readiness"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -439,8 +455,15 @@ services:
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
-      WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+      WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:?WEBHOOK_SECRET_ENCRYPTION_KEY must be set}
+      CYCLES_METRICS_TENANT_TAG_ENABLED: "false"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9980/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
       redis:
         condition: service_healthy
@@ -450,11 +473,13 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+    command: ["sh", "-c", "redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD}\""]
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -478,12 +503,17 @@ admin.example.com {
 
 **Deploy:**
 ```bash
-# Create .env with secrets (never commit this file)
-cat > .env << 'EOF'
-ADMIN_API_KEY=your-strong-admin-key-here
-REDIS_PASSWORD=your-redis-password
-WEBHOOK_SECRET_ENCRYPTION_KEY=$(openssl rand -base64 32)
-DASHBOARD_ORIGIN=https://admin.example.com
+# Generate secrets and create .env (never commit this file)
+ADMIN_API_KEY="$(openssl rand -base64 32)"
+REDIS_PASSWORD="$(openssl rand -base64 32)"
+WEBHOOK_SECRET_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+DASHBOARD_ORIGIN="https://admin.example.com"
+
+cat > .env <<EOF
+ADMIN_API_KEY=$ADMIN_API_KEY
+REDIS_PASSWORD=$REDIS_PASSWORD
+WEBHOOK_SECRET_ENCRYPTION_KEY=$WEBHOOK_SECRET_ENCRYPTION_KEY
+DASHBOARD_ORIGIN=$DASHBOARD_ORIGIN
 EOF
 
 docker compose -f docker-compose.prod.yml up -d
@@ -497,10 +527,10 @@ docker compose -f docker-compose.prod.yml up -d
 | **API proxy** | Vite dev proxy → `localhost:7979` (admin) + `localhost:7878` (runtime: reservations/evidence/JWKS) | nginx → `cycles-admin:7979` + `cycles-server:7878` |
 | **TLS** | None (local only) | Required — admin key in headers |
 | **Admin key** | Any test value | Strong random key, rotated periodically |
-| **Redis password** | Empty (default) | Set via `REDIS_PASSWORD` |
-| **CORS origin** | `http://localhost:5173` | Not needed (same-origin via nginx proxy) |
+| **Redis password** | Empty (default) | Required via `REDIS_PASSWORD` |
+| **CORS origin** | `http://localhost:5173` | Set `DASHBOARD_ORIGIN` to the public dashboard URL |
 | **Docker images** | Built from source | Pre-built from GHCR |
-| **Health checks** | Not needed | Redis + admin server health gates |
+| **Health checks** | Not needed | Dashboard liveness + backend readiness + authed Redis |
 | **Restart policy** | None | `unless-stopped` |
 | **Ports exposed** | All (5173, 7979, 6379) | Only 443/80 via TLS proxy |
 
@@ -521,10 +551,10 @@ docker compose -f docker-compose.prod.yml up -d
 
 ### CORS
 
-In production, the dashboard's nginx reverse-proxies `/v1/` to the admin server, so all API calls are same-origin from the browser's perspective. **CORS is not involved in a standard production deployment.**
+In production, the dashboard's nginx reverse-proxies `/v1/` to the backend services, so normal browser API calls are same-origin. Still set `DASHBOARD_ORIGIN` in `docker-compose.prod.yml`; compose passes it to the backend CORS allowlists for direct probes, split-host deployments, and operational consistency.
 
-CORS only matters when the browser talks directly to the admin server (e.g., during development with Vite's proxy, or non-standard deployments where the dashboard and API are on different origins). In that case:
-- Set `DASHBOARD_CORS_ORIGIN` to the exact dashboard URL (e.g., `https://admin.example.com`).
+CORS actively matters when the browser talks directly to a backend service (e.g., during development with Vite's proxy, or non-standard deployments where the dashboard and API are on different origins). In that case:
+- Set `DASHBOARD_ORIGIN` / `DASHBOARD_CORS_ORIGIN` to the exact dashboard URL (e.g., `https://admin.example.com`).
 - Do **not** use `*` — the admin server only allows the configured origin.
 - The admin server only permits `X-Admin-API-Key` and `Content-Type` headers through CORS.
 
@@ -563,7 +593,7 @@ All production assets include Subresource Integrity (SRI) hashes via `vite-plugi
 
 ### Redis
 
-- Set a password via `REDIS_PASSWORD` — the default has no authentication.
+- Production compose requires `REDIS_PASSWORD`; local development compose keeps Redis unauthenticated for convenience.
 - Use `appendonly yes` for durability (enabled in the docker-compose above).
 - Do not expose Redis port (6379) outside the Docker network.
 - For production, consider Redis Sentinel or Redis Cluster for high availability.
@@ -576,7 +606,7 @@ All production assets include Subresource Integrity (SRI) hashes via `vite-plugi
 
 ### Monitoring
 
-- The admin server exposes `/actuator/health` for health checks.
+- The backend services expose `/actuator/health/readiness` for Redis-aware readiness checks.
 - The dashboard's `GET /v1/admin/overview` endpoint is a good target for synthetic monitoring — if it returns 200, the entire stack (Redis + admin server + auth) is working.
 - Set up alerts on the overview endpoint's `failing_webhooks` and `over_limit_scopes` arrays.
 
@@ -585,8 +615,9 @@ All production assets include Subresource Integrity (SRI) hashes via `vite-plugi
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `ADMIN_API_KEY` | Yes | — | Admin API key for `X-Admin-API-Key` header |
-| `REDIS_PASSWORD` | Recommended | (empty) | Redis authentication password |
-| `WEBHOOK_SECRET_ENCRYPTION_KEY` | Recommended | (empty) | AES-256-GCM key for webhook signing secrets at rest |
+| `REDIS_PASSWORD` | Yes in prod | (empty in dev) | Redis authentication password; required by `docker-compose.prod.yml` |
+| `WEBHOOK_SECRET_ENCRYPTION_KEY` | Yes in prod | (empty in dev) | AES-256-GCM key for webhook signing secrets at rest |
+| `DASHBOARD_ORIGIN` | Yes in prod | `https://admin.example.com` | Origin used by production compose to configure backend CORS |
 | `DASHBOARD_CORS_ORIGIN` | Dev only | `http://localhost:5173` | CORS origin — only needed when browser calls admin server directly (not via nginx proxy) |
 | `ADMIN_UPSTREAM` | No | `http://cycles-admin:7979` | Governance-plane upstream for the dashboard container's bundled nginx proxy (`/v1/*` except the runtime routes below) |
 | `RUNTIME_UPSTREAM` | No | `http://cycles-server:7878` | Runtime-plane upstream for the bundled nginx proxy (`/v1/reservations/*`, `/v1/evidence/*`, `/v1/.well-known/cycles-jwks.json`) |

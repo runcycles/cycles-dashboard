@@ -22,11 +22,24 @@ Newest at the top. Older entries preserved verbatim.
 Bumps the bundled stack to the current server fleet — `cycles-server`
 `.38 → .44`, `cycles-server-admin` `.41 → .47`, `cycles-server-events`
 `.15 → .20` (compose + README) — and adds an nginx `HEALTHCHECK` to the
-Dockerfile plus a `healthcheck` block on the dashboard compose service, so a
-crashed dashboard is detected and restarted like the sibling services. Every
-intervening server release is additive/operational with no dashboard-visible
-wire change (see the baseline matrix), so no client code changed. `docker
-compose config` validates clean.
+Dockerfile plus a `healthcheck` block on the dashboard compose service, probing
+`127.0.0.1` to avoid IPv6 localhost ambiguity, so a crashed dashboard is
+detected and restarted like the sibling services. Follow-up
+review tightened the bundled stack health gates to match those hardened sibling
+images: runtime/admin/events compose probes now use `/actuator/health/readiness`
+instead of the aggregate health endpoint, production Redis requires
+`REDIS_PASSWORD` and authenticates its healthcheck, webhook-secret encryption is
+required for the admin/events pair, runtime SpringDoc is disabled, and tenant
+metric labels are off by default. Production deployment docs now generate
+secrets before writing `.env` (no literal `$(openssl ...)` values) and clarify
+that `DASHBOARD_ORIGIN` configures backend CORS even though the bundled nginx
+proxy makes normal browser API calls same-origin. The local deployment
+`Caddyfile` is ignored so real domains/secrets are not accidentally committed
+over the `Caddyfile.example` template, and Caddy now waits on the dashboard
+service healthcheck in production compose. `package-lock.json` was also synced
+to the `0.1.25.64` package version. Every intervening server release is
+additive/operational with no dashboard-visible wire change (see the baseline
+matrix), so no client code changed. `docker compose config` validates clean.
 
 ### 2026-06-23 — Docker log rotation defaults on compose files (no version bump)
 
