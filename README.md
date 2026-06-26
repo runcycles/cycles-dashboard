@@ -381,7 +381,7 @@ services:
       - cycles
 
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.41
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.47
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
@@ -411,7 +411,7 @@ services:
   # for the local demo identity, or set the CyclesEvidence env vars on both
   # cycles-server and cycles-events in your deployment.
   cycles-server:
-    image: ghcr.io/runcycles/cycles-server:0.1.25.38
+    image: ghcr.io/runcycles/cycles-server:0.1.25.44
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
@@ -434,7 +434,7 @@ services:
   # Webhook-delivery worker (consumes events from Redis, fans out to
   # subscriber endpoints).
   cycles-events:
-    image: ghcr.io/runcycles/cycles-server-events:0.1.25.15
+    image: ghcr.io/runcycles/cycles-server-events:0.1.25.20
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
