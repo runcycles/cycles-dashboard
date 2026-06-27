@@ -16,14 +16,21 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy-data:/data
     depends_on:
-      - dashboard
+      dashboard:
+        condition: service_healthy
     networks:
       - cycles
 
   dashboard:
     logging: *default-logging
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.63
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.64
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
     # The image bundles an nginx reverse proxy that splits /v1/* traffic
     # between the two planes. These default to the compose service names,
     # so they only need overriding when the admin / runtime servers live
@@ -42,7 +49,7 @@ services:
   cycles-server:
     logging: *default-logging
     # Runtime-plane server. Release cadence is independent of dashboard +
-    # cycles-server-admin. Pinned to .38 for dashboard 0.1.25.63: it
+    # cycles-server-admin. Pinned to .44 for dashboard 0.1.25.64: it
     # surfaces reservation committed/finalized/metadata, the include=
     # projection on listReservations — including include=evidence, the
     # reservation->evidence link — and serves /v1/evidence + the signer
@@ -50,16 +57,20 @@ services:
     # the dashboard degrades gracefully (fields omitted, 404 on evidence) —
     # but the full Reservations/Evidence surface needs .37+. .38 also
     # stops queuing evidence source records when evidence is unconfigured.
-    image: ghcr.io/runcycles/cycles-server:0.1.25.38
+    image: ghcr.io/runcycles/cycles-server:0.1.25.44
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
       ADMIN_API_KEY: ${ADMIN_API_KEY:?ADMIN_API_KEY must be set}
+      JAVA_OPTS: "-XX:MaxRAMPercentage=75 -XX:+UseG1GC -XX:+UseStringDeduplication"
+      CYCLES_METRICS_TENANT_TAG_ENABLED: "false"
+      SPRINGDOC_API_DOCS_ENABLED: "false"
+      SPRINGDOC_SWAGGER_UI_ENABLED: "false"
       DASHBOARD_CORS_ORIGIN: ${DASHBOARD_ORIGIN:-https://admin.example.com}
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7878/actuator/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7878/actuator/health/readiness"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -82,17 +93,18 @@ services:
     # fields — needed for the Evidence viewer when evidence emission is on.
     # `.15` gates the signer on evidence config (no dead-letter / failed-queue
     # noise when unconfigured) + fixes a retention-scan WRONGTYPE error.
-    image: ghcr.io/runcycles/cycles-server-events:0.1.25.15
+    image: ghcr.io/runcycles/cycles-server-events:0.1.25.20
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
-      WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+      WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:?WEBHOOK_SECRET_ENCRYPTION_KEY must be set}
+      CYCLES_METRICS_TENANT_TAG_ENABLED: "false"
       EVENT_TTL_DAYS: ${EVENT_TTL_DAYS:-90}
       DELIVERY_TTL_DAYS: ${DELIVERY_TTL_DAYS:-14}
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9980/actuator/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9980/actuator/health/readiness"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -105,19 +117,21 @@ services:
 
   cycles-admin:
     logging: *default-logging
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.41
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.47
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
       ADMIN_API_KEY: ${ADMIN_API_KEY:?ADMIN_API_KEY must be set}
-      WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:-}
+      WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:?WEBHOOK_SECRET_ENCRYPTION_KEY must be set}
+      WEBHOOK_SECRET_ENCRYPTION_REQUIRED: "true"
+      JAVA_OPTS: "-XX:MaxRAMPercentage=75 -XX:+UseG1GC -XX:+UseStringDeduplication"
       DASHBOARD_CORS_ORIGIN: ${DASHBOARD_ORIGIN:-https://admin.example.com}
       EVENT_TTL_DAYS: ${EVENT_TTL_DAYS:-90}
       DELIVERY_TTL_DAYS: ${DELIVERY_TTL_DAYS:-14}
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7979/actuator/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7979/actuator/health/readiness"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -132,11 +146,13 @@ services:
     logging: *default-logging
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+    command: ["sh", "-c", "redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD}\""]
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping"]
       interval: 5s
       timeout: 3s
       retries: 5
