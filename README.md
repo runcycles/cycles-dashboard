@@ -1,6 +1,6 @@
 [![CI](https://github.com/runcycles/cycles-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/runcycles/cycles-dashboard/actions)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Spec](https://img.shields.io/badge/spec-v0.1.25.34-blue)](https://github.com/runcycles/cycles-protocol/blob/main/cycles-governance-admin-v0.1.25.yaml)
+[![Spec](https://img.shields.io/badge/spec-v0.1.25.35-blue)](https://github.com/runcycles/cycles-protocol/blob/main/cycles-governance-admin-v0.1.25.yaml)
 [![Vue](https://img.shields.io/badge/vue-3-brightgreen)](https://vuejs.org)
 [![TypeScript](https://img.shields.io/badge/typescript-strict-blue)](https://www.typescriptlang.org)
 
@@ -369,7 +369,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.64
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.65
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]

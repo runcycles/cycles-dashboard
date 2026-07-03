@@ -23,7 +23,7 @@ services:
 
   dashboard:
     logging: *default-logging
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.64
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.65
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]
@@ -49,7 +49,7 @@ services:
   cycles-server:
     logging: *default-logging
     # Runtime-plane server. Release cadence is independent of dashboard +
-    # cycles-server-admin. Pinned to .44 for dashboard 0.1.25.64: it
+    # cycles-server-admin. Pinned to .44 for dashboard 0.1.25.65: it
     # surfaces reservation committed/finalized/metadata, the include=
     # projection on listReservations — including include=evidence, the
     # reservation->evidence link — and serves /v1/evidence + the signer

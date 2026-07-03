@@ -55,11 +55,13 @@ export default defineConfig({
         'src/types.ts',
         'src/main.ts',
       ],
-      // Thresholds enforce the floor in CI. Raise these as tests accumulate.
-      // Round 1 (client.ts + sanitize.ts) put us over the bar for api/ and
-      // utils/ — this floor keeps regressions from sneaking through.
+      // Thresholds enforce the floor in CI. Lines is pinned at the repo's
+      // strict ≥95% rule (CLAUDE.md) — actual line coverage is 95.98% as of
+      // the 2026-07-03 audit, so the gate now enforces what the rule states.
+      // The other counters stay at 70 as a regression floor; raise them as
+      // tests accumulate.
       thresholds: {
-        lines: 70,
+        lines: 95,
         functions: 70,
         branches: 70,
         statements: 70,
