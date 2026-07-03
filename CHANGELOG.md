@@ -15,6 +15,26 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.65] — 2026-07-03
+
+### Added
+
+- **Tenant-close cascade event kinds in the pickers** (spec v0.1.25.35):
+  `budget.closed_via_tenant_cascade`, `reservation.released_via_tenant_cascade`,
+  `webhook.disabled_via_tenant_cascade`, `api_key.revoked_via_tenant_cascade`
+  are now in `EVENT_TYPES`, so they appear in the Events view type-filter
+  typeahead and — more importantly — in the webhook subscription event-type
+  checkboxes. Before this, cascade events (emitted by cycles-server-admin
+  since it implemented the tenant-close cascade; formalized in spec
+  v0.1.25.35) rendered and free-text-filtered fine but could not be selected
+  when creating or editing a webhook subscription in the UI.
+
+### Changed
+
+- CI coverage gate: the `lines` threshold now enforces the repo's strict
+  ≥95% rule (was a 70% floor; actual line coverage is 95.98%). Spec badge
+  bumped to v0.1.25.35.
+
 ## [0.1.25.64] — 2026-06-26
 
 ### Changed

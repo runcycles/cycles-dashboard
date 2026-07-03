@@ -514,16 +514,23 @@ export const PERMISSION_GROUPS = [
   },
 ] as const
 
+// Spec v0.1.25.35 adds the four *_via_tenant_cascade kinds (CASCADE SEMANTICS
+// Rule 1) — emitted by cycles-server-admin per mutated owned object when a
+// tenant is closed; payload: EventDataTenantCascade. Each sits inside its
+// category group because the webhook event-type pickers render this list in
+// insertion order.
 export const EVENT_TYPES = [
   'budget.created', 'budget.updated', 'budget.funded', 'budget.debited', 'budget.reset',
   'budget.reset_spent',
   'budget.debt_repaid', 'budget.frozen', 'budget.unfrozen', 'budget.closed',
+  'budget.closed_via_tenant_cascade',
   'budget.threshold_crossed', 'budget.exhausted', 'budget.over_limit_entered', 'budget.over_limit_exited',
   'budget.debt_incurred', 'budget.burn_rate_anomaly',
   'reservation.denied', 'reservation.denial_rate_spike', 'reservation.expired',
   'reservation.expiry_rate_spike', 'reservation.commit_overage',
+  'reservation.released_via_tenant_cascade',
   'tenant.created', 'tenant.updated', 'tenant.suspended', 'tenant.reactivated', 'tenant.closed', 'tenant.settings_changed',
-  'api_key.created', 'api_key.revoked', 'api_key.expired', 'api_key.permissions_changed',
+  'api_key.created', 'api_key.revoked', 'api_key.revoked_via_tenant_cascade', 'api_key.expired', 'api_key.permissions_changed',
   'api_key.auth_failed', 'api_key.auth_failure_rate_spike',
   'policy.created', 'policy.updated', 'policy.deleted',
   // Spec v0.1.25.33: webhook lifecycle events, emitted by cycles-server-admin
@@ -531,6 +538,7 @@ export const EVENT_TYPES = [
   // dispatcher on auto-disable. Payload mirrors EventDataTenantLifecycle.
   'webhook.created', 'webhook.updated', 'webhook.paused',
   'webhook.resumed', 'webhook.disabled', 'webhook.deleted',
+  'webhook.disabled_via_tenant_cascade',
   'system.store_connection_lost', 'system.store_connection_restored', 'system.high_latency',
   'system.webhook_delivery_failed', 'system.webhook_test',
 ] as const
