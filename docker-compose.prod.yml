@@ -23,7 +23,7 @@ services:
 
   dashboard:
     logging: *default-logging
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.65
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.66
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]
@@ -49,7 +49,9 @@ services:
   cycles-server:
     logging: *default-logging
     # Runtime-plane server. Release cadence is independent of dashboard +
-    # cycles-server-admin. Pinned to .44 for dashboard 0.1.25.65: it
+    # cycles-server-admin. Pinned to .46 for dashboard 0.1.25.66: adds
+    # default-on 429 rate limiting on the public evidence/JWKS endpoints
+    # (anonymous surface only; dashboard traffic is far below the limit); it
     # surfaces reservation committed/finalized/metadata, the include=
     # projection on listReservations — including include=evidence, the
     # reservation->evidence link — and serves /v1/evidence + the signer
@@ -57,7 +59,7 @@ services:
     # the dashboard degrades gracefully (fields omitted, 404 on evidence) —
     # but the full Reservations/Evidence surface needs .37+. .38 also
     # stops queuing evidence source records when evidence is unconfigured.
-    image: ghcr.io/runcycles/cycles-server:0.1.25.44
+    image: ghcr.io/runcycles/cycles-server:0.1.25.46
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
@@ -93,7 +95,7 @@ services:
     # fields — needed for the Evidence viewer when evidence emission is on.
     # `.15` gates the signer on evidence config (no dead-letter / failed-queue
     # noise when unconfigured) + fixes a retention-scan WRONGTYPE error.
-    image: ghcr.io/runcycles/cycles-server-events:0.1.25.20
+    image: ghcr.io/runcycles/cycles-server-events:0.1.25.22
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
