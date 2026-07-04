@@ -15,6 +15,15 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.67] — 2026-07-04
+
+### Changed
+
+- Bumped `cycles-server-admin` `0.1.25.47 → 0.1.25.48` (compose), completing
+  the fleet alignment started in `0.1.25.66`. Admin `.48` is internal-only
+  (typed `EventDataTenantCascade` payload mapping — no wire change), so no
+  operator action is required. No dashboard code change.
+
 ## [0.1.25.66] — 2026-07-04
 
 ### Changed

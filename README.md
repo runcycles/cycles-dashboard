@@ -369,7 +369,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.66
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.67
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]
@@ -391,7 +391,7 @@ services:
       - cycles
 
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.47
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.48
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
