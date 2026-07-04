@@ -15,6 +15,25 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.66] — 2026-07-04
+
+### Changed
+
+- Bumped the bundled server stack to the current fleet: `cycles-server`
+  `0.1.25.44 → 0.1.25.46` and `cycles-server-events` `0.1.25.20 → 0.1.25.22`
+  (compose + README; `cycles-server-admin` stays `0.1.25.47` — `.48` is
+  merged but not yet released). No dashboard code change.
+- **Operator note for events `0.1.25.22`:** the dispatcher now re-validates
+  webhook URLs against the admin webhook-security config at DELIVERY time.
+  Deployments delivering to `http://` or private-network targets (e.g.
+  local receivers in dev stacks) must set `allow_http` / adjust
+  `blocked_cidr_ranges` via **Settings → Webhook security**
+  (`PUT /v1/admin/config/webhook-security`) or those deliveries permanently
+  fail with `ssrf_blocked`. Public HTTPS targets are unaffected.
+- **Operator note for server `0.1.25.46`:** default-on 429 rate limiting on
+  the public evidence/JWKS endpoints (anonymous surface only, 300 req/min
+  per client IP) — dashboard Evidence-view traffic is far below the limit.
+
 ## [0.1.25.65] — 2026-07-03
 
 ### Added

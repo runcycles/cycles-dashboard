@@ -33,7 +33,7 @@ services:
     # dashboard .63) and serves /v1/evidence + JWKS. .38: with evidence NOT
     # configured (this bundled stack's default) the producer no longer
     # queues evidence source records — keeps evidence:pending quiet.
-    image: ghcr.io/runcycles/cycles-server:0.1.25.44
+    image: ghcr.io/runcycles/cycles-server:0.1.25.46
     restart: unless-stopped
     ports:
       - "7878:7878"
@@ -71,7 +71,7 @@ services:
     # cross-surface correlation reads. `.15`: gates the signer on evidence
     # config (no dead-lettering / evidence:failed noise when unconfigured,
     # this stack's default) and fixes a retention-scan WRONGTYPE error.
-    image: ghcr.io/runcycles/cycles-server-events:0.1.25.20
+    image: ghcr.io/runcycles/cycles-server-events:0.1.25.22
     restart: unless-stopped
     ports:
       - "7980:7980"
