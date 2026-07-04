@@ -34,3 +34,6 @@ coverage
 test-results/
 playwright-report/
 playwright/.cache/
+
+# Local-only compose overrides (may carry local signing identities) - never commit
+docker-compose.override.yml
