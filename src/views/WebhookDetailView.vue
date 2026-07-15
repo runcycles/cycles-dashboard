@@ -14,7 +14,7 @@ import { useSort } from '../composables/useSort'
 import { getWebhook, listDeliveries, updateWebhook, deleteWebhook, testWebhook, replayWebhookEvents, rotateWebhookSecret, ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { WebhookSubscription, WebhookDelivery, WebhookTestResponse, ReplayEventsRequest } from '../types'
-import { EVENT_TYPES, EVENT_CATEGORIES } from '../types'
+import { EVENT_TYPES, EVENT_CATEGORIES, TENANT_ALLOWED_EVENT_TYPES, TENANT_ALLOWED_EVENT_CATEGORIES } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
@@ -389,12 +389,36 @@ interface EditForm {
 }
 const editForm = ref<EditForm>({ name: '', description: '', url: '', event_types: [], event_categories: [], scope_filter: '', disable_after_failures: '', metadata: '' })
 const editInitial = ref<EditForm | null>(null)
+
+// TENANT-OWNED CATEGORY BOUNDARY (spec revisions 0.1.25.38/.40/.41,
+// updateWebhookSubscription lines 6560-6574): when the subscription's
+// owning tenant is a CONCRETE tenant (tenant_id present and !=
+// "__system__"), any provided event_types / event_categories must stay
+// within the tenant-accessible sets (budget / reservation / tenant) —
+// servers at .40+ reject admin-only selectors with 400 INVALID_REQUEST
+// regardless of auth context. Filter the edit pickers to those sets for
+// tenant-owned rows; system-owned rows keep the full lists (system-wide
+// admin monitoring is legitimate).
+const SYSTEM_TENANT_ID = '__system__'
+const isTenantOwned = computed(() =>
+  !!webhook.value?.tenant_id && webhook.value.tenant_id !== SYSTEM_TENANT_ID,
+)
+const editEventTypes = computed<readonly string[]>(() =>
+  isTenantOwned.value ? TENANT_ALLOWED_EVENT_TYPES : EVENT_TYPES,
+)
+const editEventCategories = computed<readonly string[]>(() =>
+  isTenantOwned.value ? TENANT_ALLOWED_EVENT_CATEGORIES : EVENT_CATEGORIES,
+)
 // Thresholds + retry policy, edited via the shared WebhookAdvancedFields
 // component. Diffed against a frozen baseline the same way as editForm so
 // an unchanged advanced section never enters the PATCH body.
 const editAdvanced = ref(emptyWebhookAdvancedForm())
 const editAdvancedInitial = ref('')
 const editAdvancedHasConfig = ref(false)
+// How many legacy admin-only selectors openEdit stripped from the
+// pickers on a tenant-owned row. > 0 renders a muted hint in the edit
+// dialog so the empty checkboxes aren't mistaken for the server state.
+const hiddenLegacySelectorCount = ref(0)
 
 function snapshotForm(w: WebhookSubscription): EditForm {
   return {
@@ -417,6 +441,30 @@ function openEdit() {
   // both refs.
   editForm.value = snapshotForm(webhook.value)
   editInitial.value = snapshotForm(webhook.value)
+  // Tenant-owned rows: strip admin-only selectors (persisted by servers
+  // pre-dating the .40 boundary enforcement) from BOTH snapshots. The
+  // picker no longer renders their checkboxes, so leaving them in the
+  // form would keep invisible un-uncheckable selections; stripping only
+  // editForm would make every save carry a phantom event_types diff.
+  // With both stripped, an untouched selector stays out of the PATCH
+  // (server keeps the stored value) and a deliberate selector edit
+  // sends the cleaned array, healing the legacy row.
+  hiddenLegacySelectorCount.value = 0
+  if (isTenantOwned.value) {
+    const allowedTypes = new Set<string>(TENANT_ALLOWED_EVENT_TYPES)
+    const allowedCategories = new Set<string>(TENANT_ALLOWED_EVENT_CATEGORIES)
+    const before = editForm.value.event_types.length + editForm.value.event_categories.length
+    for (const form of [editForm.value, editInitial.value]) {
+      form.event_types = form.event_types.filter(et => allowedTypes.has(et))
+      form.event_categories = form.event_categories.filter(ec => allowedCategories.has(ec))
+    }
+    // Count what stripping hid so the dialog can say so — otherwise a
+    // legacy row whose ONLY selectors are admin-only renders an all-
+    // empty picker that reads like the server state (it isn't; the
+    // stored selectors stay active until the operator edits them).
+    hiddenLegacySelectorCount.value =
+      before - (editForm.value.event_types.length + editForm.value.event_categories.length)
+  }
   editAdvanced.value = webhookToAdvancedForm(webhook.value)
   editAdvancedInitial.value = JSON.stringify(editAdvanced.value)
   editAdvancedHasConfig.value = !!(webhook.value.thresholds || webhook.value.retry_policy)
@@ -428,10 +476,31 @@ function openEdit() {
 async function submitEdit() {
   editError.value = ''
   editMetadataError.value = ''
-  if (!editForm.value.event_types.length) { editError.value = 'Select at least one event type'; return }
+  // SELECTOR CLEARING (spec revision 0.1.25.39, WebhookUpdateRequest
+  // lines 2781-2813): an update MAY set event_types to [] to convert the
+  // subscription to category-only, PROVIDED event_categories is (or
+  // remains) non-empty. The form holds the full resulting state for both
+  // selectors, so both-empty is the only invalid combination (the server
+  // rejects it 400 per the SUBSCRIPTION SELECTOR INVARIANT). The diff
+  // below sends event_types: [] explicitly when cleared — the spec
+  // distinguishes empty-array (clear) from omitted (leave unchanged).
+  //
+  // Only enforce when the operator actually CHANGED the selectors: on a
+  // legacy tenant-owned row whose only selectors are admin-only, openEdit
+  // strips both snapshots to empty — an untouched save then omits the
+  // selector fields entirely (server keeps the stored values), so a
+  // URL/name-only edit must not be blocked by the invariant. A deliberate
+  // selector edit still sends the cleaned arrays and gets validated.
   const body: Record<string, unknown> = {}
   const init = editInitial.value
   if (!init) return
+  const selectorsChanged =
+    JSON.stringify(editForm.value.event_types) !== JSON.stringify(init.event_types) ||
+    JSON.stringify(editForm.value.event_categories) !== JSON.stringify(init.event_categories)
+  if (selectorsChanged && !editForm.value.event_types.length && !editForm.value.event_categories.length) {
+    editError.value = 'Select at least one event type or category.'
+    return
+  }
   // Diff each field. For strings, empty → undefined so we don't echo
   // an empty value that would overwrite a server default.
   if (editForm.value.name !== init.name) body.name = editForm.value.name || null
@@ -1206,16 +1275,20 @@ watch(exportError, (v) => { if (v) error.value = v })
       <div>
         <label class="form-label">Event types</label>
         <div class="grid grid-cols-2 gap-1 max-h-48 overflow-y-auto border border-gray-200 rounded p-2">
-          <label v-for="et in EVENT_TYPES" :key="et" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+          <label v-for="et in editEventTypes" :key="et" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
             <input type="checkbox" :value="et" v-model="editForm.event_types" class="rounded" />
             {{ et }}
           </label>
         </div>
+        <p v-if="isTenantOwned" class="muted-sm mt-1">Tenant-owned subscriptions can only receive tenant-scoped events (budget.*, reservation.*, tenant.*).</p>
+        <p v-if="hiddenLegacySelectorCount" class="muted-sm mt-1" data-testid="hidden-legacy-selectors-hint">
+          {{ hiddenLegacySelectorCount }} legacy admin-only selector{{ hiddenLegacySelectorCount === 1 ? ' is' : 's are' }} hidden here; {{ hiddenLegacySelectorCount === 1 ? 'it remains' : 'they remain' }} active until you edit the selectors.
+        </p>
       </div>
       <div>
         <label class="form-label">Event categories <span class="muted-sm">(additive — subscribes to all events in category, including future ones)</span></label>
         <div class="flex flex-wrap gap-2 border border-gray-200 rounded p-2">
-          <label v-for="ec in EVENT_CATEGORIES" :key="ec" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+          <label v-for="ec in editEventCategories" :key="ec" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
             <input type="checkbox" :value="ec" v-model="editForm.event_categories" class="rounded" />
             {{ ec }}
           </label>

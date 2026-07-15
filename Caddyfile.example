@@ -1,5 +1,7 @@
 # Replace admin.example.com with your actual domain.
 # Caddy automatically provisions TLS certificates via Let's Encrypt.
 admin.example.com {
+    encode zstd gzip
+    header Strict-Transport-Security "max-age=63072000; includeSubDomains"
     reverse_proxy dashboard:80
 }

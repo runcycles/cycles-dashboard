@@ -104,6 +104,7 @@ function apiKey(status: string): ApiKey {
   return {
     key_id: `key_${status.toLowerCase()}`,
     tenant_id: 'acme',
+    key_prefix: `cyc_test_${status.toLowerCase()}`,
     status,
     permissions: [],
     created_at: '2026-01-01T00:00:00Z',

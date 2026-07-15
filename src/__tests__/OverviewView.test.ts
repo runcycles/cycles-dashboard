@@ -40,8 +40,16 @@ vi.mock('vue-router', async (importOriginal) => {
   }
 })
 
+// Captures the polling callback so tests can simulate scheduled poll
+// ticks directly (F7 — walk gating distinguishes poll ticks from the
+// initial load / manual refresh, which go through refreshAll()).
+const pollState = vi.hoisted(() => ({
+  callback: null as null | (() => Promise<void> | void),
+}))
+
 vi.mock('../composables/usePolling', () => ({
   usePolling: (fn: () => Promise<void> | void) => {
+    pollState.callback = fn
     void fn()
     return {
       refresh: async () => { void fn() },
@@ -49,6 +57,12 @@ vi.mock('../composables/usePolling', () => ({
     }
   },
 }))
+
+// Simulate one scheduled poll tick (NOT a manual refresh).
+async function pollTick() {
+  await pollState.callback!()
+  await flushPromises()
+}
 
 // vue-echarts renders to Canvas, which jsdom can't support. Stub it —
 // these tests care about OverviewView's layout logic, not chart pixels.
@@ -97,6 +111,7 @@ function key(id: string, overrides: Partial<ApiKey> = {}): ApiKey {
   return {
     key_id: id,
     tenant_id: 't',
+    key_prefix: `cyc_test_${id}`,
     status: 'ACTIVE',
     permissions: [],
     created_at: '2026-01-01T00:00:00Z',
@@ -367,17 +382,105 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       expect(atCapCall?.utilization_min).toBe('0.9')
     })
 
-    // v0.1.25.53 bug #2: utilization-donut sample limit was 500 on large
-    // fleets → under-count. Bumped to 2000 to buy headroom without a
-    // cursor-walk pass. Regression pin: any future drop must be
-    // intentional and reflected here.
-    it('samples budgets at limit=2000 so the utilization donut is not undercounted on large fleets', async () => {
+    // The server clamps `limit` to 100 on every list endpoint, so the
+    // old single limit='2000' request was silently truncated — the
+    // at-cap set is now a cursor walk (limit=100 per page, following
+    // next_cursor). Regression pin: any future single-shot fetch here
+    // must be intentional and reflected in these specs.
+    it('at-cap fetch requests limit=100 per page (server clamp), not a single big-limit page', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview())
       await mountOverview()
       const atCapCall = listBudgetsMock.mock.calls
         .map(c => c[0] as Record<string, string>)
         .find(p => p.utilization_min !== undefined)
-      expect(atCapCall?.limit).toBe('2000')
+      expect(atCapCall?.limit).toBe('100')
+    })
+
+    it('at-cap fetch follows next_cursor and aggregates across pages', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      listBudgetsMock.mockImplementation((params: Record<string, string>) => {
+        if (params.utilization_min !== undefined) {
+          if (!params.cursor) {
+            return Promise.resolve({
+              ledgers: Array.from({ length: 3 }, (_, i) => atCapBudget(`page1-${i}`)),
+              has_more: true,
+              next_cursor: 'cur-2',
+            })
+          }
+          expect(params.cursor).toBe('cur-2')
+          return Promise.resolve({
+            ledgers: Array.from({ length: 2 }, (_, i) => atCapBudget(`page2-${i}`)),
+            has_more: false,
+          })
+        }
+        return Promise.resolve({ ledgers: [], has_more: false })
+      })
+      const w = await mountOverview()
+      // Badge + banner pill count the FULL walked set (3 + 2), not just
+      // the first page.
+      expect(w.find('[data-axis="budgets-at-cap"]').text()).toContain('·5')
+      // Walk completed naturally — no partial hint.
+      expect(w.find('[data-testid="at-cap-partial-note"]').exists()).toBe(false)
+    })
+
+    it('flags "counts may be partial" on the at-cap card and utilization donut when the walk hits its page cap', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        budget_counts: {
+          total: 5000, active: 5000, frozen: 0, closed: 0,
+          over_limit: 0, with_debt: 0, by_unit: {},
+        },
+      }))
+      let atCapCalls = 0
+      listBudgetsMock.mockImplementation((params: Record<string, string>) => {
+        if (params.utilization_min !== undefined) {
+          atCapCalls++
+          return Promise.resolve({
+            ledgers: Array.from({ length: 100 }, (_, i) => atCapBudget(`p${atCapCalls}-${i}`)),
+            has_more: true,
+            next_cursor: `cur-${atCapCalls}`,
+          })
+        }
+        return Promise.resolve({ ledgers: [], has_more: false })
+      })
+      const w = await mountOverview()
+      // Walk stopped at the 10-page cap with the server still reporting
+      // more rows.
+      expect(atCapCalls).toBe(10)
+      expect(w.find('[data-testid="at-cap-partial-note"]').exists()).toBe(true)
+      expect(w.find('[data-testid="at-cap-partial-note"]').text()).toContain('counts may be partial')
+      expect(w.find('[data-testid="utilization-donut-partial-note"]').exists()).toBe(true)
+    })
+
+    it('closed-tenant exclusion set is cursor-walked (limit=100, cursor threaded)', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      listTenantsMock.mockImplementation((params: Record<string, string>) => {
+        expect(params.status).toBe('CLOSED')
+        expect(params.limit).toBe('100')
+        if (!params.cursor) {
+          return Promise.resolve({ tenants: [tenant('closed-1')], has_more: true, next_cursor: 't-cur' })
+        }
+        expect(params.cursor).toBe('t-cur')
+        return Promise.resolve({ tenants: [tenant('closed-2')], has_more: false })
+      })
+      listBudgetsMock.mockImplementation((params: Record<string, string>) => {
+        if (params.utilization_min) {
+          return Promise.resolve({
+            ledgers: [
+              // Owned by a tenant only present on PAGE 2 of the closed
+              // walk — pre-fix a truncated exclusion set leaked it.
+              atCapBudget('closed-2/prod', { tenant_id: 'closed-2' }),
+              atCapBudget('acme/prod', { tenant_id: 'acme' }),
+            ],
+            has_more: false,
+          })
+        }
+        return Promise.resolve({ ledgers: [], has_more: false })
+      })
+      const w = await mountOverview()
+      expect(listTenantsMock).toHaveBeenCalledTimes(2)
+      const card = w.find('[data-testid="budgets-at-cap-card"]')
+      expect(card.text()).toContain('acme/prod')
+      expect(card.text()).not.toContain('closed-2/prod')
     })
 
     it('calls listBudgets with status=FROZEN for the frozen-scopes fetch', async () => {
@@ -735,10 +838,58 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
   })
 
   describe('Expiring API Keys card (new)', () => {
-    it('fetches listApiKeys on mount', async () => {
+    it('fetches listApiKeys on mount — ACTIVE only, limit=100 per page (server clamp)', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview())
       await mountOverview()
       expect(listApiKeysMock).toHaveBeenCalledTimes(1)
+      const params = listApiKeysMock.mock.calls[0][0] as Record<string, string>
+      // Server sorts created_at desc — NOT by expiry — and clamps limit
+      // to 100, so the card cursor-walks the ACTIVE set instead of
+      // trusting one default page.
+      expect(params.status).toBe('ACTIVE')
+      expect(params.limit).toBe('100')
+    })
+
+    it('cursor-walks the key set — an expiring key on page 2 still surfaces', async () => {
+      const soon = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString()
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      listApiKeysMock.mockImplementation((params: Record<string, string>) => {
+        if (!params.cursor) {
+          return Promise.resolve({
+            keys: [key('k-page1', { name: 'page1-key', expires_at: '2099-01-01T00:00:00Z' })],
+            has_more: true,
+            next_cursor: 'k-cur',
+          })
+        }
+        expect(params.cursor).toBe('k-cur')
+        return Promise.resolve({
+          keys: [key('k-page2', { name: 'page2-expiring', expires_at: soon })],
+          has_more: false,
+        })
+      })
+      const w = await mountOverview()
+      expect(listApiKeysMock).toHaveBeenCalledTimes(2)
+      const card = w.find('[data-testid="expiring-keys-card"]')
+      expect(card.text()).toContain('page2-expiring')
+      expect(w.find('[data-testid="expiring-keys-partial-note"]').exists()).toBe(false)
+    })
+
+    it('flags "counts may be partial" when the key walk hits its page cap', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      let calls = 0
+      listApiKeysMock.mockImplementation(() => {
+        calls++
+        return Promise.resolve({
+          keys: Array.from({ length: 100 }, (_, i) => key(`k-${calls}-${i}`)),
+          has_more: true,
+          next_cursor: `cur-${calls}`,
+        })
+      })
+      const w = await mountOverview()
+      expect(calls).toBe(10)
+      const note = w.find('[data-testid="expiring-keys-partial-note"]')
+      expect(note.exists()).toBe(true)
+      expect(note.text()).toContain('counts may be partial')
     })
 
     it('renders positive empty state when no keys expire in 7d', async () => {
@@ -799,6 +950,28 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       expect(parsed.name).toBe('api-keys')
       expect(parsed.query?.expiring_within_7d).toBe('1')
     })
+
+    // Per-key deep-link: carries ?search=<key_id> — listApiKeys supports
+    // server-side substring search over key_id + name, and ApiKeysView
+    // hydrates ?search into its filter on mount, so the landing state
+    // shows the single matching key. (The old ?key_id= param was never
+    // read by ApiKeysView — dead deep-link.)
+    it('each expiring-key row links to /api-keys with ?search=<key_id>', async () => {
+      const soon = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString()
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      listApiKeysMock.mockResolvedValue({
+        keys: [key('key-soon', { name: 'soon-key', expires_at: soon })],
+        has_more: false,
+      })
+      const w = await mountOverview()
+      const card = w.find('[data-testid="expiring-keys-card"]')
+      const rowLink = card.findAll('a').find(a => a.text().includes('soon-key'))
+      expect(rowLink).toBeDefined()
+      const parsed = JSON.parse(rowLink!.attributes('data-to') as string)
+      expect(parsed.name).toBe('api-keys')
+      expect(parsed.query?.search).toBe('key-soon')
+      expect(parsed.query?.key_id).toBeUndefined()
+    })
   })
 
   // Cross-card consistency — every "what needs attention" card should
@@ -857,6 +1030,54 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       expect(card.text()).not.toContain('acme/scope-5')
       // Axis badge shows the full server-returned count.
       expect(card.find('.badge-danger').text()).toBe('10')
+    })
+  })
+
+  describe('Failing Webhooks card — cursor-walked source', () => {
+    it('walks listWebhooks at limit=100 per page and aggregates failing subs across pages', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        webhook_counts: { total: 120, active: 118, disabled: 0, with_failures: 2 },
+      }))
+      listWebhooksMock.mockImplementation((params: Record<string, string>) => {
+        expect(params.limit).toBe('100')
+        if (!params.cursor) {
+          return Promise.resolve({
+            subscriptions: [webhookSub('wh_p1', { consecutive_failures: 2 })],
+            has_more: true,
+            next_cursor: 'w-cur',
+          })
+        }
+        expect(params.cursor).toBe('w-cur')
+        return Promise.resolve({
+          subscriptions: [webhookSub('wh_p2', { consecutive_failures: 5 })],
+          has_more: false,
+        })
+      })
+      const w = await mountOverview()
+      expect(listWebhooksMock).toHaveBeenCalledTimes(2)
+      const card = w.find('#failing-webhooks')
+      // Page-2 failing sub surfaces; badge counts both.
+      expect(card.text()).toContain('wh_p2')
+      expect(card.find('.badge-danger').text()).toBe('2')
+      expect(w.find('[data-testid="failing-webhooks-partial-note"]').exists()).toBe(false)
+    })
+
+    it('flags "counts may be partial" when the webhook walk hits its page cap', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      let calls = 0
+      listWebhooksMock.mockImplementation(() => {
+        calls++
+        return Promise.resolve({
+          subscriptions: Array.from({ length: 100 }, (_, i) => webhookSub(`wh_${calls}_${i}`, { consecutive_failures: 0 })),
+          has_more: true,
+          next_cursor: `cur-${calls}`,
+        })
+      })
+      const w = await mountOverview()
+      expect(calls).toBe(10)
+      const note = w.find('[data-testid="failing-webhooks-partial-note"]')
+      expect(note.exists()).toBe(true)
+      expect(note.text()).toContain('counts may be partial')
     })
   })
 
@@ -1357,6 +1578,107 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       const card = w.find('#failing-webhooks')
       expect(card.text()).toContain('wh_live')
       expect(card.text()).not.toContain('wh_closed')
+    })
+  })
+
+  // F7 — the four cursor walks (api keys / at-cap budgets / closed
+  // tenants / webhooks) are up to 40 sequential requests per run. They
+  // must NOT replay on every 30s poll tick: initial load and manual
+  // refresh always walk; poll ticks walk only when the overview
+  // aggregate counters change, with an every-10th-tick fallback so
+  // drift can't persist indefinitely.
+  describe('poll ticks gate the cursor walks on aggregate change', () => {
+    function clearListMocks() {
+      listApiKeysMock.mockClear()
+      listWebhooksMock.mockClear()
+      listTenantsMock.mockClear()
+      listBudgetsMock.mockClear()
+      listAuditLogsMock.mockClear()
+    }
+
+    it('a poll tick with unchanged counters re-runs the cheap fetches but NOT the walks', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      await mountOverview()
+      clearListMocks()
+
+      await pollTick()
+
+      // Cheap per-tick fetches still fire: audit feed + the two
+      // limit-10 budget lists (frozen, has_debt).
+      expect(listAuditLogsMock).toHaveBeenCalledTimes(1)
+      const budgetParams = listBudgetsMock.mock.calls.map(c => c[0] as Record<string, string>)
+      expect(budgetParams.some(p => p.status === 'FROZEN')).toBe(true)
+      expect(budgetParams.some(p => p.has_debt === 'true')).toBe(true)
+      // Walk-backed fetches do NOT re-fire — counters didn't move.
+      expect(budgetParams.some(p => p.utilization_min !== undefined)).toBe(false)
+      expect(listApiKeysMock).not.toHaveBeenCalled()
+      expect(listWebhooksMock).not.toHaveBeenCalled()
+      expect(listTenantsMock).not.toHaveBeenCalled()
+    })
+
+    it('a poll tick whose overview counters changed re-runs all four walks', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      await mountOverview()
+      clearListMocks()
+
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        webhook_counts: { total: 4, active: 4, disabled: 0, with_failures: 0 },
+      }))
+      await pollTick()
+
+      expect(listApiKeysMock).toHaveBeenCalledTimes(1)
+      expect(listWebhooksMock).toHaveBeenCalledTimes(1)
+      expect(listTenantsMock).toHaveBeenCalledTimes(1)
+      const budgetParams = listBudgetsMock.mock.calls.map(c => c[0] as Record<string, string>)
+      expect(budgetParams.some(p => p.utilization_min === '0.9')).toBe(true)
+    })
+
+    it('a changed-counter walk resets the gate — the next unchanged tick skips again', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      await mountOverview()
+
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        tenant_counts: { total: 11, active: 11, suspended: 0, closed: 0 },
+      }))
+      await pollTick() // walks (counters changed)
+      clearListMocks()
+
+      await pollTick() // same counters as previous tick → no walk
+      expect(listApiKeysMock).not.toHaveBeenCalled()
+      expect(listWebhooksMock).not.toHaveBeenCalled()
+      expect(listTenantsMock).not.toHaveBeenCalled()
+    })
+
+    it('the every-10th-tick fallback re-walks even when counters never change', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      await mountOverview()
+      clearListMocks()
+
+      // Ticks 1–9 after the initial walk: gate holds.
+      for (let i = 0; i < 9; i++) await pollTick()
+      expect(listApiKeysMock).not.toHaveBeenCalled()
+      expect(listWebhooksMock).not.toHaveBeenCalled()
+      expect(listTenantsMock).not.toHaveBeenCalled()
+
+      // Tick 10: fallback fires so drift can't persist indefinitely.
+      await pollTick()
+      expect(listApiKeysMock).toHaveBeenCalledTimes(1)
+      expect(listWebhooksMock).toHaveBeenCalledTimes(1)
+      expect(listTenantsMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('manual refresh (PageHeader) always re-runs the walks regardless of counters', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      const w = await mountOverview()
+      clearListMocks()
+
+      const { default: PageHeader } = await import('../components/PageHeader.vue')
+      w.findComponent(PageHeader).vm.$emit('refresh')
+      await flushPromises()
+
+      expect(listApiKeysMock).toHaveBeenCalledTimes(1)
+      expect(listWebhooksMock).toHaveBeenCalledTimes(1)
+      expect(listTenantsMock).toHaveBeenCalledTimes(1)
     })
   })
 })

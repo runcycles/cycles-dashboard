@@ -153,13 +153,15 @@ describe('CommandPalette', () => {
     input.dispatchEvent(new Event('input', { bubbles: true }))
     await new Promise((r) => setTimeout(r, 200))
     const options = document.body.querySelectorAll('[role="option"]')
-    expect(options.length).toBeGreaterThanOrEqual(5)
+    expect(options.length).toBeGreaterThanOrEqual(7)
     const text = document.body.textContent || ''
     expect(text).toContain('/wh')
     expect(text).toContain('/key')
     expect(text).toContain('/audit')
     expect(text).toContain('/event')
     expect(text).toContain('/tenant')
+    expect(text).toContain('/budget')
+    expect(text).toContain('/res')
     w.unmount()
   })
 
@@ -241,6 +243,57 @@ describe('CommandPalette', () => {
     expect(routerPushMock).toHaveBeenCalledWith({
       name: 'tenant-detail',
       params: { id: 'some-id-not-in-cache' },
+    })
+    w.unmount()
+  })
+
+  it('/budget <query> routes to budgets pre-filtered by search', async () => {
+    const w = await mountPaletteOpen()
+    const input = document.body.querySelector<HTMLInputElement>('#command-palette-input')!
+    input.value = '/budget tenant:acme'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise((r) => setTimeout(r, 200))
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')!
+    const inner = dialog.querySelector<HTMLElement>('[class*="max-w-xl"]')!
+    inner.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await flushPromises()
+    expect(routerPushMock).toHaveBeenCalledWith({
+      name: 'budgets',
+      query: { search: 'tenant:acme' },
+    })
+    w.unmount()
+  })
+
+  it('/res <tenant> routes to reservations pre-filtered by tenant_id', async () => {
+    const w = await mountPaletteOpen()
+    const input = document.body.querySelector<HTMLInputElement>('#command-palette-input')!
+    input.value = '/res acme-corp'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise((r) => setTimeout(r, 200))
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')!
+    const inner = dialog.querySelector<HTMLElement>('[class*="max-w-xl"]')!
+    inner.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await flushPromises()
+    expect(routerPushMock).toHaveBeenCalledWith({
+      name: 'reservations',
+      query: { tenant_id: 'acme-corp' },
+    })
+    w.unmount()
+  })
+
+  it('/reservation alias also routes to reservations', async () => {
+    const w = await mountPaletteOpen()
+    const input = document.body.querySelector<HTMLInputElement>('#command-palette-input')!
+    input.value = '/reservation acme-corp'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise((r) => setTimeout(r, 200))
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')!
+    const inner = dialog.querySelector<HTMLElement>('[class*="max-w-xl"]')!
+    inner.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await flushPromises()
+    expect(routerPushMock).toHaveBeenCalledWith({
+      name: 'reservations',
+      query: { tenant_id: 'acme-corp' },
     })
     w.unmount()
   })

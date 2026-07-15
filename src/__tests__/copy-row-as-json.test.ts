@@ -16,6 +16,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '../stores/auth'
+import { toasts } from '../composables/useToast'
 import type { Capabilities } from '../types'
 
 const listEventsMock = vi.fn()
@@ -233,7 +234,8 @@ describe('AuditView — Copy JSON copies full entry including metadata', () => {
     expect(w.find(`button[aria-label="Copy full JSON for audit log ${sampleEntry.log_id}"]`).text()).toBe('Copy JSON')
   })
 
-  it('silently swallows clipboard errors', async () => {
+  it('toasts "Copy failed" on clipboard errors instead of failing silently', async () => {
+    toasts.value = []
     writeTextMock.mockRejectedValueOnce(new Error('permission denied'))
     listAuditLogsMock.mockResolvedValue({ logs: [sampleEntry], has_more: false, next_cursor: undefined })
     const { default: AuditView } = await import('../views/AuditView.vue')
@@ -242,10 +244,14 @@ describe('AuditView — Copy JSON copies full entry including metadata', () => {
 
     await w.find('button[aria-label="Expand audit details"]').trigger('click')
     await flushPromises()
-    // Should not throw even though writeText rejects.
+    // Must not throw even though writeText rejects…
     await expect(
       w.find(`button[aria-label="Copy full JSON for audit log ${sampleEntry.log_id}"]`).trigger('click')
     ).resolves.not.toThrow()
+    await flushPromises()
+    // …and the failure is surfaced as an error toast (same copy as TenantsView).
+    expect(toasts.value.some(t => t.type === 'error' && t.message.includes('Copy failed'))).toBe(true)
+    toasts.value = []
   })
 })
 

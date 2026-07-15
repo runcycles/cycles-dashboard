@@ -779,7 +779,7 @@ const gridTemplate = computed(() =>
          — consistent visual grouping & separation from the table below. -->
     <div class="card p-4 mb-4">
       <div class="flex gap-3 flex-wrap items-center">
-        <input v-model="search" placeholder="Search by ID or name..." class="border border-gray-300 rounded px-3 py-1.5 text-sm max-w-xs flex-1 min-w-[14rem]" />
+        <input v-model="search" placeholder="Search by ID or name..." aria-label="Search tenants by ID or name" class="border border-gray-300 rounded px-3 py-1.5 text-sm max-w-xs flex-1 min-w-[14rem]" />
         <select v-model="parentFilter" aria-label="Filter by parent tenant" class="form-select">
           <option value="">All tenants</option>
           <option value="__root__">(root-level only)</option>

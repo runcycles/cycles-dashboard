@@ -1,40 +1,52 @@
+# Example nginx TLS terminator in front of the dashboard container.
+# The nginx equivalent of Caddyfile.example.
+#
+# This edge proxy does ONE job: terminate TLS and forward everything —
+# SPA assets and /v1/* API calls alike — to the dashboard container. The
+# container's own bundled nginx (default.conf.template inside the image)
+# handles the /v1/* split between the admin plane (:7979) and the runtime
+# plane (:7878), serves the SPA, and sets security/cache headers.
+#
+# Do NOT proxy /v1/ from here straight to a backend plane: that bypasses
+# the admin/runtime routing split, and a variable-based proxy_pass here
+# would reintroduce the path-stripping regression documented in
+# default.conf.template and OPERATIONS.md ("Reverse-proxy wiring").
+#
+# Replace admin.example.com and the certificate paths. "dashboard" is the
+# compose service name — adjust host/port if the container lives elsewhere.
+
 server {
     listen 443 ssl;
     server_name admin.example.com;
+    server_tokens off;
 
     ssl_certificate     /etc/ssl/certs/dashboard.crt;
     ssl_certificate_key /etc/ssl/private/dashboard.key;
     ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_prefer_server_ciphers on;
-    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    # Modern clients pick the best cipher themselves; forcing server order
+    # is a legacy-client mitigation that no longer helps.
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
 
-    # Security headers
-    add_header X-Frame-Options "DENY" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'" always;
-    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    # HSTS is set here (the TLS hop), not in the container, which serves
+    # plain HTTP behind the terminator. Keep the `preload` token: domains
+    # on the hstspreload.org list must serve it or they become ineligible
+    # and can be dropped from the list.
     add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
-    server_tokens off;
-
-    root /usr/share/nginx/html;
-    index index.html;
 
     location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    location /v1/ {
-        resolver 127.0.0.11 valid=30s ipv6=off;
-        set $upstream http://cycles-admin:7979;
-        proxy_pass $upstream/v1/;
+        proxy_pass http://dashboard:80;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 
 server {
     listen 80;
+    server_name admin.example.com;
     return 301 https://$host$request_uri;
 }

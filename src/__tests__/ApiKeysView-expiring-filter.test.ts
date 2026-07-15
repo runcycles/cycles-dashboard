@@ -14,6 +14,7 @@ import type { Capabilities, ApiKey } from '../types'
 
 const listApiKeysMock = vi.fn()
 const listTenantsMock = vi.fn()
+const replaceMock = vi.fn()
 const routeQuery: Record<string, string> = {}
 
 vi.mock('../api/client', async () => {
@@ -32,11 +33,18 @@ vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
   return {
     ...actual,
-    useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+    useRouter: () => ({ push: vi.fn(), replace: replaceMock }),
     useRoute: () => ({ query: routeQuery, params: {} }),
     RouterLink: { template: '<a><slot /></a>' },
   }
 })
+
+// Pass-through debounce so the ?search= write-back specs don't need
+// fake-timer choreography; existing specs only read the initial value
+// and are unaffected by immediacy.
+vi.mock('../composables/useDebouncedRef', () => ({
+  useDebouncedRef: <T>(source: { value: T }) => source,
+}))
 
 vi.mock('../composables/usePolling', () => ({
   usePolling: (fn: () => Promise<void> | void) => {
@@ -80,6 +88,7 @@ function key(id: string, overrides: Partial<ApiKey> = {}): ApiKey {
   return {
     key_id: id,
     tenant_id: 't-alpha',
+    key_prefix: `cyc_test_${id}`,
     name: id,
     status: 'ACTIVE',
     permissions: [],
@@ -136,6 +145,20 @@ describe('ApiKeysView — ?expiring_within_7d=1 client-side filter', () => {
     expect(chip.find('button').exists()).toBe(true)
   })
 
+  it('renders the key_prefix column so operators can correlate stored secrets', async () => {
+    listApiKeysMock.mockResolvedValue({
+      keys: [key('k-1', { expires_at: undefined })],
+      has_more: false,
+    })
+    const { default: ApiKeysView } = await import('../views/ApiKeysView.vue')
+    const w = mount(ApiKeysView, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
+    await flushPromises(); await flushPromises()
+
+    const headers = w.findAll('[role="columnheader"]').map(h => h.text())
+    expect(headers).toContain('Prefix')
+    expect(w.text()).toContain('cyc_test_k-1')
+  })
+
   it('does NOT filter when the URL param is absent', async () => {
     listApiKeysMock.mockResolvedValue({
       keys: [
@@ -174,5 +197,116 @@ describe('ApiKeysView — ?expiring_within_7d=1 client-side filter', () => {
 
     expect(w.text()).toContain('k-soon')
     expect(w.text()).toContain('k-later')
+  })
+})
+
+describe('ApiKeysView — ?search= deep-link hydration (Overview expiring-key rows)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    const auth = useAuthStore()
+    auth.apiKey = 'test-key'
+    auth.capabilities = FULL_CAPS
+    listApiKeysMock.mockReset()
+    listTenantsMock.mockReset()
+    listTenantsMock.mockResolvedValue({ tenants: [] })
+    for (const k of Object.keys(routeQuery)) delete routeQuery[k]
+  })
+
+  it('hydrates ?search= into the search input and sends it server-side', async () => {
+    routeQuery.search = 'key-soon'
+    listApiKeysMock.mockResolvedValue({
+      keys: [key('key-soon', { expires_at: in7d(3) })],
+      has_more: false,
+    })
+    const { default: ApiKeysView } = await import('../views/ApiKeysView.vue')
+    const w = mount(ApiKeysView, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
+    await flushPromises(); await flushPromises()
+
+    // The visible search input reflects the URL param…
+    expect((w.find('#keys-search').element as HTMLInputElement).value).toBe('key-soon')
+    // …and the initial fetch is already scoped server-side.
+    const firstCall = listApiKeysMock.mock.calls[0]?.[0] ?? {}
+    expect(firstCall.search).toBe('key-soon')
+  })
+
+  it('client-side filter also applies, so the landing state shows only the match', async () => {
+    routeQuery.search = 'key-soon'
+    // Simulate a pre-v0.1.25.21 server that ignores the search param.
+    listApiKeysMock.mockResolvedValue({
+      keys: [
+        key('key-soon',  { expires_at: in7d(3) }),
+        key('key-other', { expires_at: in7d(30) }),
+      ],
+      has_more: false,
+    })
+    const { default: ApiKeysView } = await import('../views/ApiKeysView.vue')
+    const w = mount(ApiKeysView, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
+    await flushPromises(); await flushPromises()
+
+    expect(w.text()).toContain('key-soon')
+    expect(w.text()).not.toContain('key-other')
+  })
+})
+
+// F6 — the sync was one-way: ?search= hydrated the ref, but operator
+// edits never wrote back, so reloading/sharing the URL re-applied a
+// cleared filter. The debounced write-back mirrors TenantsView's
+// bidirectional pattern.
+describe('ApiKeysView — ?search= URL write-back (F6)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    const auth = useAuthStore()
+    auth.apiKey = 'test-key'
+    auth.capabilities = FULL_CAPS
+    listApiKeysMock.mockReset()
+    listTenantsMock.mockReset()
+    replaceMock.mockReset()
+    listTenantsMock.mockResolvedValue({ tenants: [] })
+    listApiKeysMock.mockResolvedValue({ keys: [], has_more: false })
+    for (const k of Object.keys(routeQuery)) delete routeQuery[k]
+  })
+
+  async function mountView() {
+    const { default: ApiKeysView } = await import('../views/ApiKeysView.vue')
+    const w = mount(ApiKeysView, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
+    await flushPromises(); await flushPromises()
+    return w
+  }
+
+  it('typing a search term writes ?search= to the URL via router.replace', async () => {
+    const w = await mountView()
+    await w.find('#keys-search').setValue('acme')
+    await flushPromises()
+    expect(replaceMock).toHaveBeenCalled()
+    const arg = replaceMock.mock.calls.at(-1)![0] as { query: Record<string, string | undefined> }
+    expect(arg.query.search).toBe('acme')
+  })
+
+  it('clearing the search removes the param instead of leaving a stale ?search=', async () => {
+    routeQuery.search = 'acme'
+    const w = await mountView()
+    await w.find('#keys-search').setValue('')
+    await flushPromises()
+    expect(replaceMock).toHaveBeenCalled()
+    const arg = replaceMock.mock.calls.at(-1)![0] as { query: Record<string, string | undefined> }
+    expect(arg.query.search).toBeUndefined()
+  })
+
+  it('does not replace when the URL already matches (loop guard)', async () => {
+    routeQuery.search = 'acme'
+    await mountView()
+    // Hydration set search='acme'; the URL already carries it — the
+    // write-back watcher must not fire a redundant replace.
+    expect(replaceMock).not.toHaveBeenCalled()
+  })
+
+  it('preserves unrelated query params on write-back', async () => {
+    routeQuery.expiring_within_7d = '1'
+    const w = await mountView()
+    await w.find('#keys-search').setValue('acme')
+    await flushPromises()
+    const arg = replaceMock.mock.calls.at(-1)![0] as { query: Record<string, string | undefined> }
+    expect(arg.query.expiring_within_7d).toBe('1')
+    expect(arg.query.search).toBe('acme')
   })
 })

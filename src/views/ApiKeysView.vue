@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, computed, nextTick, onUnmounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { usePolling } from '../composables/usePolling'
 import { POLL_SLOW_MS } from '../composables/pollingConstants'
@@ -8,6 +8,7 @@ import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useTerminalAwareList } from '../composables/useTerminalAwareList'
 import { useListExport } from '../composables/useListExport'
+import { useFocusTrap } from '../composables/useFocusTrap'
 import { listTenants, listApiKeys, revokeApiKey, createApiKey, updateApiKey } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { Tenant, ApiKey, ApiKeyCreateResponse } from '../types'
@@ -19,6 +20,7 @@ import PageHeader from '../components/PageHeader.vue'
 import TenantLink from '../components/TenantLink.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import InlineErrorBanner from '../components/InlineErrorBanner.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
@@ -44,8 +46,13 @@ interface KeyWithTenant extends ApiKey {
 
 const auth = useAuthStore()
 const route = useRoute()
+const router = useRouter()
 const canManage = computed(() => auth.capabilities?.manage_api_keys !== false)
 const keys = ref<KeyWithTenant[]>([])
+// P1-H3: gates the cold-load skeleton. Set true after the first
+// successful poll so EmptyState doesn't flash "No API keys found" on
+// a pending fetch. Same pattern as TenantsView / EventsView.
+const initialLoadDone = ref(false)
 const error = ref('')
 const filterStatus = ref('')
 const filterTenant = ref('')
@@ -66,8 +73,38 @@ watch(() => route.query.expiring_within_7d, (v) => { expiringWithin7d.value = v 
 // client-side filter on filteredKeys is kept as graceful degradation
 // for pre-0.1.25.21 servers — older admin tiers MUST ignore the
 // unknown param, so we still do the substring match locally.
-const search = ref('')
+//
+// Hydrated from ?search= so deep-links land pre-filtered — the
+// Overview "Expiring API keys" card links each key here via
+// ?search=<key_id>, which the server matches exactly (substring over
+// key_id + name), so the landing state shows the single matching key.
+const search = ref((route.query.search as string) || '')
 const debouncedSearch = useDebouncedRef(search, 200)
+// URL → ref sync for ?search= (deep-links + back/forward when the
+// component stays mounted). The debouncedSearch watcher below then
+// refetches page 1 scoped to the new search term. Loop-safe against
+// the write-back watcher below: only acts when the param differs from
+// the current ref state.
+watch(() => route.query.search, (v) => {
+  const next = typeof v === 'string' ? v : ''
+  if (next !== search.value) search.value = next
+})
+// Ref → URL write-back (piggybacks the existing 200ms search debounce)
+// so the URL never carries a stale ?search= — reloading or sharing a
+// URL after clearing the filter otherwise re-applied it. Mirrors the
+// TenantsView bidirectional pattern: set the param when non-empty,
+// remove it when empty, and skip when the URL already matches (which
+// also breaks the loop with the hydration watcher above).
+watch(debouncedSearch, (v) => {
+  const current = typeof route.query.search === 'string' ? route.query.search : ''
+  if (v === current) return
+  router.replace({
+    query: {
+      ...route.query,
+      search: v || undefined,
+    },
+  })
+})
 const tenants = ref<Tenant[]>([])
 const pendingRevoke = ref<KeyWithTenant | null>(null)
 
@@ -131,21 +168,14 @@ function openCreate() {
   showCreate.value = true
 }
 
-// Edit API key
+// Edit API key. No expires_at field — the spec's PATCH body is
+// additionalProperties:false and expiry is immutable ("revoke and
+// recreate"); the server would silently drop the field (200 OK,
+// expiry unchanged). The edit dialog shows the expiry read-only.
 const editingKey = ref<KeyWithTenant | null>(null)
 const editLoading = ref(false)
 const editError = ref('')
-const editForm = ref({ name: '', permissions: [] as string[], scope_filter: '', expires_at: '' })
-
-// ISO 8601 → datetime-local input value (local time, minute precision).
-// Used to pre-fill the edit form's expiry picker from a stored key.
-function isoToLocalInput(iso: string | undefined): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return ''
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
+const editForm = ref({ name: '', permissions: [] as string[], scope_filter: '' })
 
 async function copyKeyId(id: string) {
   try {
@@ -178,12 +208,13 @@ function openEdit(k: KeyWithTenant) {
     name: k.name || '',
     permissions: kept,
     scope_filter: k.scope_filter?.join(', ') || '',
-    expires_at: isoToLocalInput(k.expires_at),
   }
   editError.value = ''
   editingKey.value = k
   if (dropped.length) {
-    toast.error(`Unrecognized permissions will be removed on save: ${dropped.join(', ')}`)
+    // Advisory, not a failure — a persistent error toast here would
+    // outlive a successful save and read as an unresolved problem.
+    toast.warning(`Unrecognized permissions will be removed on save: ${dropped.join(', ')}`)
   }
 }
 
@@ -241,15 +272,7 @@ async function submitEdit() {
     if (!sameStringSet(scopes, original.scope_filter)) {
       body.scope_filter = scopes
     }
-    // expires_at: the picker is minute-precision, so compare the current
-    // input string against the prefilled one (also minute-precision) rather
-    // than regenerated-ISO vs the original full ISO — otherwise a rename-only
-    // save would silently truncate a key expiring at e.g. 12:34:56Z down to
-    // 12:34:00Z. Only PATCH when the operator actually changed the control;
-    // blank = no change (the form can't clear an existing expiry).
-    if (editForm.value.expires_at && editForm.value.expires_at !== isoToLocalInput(original.expires_at)) {
-      body.expires_at = new Date(editForm.value.expires_at).toISOString()
-    }
+    // expires_at is never sent — immutable per spec (revoke + recreate).
     if (Object.keys(body).length === 0) {
       // Nothing to submit — close the dialog quietly.
       editingKey.value = null
@@ -370,6 +393,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
     hasMore.value = first.hasMore
     nextCursor.value = first.nextCursor
     error.value = ''
+    initialLoadDone.value = true
   } catch (e) { error.value = toMessage(e) }
 }, POLL_SLOW_MS)
 
@@ -423,6 +447,7 @@ const {
   },
   columns: [
     { header: 'key_id',       value: k => k.key_id },
+    { header: 'key_prefix',   value: k => k.key_prefix ?? '' },
     { header: 'name',         value: k => k.name ?? '' },
     { header: 'tenant_id',    value: k => k.tenant_id },
     { header: 'tenant_name',  value: k => k.tenant_name ?? '' },
@@ -456,16 +481,17 @@ const virtualizer = useVirtualizer(computed(() => ({
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
 const totalHeight = computed(() => virtualizer.value.getTotalSize())
 
-// 9-column grid when canManage, 8 without. Total minimum is now
-// ~1220px (was 1380px pre-pill-only); the permissions column shrank
-// from `minmax(260px, 2.5fr)` to `minmax(140px, 1.2fr)` because the
-// pill rendering ("4 perms ↗") only needs ~90px versus the chip
-// preview's demand for 2 rows of 2 chips. Narrower grid = horizontal
-// scroll engages less often on typical operator viewports.
+// 10-column grid when canManage, 9 without. Total minimum is now
+// ~1340px; the permissions column shrank from `minmax(260px, 2.5fr)`
+// to `minmax(140px, 1.2fr)` because the pill rendering ("4 perms ↗")
+// only needs ~90px versus the chip preview's demand for 2 rows of 2
+// chips. Prefix column (120px) shows key_prefix — the visible secret
+// prefix operators use to correlate a stored key with a row; the
+// key_id column is masked, so this is the only correlation handle.
 const gridTemplate = computed(() =>
   canManage.value
-    ? '180px minmax(120px,1fr) minmax(120px,1fr) 100px minmax(140px,1.2fr) minmax(140px,1fr) 160px 140px 160px'
-    : '180px minmax(120px,1fr) minmax(120px,1fr) 100px minmax(140px,1.2fr) minmax(140px,1fr) 160px 140px',
+    ? '180px 120px minmax(120px,1fr) minmax(120px,1fr) 100px minmax(140px,1.2fr) minmax(140px,1fr) 160px 140px 160px'
+    : '180px 120px minmax(120px,1fr) minmax(120px,1fr) 100px minmax(140px,1.2fr) minmax(140px,1fr) 160px 140px',
 )
 
 // Permissions cell: single always-visible "N perms" pill. Clicking
@@ -476,6 +502,34 @@ const gridTemplate = computed(() =>
 const viewingPermsFor = ref<KeyWithTenant | null>(null)
 function openPermsViewer(k: KeyWithTenant) { viewingPermsFor.value = k }
 function closePermsViewer() { viewingPermsFor.value = null }
+
+// A11y for the hand-rolled perms-viewer modal — parity with what
+// FormDialog / ConfirmAction get from being dedicated components:
+// Tab is trapped inside the dialog (useFocusTrap acts only while
+// permsDialogRef is populated, i.e. while the v-if renders), Escape
+// closes from anywhere in the document (pre-fix it only worked when
+// focus happened to be inside the modal), focus moves into the dialog
+// on open and is restored to the triggering pill on close.
+const permsDialogRef = ref<HTMLElement | null>(null)
+useFocusTrap(permsDialogRef)
+let permsPrevFocus: HTMLElement | null = null
+function onPermsViewerKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') closePermsViewer()
+}
+watch(viewingPermsFor, async (now, before) => {
+  if (now && !before) {
+    permsPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    document.addEventListener('keydown', onPermsViewerKeydown)
+    await nextTick()
+    // First focusable element is the header Close button.
+    permsDialogRef.value?.querySelector<HTMLElement>('button')?.focus()
+  } else if (!now && before) {
+    document.removeEventListener('keydown', onPermsViewerKeydown)
+    permsPrevFocus?.focus()
+    permsPrevFocus = null
+  }
+})
+onUnmounted(() => document.removeEventListener('keydown', onPermsViewerKeydown))
 </script>
 
 <template>
@@ -590,12 +644,13 @@ function closePermsViewer() { viewingPermsFor.value = null }
       class="bg-white rounded-lg shadow overflow-x-auto overflow-y-hidden text-sm flex-1 min-h-0 flex flex-col"
       role="table"
       :aria-rowcount="sortedKeys.length + 1"
-      :aria-colcount="canManage ? 9 : 8"
+      :aria-colcount="canManage ? 10 : 9"
     >
-     <div :style="{ minWidth: canManage ? '1280px' : '1120px' }" class="flex flex-col flex-1 min-h-0">
+     <div :style="{ minWidth: canManage ? '1400px' : '1240px' }" class="flex flex-col flex-1 min-h-0">
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
         <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
           <SortHeader as="div" label="Key ID" column="key_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <div role="columnheader" class="table-cell text-left">Prefix</div>
           <SortHeader as="div" label="Name" column="name" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Tenant" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
@@ -628,6 +683,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
             :style="{ gridTemplateColumns: gridTemplate, transform: `translateY(${v.start}px)`, height: ROW_HEIGHT_ESTIMATE + 'px' }"
           >
             <div role="cell" class="table-cell"><MaskedValue :value="sortedKeys[v.index].key_id" /></div>
+            <div role="cell" class="table-cell muted-sm font-mono truncate" :title="sortedKeys[v.index].key_prefix">{{ sortedKeys[v.index].key_prefix || '—' }}</div>
             <div role="cell" class="table-cell text-gray-700 truncate">{{ sortedKeys[v.index].name || '-' }}</div>
             <div role="cell" class="table-cell min-w-0 overflow-hidden">
               <TenantLink :tenant-id="sortedKeys[v.index].tenant_id" />
@@ -683,6 +739,10 @@ function closePermsViewer() { viewingPermsFor.value = null }
         </div>
       </div>
 
+      <!-- P1-H3: cold-load skeleton. -->
+      <div v-else-if="!initialLoadDone && !error" class="px-4 py-6">
+        <LoadingSkeleton />
+      </div>
       <div v-else>
         <EmptyState
           item-noun="API key"
@@ -772,10 +832,13 @@ function closePermsViewer() { viewingPermsFor.value = null }
         <label for="ek-scope" class="form-label">Scope filter (comma-separated)</label>
         <input id="ek-scope" v-model="editForm.scope_filter" class="form-input-mono" />
       </div>
+      <!-- Expiry is read-only here: the spec marks expires_at immutable
+           on PATCH (additionalProperties:false; the server silently
+           dropped the field pre-fix, making the old picker a no-op). -->
       <div>
-        <label for="ek-expires" class="form-label">Expires at</label>
-        <input id="ek-expires" v-model="editForm.expires_at" type="datetime-local" class="form-input" />
-        <p class="muted-sm mt-0.5">Leave unchanged to keep the current expiry. Clearing the field does not remove an existing expiry.</p>
+        <span class="form-label">Expires at</span>
+        <p class="text-sm text-gray-700 dark:text-gray-200">{{ editingKey.expires_at ? formatDateTime(editingKey.expires_at) : 'Never' }}</p>
+        <p class="muted-sm mt-0.5">Expiry is immutable — revoke and recreate the key to change it.</p>
       </div>
     </FormDialog>
 
@@ -798,9 +861,14 @@ function closePermsViewer() { viewingPermsFor.value = null }
       v-if="viewingPermsFor"
       class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
       @click.self="closePermsViewer"
-      @keyup.esc="closePermsViewer"
     >
-      <div class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-5 max-w-md w-full mx-4 max-h-[80vh] flex flex-col">
+      <div
+        ref="permsDialogRef"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="`Permissions for ${viewingPermsFor.name || viewingPermsFor.key_id}`"
+        class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-5 max-w-md w-full mx-4 max-h-[80vh] flex flex-col"
+      >
         <div class="flex items-start justify-between mb-3">
           <div>
             <h3 class="text-sm font-semibold text-gray-900">Permissions</h3>

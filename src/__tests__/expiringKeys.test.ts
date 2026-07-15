@@ -19,6 +19,7 @@ function key(id: string, overrides: Partial<ApiKey> = {}): ApiKey {
   return {
     key_id: id,
     tenant_id: 't',
+    key_prefix: `cyc_test_${id}`,
     status: 'ACTIVE',
     permissions: [],
     created_at: '2026-01-01T00:00:00Z',

@@ -40,10 +40,11 @@ const listboxId = 'command-palette-listbox'
 //
 // Each command's `execute` performs a router.push to the relevant
 // detail or pre-filtered list view. Filter routing relies on the
-// destination view reading the query param on mount (verified for
-// AuditView `key_id`/`search`, EventsView `search`); reservations
-// and budgets are intentionally omitted — those views don't yet
-// honor URL filters and would need their own change first.
+// destination view BOTH reading the query param on mount AND watching
+// route.query for same-route navigation (the push doesn't remount a
+// view the operator is already on). Verified for AuditView
+// `key_id`/`search`, EventsView `search`, BudgetsView `search`,
+// ReservationsView `tenant_id`.
 type CommandDef = {
   name: string
   aliases?: string[]
@@ -90,6 +91,21 @@ const COMMANDS: CommandDef[] = [
     argLabel: 'event_id',
     help: 'Events list filtered by event_id substring.',
     execute: (id, r) => r.push({ name: 'events', query: { search: id } }),
+  },
+  {
+    name: 'budget',
+    label: 'Search budgets',
+    argLabel: 'tenant_id or scope',
+    help: 'Budgets list filtered by tenant_id or scope substring.',
+    execute: (q, r) => r.push({ name: 'budgets', query: { search: q } }),
+  },
+  {
+    name: 'res',
+    aliases: ['reservation'],
+    label: 'Open reservations for tenant',
+    argLabel: 'tenant_id',
+    help: 'Reservations list filtered to a tenant.',
+    execute: (id, r) => r.push({ name: 'reservations', query: { tenant_id: id } }),
   },
 ]
 

@@ -13,8 +13,14 @@
 //
 // Plus ?status=BOGUS (unknown value must be ignored, not crash).
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { reactive } from 'vue'
+import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
+
+// The reactive routeRef below is shared across tests — auto-unmount so
+// a previous test's still-mounted component can't react to the next
+// test's route mutations.
+enableAutoUnmount(afterEach)
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '../stores/auth'
 import type { Capabilities } from '../types'
@@ -31,7 +37,10 @@ vi.mock('../api/client', async () => {
   }
 })
 
-const routeRef: { query: Record<string, string>; params: Record<string, string> } = { query: {}, params: {} }
+// Reactive so the view's route.query watchers fire when tests reassign
+// routeRef.query — simulates same-route navigation (e.g. the /res
+// palette command) without a remount.
+const routeRef: { query: Record<string, string>; params: Record<string, string> } = reactive({ query: {}, params: {} })
 
 vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
@@ -150,5 +159,52 @@ describe('ReservationsView — URL deep-link smoke', () => {
     // And no call under the stale id fired.
     const staleCall = listReservationsMock.mock.calls.find(args => args[0] === 'deleted-tenant')
     expect(staleCall).toBeUndefined()
+  })
+
+  // F3 — same-route navigation (the /res palette command) updates
+  // route.query without remounting the component, so the setup-time
+  // read alone made the command a no-op when the operator was already
+  // on Reservations. The view now watches ?tenant_id.
+  it('F3: reacts to a ?tenant_id change while mounted (palette /res command)', async () => {
+    routeRef.query = {}
+    listTenantsMock.mockResolvedValue({
+      tenants: [
+        { tenant_id: 'alpha', status: 'ACTIVE' },
+        { tenant_id: 'beta', status: 'ACTIVE' },
+      ],
+      has_more: false,
+    })
+    const { default: ReservationsView } = await import('../views/ReservationsView.vue')
+    mount(ReservationsView, stdMount())
+    await flushPromises()
+    // Defaulted to first-ACTIVE tenant.
+    expect(listReservationsMock.mock.calls.some(args => args[0] === 'alpha')).toBe(true)
+    listReservationsMock.mockClear()
+
+    // Palette pushes /reservations?tenant_id=beta — no remount.
+    routeRef.query = { tenant_id: 'beta' }
+    await flushPromises()
+    expect(listReservationsMock.mock.calls.some(args => args[0] === 'beta')).toBe(true)
+  })
+
+  it('F3: an absent ?tenant_id does not clobber the operator\'s current pick', async () => {
+    routeRef.query = { tenant_id: 'beta' }
+    listTenantsMock.mockResolvedValue({
+      tenants: [
+        { tenant_id: 'alpha', status: 'ACTIVE' },
+        { tenant_id: 'beta', status: 'ACTIVE' },
+      ],
+      has_more: false,
+    })
+    const { default: ReservationsView } = await import('../views/ReservationsView.vue')
+    mount(ReservationsView, stdMount())
+    await flushPromises()
+    listReservationsMock.mockClear()
+
+    // Navigation that drops the param (e.g. bare /reservations) must
+    // not reset the tenant filter or refetch under a different scope.
+    routeRef.query = {}
+    await flushPromises()
+    expect(listReservationsMock.mock.calls.some(args => args[0] !== 'beta')).toBe(false)
   })
 })

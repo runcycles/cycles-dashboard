@@ -375,6 +375,27 @@ describe('endpoint wrappers — smoke', () => {
     expect(body.spent).toBeUndefined()
   })
 
+  // v0.1.25.41 catch-up: /fund responds with the spec's
+  // BudgetFundingResponse (§BudgetFundingResponse, lines 986-1016) — a
+  // before/after delta of the operation — NOT the full BudgetLedger the
+  // wrapper previously claimed. Pins the pass-through so the typed
+  // surface matches what the server actually emits.
+  it('fundBudget resolves the BudgetFundingResponse delta body', async () => {
+    const delta: import('../types').BudgetFundingResponse = {
+      operation: 'CREDIT',
+      previous_allocated: { unit: 'USD', amount: 100 },
+      new_allocated: { unit: 'USD', amount: 200 },
+      previous_remaining: { unit: 'USD', amount: -40 }, // SignedAmount — may be negative under overdraft
+      new_remaining: { unit: 'USD', amount: 60 },
+      timestamp: '2026-07-01T00:00:00Z',
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(delta)))
+    const res = await api.fundBudget('acme', 'tenant:acme', 'USD', 'CREDIT', 100, 'idem-delta')
+    expect(res.operation).toBe('CREDIT')
+    expect(res.previous_remaining).toEqual({ unit: 'USD', amount: -40 })
+    expect(res.new_remaining).toEqual({ unit: 'USD', amount: 60 })
+  })
+
   // v0.1.25.20: admin-on-behalf-of write wrappers (server v0.1.25.14, spec
   // v0.1.25.13). Each wrapper must inject tenant_id into the body so the
   // server can route the create to the correct tenant; updatePolicy needs

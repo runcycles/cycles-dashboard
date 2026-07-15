@@ -19,6 +19,7 @@ import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
 import TenantLink from '../components/TenantLink.vue'
 import EmptyState from '../components/EmptyState.vue'
+import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import InlineErrorBanner from '../components/InlineErrorBanner.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
@@ -60,6 +61,11 @@ const tenants = ref<Tenant[]>([])
 // is `tenant_id` for consistency with AuditView's filter deep-links.
 const selectedTenant = ref((route.query.tenant_id as string) || '')
 const budgets = ref<BudgetLedger[]>([])
+// P1-H3: gates the cold-load skeleton. Set true after the first
+// successful list fetch so EmptyState doesn't flash "No budgets found"
+// while the initial request is still in flight. Same pattern as
+// TenantsView / EventsView.
+const initialLoadDone = ref(false)
 const hasMore = ref(false)
 const nextCursor = ref('')
 const loadingMore = ref(false)
@@ -246,6 +252,7 @@ async function loadList() {
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
     error.value = ''
+    initialLoadDone.value = true
   } catch (e) { error.value = toMessage(e) }
 }
 
@@ -459,13 +466,13 @@ async function submitFund() {
   if (fundLoading.value) return // double-submit guard (defense in depth alongside :disabled)
   fundLoading.value = true
   try {
-    // Date.now() alone collides if the user double-clicks within the same
-    // millisecond. Mix in 64 bits of crypto randomness so each Execute is
-    // a distinct idempotency key and the server treats them as separate
-    // operations (or rejects the second as a true duplicate when intended).
-    const rand = crypto.getRandomValues(new Uint8Array(8))
-    const suffix = Array.from(rand, b => b.toString(16).padStart(2, '0')).join('')
-    const idempotencyKey = `dashboard-${fundForm.value.operation.toLowerCase()}-${target.scope}-${Date.now()}-${suffix}`
+    // UUID v4 via the shared helper — same as the bulk path. The prior
+    // `dashboard-{op}-{scope}-{ts}-{rand}` shape embedded the scope, and
+    // scope segments run up to 128 chars each, so deep scopes overflowed
+    // the server's 256-char idempotency-key cap → 400. A UUID is bounded,
+    // unique per Execute (double-clicks get distinct keys), and the
+    // server treats the key as opaque anyway.
+    const idempotencyKey = generateIdempotencyKey()
     await fundBudget(tenantId, target.scope, target.unit, fundForm.value.operation, amount, idempotencyKey, fundForm.value.reason || `${fundForm.value.operation} via admin dashboard`, spent)
     if (isDetail.value) await loadDetail()
     else await loadList()
@@ -533,21 +540,29 @@ const bulkSetupForm = ref<{ action: BudgetBulkAction; unit: string; amount: numb
 })
 const bulkSetupError = ref('')
 
-// Mirrors the single-row fundHints map so operators see the same
-// per-action copy in the bulk setup form as in the one-off Fund dialog.
+// Per-action copy for the bulk setup form. NOT a copy of the single-row
+// fundHints: bulk RESET / RESET_SPENT apply ONE amount to EVERY matched
+// budget (FUND_LUA runs `allocated = amount` before touching spent), so
+// budgets with differing allocations all get clobbered to the same value
+// — the hints must say so. Any FROZEN budget the filter matches is
+// rejected before dispatch and lands in failed[] per-row.
 const bulkActionHints: Record<BudgetBulkAction, string> = {
   CREDIT: 'Adds funds to each matching budget\'s allocated and remaining balance.',
   DEBIT: 'Removes funds from each matching budget. Rows whose remaining would go negative fail per-row with BUDGET_EXCEEDED.',
-  RESET: 'Sets each matching budget\'s allocated to the exact amount; remaining is recalculated.',
-  RESET_SPENT: 'Billing-period rollover — resets each matching budget\'s spent counter to the override (default 0). Allocated and reserved are preserved.',
+  RESET: 'Sets EVERY matching budget\'s allocated to this one amount — budgets with differing allocations are all overwritten to the same value. FROZEN budgets matched by the filter fail per-row; unfreeze first.',
+  RESET_SPENT: 'Billing-period rollover — sets EVERY matching budget\'s allocated to this one amount AND resets its spent counter to the override (default 0). Budgets with differing allocations are all overwritten to the same value; reserved and debt carry over. FROZEN budgets matched by the filter fail per-row; unfreeze first.',
   REPAY_DEBT: 'Reduces outstanding debt on each matching budget by this amount.',
 }
 
 // Per-action eligibility mirrors the single-row Fund action's server-side
 // behaviour: CREDIT / DEBIT / REPAY_DEBT require status==='ACTIVE', otherwise
 // the server would return INVALID_TRANSITION per-row. Client-side filtering
-// keeps the preview count honest. RESET / RESET_SPENT run against all
-// statuses — used for billing rollover that must touch FROZEN budgets too.
+// keeps the preview count honest. RESET / RESET_SPENT carry no status gate
+// because the server MATCHES them by filter regardless of status — but any
+// FROZEN row is still rejected per-row at dispatch (lands in failed[]).
+// Do NOT exclude FROZEN rows from the preview count here: the server's
+// total_matched includes them, so a filtered expected_count would trigger
+// COUNT_MISMATCH on every submit.
 function bulkActionEligibleStatus(action: BudgetBulkAction): string | null {
   if (action === 'CREDIT' || action === 'DEBIT' || action === 'REPAY_DEBT') return 'ACTIVE'
   return null
@@ -565,6 +580,19 @@ const filterBulkUnit = ref<string>('')
 const filterBulkReason = ref<string>('')
 const filterBulkRunning = ref(false)
 const filterBulkSubmitError = ref('')
+// FROZEN rows matched during the preview walk (only reachable for
+// RESET / RESET_SPENT — the other actions gate on ACTIVE in filterFn).
+// The server rejects each FROZEN row before dispatch, so these are
+// guaranteed per-row failures; surface the count in the preview dialog
+// so the operator isn't surprised by a partially-failed run. The rows
+// stay IN the preview count — excluding them would make expected_count
+// diverge from the server's total_matched and 409 COUNT_MISMATCH.
+const filterBulkFrozenCount = ref(0)
+const filterBulkFrozenWarning = computed<string>(() => {
+  const n = filterBulkFrozenCount.value
+  if (n === 0) return ''
+  return `${n} FROZEN budget${n === 1 ? '' : 's'} in this selection will fail per-row — unfreeze ${n === 1 ? 'it' : 'them'} first. ${n === 1 ? 'It is' : 'They are'} still included in the count above (the server matches by filter regardless of status).`
+})
 // Per-row result dialog — opens after submit iff failed[] or skipped[]
 // is non-empty.
 const bulkResult = ref<{
@@ -749,6 +777,10 @@ const filterBulkPreview = useBulkActionPreview<BudgetLedger>({
     if (!filterBulkAction.value) return false
     const required = bulkActionEligibleStatus(filterBulkAction.value)
     if (required && b.status !== required) return false
+    // Matched row that will still fail at dispatch — see
+    // filterBulkFrozenCount. Counted here (not excluded) so the
+    // preview count stays aligned with the server's total_matched.
+    if (b.status === 'FROZEN') filterBulkFrozenCount.value++
     return true
   },
   toSample: (b) => ({
@@ -797,10 +829,16 @@ function submitBulkSetup() {
   }
   // Spec v0.1.25.26: amount is required for ALL five actions including
   // RESET_SPENT (that action sets allocated to `amount`; `spent` is the
-  // optional counter override that defaults to 0).
+  // optional counter override that defaults to 0). Zero is legal for
+  // RESET / RESET_SPENT (server Amount is @Min(0); zero-allocation
+  // rollover mirrors the single-op RESET_SPENT path) but meaningless
+  // for CREDIT / DEBIT / REPAY_DEBT, which stay strictly positive.
+  const allowZero = action === 'RESET' || action === 'RESET_SPENT'
   const n = Number(bulkSetupForm.value.amount)
-  if (!Number.isFinite(n) || n <= 0) {
-    bulkSetupError.value = 'Amount must be a positive number'
+  if (!Number.isFinite(n) || (allowZero ? n < 0 : n <= 0)) {
+    bulkSetupError.value = allowZero
+      ? 'Amount must be zero or a positive number'
+      : 'Amount must be a positive number'
     return
   }
   filterBulkAmount.value = n
@@ -822,6 +860,8 @@ function submitBulkSetup() {
   filterBulkReason.value = bulkSetupForm.value.reason.trim()
   filterBulkAction.value = action
   filterBulkSubmitError.value = ''
+  // Fresh walk, fresh frozen tally — filterFn increments it per match.
+  filterBulkFrozenCount.value = 0
   showBulkSetup.value = false
   void filterBulkPreview.startPreview()
 }
@@ -866,6 +906,7 @@ function cancelFilterBulk() {
   filterBulkUnit.value = ''
   filterBulkReason.value = ''
   filterBulkSubmitError.value = ''
+  filterBulkFrozenCount.value = 0
 }
 
 async function executeFilterBulk() {
@@ -1192,6 +1233,16 @@ function rowTenantId(b: BudgetLedger): string {
       </div>
     </template>
 
+    <!-- Detail lookup in flight — the URL says detail mode but the
+         ledger hasn't resolved yet. Render a skeleton (mirrors
+         TenantDetailView's initial-loading state) instead of falling
+         through to the full list UI, which flashed the filter bar +
+         "No budgets found" for a beat before the detail card mounted. -->
+    <LoadingSkeleton
+      v-else-if="isDetail && !error"
+      data-testid="budget-detail-loading"
+    />
+
     <!-- List mode. Wrap the list-mode subtree in its own flex-col so
          the virtualized table below can flex-fill without polluting
          the detail-mode (natural block flow) layout. -->
@@ -1394,6 +1445,10 @@ function rowTenantId(b: BudgetLedger): string {
           </div>
         </div>
 
+        <!-- P1-H3: cold-load skeleton. -->
+        <div v-else-if="!initialLoadDone && !error" class="px-4 py-6">
+          <LoadingSkeleton />
+        </div>
         <div v-else>
           <EmptyState message="No budgets found" :hint="!selectedTenant ? 'Select a tenant to view budgets' : undefined" />
         </div>
@@ -1627,6 +1682,7 @@ function rowTenantId(b: BudgetLedger): string {
       :reached-end="filterBulkPreview.reachedEnd.value"
       :error="filterBulkPreview.previewError.value"
       :submit-error="filterBulkSubmitError"
+      :notice="filterBulkFrozenWarning"
       :submitting="filterBulkRunning"
       :confirm-danger="filterBulkAction === 'DEBIT'"
       @confirm="executeFilterBulk"

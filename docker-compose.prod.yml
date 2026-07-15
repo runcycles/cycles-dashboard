@@ -7,8 +7,16 @@ x-logging: &default-logging
 services:
   caddy:
     logging: *default-logging
-    image: caddy:2-alpine
+    # Pinned to the current stable minor (floating 2-alpine could silently
+    # jump majors/minors). Bump deliberately.
+    image: caddy:2.11-alpine
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 256m
     ports:
       - "443:443"
       - "80:80"
@@ -23,8 +31,14 @@ services:
 
   dashboard:
     logging: *default-logging
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.67
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.68
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 256m
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]
       interval: 30s
@@ -61,6 +75,15 @@ services:
     # stops queuing evidence source records when evidence is unconfigured.
     image: ghcr.io/runcycles/cycles-server:0.1.25.46
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    # The JVM sizes its heap as 75% of the *container* limit
+    # (MaxRAMPercentage below). Without a limit it sees the whole host and
+    # the two JVMs can overcommit it together.
+    deploy:
+      resources:
+        limits:
+          memory: 1g
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -97,6 +120,12 @@ services:
     # noise when unconfigured) + fixes a retention-scan WRONGTYPE error.
     image: ghcr.io/runcycles/cycles-server-events:0.1.25.22
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 1g
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -121,6 +150,13 @@ services:
     logging: *default-logging
     image: ghcr.io/runcycles/cycles-server-admin:0.1.25.48
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    # See cycles-server note — heap is sized off this limit.
+    deploy:
+      resources:
+        limits:
+          memory: 1g
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -146,8 +182,16 @@ services:
 
   redis:
     logging: *default-logging
-    image: redis:7-alpine
+    # Pinned to the current stable 7.x minor (floating 7-alpine could
+    # silently jump minors). Bump deliberately.
+    image: redis:7.4-alpine
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 512m
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
     command: ["sh", "-c", "redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD}\""]

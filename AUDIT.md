@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.67 (2026-07-04)
+**Current release:** v0.1.25.68 (2026-07-15)
 
 ## Baseline requirements
 
@@ -9,13 +9,81 @@
 | cycles-server (runtime plane) | v0.1.25.8+ | v0.1.25.46 | `.39`–`.44` are additive runtime + ops/deployment changes (SCAN pagination, idempotent event replay, auth-cache freshness, structured logging + CR/LF sanitization, Redis-aware `/actuator/health/readiness`, stateless API-key-only Spring Security, prod-Compose hardening: Prometheus tenant-label + SpringDoc off) — no dashboard-visible wire change; e2e green against `.44`. `.13` bounds `listReservationsSorted` at `SORTED_HYDRATE_CAP=2000`. `.14` adds W3C Trace Context on the runtime plane (`X-Cycles-Trace-Id` response header, `trace_id` on runtime events + audit entries, MDC `traceId`). `.15` adds audit-log retention TTL (default 400 days, matches admin). `.16`–`.17` are additive runtime-plane patches with no dashboard-visible wire change (reservations contract unchanged; the dashboard required no client changes and e2e passes against the pinned `.17` image). All additive — no wire breakage. Pre-`.14` runtime rows carry no trace chip; dashboard tolerates the absence. The `.62` Evidence viewer + reservation `committed_metadata`/window filters are additive runtime-plane reads — servers that don't publish `/v1/evidence` or the projections degrade gracefully (404 / omitted fields). Compose shipped pin moved `.17 → .37`: `.37` surfaces reservation `committed`/`finalized_at_ms`/metadata, the `include=` projection on `listReservations` — including `include=evidence`, the reservation→evidence link (`.63`) — and serves `/v1/evidence` + JWKS, so the full Reservations/Evidence surface is exercisable against the shipped stack. Minimum stays `.8+` (graceful degradation below `.37`: evidence/projection fields omitted, no links render). `.38` stops the producer queuing evidence source records when evidence is unconfigured (this dashboard's bundled stack does not configure evidence), so `evidence:pending` stays quiet. |
 | cycles-admin (governance plane) | v0.1.25.17+ | v0.1.25.48 | `.42`–`.47` are ops/security/deployment hardening (Tomcat CVE pin, log sanitization, operational-endpoint auth gating `/actuator`+`/api-docs` behind the admin key, auth-failure rate limiting, webhook-secret encryption enforcement, Jedis/springdoc alignment, prod-deployment hardening) — no dashboard-visible wire change; the dashboard never calls `/actuator` or `/api-docs`. (prior notes preserved through `.37` — see release history.) `.38` is a security/polish release with no dashboard-visible wire change. `.39` implements spec v0.1.25.33 webhook lifecycle events — emits `webhook.{created,updated,paused,resumed,disabled,deleted}` on the `webhook` category on create / update / delete / bulk-action flows; dashboard `.59` surfaces these in EventsView filters. `.40` is post-review polish on the webhook-lifecycle emit; `.41` drops the tomcat override (SB 3.5.14 BOM-managed) + aligns Jedis — both dependency/hygiene only, no dashboard-visible wire change. |
 | cycles-events (dispatch worker) | v0.1.25.6+ | v0.1.25.22 | `.16`–`.20` harden webhook dispatch (reliable claim/ack queue, startup recovery, multi-replica-safe stale-only recovery, fail-closed delivery-state writes, tenant-metric label off) — worker internals, no dashboard-visible wire change. `.8` captured trace context on `WebhookDelivery` (protocol v0.1.25.28). `.11` emits `webhook.disabled` on the dispatcher auto-disable path (spec v0.1.25.33) so the Events view shows consecutive-failure auto-pause, not just operator pause. `.14` ("CyclesEvidence signing tier") adds the evidence-envelope signer (consumes `evidence:pending`, signs + stores) — required for the Evidence viewer to resolve a real envelope when evidence emission is configured; webhook-delivery behaviour unchanged. `.15` gates that signer on evidence config so an unconfigured stack (the default here) no longer dead-letters records into `evidence:failed`, and fixes a retention-scan `WRONGTYPE` startup error. |
-| Spec alignment | — | v0.1.25.35 | Pin moves on end-to-end support. `.32` formalized per-row event emission for `bulkActionBudgets` / `bulkActionTenants` (docs-only, no wire change). `.33` added six `webhook.*` EventType values + `EventDataWebhookLifecycle` payload schema. `.34` expanded `EventCategory` enum to include `webhook` so the `.33` events pass server-side validation. `.35` added the four `*_via_tenant_cascade` EventType values (+ `EventDataTenantCascade` payload schema) the admin server has emitted since implementing the tenant-close cascade; dashboard `.65` adds them to `EVENT_TYPES` so they are pickable in webhook subscriptions and suggested in the Events type filter. All additive — pre-`.31` servers tolerate unknown enum values per the spec's forward-compat rule, so the dashboard is backwards-compatible with every deployed admin version. |
+| Spec alignment | — | v0.1.25.41 | Pin moves on end-to-end support. `.36` adds `admin_on_behalf_of` actor type, `.37` adds `TENANT_CLOSED` reason code (both tolerated — open string types). `.38`/`.40`/`.41` define the tenant-owned category boundary (admin-only `api_key.*`/`policy.*`/`webhook.*`/`system.*` types are 400'd on tenant-owned subscriptions; dashboard `.68` gates the pickers). `.39` allows category-only subscriptions on update (dashboard `.68` permits clearing `event_types` when categories remain). Earlier: (prior `.32`–`.35` notes preserved in release history.) `.32` formalized per-row event emission for `bulkActionBudgets` / `bulkActionTenants` (docs-only, no wire change). `.33` added six `webhook.*` EventType values + `EventDataWebhookLifecycle` payload schema. `.34` expanded `EventCategory` enum to include `webhook` so the `.33` events pass server-side validation. `.35` added the four `*_via_tenant_cascade` EventType values (+ `EventDataTenantCascade` payload schema) the admin server has emitted since implementing the tenant-close cascade; dashboard `.65` adds them to `EVENT_TYPES` so they are pickable in webhook subscriptions and suggested in the Events type filter. All additive — pre-`.31` servers tolerate unknown enum values per the spec's forward-compat rule, so the dashboard is backwards-compatible with every deployed admin version. |
 
 **Pre-baseline compatibility:** dashboard `TenantLink.isSystem` accepts both legacy `<unauthenticated>` and new `__`-prefixed sentinels (shipped v0.1.25.31). Row-select bulk paths (Tenants/Webhooks suspend, Budgets freeze, Emergency-freeze) fan out per-row and work against any admin version.
 
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-07-15 — v0.1.25.68: four-plane audit (spec ↔ server ↔ UI/UX ↔ ops) + fixes
+
+Full conformance audit of the dashboard against spec v0.1.25.41 (file
+authority), the actual admin-server handler code, and UI/UX + ops review.
+Four findings were silent-data-integrity bugs; all fixed in this release.
+
+**Compliance fixes** (each verified against spec text AND server handler code):
+
+| Finding | Root cause | Fix |
+|---|---|---|
+| Key-expiry "edit" was a no-op | `expires_at` immutable per spec; server DTO lacks the field, Jackson drops unknowns silently → 200 + "updated" toast, expiry unchanged | Edit dialogs show expiry read-only ("revoke and recreate"); field removed from `ApiKeyUpdateRequest` |
+| Tenant `reservation_expiry_policy` edit was a no-op | Create-only field sent on PATCH; same silent-drop | Removed from edit form + `TenantUpdateRequest`; shown read-only |
+| Bulk RESET_SPENT hint said "allocated preserved" | Server `FUND_LUA` runs `allocated = amount` first — one amount clobbers every matched budget | Hints state real semantics; preview warns on FROZEN rows (fail per-row); `amount: 0` allowed for resets |
+| Overview counts wrong at scale | Server clamps every list `limit` to 100; view requested 2000/1000/200 | New `walkCursorPages` util (100/page, 10-page cap, `partial` flag → "counts may be partial" note) |
+
+**Spec catch-up `.35 → .41`:** category-only subscriptions on edit (`.39`),
+tenant-owned event-type gating (`.38`/`.40`/`.41`), `key_prefix` typed +
+shown as a column (key-id is masked; prefix is the correlation handle),
+`BudgetFundingResponse` (fund was mistyped as `BudgetLedger`), phantom
+type fields removed (`PolicyUpdateRequest.scope_pattern`,
+`ApiKeyCreateResponse.name`).
+
+**UX/a11y batch:** dialogs un-dismissible mid-mutation (duplicate-write
+guard); error toasts persist + dismiss button + `aria-live`; focus traps on
+the two hand-rolled modals (perms viewer, close-tenant — which also gained
+an in-flight state fixing a double-PATCH window); Overview→keys deep link
+(`?key_id` → `?search`); cold-load skeletons on Budgets/API keys; Audit
+URL write-back + refresh button; `/budget` + `/res` palette commands;
+terminal states gray in `StatusBadge` (webhook `DISABLED` stays red —
+it's the server's auto-disable-on-failures state, not an operator pause).
+
+**Ops:** `nginx-ssl.conf.example` rewritten as pure TLS terminator (old one
+reproduced the documented `proxy_pass` variable path-stripping bug and
+skipped the runtime plane); `Cache-Control` no-cache on `index.html` +
+immutable assets (closes the SRI stale-deploy failure); security headers
+moved to an include (add_header inheritance pitfall); gzip;
+`X-Forwarded-Proto`; JSON 5xx for `/v1/*`; dev compose loopback-bound
+(passwordless Redis was on 0.0.0.0); prod pins redis 7.4 / caddy 2.11 +
+memory limits + `no-new-privileges`; HSTS + `encode` in Caddyfile; shared
+CI workflow SHA-pinned; release images get SBOM + provenance. OPERATIONS.md
+gains rollback, redis-data backup/restore, caddy-data cert-volume notes.
+
+**Review round:** high-effort multi-agent review of the full diff surfaced
+10 confirmed regressions in the fix batches themselves — all fixed before
+commit. Notable: legacy tenant-owned webhooks (admin-only selectors) became
+un-editable under the new gating (validation now only fires on deliberate
+selector edits, with a hidden-legacy hint); two AuditView URL-sync defects
+(stale results on back-nav, bare `/audit` nav wiping filters — replaced the
+form-compare guard with a last-self-written-query marker + empty-query
+skip); `/res` palette command was a no-op when already on Reservations
+(added a route watcher); persistent error toasts had no stack cap (5, oldest
+dropped) and two advisories misused `toast.error` (new `warning` type); the
+FROZEN bulk advisory rendered in the red submit-error slot (separate amber
+`notice` prop); ApiKeys `?search` sync was one-way (write-back added);
+Overview re-ran all four cursor walks every 30s tick (now gated on
+overview-counter change + every-10th-tick fallback); the container nginx
+clobbered the TLS edge's `X-Forwarded-Proto` with `http` (map pass-through);
+the TLS example dropped HSTS `preload` (restored).
+
+**Validation:** vue-tsc clean; 1,078/1,078 tests (92 files); line coverage
+96.07% (gate ≥95%); nginx template re-rendered through the real image's
+envsubst + `nginx -t` after the map change; earlier live smoke test covered
+headers, JSON 502, and the e2e probe contract.
+
+**Known deferrals:** session-expiry countdown warning, dirty-form discard
+guard, suspend/reactivate `:loading` wiring, policy disable/enable UI +
+policy-list pagination (>50 truncates), `GET /v1/admin/events/{id}` unused.
 
 ### 2026-07-04 — v0.1.25.67: admin pin bump (.48)
 

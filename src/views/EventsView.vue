@@ -24,11 +24,13 @@ import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import TimeRangePicker from '../components/TimeRangePicker.vue'
 import CorrelationIdChip from '../components/CorrelationIdChip.vue'
 import { formatDateTime } from '../utils/format'
+import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 import { safeJsonStringify } from '../utils/safe'
 
 const route = useRoute()
 const router = useRouter()
+const toast = useToast()
 
 const events = ref<Event[]>([])
 // P1-H3: gates the cold-load skeleton. Flipped true after the first
@@ -51,10 +53,16 @@ function toggleExpanded(id: string) {
 // `loadedMorePages` because a new sort order invalidates the tail
 // cursor — page 1 under the new order is a different tuple and the
 // merge-from-head dedup wouldn't know about the displaced rows.
+//
+// Seeded with timestamp desc — the server returns newest-first by
+// default, and an unseeded useSort left the Time column advertising
+// "unsorted" while the rows were in fact sorted. timestamp is in the
+// sort_by enum (the Time SortHeader already sends it), so explicitly
+// requesting the default order is wire-safe.
 const { sortKey, sortDir, toggle, sorted: sortedEvents } = useSort(
   events,
-  undefined,
-  'asc',
+  'timestamp',
+  'desc',
   undefined,
   {
     serverSide: true,
@@ -88,9 +96,10 @@ async function copyEventJson(e: Event) {
       if (copiedEventId.value === e.event_id) copiedEventId.value = null
     }, 2000)
   } catch {
-    // Clipboard permission denied or insecure context — silently
-    // fail rather than toast. The operator can still select-and-copy
-    // from the pre element.
+    // Clipboard permission denied or insecure context. Toast so the
+    // failure isn't silent (same copy as TenantsView) — the operator
+    // can still select-and-copy from the pre element.
+    toast.error('Copy failed — clipboard unavailable')
   }
 }
 

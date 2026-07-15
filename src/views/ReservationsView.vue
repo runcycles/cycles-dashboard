@@ -367,6 +367,18 @@ watch([
 ], () => { loadReservations() })
 watch(debouncedSubjectKey, () => { loadReservations() })
 
+// URL → ref sync for ?tenant_id= while mounted (the setup-time read
+// above only covers first mount). Same-route navigation — the /res
+// palette command, browser back/forward — updates route.query without
+// remounting, so without this watch the command was a no-op when the
+// operator was already on Reservations. Mirrors BudgetsView's
+// route.query watcher: only react when the param is present and
+// different, so a nav without the param never clobbers a manual pick.
+// The tenantFilter watcher above then refetches the list.
+watch(() => route.query.tenant_id, (v) => {
+  if (typeof v === 'string' && v && v !== tenantFilter.value) tenantFilter.value = v
+})
+
 // M14: keep the URL in sync with tenantFilter so the filtered view is
 // shareable. `replace` (not push) — filter changes shouldn't clutter
 // history; deep links + browser-back still restore the correct scope.

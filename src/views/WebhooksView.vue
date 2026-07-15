@@ -16,7 +16,7 @@ import { generateIdempotencyKey } from '../utils/idempotencyKey'
 import type { WebhookBulkAction, WebhookBulkFilter } from '../types'
 import { useAuthStore } from '../stores/auth'
 import type { WebhookSubscription, WebhookCreateRequest, WebhookCreateResponse, Tenant, WebhookSecurityConfig } from '../types'
-import { EVENT_TYPES } from '../types'
+import { EVENT_TYPES, TENANT_ALLOWED_EVENT_TYPES } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import TenantLink from '../components/TenantLink.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -477,6 +477,23 @@ function openCreate() {
   showCreate.value = true
 }
 
+// TENANT-OWNED CATEGORY BOUNDARY (spec revisions 0.1.25.38/.40/.41,
+// createWebhookSubscription lines 6281-6318): when the create form
+// targets a concrete tenant, servers at .40+ reject admin-only event
+// types (api_key.* / policy.* / webhook.* / system.*) with 400
+// INVALID_REQUEST — the tenant owns the delivery URL + signing secret,
+// so admin telemetry on such a row would leak to a tenant-controlled
+// endpoint. Filter the picker to the tenant-allowed set and drop any
+// already-checked now-disallowed types when the operator picks a tenant.
+const createEventTypes = computed<readonly string[]>(() =>
+  createForm.value.tenant_id ? TENANT_ALLOWED_EVENT_TYPES : EVENT_TYPES,
+)
+watch(() => createForm.value.tenant_id, (tenantId) => {
+  if (!tenantId) return
+  const allowed = new Set<string>(TENANT_ALLOWED_EVENT_TYPES)
+  createForm.value.event_types = createForm.value.event_types.filter(et => allowed.has(et))
+})
+
 async function onSecretClose() {
   const subId = createdWebhook.value?.subscription?.subscription_id
   createdWebhook.value = null
@@ -858,7 +875,10 @@ const gridTemplate = computed(() =>
             <div v-if="canManage" role="cell" class="table-cell">
               <input type="checkbox" :checked="selected.has(sortedWebhooks[v.index].subscription_id)" @change="toggleSelect(sortedWebhooks[v.index].subscription_id)" :aria-label="`Select webhook ${sortedWebhooks[v.index].name || sortedWebhooks[v.index].url}`" />
             </div>
-            <div role="cell" class="table-cell"><span :class="healthColor(sortedWebhooks[v.index])" class="inline-block w-2.5 h-2.5 rounded-full" :title="healthLabel(sortedWebhooks[v.index])" /></div>
+            <!-- WCAG 1.4.1: the dot is color-only, so pair it with sr-only
+                 text carrying the health label — title alone is invisible
+                 to screen readers and keyboard users. -->
+            <div role="cell" class="table-cell"><span :class="healthColor(sortedWebhooks[v.index])" class="inline-block w-2.5 h-2.5 rounded-full" :title="healthLabel(sortedWebhooks[v.index])" aria-hidden="true" /><span class="sr-only">{{ healthLabel(sortedWebhooks[v.index]) }}</span></div>
             <div role="cell" class="table-cell min-w-0">
               <router-link :to="{ name: 'webhook-detail', params: { id: sortedWebhooks[v.index].subscription_id } }" class="text-blue-600 hover:underline truncate block" :title="sortedWebhooks[v.index].url">{{ sortedWebhooks[v.index].url }}</router-link>
               <span v-if="sortedWebhooks[v.index].name" class="muted-sm truncate block" :title="sortedWebhooks[v.index].name">{{ sortedWebhooks[v.index].name }}</span>
@@ -1011,11 +1031,12 @@ const gridTemplate = computed(() =>
       <div>
         <label class="form-label">Event types</label>
         <div class="grid grid-cols-2 gap-1 max-h-48 overflow-y-auto border border-gray-200 rounded p-2">
-          <label v-for="et in EVENT_TYPES" :key="et" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+          <label v-for="et in createEventTypes" :key="et" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
             <input type="checkbox" :value="et" v-model="createForm.event_types" class="rounded" />
             {{ et }}
           </label>
         </div>
+        <p v-if="createForm.tenant_id" class="muted-sm mt-1">Tenant-owned subscriptions can only receive tenant-scoped events (budget.*, reservation.*, tenant.*).</p>
       </div>
       <div>
         <label for="cw-scope" class="form-label">Scope filter (optional)</label>
