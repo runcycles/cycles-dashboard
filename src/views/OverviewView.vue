@@ -132,7 +132,9 @@ function walkApiKeysPages(base: Record<string, string>) {
 // change (walkSignature below covers the counter fields backing the
 // walk-fed cards), with a slow-cadence fallback (every 10th fast tick)
 // so drift can't persist indefinitely when counters don't move — e.g.
-// a new ACTIVE api key, which no overview counter reflects.
+// a new ACTIVE api key, which no overview counter reflects. A walk round
+// with any rejection is never committed as done — the next tick retries
+// (see the post-settle commit below).
 const WALK_FALLBACK_TICKS = 10
 let forceWalks = true // initial load always walks
 let ticksSinceWalk = 0
@@ -175,9 +177,6 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
   const countersChanged = sig !== null && sig !== lastWalkSignature
   const results: PromiseSettledResult<unknown>[] = [ov, audit, frozen, debt]
   if (forceWalks || countersChanged || ticksSinceWalk >= WALK_FALLBACK_TICKS) {
-    forceWalks = false
-    ticksSinceWalk = 0
-    if (sig !== null) lastWalkSignature = sig
     const [apiKeys, atCap, closed, webhooks] = await Promise.allSettled([
       // Expiring-keys card. The server sorts by created_at desc — NOT by
       // expiry — and has no `expires_before` filter, so one default page
@@ -224,6 +223,22 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
       webhooksPartial.value = webhooks.value.partial
     }
     results.push(apiKeys, atCap, closed, webhooks)
+    // Commit the walk as "done" only when ALL four fulfilled. Committing
+    // up-front (pre-fix) meant a rejected walk left its card stale for up
+    // to WALK_FALLBACK_TICKS (~5 min) — the next ticks saw an unchanged
+    // signature and skipped the walks — while the error banner cleared as
+    // soon as a later tick's phase-1 fetches succeeded. On any rejection,
+    // force a retry next tick and leave the signature/tick state alone;
+    // each retry re-surfaces the failure in the banner until a full walk
+    // round succeeds.
+    const anyWalkRejected = [apiKeys, atCap, closed, webhooks].some(r => r.status === 'rejected')
+    if (anyWalkRejected) {
+      forceWalks = true
+    } else {
+      forceWalks = false
+      ticksSinceWalk = 0
+      if (sig !== null) lastWalkSignature = sig
+    }
   }
   // Surface the first failure so the operator sees *something* wrong —
   // but only error-banner; cards for the successful fetches still render.

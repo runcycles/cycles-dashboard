@@ -447,8 +447,11 @@ function openEdit() {
   // form would keep invisible un-uncheckable selections; stripping only
   // editForm would make every save carry a phantom event_types diff.
   // With both stripped, an untouched selector stays out of the PATCH
-  // (server keeps the stored value) and a deliberate selector edit
-  // sends the cleaned array, healing the legacy row.
+  // (server keeps the stored value; a rename must not silently change
+  // delivery) and a deliberate selector edit heals the legacy row —
+  // submitEdit sends BOTH cleaned arrays whenever anything was hidden,
+  // so a stripped-to-empty field goes out as an explicit [] (clear)
+  // instead of being omitted (keep). See the legacy-clear block there.
   hiddenLegacySelectorCount.value = 0
   if (isTenantOwned.value) {
     const allowedTypes = new Set<string>(TENANT_ALLOWED_EVENT_TYPES)
@@ -508,6 +511,20 @@ async function submitEdit() {
   if (editForm.value.url !== init.url) body.url = editForm.value.url
   if (JSON.stringify(editForm.value.event_types) !== JSON.stringify(init.event_types)) body.event_types = editForm.value.event_types
   if (JSON.stringify(editForm.value.event_categories) !== JSON.stringify(init.event_categories)) body.event_categories = editForm.value.event_categories
+  // LEGACY-SELECTOR CLEAR: when openEdit hid legacy admin-only selectors
+  // and the operator deliberately edited EITHER selector field, send
+  // BOTH cleaned arrays explicitly. The per-field diffs above miss the
+  // stripped field when the edit only touched the other one (stripped-
+  // empty == stripped-empty → omitted → server KEEPS the hidden legacy
+  // selectors, which keep delivering admin telemetry to the tenant
+  // endpoint) — and an unchanged-empty field must go out as the spec's
+  // explicit `event_types: []` clear. Untouched-selectors saves still
+  // omit both (guarded by selectorsChanged), so a rename never silently
+  // changes delivery.
+  if (selectorsChanged && hiddenLegacySelectorCount.value > 0) {
+    body.event_types = editForm.value.event_types
+    body.event_categories = editForm.value.event_categories
+  }
   if (editForm.value.scope_filter !== init.scope_filter) body.scope_filter = editForm.value.scope_filter || null
   if (editForm.value.disable_after_failures !== init.disable_after_failures) body.disable_after_failures = Number(editForm.value.disable_after_failures)
   if (editForm.value.metadata !== init.metadata) {
@@ -1282,7 +1299,7 @@ watch(exportError, (v) => { if (v) error.value = v })
         </div>
         <p v-if="isTenantOwned" class="muted-sm mt-1">Tenant-owned subscriptions can only receive tenant-scoped events (budget.*, reservation.*, tenant.*).</p>
         <p v-if="hiddenLegacySelectorCount" class="muted-sm mt-1" data-testid="hidden-legacy-selectors-hint">
-          {{ hiddenLegacySelectorCount }} legacy admin-only selector{{ hiddenLegacySelectorCount === 1 ? ' is' : 's are' }} hidden here; {{ hiddenLegacySelectorCount === 1 ? 'it remains' : 'they remain' }} active until you edit the selectors.
+          {{ hiddenLegacySelectorCount }} legacy admin-only selector{{ hiddenLegacySelectorCount === 1 ? ' is' : 's are' }} hidden here; {{ hiddenLegacySelectorCount === 1 ? 'it remains' : 'they remain' }} active until you edit the selectors, at which point {{ hiddenLegacySelectorCount === 1 ? 'it is' : 'they are' }} cleared.
         </p>
       </div>
       <div>

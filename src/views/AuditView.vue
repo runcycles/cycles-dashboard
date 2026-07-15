@@ -395,21 +395,30 @@ onMounted(() => {
 })
 // Watch in-place query changes too — same-route navigation (e.g. clicking
 // an Activity link from a sidebar that's already on AuditView) won't
-// remount the component, so the onMounted hook wouldn't fire. Guard order:
+// remount the component, so the onMounted hook wouldn't fire.
+//
+// URL-AUTHORITATIVE FILTERS (deliberate — do not flip back): the URL is
+// the single source of truth for the synced filter state. A navigation
+// to a bare /audit (sidebar re-click, Back to a pre-filter history
+// entry) resets EVERY filter field to defaults and refetches unfiltered —
+// params removed means filters cleared, per the GitHub/Linear list-view
+// convention. The trade-off is accepted: a sidebar re-click discards a
+// working (unsubmitted) filter set, but every SUBMITTED filter set was
+// written to the URL by applyFilters and stays one Back-press away in
+// browser history. Guard order:
 //   1. Self-inflicted (the applyFilters write-back) → skip; re-hydrating
 //      would double-fetch. Consumed one-shot so a later back/forward
 //      return to the same URL still refetches.
-//   2. Empty incoming query (bare /audit sidebar click) → skip entirely,
-//      preserving the operator's working filter state.
-//   3. Anything else is a real navigation (deep-link, back/forward) →
-//      reset-hydrate from the URL and refetch, even if the form already
-//      matches — the results on screen may be for different filters.
+//   2. Anything else is a real navigation (deep-link, back/forward, bare
+//      sidebar click) → reset-hydrate from the URL and refetch, even if
+//      the form already matches — the results on screen may be for
+//      different filters. applyQueryParams is reset-style, so an empty
+//      query clears every field (from/to and status band included).
 watch(() => route.query, () => {
   const incoming = serializeRouteQuery()
   const self = lastSelfWrittenQuery
   lastSelfWrittenQuery = null
   if (self !== null && incoming === self) return
-  if (incoming === '') return
   applyQueryParams()
   query()
 })

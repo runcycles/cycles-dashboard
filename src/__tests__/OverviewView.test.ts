@@ -1667,6 +1667,37 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       expect(listTenantsMock).toHaveBeenCalledTimes(1)
     })
 
+    // F2 (walk-failure retry): a rejected walk must NOT be committed as
+    // done — pre-fix the signature was committed before the walks
+    // settled, so a failed walk round was skipped for up to 10 ticks
+    // (~5 min) while the error banner cleared after the next successful
+    // phase-1 tick. Now any rejection forces a retry on the next tick,
+    // and the banner persists (each retry re-fails) until a full walk
+    // round succeeds.
+    it('a rejected walk retries on the next tick and the error banner persists until it succeeds', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      listWebhooksMock.mockRejectedValue(new Error('webhook list down'))
+      const w = await mountOverview()
+      expect(w.text()).toContain('webhook list down')
+      clearListMocks()
+
+      // Counters unchanged — but the failed round forces a re-walk.
+      await pollTick()
+      expect(listWebhooksMock).toHaveBeenCalledTimes(1)
+      expect(listApiKeysMock).toHaveBeenCalledTimes(1)
+      // Still failing → the banner persists instead of clearing.
+      expect(w.text()).toContain('webhook list down')
+
+      // Walk round succeeds → banner clears and the gate re-arms.
+      listWebhooksMock.mockResolvedValue({ subscriptions: [], has_more: false })
+      await pollTick()
+      expect(w.text()).not.toContain('webhook list down')
+      clearListMocks()
+      await pollTick()
+      expect(listWebhooksMock).not.toHaveBeenCalled()
+      expect(listApiKeysMock).not.toHaveBeenCalled()
+    })
+
     it('manual refresh (PageHeader) always re-runs the walks regardless of counters', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview())
       const w = await mountOverview()

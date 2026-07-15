@@ -13,8 +13,10 @@
 //    "__system__") may only select budget.* / reservation.* / tenant.*
 //    selectors. The edit pickers filter to the tenant-allowed sets and
 //    legacy admin-only selections are stripped from both form snapshots
-//    (no phantom diff on an untouched save; a deliberate selector edit
-//    sends the cleaned array).
+//    (no phantom diff on an untouched save). A deliberate selector edit
+//    on a row where stripping hid anything sends BOTH cleaned arrays —
+//    explicit [] clears included — so the hidden legacy selectors are
+//    removed server-side (F1), not silently kept.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { h as actualH, defineComponent } from 'vue'
@@ -261,6 +263,52 @@ describe('WebhookDetailView — tenant-owned selector gating (spec revs .38/.40/
     expect('event_categories' in body).toBe(false)
   })
 
+  // F1 — the legacy-clear path. A category-only edit on a legacy row
+  // used to omit event_types (stripped-empty diffed equal against the
+  // stripped-empty baseline), so the hidden admin-only types survived
+  // the "selector edit" and kept delivering admin telemetry to the
+  // tenant endpoint. Any deliberate selector edit on a row with hidden
+  // legacy selectors must now send BOTH cleaned arrays — including the
+  // spec's explicit `event_types: []` clear for a stripped-empty field.
+  it('category-only edit on a legacy row sends event_types: [] explicitly (clears hidden legacy types)', async () => {
+    getWebhookMock.mockResolvedValue(subscription({
+      tenant_id: 'acme',
+      event_types: ['api_key.created'],   // admin-only → stripped to empty
+      event_categories: ['budget'],
+    }))
+    const w = await mountView()
+
+    // Operator only touches the CATEGORY picker.
+    await eventTypeCheckbox(w, 'tenant')!.setValue(true)
+    await submitEditForm(w)
+
+    expect(updateWebhookMock).toHaveBeenCalledTimes(1)
+    const body = updateWebhookMock.mock.calls[0][1] as Record<string, unknown>
+    // The untouched (stripped-empty) types field is NOT omitted — the
+    // spec distinguishes [] (clear) from omitted (keep), and only the
+    // explicit [] removes the legacy types server-side.
+    expect(body.event_types).toEqual([])
+    expect(body.event_categories).toEqual(['budget', 'tenant'])
+  })
+
+  it('type-only edit on a legacy row also sends the cleaned categories explicitly', async () => {
+    getWebhookMock.mockResolvedValue(subscription({
+      tenant_id: 'acme',
+      event_types: ['budget.created'],
+      event_categories: ['system'],       // admin-only → stripped to empty
+    }))
+    const w = await mountView()
+
+    await eventTypeCheckbox(w, 'budget.updated')!.setValue(true)
+    await submitEditForm(w)
+
+    expect(updateWebhookMock).toHaveBeenCalledTimes(1)
+    const body = updateWebhookMock.mock.calls[0][1] as Record<string, unknown>
+    expect(body.event_types).toEqual(['budget.created', 'budget.updated'])
+    // Stripped-empty categories go out as the explicit clear.
+    expect(body.event_categories).toEqual([])
+  })
+
   it('legacy row: DELIBERATELY emptying the remaining selectors is still rejected', async () => {
     getWebhookMock.mockResolvedValue(subscription({
       tenant_id: 'acme',
@@ -289,7 +337,9 @@ describe('WebhookDetailView — tenant-owned selector gating (spec revs .38/.40/
     const hint = w.find('[data-testid="hidden-legacy-selectors-hint"]')
     expect(hint.exists()).toBe(true)
     expect(hint.text()).toContain('2 legacy admin-only selectors are hidden')
-    expect(hint.text()).toContain('remain active until you edit the selectors')
+    // F1: the hint states the full contract — hidden legacy selectors
+    // stay active until a selector edit, which clears them.
+    expect(hint.text()).toContain('remain active until you edit the selectors, at which point they are cleared')
   })
 
   it('no hidden-selector hint when nothing was stripped', async () => {

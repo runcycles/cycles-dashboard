@@ -371,20 +371,34 @@ watch(debouncedSubjectKey, () => { loadReservations() })
 // above only covers first mount). Same-route navigation — the /res
 // palette command, browser back/forward — updates route.query without
 // remounting, so without this watch the command was a no-op when the
-// operator was already on Reservations. Mirrors BudgetsView's
-// route.query watcher: only react when the param is present and
-// different, so a nav without the param never clobbers a manual pick.
-// The tenantFilter watcher above then refetches the list.
+// operator was already on Reservations.
+//
+// URL-AUTHORITATIVE FILTER (deliberate — do not flip back): the URL is
+// the single source of truth for the synced ?tenant_id filter, per the
+// GitHub/Linear list-view convention. Param present and different →
+// adopt it; param ABSENT → clear the filter, so Back to a bare
+// /reservations entry un-scopes the list instead of silently keeping
+// the previous tenant (the scoped URL stays one Forward-press away in
+// history). The tenantFilter watcher above refetches on either change;
+// the write-back below is loop-safe (it skips when URL and ref already
+// agree, which they do after either branch here).
 watch(() => route.query.tenant_id, (v) => {
-  if (typeof v === 'string' && v && v !== tenantFilter.value) tenantFilter.value = v
+  if (typeof v === 'string' && v) {
+    if (v !== tenantFilter.value) tenantFilter.value = v
+  } else if (tenantFilter.value) {
+    tenantFilter.value = ''
+  }
 })
 
 // M14: keep the URL in sync with tenantFilter so the filtered view is
 // shareable. `replace` (not push) — filter changes shouldn't clutter
 // history; deep links + browser-back still restore the correct scope.
+// Compare against '' (not undefined) for the absent param so clearing
+// the filter when the URL is already bare is a no-op — keeps the
+// URL → ref watcher above from ping-ponging with this write-back.
 watch(tenantFilter, (tenantId) => {
-  const current = typeof route.query.tenant_id === 'string' ? route.query.tenant_id : undefined
-  if (current === tenantId) return
+  const current = typeof route.query.tenant_id === 'string' ? route.query.tenant_id : ''
+  if (current === (tenantId || '')) return
   router.replace({
     query: {
       ...route.query,

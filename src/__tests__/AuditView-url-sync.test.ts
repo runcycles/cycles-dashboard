@@ -1,17 +1,18 @@
-// F2 — AuditView route.query watcher guard.
+// AuditView route.query watcher guard — URL-authoritative semantics.
 //
-// The old guard compared the incoming URL to the CURRENT (possibly
-// unsubmitted) form state, which broke two ways:
-//   (a) browser Back to /audit?tenant_id=A while the form happened to
-//       read A skipped the refetch, leaving tenant B's results on
-//       screen;
-//   (b) a bare /audit navigation (sidebar click) reset-hydrated the
-//       whole form and fired an unfiltered query, wiping the operator's
-//       working filter set.
-// The new guard remembers the exact query the view itself last wrote
-// via router.replace: self-inflicted change → skip (one-shot); empty
-// incoming query → skip entirely; anything else → reset-hydrate + query,
-// even if the form already matches.
+// The guard remembers the exact query the view itself last wrote via
+// router.replace: a self-inflicted change → skip (one-shot, query()
+// already ran in applyFilters); ANY other query change — parameterized
+// or bare — is a real navigation that reset-hydrates the form from the
+// URL and refetches, even when the form happens to match already.
+//
+// F6 (deliberate design decision — do not flip back): the URL is the
+// single source of truth for the synced filters. Back/forward to a bare
+// /audit entry, or a bare sidebar re-click, resets ALL filter fields to
+// defaults and refetches unfiltered — params removed means filters
+// cleared (GitHub/Linear convention). Submitted filter sets are always
+// in the URL, so they stay recoverable one Back-press away; only
+// unsubmitted form fiddling is discarded.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { reactive } from 'vue'
@@ -76,18 +77,34 @@ describe('AuditView — URL ↔ form sync guard (F2)', () => {
     expect(listAuditLogsMock.mock.calls[0][0].tenant_id).toBe('acme')
   })
 
-  it('a bare /audit navigation preserves the working filter state and does not fire an unfiltered query', async () => {
-    routeRef.query = { tenant_id: 'acme' }
+  it('navigation to a bare /audit resets all filters and refetches unfiltered (URL-authoritative)', async () => {
+    // Land with a full filter set in the URL, including the time window
+    // and status band.
+    routeRef.query = {
+      tenant_id: 'acme',
+      from: '2026-04-01T00:00',
+      to: '2026-04-02T00:00',
+      status_band: 'errors',
+    }
     const w = await mountView()
+    const hydratedCall = listAuditLogsMock.mock.calls.at(-1)![0]
+    expect(hydratedCall.tenant_id).toBe('acme')
+    expect(hydratedCall.status_min).toBe('400')
     listAuditLogsMock.mockClear()
 
-    // Sidebar click → same route, empty query. Pre-change behavior:
-    // filters preserved, no refetch.
+    // Back to a bare-/audit history entry (or a bare sidebar re-click).
+    // Params removed → filters cleared → unfiltered refetch.
     routeRef.query = {}
     await flushPromises()
 
-    expect(listAuditLogsMock).not.toHaveBeenCalled()
-    expect((w.find('#audit-tenant').element as HTMLInputElement).value).toBe('acme')
+    expect(listAuditLogsMock).toHaveBeenCalledTimes(1)
+    const call = listAuditLogsMock.mock.calls[0][0]
+    expect(call.tenant_id).toBeUndefined()
+    expect(call.from).toBeUndefined()
+    expect(call.to).toBeUndefined()
+    expect(call.status_min).toBeUndefined()
+    expect(call.status_max).toBeUndefined()
+    expect((w.find('#audit-tenant').element as HTMLInputElement).value).toBe('')
   })
 
   it('the view\'s own write-back (applyFilters replace) does not double-fetch', async () => {

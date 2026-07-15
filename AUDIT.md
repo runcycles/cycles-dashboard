@@ -76,14 +76,43 @@ overview-counter change + every-10th-tick fallback); the container nginx
 clobbered the TLS edge's `X-Forwarded-Proto` with `http` (map pass-through);
 the TLS example dropped HSTS `preload` (restored).
 
-**Validation:** vue-tsc clean; 1,078/1,078 tests (92 files); line coverage
-96.07% (gate ≥95%); nginx template re-rendered through the real image's
-envsubst + `nginx -t` after the map change; earlier live smoke test covered
-headers, JSON 502, and the e2e probe contract.
+**Review round 2** (full committed diff, incl. round-1 fixes): 7 more
+confirmed correctness bugs, all fixed in the follow-up commit. Worst:
+legacy admin-only webhook event_types could never be cleared (a category-
+only edit omitted the stripped-empty types field — hidden admin telemetry
+kept flowing to the tenant endpoint; selector edits on legacy rows now send
+BOTH cleaned arrays, emitting the spec's explicit `event_types: []`); the
+Overview walk gate committed its signature before the walks settled (failed
+walks went unretried ~5 min while the banner cleared — signature now
+commits only on full success, any rejection forces a retry); the rewritten
+nginx-ssl example pinned the container IP at startup (restored the
+resolver + no-URI-variable proxy_pass pattern). Rounds 1 and 2 flagged
+opposite behaviors for bare-URL navigation (preserve vs reset filters) —
+resolved with URL-authoritative semantics everywhere (GitHub/Linear
+convention: bare URL = default filters; history preserves submitted state):
+AuditView bare-nav resets + refetches, ReservationsView clears its tenant
+filter on param removal, ApiKeysView writes expiring_within_7d removal back
+to the URL. Also: toast cap now evicts oldest non-error first (persistent
+errors survive transient toasts); useFocusTrap activates on container-ref
+populate/clear instead of view lifetime (no more document-level listeners
+on closed dialogs or focus-yank on navigation).
+
+**Validation:** vue-tsc clean; 1,097/1,097 tests (92 files); line coverage
+96.1% (gate ≥95%); production `npm run build` + full `docker build` pass;
+built image live-smoke-tested (index no-cache + full security headers, SPA
+fallback headers, immutable assets, gzip, JSON 502 on dead upstream,
+container healthcheck healthy); nginx template re-rendered through the real
+image's envsubst + `nginx -t` after the X-Forwarded-Proto map change.
 
 **Known deferrals:** session-expiry countdown warning, dirty-form discard
 guard, suspend/reactivate `:loading` wiring, policy disable/enable UI +
 policy-list pagination (>50 truncates), `GET /v1/admin/events/{id}` unused.
+Structural (review round 2, consolidation not defects): extract a shared
+`useUrlSyncedRef` composable (the per-view URL↔ref watcher pairs in
+Tenants/Budgets/Events/Audit/ApiKeys/Reservations re-derive the same
+guards); rebuild `useBulkActionPreview`/`useListExport` pagination loops on
+`walkCursorPages`; ReservationsView bare-URL nav leaves the list empty
+rather than re-defaulting to the first ACTIVE tenant.
 
 ### 2026-07-04 — v0.1.25.67: admin pin bump (.48)
 

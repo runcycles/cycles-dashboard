@@ -187,7 +187,12 @@ describe('ReservationsView — URL deep-link smoke', () => {
     expect(listReservationsMock.mock.calls.some(args => args[0] === 'beta')).toBe(true)
   })
 
-  it('F3: an absent ?tenant_id does not clobber the operator\'s current pick', async () => {
+  // F7 (URL-authoritative filter — deliberate design decision): the URL
+  // is the source of truth for the synced ?tenant_id filter. Back to a
+  // bare /reservations history entry clears the filter instead of
+  // silently keeping the previous tenant scope (the scoped URL stays one
+  // Forward-press away). Pre-fix the watcher ignored param removal.
+  it('F7: Back to a bare URL (param removed) clears the tenant filter', async () => {
     routeRef.query = { tenant_id: 'beta' }
     listTenantsMock.mockResolvedValue({
       tenants: [
@@ -197,14 +202,17 @@ describe('ReservationsView — URL deep-link smoke', () => {
       has_more: false,
     })
     const { default: ReservationsView } = await import('../views/ReservationsView.vue')
-    mount(ReservationsView, stdMount())
+    const w = mount(ReservationsView, stdMount())
     await flushPromises()
+    expect((w.find('#res-tenant').element as HTMLSelectElement).value).toBe('beta')
     listReservationsMock.mockClear()
 
-    // Navigation that drops the param (e.g. bare /reservations) must
-    // not reset the tenant filter or refetch under a different scope.
+    // Browser Back to bare /reservations — param removed → filter
+    // cleared. listReservations requires a tenant, so no fetch fires
+    // under any scope (the list empties client-side).
     routeRef.query = {}
     await flushPromises()
-    expect(listReservationsMock.mock.calls.some(args => args[0] !== 'beta')).toBe(false)
+    expect((w.find('#res-tenant').element as HTMLSelectElement).value).toBe('')
+    expect(listReservationsMock).not.toHaveBeenCalled()
   })
 })

@@ -248,6 +248,90 @@ describe('ApiKeysView — ?search= deep-link hydration (Overview expiring-key ro
   })
 })
 
+// F5 — ?expiring_within_7d was one-directional too: dismissing the pill
+// (or clearFilters) only reset the ref, leaving the param in the URL —
+// reload/share re-applied the dismissed filter, and the ?search
+// write-back (which spreads ...route.query) kept re-propagating it.
+// The ref → URL write-back removes the param on dismiss.
+describe('ApiKeysView — ?expiring_within_7d URL write-back (F5)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    const auth = useAuthStore()
+    auth.apiKey = 'test-key'
+    auth.capabilities = FULL_CAPS
+    listApiKeysMock.mockReset()
+    listTenantsMock.mockReset()
+    replaceMock.mockReset()
+    listTenantsMock.mockResolvedValue({ tenants: [] })
+    listApiKeysMock.mockResolvedValue({ keys: [], has_more: false })
+    for (const k of Object.keys(routeQuery)) delete routeQuery[k]
+    // Simulate the router applying each replace to the current route so
+    // follow-up write-backs (e.g. the ?search spread) see the URL state
+    // the previous replace produced — mirrors real router behavior.
+    replaceMock.mockImplementation(({ query }: { query: Record<string, string | undefined> }) => {
+      for (const k of Object.keys(routeQuery)) delete routeQuery[k]
+      for (const [k, v] of Object.entries(query)) {
+        if (v !== undefined) routeQuery[k] = v
+      }
+    })
+  })
+
+  async function mountView() {
+    const { default: ApiKeysView } = await import('../views/ApiKeysView.vue')
+    const w = mount(ApiKeysView, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
+    await flushPromises(); await flushPromises()
+    return w
+  }
+
+  it('dismissing the pill removes ?expiring_within_7d from the URL (preserving other params)', async () => {
+    routeQuery.expiring_within_7d = '1'
+    routeQuery.search = 'acme'
+    const w = await mountView()
+    await w.find('[data-testid="api-keys-expiring-filter-chip"] button').trigger('click')
+    await flushPromises()
+
+    expect(replaceMock).toHaveBeenCalled()
+    const arg = replaceMock.mock.calls.at(-1)![0] as { query: Record<string, string | undefined> }
+    expect(arg.query.expiring_within_7d).toBeUndefined()
+    expect(arg.query.search).toBe('acme')
+  })
+
+  it('clearFilters removes the param too', async () => {
+    routeQuery.expiring_within_7d = '1'
+    const w = await mountView()
+    const clear = w.findAll('button').find(b => b.text() === 'Clear')
+    expect(clear).toBeDefined()
+    await clear!.trigger('click')
+    await flushPromises()
+
+    const arg = replaceMock.mock.calls.at(-1)![0] as { query: Record<string, string | undefined> }
+    expect(arg.query.expiring_within_7d).toBeUndefined()
+  })
+
+  it('the ?search write-back no longer resurrects a dismissed filter', async () => {
+    routeQuery.expiring_within_7d = '1'
+    const w = await mountView()
+    // Dismiss the pill — the write-back strips the param from the URL.
+    await w.find('[data-testid="api-keys-expiring-filter-chip"] button').trigger('click')
+    await flushPromises()
+    expect(routeQuery.expiring_within_7d).toBeUndefined()
+
+    // Now type a search term. Pre-fix, this replace spread the STALE
+    // route.query and re-wrote expiring_within_7d='1' into the URL.
+    await w.find('#keys-search').setValue('acme')
+    await flushPromises()
+    const arg = replaceMock.mock.calls.at(-1)![0] as { query: Record<string, string | undefined> }
+    expect(arg.query.search).toBe('acme')
+    expect(arg.query.expiring_within_7d).toBeUndefined()
+  })
+
+  it('does not replace on mount when URL and ref already agree (loop guard)', async () => {
+    routeQuery.expiring_within_7d = '1'
+    await mountView()
+    expect(replaceMock).not.toHaveBeenCalled()
+  })
+})
+
 // F6 — the sync was one-way: ?search= hydrated the ref, but operator
 // edits never wrote back, so reloading/sharing the URL re-applied a
 // cleared filter. The debounced write-back mirrors TenantsView's

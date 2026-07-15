@@ -54,7 +54,10 @@ UX work that does not advance spec alignment.
   includes it in exports.
 - Command palette: `/budget <query>` and `/res <tenant>` slash commands.
 - Audit view: filters persist to the URL (shareable queries) and the standard
-  refresh button renders in the header.
+  refresh button renders in the header. URL-synced filters across list views
+  now treat the URL as authoritative: navigating to a bare URL (sidebar
+  click, browser Back) resets the synced filters; submitted filter state
+  stays one Back-press away in history.
 - gzip compression, `X-Forwarded-Proto`, JSON `502/503/504` error bodies for
   `/v1/*`, and a tightened CSP in the container nginx config; HSTS +
   `encode` in `Caddyfile.example`.

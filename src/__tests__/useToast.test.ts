@@ -152,7 +152,7 @@ describe('useToast', () => {
     expect(toasts.value).toHaveLength(0)
   })
 
-  it('caps the stack at 5, dropping the oldest toast first', () => {
+  it('caps the stack at 5 — an all-error stack drops the oldest error (persistent errors cannot grow unbounded)', () => {
     const t = useToast()
     for (let i = 0; i < 7; i++) t.error(`err-${i}`)
     expect(toasts.value).toHaveLength(5)
@@ -160,7 +160,7 @@ describe('useToast', () => {
     expect(toasts.value.map(x => x.message)).toEqual(['err-2', 'err-3', 'err-4', 'err-5', 'err-6'])
   })
 
-  it('cap drops oldest regardless of type (persistent errors cannot grow unbounded)', () => {
+  it('cap evicts the oldest non-error before any error', () => {
     const t = useToast()
     t.success('old-success')
     for (let i = 0; i < 5; i++) t.error(`err-${i}`)
@@ -169,6 +169,28 @@ describe('useToast', () => {
     // The dropped success's auto-dismiss timer firing later is a no-op.
     vi.advanceTimersByTime(4_001)
     expect(toasts.value.map(x => x.message)).toEqual(['err-0', 'err-1', 'err-2', 'err-3', 'err-4'])
+  })
+
+  it('a success arriving on 5 persistent errors evicts the oldest error only because no non-error exists', () => {
+    const t = useToast()
+    for (let i = 0; i < 5; i++) t.error(`err-${i}`)
+    t.success('done')
+    expect(toasts.value).toHaveLength(5)
+    // err-0 (oldest error) evicted — the stack was all errors.
+    expect(toasts.value.map(x => x.message)).toEqual(['err-1', 'err-2', 'err-3', 'err-4', 'done'])
+  })
+
+  it('a success arriving on 4 errors + 1 warning evicts the warning, not an error', () => {
+    const t = useToast()
+    t.error('err-0')
+    t.error('err-1')
+    t.warning('advisory')
+    t.error('err-2')
+    t.error('err-3')
+    t.success('done')
+    expect(toasts.value).toHaveLength(5)
+    // The warning (oldest non-error) goes; all four errors survive.
+    expect(toasts.value.map(x => x.message)).toEqual(['err-0', 'err-1', 'err-2', 'err-3', 'done'])
   })
 
   it('stack below the cap is untouched by the cap logic', () => {

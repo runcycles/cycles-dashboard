@@ -64,9 +64,28 @@ const filterTenant = ref('')
 // that card should land on this view showing *those* keys, not the
 // whole fleet.
 const expiringWithin7d = ref(route.query.expiring_within_7d === '1')
-// Keep URL ↔ ref in sync across back/forward nav so the badge state
-// stays authoritative.
+// URL → ref sync. URL-AUTHORITATIVE (deliberate — do not flip back):
+// the URL is the single source of truth for this synced filter, per the
+// GitHub/Linear list-view convention — param present → filter on, param
+// ABSENT → filter off, so Back to a bare /api-keys entry clears it (the
+// filtered URL stays one Forward-press away in history).
 watch(() => route.query.expiring_within_7d, (v) => { expiringWithin7d.value = v === '1' })
+// Ref → URL write-back. Dismissing the pill (or clearFilters) must also
+// REMOVE the param — pre-fix only the ref was reset, so the stale param
+// survived in the URL, reload/share re-applied the dismissed filter, and
+// the ?search write-back below (which spreads ...route.query) kept
+// re-propagating it. Loop-safe against the URL → ref watcher above:
+// acts only when URL and ref actually disagree.
+watch(expiringWithin7d, (v) => {
+  const current = route.query.expiring_within_7d === '1'
+  if (v === current) return
+  router.replace({
+    query: {
+      ...route.query,
+      expiring_within_7d: v ? '1' : undefined,
+    },
+  })
+})
 // cycles-governance-admin v0.1.25.21: free-text `search` query param
 // on listApiKeys (case-insensitive substring match on key_id + name).
 // Debounced 200ms so a 20-char fragment doesn't fire 20 fetches. The
