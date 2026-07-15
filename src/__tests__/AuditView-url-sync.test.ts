@@ -36,8 +36,9 @@ const replaceMock = vi.fn()
 
 // Reactive route so the view's `watch(() => route.query, …)` fires when
 // tests reassign `routeRef.query` (simulating back/forward + same-route
-// navigation without a remount).
-const routeRef = reactive({ query: {} as Record<string, string> })
+// navigation without a remount). Carries `name` because the watcher is
+// route-identity-guarded (F3).
+const routeRef = reactive({ query: {} as Record<string, string>, name: 'audit' })
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: vi.fn(), replace: replaceMock }),
@@ -48,6 +49,7 @@ vi.mock('vue-router', () => ({
 beforeEach(() => {
   setActivePinia(createPinia())
   routeRef.query = {}
+  routeRef.name = 'audit'
   listAuditLogsMock.mockReset()
   listAuditLogsMock.mockResolvedValue({ logs: [], has_more: false, next_cursor: undefined })
   replaceMock.mockReset()
@@ -162,5 +164,57 @@ describe('AuditView — URL ↔ form sync guard (F2)', () => {
     const lastCall = listAuditLogsMock.mock.calls.at(-1)![0]
     expect(lastCall.key_id).toBe('key_1')
     expect(lastCall.tenant_id).toBeUndefined()
+  })
+
+  // F6: when applyFilters' replace targets a query identical to the
+  // current URL, vue-router dedupes it — the watcher never fires and a
+  // marker armed anyway was never consumed. That stale marker wrongly
+  // swallowed the NEXT real navigation to the same query (e.g. Run
+  // Query on bare /audit, then a bare sidebar re-click kept stale
+  // results). The marker is now armed only when the URL will change.
+  it('Run Query with URL-identical filters does not leak the one-shot marker', async () => {
+    const w = await mountView()
+    listAuditLogsMock.mockClear()
+
+    // Run Query on bare /audit with an empty form — buildUrlQuery() is
+    // {}, identical to the current URL, so router.replace dedupes and
+    // no watcher event fires (routeRef.query is left untouched here).
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(listAuditLogsMock).toHaveBeenCalledTimes(1)
+
+    // Operator fiddles with the form (unsubmitted), then a REAL
+    // navigation to the same bare query lands (sidebar re-click).
+    await w.find('#audit-tenant').setValue('acme')
+    listAuditLogsMock.mockClear()
+    routeRef.query = {}
+    await flushPromises()
+
+    // Pre-fix the stale marker matched ('' === '') and skipped this —
+    // stale results stayed on screen. Now: reset-hydrate + refetch.
+    expect(listAuditLogsMock).toHaveBeenCalledTimes(1)
+    expect((w.find('#audit-tenant').element as HTMLInputElement).value).toBe('')
+  })
+
+  // F3 (route-identity guard): the route.query watcher fires during
+  // navigation AWAY too — a destination route carrying same-named
+  // params must not reset-hydrate this view or fire a fetch on the way
+  // out.
+  it('a navigation away to a route with same-named params does not refetch', async () => {
+    const w = await mountView()
+    await w.find('#audit-tenant').setValue('acme')
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    routeRef.query = { tenant_id: 'acme' } // self write-back lands
+    await flushPromises()
+    listAuditLogsMock.mockClear()
+
+    // Router commits /reservations?tenant_id=beta while AuditView is
+    // still mounted (watchers run before unmount).
+    routeRef.name = 'reservations'
+    routeRef.query = { tenant_id: 'beta' }
+    await flushPromises()
+    expect(listAuditLogsMock).not.toHaveBeenCalled()
+    expect((w.find('#audit-tenant').element as HTMLInputElement).value).toBe('acme')
   })
 })

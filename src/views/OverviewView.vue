@@ -133,12 +133,29 @@ function walkApiKeysPages(base: Record<string, string>) {
 // walk-fed cards), with a slow-cadence fallback (every 10th fast tick)
 // so drift can't persist indefinitely when counters don't move — e.g.
 // a new ACTIVE api key, which no overview counter reflects. A walk round
-// with any rejection is never committed as done — the next tick retries
-// (see the post-settle commit below).
+// with any rejection is never committed as done — it retries under the
+// exponential backoff below (see the post-settle commit).
 const WALK_FALLBACK_TICKS = 10
 let forceWalks = true // initial load always walks
-let ticksSinceWalk = 0
+let ticksSinceWalk = 0 // ticks since the last walk ATTEMPT (success or failure)
 let lastWalkSignature: string | null = null
+// Failed-round retry backoff. The previous fix (forceWalks = true on any
+// rejection) re-fired all four multi-page walks on EVERY 30s tick for as
+// long as an endpoint stayed down — request amplification against an
+// already-degraded API. Instead, retry after walkRetryBackoffTicks ticks,
+// doubling per failed round (2 → 4 → 8 → capped at WALK_FALLBACK_TICKS)
+// and resetting to 1 on a fully-successful round. While a failure streak
+// is active the counter-change trigger also respects the backoff — a
+// counter change mid-outage must not re-open the floodgates. Manual
+// refresh (refreshAll) still forces an immediate attempt.
+let walkRetryBackoffTicks = 1
+let walkFailStreak = false
+// First failure message from the last attempted walk round. Folded into
+// the error banner (see the post-settle block) so the failure stays
+// visible across the whole backoff window — the opposite defect of the
+// prior round was a banner that cleared as soon as a later tick's
+// phase-1 fetches succeeded while the walks were still broken.
+const walkError = ref('')
 
 // Counter fields relevant to the walk-backed cards: tenant counts
 // (closed-tenant exclusion walk), budget counts (at/near-cap walk),
@@ -172,11 +189,14 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
 
   // Phase 2 — the cursor walks, gated. A failed getOverview() yields no
   // signature; walk only if forced or fallback-due (can't detect change).
+  // During a failure streak the cadence is the retry backoff, not the
+  // slow fallback, and the counter-change trigger is suspended (an
+  // uncommitted signature reads as "changed" every tick of an outage).
   ticksSinceWalk++
   const sig = ov.status === 'fulfilled' ? walkSignature(ov.value) : null
   const countersChanged = sig !== null && sig !== lastWalkSignature
-  const results: PromiseSettledResult<unknown>[] = [ov, audit, frozen, debt]
-  if (forceWalks || countersChanged || ticksSinceWalk >= WALK_FALLBACK_TICKS) {
+  const walkDue = ticksSinceWalk >= (walkFailStreak ? walkRetryBackoffTicks : WALK_FALLBACK_TICKS)
+  if (forceWalks || walkDue || (countersChanged && !walkFailStreak)) {
     const [apiKeys, atCap, closed, webhooks] = await Promise.allSettled([
       // Expiring-keys card. The server sorts by created_at desc — NOT by
       // expiry — and has no `expires_before` filter, so one default page
@@ -222,28 +242,36 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
       failingWebhooksRaw.value = webhooks.value.items
       webhooksPartial.value = webhooks.value.partial
     }
-    results.push(apiKeys, atCap, closed, webhooks)
     // Commit the walk as "done" only when ALL four fulfilled. Committing
     // up-front (pre-fix) meant a rejected walk left its card stale for up
     // to WALK_FALLBACK_TICKS (~5 min) — the next ticks saw an unchanged
-    // signature and skipped the walks — while the error banner cleared as
-    // soon as a later tick's phase-1 fetches succeeded. On any rejection,
-    // force a retry next tick and leave the signature/tick state alone;
-    // each retry re-surfaces the failure in the banner until a full walk
-    // round succeeds.
-    const anyWalkRejected = [apiKeys, atCap, closed, webhooks].some(r => r.status === 'rejected')
-    if (anyWalkRejected) {
-      forceWalks = true
+    // signature and skipped the walks. On any rejection, keep the
+    // signature uncommitted (the next attempt replays the full round),
+    // remember the failure for the banner, and back off exponentially
+    // instead of hammering the degraded endpoint every tick.
+    forceWalks = false
+    ticksSinceWalk = 0
+    const firstWalkFail = [apiKeys, atCap, closed, webhooks].find(r => r.status === 'rejected')
+    if (firstWalkFail && firstWalkFail.status === 'rejected') {
+      walkFailStreak = true
+      walkRetryBackoffTicks = Math.min(walkRetryBackoffTicks * 2, WALK_FALLBACK_TICKS)
+      walkError.value = toMessage(firstWalkFail.reason)
     } else {
-      forceWalks = false
-      ticksSinceWalk = 0
+      walkFailStreak = false
+      walkRetryBackoffTicks = 1
+      walkError.value = ''
       if (sig !== null) lastWalkSignature = sig
     }
   }
   // Surface the first failure so the operator sees *something* wrong —
   // but only error-banner; cards for the successful fetches still render.
-  const firstFail = results.find(r => r.status === 'rejected')
-  error.value = firstFail && firstFail.status === 'rejected' ? toMessage(firstFail.reason) : ''
+  // Phase-1 failures win (they're fresher — re-checked every tick);
+  // otherwise the last walk round's failure persists across the backoff
+  // window instead of clearing between retries.
+  const phase1Fail = [ov, audit, frozen, debt].find(r => r.status === 'rejected')
+  error.value = phase1Fail && phase1Fail.status === 'rejected'
+    ? toMessage(phase1Fail.reason)
+    : walkError.value
 }, POLL_FAST_MS)
 
 // Manual refresh (PageHeader button) always re-runs the walks — the

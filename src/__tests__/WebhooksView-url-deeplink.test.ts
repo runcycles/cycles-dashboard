@@ -32,7 +32,11 @@ vi.mock('../api/client', async () => {
   }
 })
 
-const routeRef: { query: Record<string, string>; params: Record<string, string> } = { query: {}, params: {} }
+// `name` matches the real route — the view's URL → ref watchers are
+// route-identity-guarded (F3), and their `immediate` hydration run
+// checks it at setup.
+const routeRef: { query: Record<string, string>; params: Record<string, string>; name: string } =
+  { query: {}, params: {}, name: 'webhooks' }
 
 vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()

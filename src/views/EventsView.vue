@@ -266,6 +266,11 @@ watch(toDate, () => applyFilters())
 // router.replace inside applyFilters() becomes a no-op when the URL
 // already matches, so there's no loop.
 watch(() => route.query, (q) => {
+  // Route-identity guard: fires while navigating AWAY too (before
+  // unmount), and a destination route can carry same-named params
+  // (e.g. /audit?trace_id=…) — ignore query changes that belong to
+  // another route.
+  if (route.name !== 'events') return
   if ((q.trace_id as string || '') !== traceId.value) traceId.value = (q.trace_id as string) || ''
   if ((q.request_id as string || '') !== requestId.value) requestId.value = (q.request_id as string) || ''
   if ((q.correlation_id as string || '') !== correlationId.value) correlationId.value = (q.correlation_id as string) || ''

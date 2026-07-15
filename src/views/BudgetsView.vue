@@ -632,6 +632,9 @@ watch(
 // wrong filter). Re-running loadList resets nextCursor/hasMore
 // up-front and re-fetches page 1 under the new filter.
 watch(() => route.query.filter, () => {
+  // Route-identity guard: fires while navigating AWAY too (before
+  // unmount) — ignore query changes that belong to another route.
+  if (route.name !== 'budgets') return
   selected.value = new Set()
   if (!isDetail.value) void loadList()
 })
@@ -1016,6 +1019,11 @@ watch(() => route.query, (q) => {
   // route with different query params — Vue Router keeps the component
   // mounted, so the setup-time hydration above doesn't re-run. Sync
   // the refs explicitly when URL-driven filters change.
+  // Route-identity guard: fires while navigating AWAY too (before
+  // unmount), and a destination route can carry same-named params
+  // (e.g. /reservations?tenant_id=beta) — ignore query changes that
+  // belong to another route.
+  if (route.name !== 'budgets') return
   const nextTenant = (q.tenant_id as string) || ''
   if (nextTenant !== selectedTenant.value) selectedTenant.value = nextTenant
   const nextSearch = (q.search as string) || ''

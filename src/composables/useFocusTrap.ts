@@ -63,17 +63,20 @@ export function useFocusTrap(containerRef: Ref<HTMLElement | null>) {
         last.focus()
       }
     } else {
-      if (active === last) {
+      // Recapture escaped focus on forward Tab too — if focus is
+      // outside the container (programmatic focus, a container swap
+      // race), a plain wrap-on-last check would let Tab walk the page
+      // behind the modal freely.
+      if (active === last || !container.contains(active)) {
         e.preventDefault()
         first.focus()
       }
     }
   }
 
-  function activate(container: HTMLElement) {
-    if (trapActive) return
-    trapActive = true
-    previouslyFocused = (document.activeElement as HTMLElement) ?? null
+  // Initial-focus logic shared by activation and container swaps: first
+  // focusable child, else the container itself (made focusable).
+  function focusInto(container: HTMLElement) {
     const focusable = getFocusable(container)
     if (focusable.length > 0) {
       focusable[0].focus()
@@ -82,6 +85,13 @@ export function useFocusTrap(containerRef: Ref<HTMLElement | null>) {
       container.setAttribute('tabindex', '-1')
       container.focus()
     }
+  }
+
+  function activate(container: HTMLElement) {
+    if (trapActive) return
+    trapActive = true
+    previouslyFocused = (document.activeElement as HTMLElement) ?? null
+    focusInto(container)
     document.addEventListener('keydown', onKeydown)
   }
 
@@ -99,10 +109,21 @@ export function useFocusTrap(containerRef: Ref<HTMLElement | null>) {
   // when we pick the initial focus target. If the ref swaps directly
   // between two elements (no null in between), the trap stays active —
   // onKeydown reads containerRef.value live, so the cycle follows the
-  // new element.
-  watch(containerRef, (el) => {
-    if (el) activate(el)
-    else deactivate()
+  // new element — and focus is moved into the new container when the
+  // swap stranded it outside (the old element is typically detached, so
+  // focus fell to <body>, behind the modal). previouslyFocused is kept
+  // from the original activation so closing still restores the operator
+  // to where they were before the dialog opened.
+  watch(containerRef, (el, prev) => {
+    if (el) {
+      if (!trapActive) {
+        activate(el)
+      } else if (prev && el !== prev && !el.contains(document.activeElement)) {
+        focusInto(el)
+      }
+    } else {
+      deactivate()
+    }
   }, { flush: 'post' })
 
   onBeforeUnmount(() => deactivate())

@@ -36,7 +36,11 @@ vi.mock('../api/client', async () => {
   }
 })
 
-const routeRef: { query: Record<string, string>; params: Record<string, string> } = { query: {}, params: {} }
+// `name` is set per-describe to the mounted view's route — the views'
+// URL → ref watchers are route-identity-guarded (F3), and WebhooksView's
+// `immediate` hydration run checks it at setup.
+const routeRef: { query: Record<string, string>; params: Record<string, string>; name: string } =
+  { query: {}, params: {}, name: '' }
 const pushMock = vi.fn()
 const replaceMock = vi.fn((loc: { query: Record<string, string | undefined> }) => {
   const next: Record<string, string> = {}
@@ -125,6 +129,7 @@ function findToggle(w: ReturnType<typeof mount>, ariaLabelContains: string): HTM
 describe('WebhooksView — hide DISABLED by default', () => {
   beforeEach(() => {
     resetAll()
+    routeRef.name = 'webhooks'
     listWebhooksMock.mockResolvedValue({
       subscriptions: [
         { id: 'w1', url: 'https://ex.com/a', status: 'ACTIVE', event_types: [], created_at: '2026-01-01T00:00:00Z', failure_count: 0 },
@@ -176,6 +181,7 @@ describe('WebhooksView — hide DISABLED by default', () => {
 describe('TenantsView — hide CLOSED by default', () => {
   beforeEach(() => {
     resetAll()
+    routeRef.name = 'tenants'
     listTenantsMock.mockResolvedValue({
       tenants: [
         { tenant_id: 't1', name: 'Acme', status: 'ACTIVE', created_at: '2026-01-01T00:00:00Z' },
@@ -238,6 +244,7 @@ describe('TenantsView — hide CLOSED by default', () => {
 describe('BudgetsView — hide CLOSED by default', () => {
   beforeEach(() => {
     resetAll()
+    routeRef.name = 'budgets'
     listBudgetsMock.mockResolvedValue({
       ledgers: [
         { ledger_id: 'b1', tenant_id: 'T', scope: 'scope-1', status: 'ACTIVE', unit: 'USD', commit_overage_policy: 'REJECT', allocated: { amount: 100, unit: 'USD' }, remaining: { amount: 50, unit: 'USD' }, reserved: { amount: 0, unit: 'USD' }, created_at: '2026-01-01T00:00:00Z' },
@@ -286,6 +293,7 @@ describe('BudgetsView — hide CLOSED by default', () => {
 describe('ApiKeysView — hide REVOKED/EXPIRED by default', () => {
   beforeEach(() => {
     resetAll()
+    routeRef.name = 'api-keys'
     listApiKeysMock.mockResolvedValue({
       keys: [
         { key_id: 'k1', name: 'key-active', status: 'ACTIVE', tenant_id: 'T', created_at: '2026-01-01T00:00:00Z', permissions: [] },

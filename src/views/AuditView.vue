@@ -384,7 +384,14 @@ let lastSelfWrittenQuery: string | null = null
 // query. Wired to the form's @submit.
 function applyFilters() {
   const q = buildUrlQuery()
-  lastSelfWrittenQuery = serializeQuery(q)
+  // Arm the one-shot marker only when the replace will actually change
+  // the URL. vue-router dedupes an identical-query replace — the
+  // watcher never fires, the marker is never consumed, and a stale
+  // marker would wrongly skip a LATER real navigation to this same
+  // query (e.g. Run Query on bare /audit, then a bare sidebar re-click
+  // kept stale results on screen).
+  const serialized = serializeQuery(q)
+  lastSelfWrittenQuery = serialized !== serializeRouteQuery() ? serialized : null
   router.replace({ query: q })
   query()
 }
@@ -415,6 +422,11 @@ onMounted(() => {
 //      different filters. applyQueryParams is reset-style, so an empty
 //      query clears every field (from/to and status band included).
 watch(() => route.query, () => {
+  // Route-identity guard: this watcher also fires while navigating AWAY
+  // (before unmount), and a destination route can carry same-named
+  // params (e.g. /events?search=…) — ignore query changes that belong
+  // to another route.
+  if (route.name !== 'audit') return
   const incoming = serializeRouteQuery()
   const self = lastSelfWrittenQuery
   lastSelfWrittenQuery = null

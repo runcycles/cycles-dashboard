@@ -69,23 +69,36 @@ const expiringWithin7d = ref(route.query.expiring_within_7d === '1')
 // GitHub/Linear list-view convention — param present → filter on, param
 // ABSENT → filter off, so Back to a bare /api-keys entry clears it (the
 // filtered URL stays one Forward-press away in history).
-watch(() => route.query.expiring_within_7d, (v) => { expiringWithin7d.value = v === '1' })
+watch(() => route.query.expiring_within_7d, (v) => {
+  // Route-identity guard: this watcher also fires while navigating AWAY
+  // (before unmount) — ignore query changes that belong to another route.
+  if (route.name !== 'api-keys') return
+  expiringWithin7d.value = v === '1'
+})
 // Ref → URL write-back. Dismissing the pill (or clearFilters) must also
 // REMOVE the param — pre-fix only the ref was reset, so the stale param
 // survived in the URL, reload/share re-applied the dismissed filter, and
 // the ?search write-back below (which spreads ...route.query) kept
 // re-propagating it. Loop-safe against the URL → ref watcher above:
-// acts only when URL and ref actually disagree.
+// acts only when the URL isn't already the canonical representation of
+// the ref state ('1' when on, param absent when off).
+//
+// `immediate` + presence-normalization: a deep link carrying any OTHER
+// value (?expiring_within_7d=true, =0, valueless) hydrates the ref
+// false, and the old `ref === (param === '1')` comparison read that as
+// "already in sync" — the junk param was never stripped and the ?search
+// write-back's route.query spread re-propagated it forever. Now any
+// non-'1' value is replaced away on landing (list stays unfiltered).
 watch(expiringWithin7d, (v) => {
-  const current = route.query.expiring_within_7d === '1'
-  if (v === current) return
+  const raw = route.query.expiring_within_7d
+  if (v ? raw === '1' : raw === undefined) return
   router.replace({
     query: {
       ...route.query,
       expiring_within_7d: v ? '1' : undefined,
     },
   })
-})
+}, { immediate: true })
 // cycles-governance-admin v0.1.25.21: free-text `search` query param
 // on listApiKeys (case-insensitive substring match on key_id + name).
 // Debounced 200ms so a 20-char fragment doesn't fire 20 fetches. The
@@ -105,6 +118,11 @@ const debouncedSearch = useDebouncedRef(search, 200)
 // the write-back watcher below: only acts when the param differs from
 // the current ref state.
 watch(() => route.query.search, (v) => {
+  // Route-identity guard: this watcher also fires while navigating AWAY
+  // (before unmount), and a destination route can carry its own ?search
+  // (e.g. /audit?search=…) — ignore query changes that belong to
+  // another route.
+  if (route.name !== 'api-keys') return
   const next = typeof v === 'string' ? v : ''
   if (next !== search.value) search.value = next
 })

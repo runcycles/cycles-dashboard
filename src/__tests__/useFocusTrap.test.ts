@@ -141,6 +141,40 @@ describe('useFocusTrap', () => {
     expect((document.activeElement as HTMLElement)?.id).toBe('b')
   })
 
+  // F7(b): the forward-Tab branch must mirror the Shift+Tab recapture —
+  // pre-fix it only wrapped when active === last, so escaped focus
+  // tabbed freely through the page behind the modal.
+  it('forward Tab from OUTSIDE the container pulls focus back to the first element', async () => {
+    const Dialog = makeDialogComponent(() => [
+      h('button', { id: 'a' }, 'a'),
+      h('button', { id: 'b' }, 'b'),
+    ])
+    mount(Dialog, { attachTo: document.body })
+    await flushPromises()
+
+    outsideButton.focus()
+    document.dispatchEvent(tabEvent(false))
+    expect((document.activeElement as HTMLElement)?.id).toBe('a')
+  })
+
+  it('forward Tab from a middle element is not intercepted (native forward-tab order applies)', async () => {
+    const Dialog = makeDialogComponent(() => [
+      h('button', { id: 'a' }, 'a'),
+      h('button', { id: 'b' }, 'b'),
+      h('button', { id: 'c' }, 'c'),
+    ])
+    mount(Dialog, { attachTo: document.body })
+    await flushPromises()
+
+    ;(document.getElementById('b') as HTMLButtonElement).focus()
+    const evt = tabEvent(false)
+    document.dispatchEvent(evt)
+    // Handler leaves the event alone — the recapture applies only to
+    // ESCAPED focus, not to normal in-container tabbing.
+    expect((document.activeElement as HTMLElement)?.id).toBe('b')
+    expect(evt.defaultPrevented).toBe(false)
+  })
+
   it('does not intercept non-Tab keys', async () => {
     const Dialog = makeDialogComponent(() => [
       h('button', { id: 'a' }, 'a'),
@@ -301,7 +335,12 @@ describe('useFocusTrap', () => {
       expect(document.activeElement).toBe(document.body)
     })
 
-    it('re-pointing the ref to a new element while active keeps the trap armed without re-capturing focus', async () => {
+    // F7(a): a direct element-to-element swap (no null in between) used
+    // to leave focus wherever it was — typically stranded on a detached
+    // node or the page behind the modal. The watcher now moves focus
+    // into the new container (same first-focusable/fallback logic as
+    // activation) whenever the swap left it outside.
+    it('re-pointing the ref to a new element while active moves focus into the new container', async () => {
       // Drive the composable with a hand-managed ref (not a template
       // ref) so the swap is guaranteed not to pass through null.
       const containerRef = ref<HTMLElement | null>(null)
@@ -329,12 +368,13 @@ describe('useFocusTrap', () => {
       expect((document.activeElement as HTMLElement)?.id).toBe('in-a')
 
       // Swap a → b with no null in between: the trap stays active (no
-      // deactivate/reactivate churn, no focus re-capture)…
+      // deactivate/reactivate churn) and focus follows into the new
+      // container instead of stranding on the old element.
       containerRef.value = b
       await flushPromises()
-      expect((document.activeElement as HTMLElement)?.id).toBe('in-a')
-      // …and the keydown handler reads the ref live, so cycling now
-      // follows the NEW container (focus is outside b → wraps in).
+      expect((document.activeElement as HTMLElement)?.id).toBe('in-b')
+      // The keydown handler reads the ref live, so cycling follows the
+      // NEW container.
       document.dispatchEvent(tabEvent(true))
       expect((document.activeElement as HTMLElement)?.id).toBe('in-b')
 
@@ -343,6 +383,39 @@ describe('useFocusTrap', () => {
       containerRef.value = null
       expect(() => document.dispatchEvent(tabEvent(false))).not.toThrow()
       await flushPromises()
+    })
+
+    it('a swap does not re-capture focus when it already sits inside the new container', async () => {
+      const containerRef = ref<HTMLElement | null>(null)
+      const Host = defineComponent({
+        setup() {
+          useFocusTrap(containerRef)
+          return () => h('div')
+        },
+      })
+      mount(Host, { attachTo: document.body })
+
+      const makeContainer = (firstId: string, secondId: string) => {
+        const div = document.createElement('div')
+        for (const id of [firstId, secondId]) {
+          const btn = document.createElement('button')
+          btn.id = id
+          div.appendChild(btn)
+        }
+        document.body.appendChild(div)
+        return div
+      }
+      const a = makeContainer('a-1', 'a-2')
+      const b = makeContainer('b-1', 'b-2')
+
+      containerRef.value = a
+      await flushPromises()
+      // Operator (or the opening component) already put focus inside
+      // the incoming container — the swap must not yank it to b-1.
+      ;(document.getElementById('b-2') as HTMLButtonElement).focus()
+      containerRef.value = b
+      await flushPromises()
+      expect((document.activeElement as HTMLElement)?.id).toBe('b-2')
     })
 
     it('a container swap without passing through null keeps the trap active on the new element', async () => {
@@ -365,6 +438,9 @@ describe('useFocusTrap', () => {
 
       wrapper.vm.which = 2
       await flushPromises()
+      // F7(a): the old container was replaced in the DOM (focus fell to
+      // <body>) — the trap moves focus into the replacement.
+      expect((document.activeElement as HTMLElement)?.id).toBe('two-a')
       // Trap still cycles — now within the replacement container.
       ;(document.getElementById('two-b') as HTMLButtonElement).focus()
       document.dispatchEvent(tabEvent(false))

@@ -103,7 +103,13 @@ const statusFromQuery = computed<string | null>(() => {
   if (typeof s !== 'string') return null
   return s === 'ACTIVE' || s === 'PAUSED' || s === 'DISABLED' ? s : null
 })
+// Route-identity guards: these watchers also fire while navigating AWAY
+// (before unmount), and a destination route can carry same-named params
+// (e.g. /tenants?status=ACTIVE) — ignore query changes that belong to
+// another route. (The immediate run happens at setup, where route.name
+// is already 'webhooks'.)
 watch(statusFromQuery, s => {
+  if (route.name !== 'webhooks') return
   if (s && statusFilter.value !== s) statusFilter.value = s
 }, { immediate: true })
 const failingFromQuery = computed<boolean>(() => {
@@ -111,6 +117,7 @@ const failingFromQuery = computed<boolean>(() => {
   return f === '1' || f === 'true'
 })
 watch(failingFromQuery, f => {
+  if (route.name !== 'webhooks') return
   if (failingFilter.value !== f) failingFilter.value = f
 }, { immediate: true })
 

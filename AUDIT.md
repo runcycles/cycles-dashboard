@@ -97,6 +97,34 @@ errors survive transient toasts); useFocusTrap activates on container-ref
 populate/clear instead of view lifetime (no more document-level listeners
 on closed dialogs or focus-yank on navigation).
 
+**Review round 3** (working diff on top of rounds 1–2): 7 more confirmed
+findings, all fixed. Worst: the round-2 walk-retry fix over-corrected —
+any rejected walk re-fired all four multi-page cursor walks EVERY 30s
+tick for the duration of an outage (request amplification against a
+degraded API); replaced with exponential backoff (retry after 2 → 4 → 8
+ticks, capped at the 10-tick fallback, reset on a full success) plus a
+persistent walk-error banner that no longer clears between retries
+(manual refresh still forces an immediate attempt; counter-change
+triggers respect an active backoff). Also: ReservationsView bare-URL
+states were contradictory (Back-to-bare cleared the filter, reload of
+the same bare URL picked the default tenant) — bare URL now consistently
+means default tenant via a shared `defaultTenantId()`; route-identity
+guards added to every `route.query` watcher in Reservations / Audit /
+ApiKeys / Tenants / Budgets / Events / Webhooks (they fire during
+navigation AWAY, so a destination carrying a same-named param mutated
+the unmounting view and fired spurious fetches); toast eviction refined
+(a transient landing on an all-error stack soft-overflows past the cap
+instead of evicting an unacknowledged error — only an incoming error
+evicts the oldest error); ApiKeys `?expiring_within_7d=<junk>` is now
+stripped on landing (presence-normalized write-back — previously
+re-propagated forever by the `?search` spread); AuditView's one-shot
+self-write marker is armed only when the replace actually changes the
+URL (router dedupe left it stale, swallowing the next real navigation
+to the same query); useFocusTrap recaptures escaped focus on forward
+Tab (mirror of the Shift+Tab path) and moves focus into the new
+container on a direct element-to-element ref swap. Round-3 validation:
+vue-tsc clean; 1,111/1,111 tests (92 files); line coverage 96.13%.
+
 **Validation:** vue-tsc clean; 1,097/1,097 tests (92 files); line coverage
 96.1% (gate ≥95%); production `npm run build` + full `docker build` pass;
 built image live-smoke-tested (index no-cache + full security headers, SPA
@@ -110,9 +138,9 @@ policy-list pagination (>50 truncates), `GET /v1/admin/events/{id}` unused.
 Structural (review round 2, consolidation not defects): extract a shared
 `useUrlSyncedRef` composable (the per-view URL↔ref watcher pairs in
 Tenants/Budgets/Events/Audit/ApiKeys/Reservations re-derive the same
-guards); rebuild `useBulkActionPreview`/`useListExport` pagination loops on
-`walkCursorPages`; ReservationsView bare-URL nav leaves the list empty
-rather than re-defaulting to the first ACTIVE tenant.
+guards, now including the round-3 route-identity guard); rebuild
+`useBulkActionPreview`/`useListExport` pagination loops on
+`walkCursorPages`.
 
 ### 2026-07-04 — v0.1.25.67: admin pin bump (.48)
 

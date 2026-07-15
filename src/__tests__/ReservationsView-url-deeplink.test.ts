@@ -39,8 +39,11 @@ vi.mock('../api/client', async () => {
 
 // Reactive so the view's route.query watchers fire when tests reassign
 // routeRef.query — simulates same-route navigation (e.g. the /res
-// palette command) without a remount.
-const routeRef: { query: Record<string, string>; params: Record<string, string> } = reactive({ query: {}, params: {} })
+// palette command) without a remount. Carries `name` because the view's
+// query watchers are route-identity-guarded (F3) — tests flip it to
+// simulate navigating away to a route with same-named params.
+const routeRef: { query: Record<string, string>; params: Record<string, string>; name: string } =
+  reactive({ query: {}, params: {}, name: 'reservations' })
 
 vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
@@ -111,6 +114,7 @@ describe('ReservationsView — URL deep-link smoke', () => {
     listTenantsMock.mockResolvedValue({ tenants: [], has_more: false })
     routeRef.query = {}
     routeRef.params = {}
+    routeRef.name = 'reservations'
   })
 
   for (const [label, query] of QUERIES) {
@@ -187,12 +191,12 @@ describe('ReservationsView — URL deep-link smoke', () => {
     expect(listReservationsMock.mock.calls.some(args => args[0] === 'beta')).toBe(true)
   })
 
-  // F7 (URL-authoritative filter — deliberate design decision): the URL
-  // is the source of truth for the synced ?tenant_id filter. Back to a
-  // bare /reservations history entry clears the filter instead of
-  // silently keeping the previous tenant scope (the scoped URL stays one
-  // Forward-press away). Pre-fix the watcher ignored param removal.
-  it('F7: Back to a bare URL (param removed) clears the tenant filter', async () => {
+  // F2 (bare-URL consistency): a bare /reservations must mean the SAME
+  // state no matter how the operator arrives — a fresh mount of the
+  // bare URL auto-selects the first-ACTIVE default (loadTenants), so
+  // Back to a bare entry re-defaults to that same tenant instead of
+  // clearing to an empty list (which made one URL render two states).
+  it('F2: Back to a bare URL (param removed) re-defaults to the first ACTIVE tenant', async () => {
     routeRef.query = { tenant_id: 'beta' }
     listTenantsMock.mockResolvedValue({
       tenants: [
@@ -207,12 +211,40 @@ describe('ReservationsView — URL deep-link smoke', () => {
     expect((w.find('#res-tenant').element as HTMLSelectElement).value).toBe('beta')
     listReservationsMock.mockClear()
 
-    // Browser Back to bare /reservations — param removed → filter
-    // cleared. listReservations requires a tenant, so no fetch fires
-    // under any scope (the list empties client-side).
+    // Browser Back to bare /reservations — param removed → the filter
+    // re-defaults to the same tenant a fresh bare-URL mount would pick,
+    // and the list refetches under that scope.
     routeRef.query = {}
     await flushPromises()
-    expect((w.find('#res-tenant').element as HTMLSelectElement).value).toBe('')
+    expect((w.find('#res-tenant').element as HTMLSelectElement).value).toBe('alpha')
+    expect(listReservationsMock.mock.calls.some(args => args[0] === 'alpha')).toBe(true)
+  })
+
+  // F3 (route-identity guard): the ?tenant_id watcher fires during
+  // navigation AWAY too (before unmount). A destination route carrying
+  // a same-named param (e.g. /budgets?tenant_id=beta) must not mutate
+  // this view's filter or fire a spurious fetch on the way out.
+  it('F3: a navigation away to a route with a tenant_id param does not refetch or change the filter', async () => {
+    routeRef.query = { tenant_id: 'alpha' }
+    listTenantsMock.mockResolvedValue({
+      tenants: [
+        { tenant_id: 'alpha', status: 'ACTIVE' },
+        { tenant_id: 'beta', status: 'ACTIVE' },
+      ],
+      has_more: false,
+    })
+    const { default: ReservationsView } = await import('../views/ReservationsView.vue')
+    const w = mount(ReservationsView, stdMount())
+    await flushPromises()
+    expect((w.find('#res-tenant').element as HTMLSelectElement).value).toBe('alpha')
+    listReservationsMock.mockClear()
+
+    // Router commits /budgets?tenant_id=beta — name and query flip
+    // while this component is still mounted (guards run before unmount).
+    routeRef.name = 'budgets'
+    routeRef.query = { tenant_id: 'beta' }
+    await flushPromises()
     expect(listReservationsMock).not.toHaveBeenCalled()
+    expect((w.find('#res-tenant').element as HTMLSelectElement).value).toBe('alpha')
   })
 })

@@ -330,6 +330,47 @@ describe('ApiKeysView — ?expiring_within_7d URL write-back (F5)', () => {
     await mountView()
     expect(replaceMock).not.toHaveBeenCalled()
   })
+
+  // F5 (presence normalization): only '1' means "filter on". Any other
+  // value hydrates the ref false, and pre-fix the `ref === (param ===
+  // '1')` comparison read false === false as "in sync" — the junk param
+  // was never stripped and the ?search write-back's route.query spread
+  // re-propagated it forever. The write-back now strips any non-'1'
+  // value on landing.
+  it('landing with ?expiring_within_7d=true strips the malformed param and leaves the list unfiltered', async () => {
+    routeQuery.expiring_within_7d = 'true'
+    listApiKeysMock.mockResolvedValue({
+      keys: [
+        key('k-soon',  { expires_at: in7d(3) }),
+        key('k-later', { expires_at: in7d(30) }),
+      ],
+      has_more: false,
+    })
+    const w = await mountView()
+
+    // Param stripped from the URL (replace applied by the mock router).
+    expect(replaceMock).toHaveBeenCalled()
+    expect(routeQuery.expiring_within_7d).toBeUndefined()
+    // List unfiltered, no filter chip.
+    expect(w.text()).toContain('k-soon')
+    expect(w.text()).toContain('k-later')
+    expect(w.find('[data-testid="api-keys-expiring-filter-chip"]').exists()).toBe(false)
+
+    // And the ?search write-back can no longer resurrect it.
+    await w.find('#keys-search').setValue('acme')
+    await flushPromises()
+    const arg = replaceMock.mock.calls.at(-1)![0] as { query: Record<string, string | undefined> }
+    expect(arg.query.expiring_within_7d).toBeUndefined()
+  })
+
+  it('landing with a valueless ?expiring_within_7d strips it too (any non-"1" form)', async () => {
+    // vue-router represents `?expiring_within_7d` (no value) as null.
+    ;(routeQuery as Record<string, string | null>).expiring_within_7d = null
+    const w = await mountView()
+    expect(replaceMock).toHaveBeenCalled()
+    expect(routeQuery.expiring_within_7d).toBeUndefined()
+    expect(w.find('[data-testid="api-keys-expiring-filter-chip"]').exists()).toBe(false)
+  })
 })
 
 // F6 — the sync was one-way: ?search= hydrated the ref, but operator

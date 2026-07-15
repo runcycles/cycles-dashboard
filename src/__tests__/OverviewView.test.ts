@@ -1667,35 +1667,131 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       expect(listTenantsMock).toHaveBeenCalledTimes(1)
     })
 
-    // F2 (walk-failure retry): a rejected walk must NOT be committed as
-    // done — pre-fix the signature was committed before the walks
-    // settled, so a failed walk round was skipped for up to 10 ticks
-    // (~5 min) while the error banner cleared after the next successful
-    // phase-1 tick. Now any rejection forces a retry on the next tick,
-    // and the banner persists (each retry re-fails) until a full walk
-    // round succeeds.
-    it('a rejected walk retries on the next tick and the error banner persists until it succeeds', async () => {
+    // F1 (walk-failure retry with exponential backoff): a rejected walk
+    // must NOT be committed as done — pre-fix the signature was
+    // committed before the walks settled, so a failed round was skipped
+    // for up to 10 ticks (~5 min) while the error banner cleared after
+    // the next successful phase-1 tick. The first fix over-corrected:
+    // forceWalks=true on failure re-fired all four walks EVERY tick for
+    // as long as the endpoint stayed down. Now failed rounds retry
+    // under an exponential backoff (2 → 4 → 8 → capped at 10 ticks,
+    // reset to 1 on a fully-successful round), the banner persists
+    // across the whole backoff window, and manual refresh still forces
+    // an immediate attempt.
+    it('a rejected round does not re-walk on the next tick — the retry lands after the 2-tick backoff', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview())
       listWebhooksMock.mockRejectedValue(new Error('webhook list down'))
-      const w = await mountOverview()
+      const w = await mountOverview() // round 1 fails → backoff = 2 ticks
       expect(w.text()).toContain('webhook list down')
       clearListMocks()
 
-      // Counters unchanged — but the failed round forces a re-walk.
+      // Tick 1 — inside the backoff window: no walk fires…
+      await pollTick()
+      expect(listWebhooksMock).not.toHaveBeenCalled()
+      expect(listApiKeysMock).not.toHaveBeenCalled()
+      expect(listTenantsMock).not.toHaveBeenCalled()
+      // …and the banner persists instead of clearing between retries.
+      expect(w.text()).toContain('webhook list down')
+
+      // Tick 2 — backoff elapsed: the retry fires.
       await pollTick()
       expect(listWebhooksMock).toHaveBeenCalledTimes(1)
       expect(listApiKeysMock).toHaveBeenCalledTimes(1)
-      // Still failing → the banner persists instead of clearing.
       expect(w.text()).toContain('webhook list down')
+    })
 
-      // Walk round succeeds → banner clears and the gate re-arms.
-      listWebhooksMock.mockResolvedValue({ subscriptions: [], has_more: false })
+    it('the backoff doubles per failed round and is capped at the 10-tick fallback cadence', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      listWebhooksMock.mockRejectedValue(new Error('webhook list down'))
+      await mountOverview() // failure #1 → backoff 2
+
+      // Walk off failures #2 (after 2 ticks), #3 (after 4), #4 (after 8):
+      // backoff reaches the 10-tick cap.
+      for (const gap of [2, 4, 8]) {
+        clearListMocks()
+        for (let i = 0; i < gap - 1; i++) {
+          await pollTick()
+          expect(listWebhooksMock).not.toHaveBeenCalled()
+        }
+        await pollTick()
+        expect(listWebhooksMock).toHaveBeenCalledTimes(1)
+      }
+
+      // Capped: the next retry lands exactly 10 ticks later, not 16.
+      clearListMocks()
+      for (let i = 0; i < 9; i++) {
+        await pollTick()
+        expect(listWebhooksMock).not.toHaveBeenCalled()
+      }
       await pollTick()
+      expect(listWebhooksMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('a counter change during a failure streak does not bypass the backoff', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      listWebhooksMock.mockRejectedValue(new Error('webhook list down'))
+      await mountOverview() // failure #1 → backoff 2
+      clearListMocks()
+
+      // Counters move mid-outage — pre-fix this re-fired the walks
+      // immediately (and every tick, since the failed signature was
+      // never committed). The backoff must hold.
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        tenant_counts: { total: 99, active: 99, suspended: 0, closed: 0 },
+      }))
+      await pollTick()
+      expect(listWebhooksMock).not.toHaveBeenCalled()
+      expect(listApiKeysMock).not.toHaveBeenCalled()
+
+      // Backoff elapses → retry fires (and picks up the new counters).
+      await pollTick()
+      expect(listWebhooksMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('a fully-successful round clears the banner and resets the backoff to 1', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      listWebhooksMock.mockRejectedValue(new Error('webhook list down'))
+      const w = await mountOverview() // failure #1 → backoff 2
+      await pollTick() // backoff window
+      listWebhooksMock.mockResolvedValue({ subscriptions: [], has_more: false })
+      await pollTick() // retry succeeds → streak + backoff reset
       expect(w.text()).not.toContain('webhook list down')
+
+      // Gate re-arms: an unchanged-counter tick doesn't walk.
       clearListMocks()
       await pollTick()
       expect(listWebhooksMock).not.toHaveBeenCalled()
       expect(listApiKeysMock).not.toHaveBeenCalled()
+
+      // A NEW failure starts the backoff over at 2 ticks (not carried
+      // over at 4+ from the previous streak): counter change triggers a
+      // walk that fails; the next retry is 2 ticks out.
+      listWebhooksMock.mockRejectedValue(new Error('down again'))
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        webhook_counts: { total: 9, active: 9, disabled: 0, with_failures: 0 },
+      }))
+      await pollTick() // walks (counters changed, no streak) → fails
+      expect(listWebhooksMock).toHaveBeenCalledTimes(1)
+      expect(w.text()).toContain('down again')
+      clearListMocks()
+      await pollTick() // tick 1 of backoff 2 — no walk
+      expect(listWebhooksMock).not.toHaveBeenCalled()
+      expect(w.text()).toContain('down again')
+      await pollTick() // tick 2 — retry
+      expect(listWebhooksMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('manual refresh forces an immediate retry inside the backoff window', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      listWebhooksMock.mockRejectedValue(new Error('webhook list down'))
+      const w = await mountOverview() // failure #1 → backoff 2
+      clearListMocks()
+
+      const { default: PageHeader } = await import('../components/PageHeader.vue')
+      w.findComponent(PageHeader).vm.$emit('refresh')
+      await flushPromises()
+      expect(listWebhooksMock).toHaveBeenCalledTimes(1)
+      expect(listApiKeysMock).toHaveBeenCalledTimes(1)
     })
 
     it('manual refresh (PageHeader) always re-runs the walks regardless of counters', async () => {

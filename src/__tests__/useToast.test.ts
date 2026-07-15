@@ -171,13 +171,37 @@ describe('useToast', () => {
     expect(toasts.value.map(x => x.message)).toEqual(['err-0', 'err-1', 'err-2', 'err-3', 'err-4'])
   })
 
-  it('a success arriving on 5 persistent errors evicts the oldest error only because no non-error exists', () => {
+  it('a success arriving on 5 persistent errors soft-overflows — no error is evicted', () => {
+    // F4: a transient must never evict an unacknowledged error. The
+    // stack briefly holds 6 toasts; the success auto-dismisses in 4s,
+    // restoring the cap on its own.
     const t = useToast()
     for (let i = 0; i < 5; i++) t.error(`err-${i}`)
     t.success('done')
+    expect(toasts.value).toHaveLength(6)
+    expect(toasts.value.map(x => x.message)).toEqual(['err-0', 'err-1', 'err-2', 'err-3', 'err-4', 'done'])
+
+    // Auto-dismiss restores the hard cap with all five errors intact.
+    vi.advanceTimersByTime(4_001)
     expect(toasts.value).toHaveLength(5)
-    // err-0 (oldest error) evicted — the stack was all errors.
-    expect(toasts.value.map(x => x.message)).toEqual(['err-1', 'err-2', 'err-3', 'err-4', 'done'])
+    expect(toasts.value.map(x => x.message)).toEqual(['err-0', 'err-1', 'err-2', 'err-3', 'err-4'])
+  })
+
+  it('an error arriving on 5 errors evicts the oldest error (hard cap among errors)', () => {
+    const t = useToast()
+    for (let i = 0; i < 5; i++) t.error(`err-${i}`)
+    t.error('err-new')
+    expect(toasts.value).toHaveLength(5)
+    expect(toasts.value.map(x => x.message)).toEqual(['err-1', 'err-2', 'err-3', 'err-4', 'err-new'])
+  })
+
+  it('a warning arriving on 5 errors also soft-overflows (transients never evict errors)', () => {
+    const t = useToast()
+    for (let i = 0; i < 5; i++) t.error(`err-${i}`)
+    t.warning('advisory')
+    expect(toasts.value).toHaveLength(6)
+    vi.advanceTimersByTime(4_001)
+    expect(toasts.value.map(x => x.message)).toEqual(['err-0', 'err-1', 'err-2', 'err-3', 'err-4'])
   })
 
   it('a success arriving on 4 errors + 1 warning evicts the warning, not an error', () => {

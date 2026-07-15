@@ -12,9 +12,13 @@ const AUTO_DISMISS_MS = 4000
 // leave the oldest dismiss buttons unreachable. Pushing past the cap
 // evicts the oldest NON-error toast first — success/warning toasts are
 // transient advisories, while an evicted error is a silently-vanished
-// failure the operator never acknowledged. Only when the stack is all
-// errors does the oldest error go (the cap stays hard at 5; the newest
-// failure is the one the operator is reacting to).
+// failure the operator never acknowledged. On an all-error stack the
+// rule depends on what's incoming: another ERROR evicts the oldest
+// error (the cap stays hard among errors; the newest failure is the one
+// the operator is reacting to), but a transient success/warning pushes
+// as a soft overflow instead — it auto-dismisses in 4s, restoring the
+// cap, whereas evicting an unacknowledged error for a 4-second advisory
+// would silently vanish a failure.
 const MAX_TOASTS = 5
 
 let nextId = 0
@@ -30,13 +34,18 @@ export function useToast() {
   function show(message: string, type: Toast['type'] = 'success') {
     const id = nextId++
     // Evict BEFORE pushing so the incoming toast can never be its own
-    // eviction candidate (a success landing on 5 errors must evict the
-    // oldest error, not itself). Oldest non-error first; oldest error
-    // only as a last resort (all-error stack). See MAX_TOASTS above.
+    // eviction candidate. Oldest non-error first; on an all-error stack
+    // only an incoming ERROR evicts (oldest error) — a transient
+    // success/warning soft-overflows past the cap instead, since its
+    // own auto-dismiss restores the cap in 4s and unacknowledged errors
+    // must never be evicted by transients. See MAX_TOASTS above.
     if (toasts.value.length >= MAX_TOASTS) {
       const evictIdx = toasts.value.findIndex(t => t.type !== 'error')
-      const evictAt = evictIdx === -1 ? 0 : evictIdx
-      toasts.value = toasts.value.filter((_, i) => i !== evictAt)
+      if (evictIdx !== -1) {
+        toasts.value = toasts.value.filter((_, i) => i !== evictIdx)
+      } else if (type === 'error') {
+        toasts.value = toasts.value.slice(1)
+      }
     }
     toasts.value.push({ id, message, type })
     // Error toasts persist until manually dismissed — a 4s window is

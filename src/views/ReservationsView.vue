@@ -81,6 +81,11 @@ const statusFromQuery = computed<string | null>(() => {
 })
 const statusFilter = ref<string>(statusFromQuery.value ?? 'ACTIVE')
 watch(statusFromQuery, s => {
+  // Route-identity guard: this watcher also fires while navigating AWAY
+  // (before unmount), and a destination route can carry its own ?status
+  // (e.g. /webhooks?status=PAUSED) — ignore query changes that belong to
+  // another route.
+  if (route.name !== 'reservations') return
   if (s && statusFilter.value !== s) statusFilter.value = s
 })
 
@@ -221,17 +226,25 @@ const { sortKey, sortDir, toggle, sorted: sortedReservations } = useSort(
   { serverSide: true, onChange: () => { loadReservations() } },
 )
 
+// Default tenant — the first ACTIVE tenant, falling back to the first
+// tenant of any status ('' while tenants haven't loaded). Suspended and
+// closed tenants typically have no live reservations, so defaulting to
+// one renders an empty table that looks broken. Shared by loadTenants'
+// first-render default AND the URL-watcher's param-removed branch below
+// so a bare /reservations always means the SAME scope — pre-fix, Back
+// to bare cleared the filter while a reload of the same bare URL
+// auto-selected the default: one URL, two states.
+function defaultTenantId(): string {
+  if (tenants.value.length === 0) return ''
+  const firstActive = tenants.value.find((t) => t.status === 'ACTIVE')
+  return (firstActive ?? tenants.value[0]).tenant_id
+}
+
 async function loadTenants() {
   try {
     const res = await listTenants()
     tenants.value = res.tenants
-    // Default the tenant filter to the first ACTIVE tenant so the view
-    // has something to show on first render. Suspended/closed tenants
-    // typically have no live reservations — picking one by accident
-    // renders an empty table that looks broken. Fall back to the
-    // first tenant of any status if none are ACTIVE.
-    //
-    // Skip this default when `?tenant_id=` pre-selected one already
+    // Skip the default when `?tenant_id=` pre-selected one already
     // (M14). Also validate that a URL-supplied tenant actually exists
     // in the list; an outdated/malformed link otherwise silently holds
     // the dropdown on a non-existent value.
@@ -243,9 +256,8 @@ async function loadTenants() {
         tenantFilter.value = ''
       }
     }
-    if (!tenantFilter.value && tenants.value.length > 0) {
-      const firstActive = tenants.value.find((t) => t.status === 'ACTIVE')
-      tenantFilter.value = (firstActive ?? tenants.value[0]).tenant_id
+    if (!tenantFilter.value) {
+      tenantFilter.value = defaultTenantId()
     }
   } catch (e) { error.value = toMessage(e) }
 }
@@ -376,17 +388,28 @@ watch(debouncedSubjectKey, () => { loadReservations() })
 // URL-AUTHORITATIVE FILTER (deliberate — do not flip back): the URL is
 // the single source of truth for the synced ?tenant_id filter, per the
 // GitHub/Linear list-view convention. Param present and different →
-// adopt it; param ABSENT → clear the filter, so Back to a bare
-// /reservations entry un-scopes the list instead of silently keeping
-// the previous tenant (the scoped URL stays one Forward-press away in
-// history). The tenantFilter watcher above refetches on either change;
-// the write-back below is loop-safe (it skips when URL and ref already
-// agree, which they do after either branch here).
+// adopt it; param ABSENT → bare URL means DEFAULT TENANT, the same
+// scope loadTenants picks on a fresh mount of the bare URL (pre-fix
+// this branch cleared the filter, so Back-to-bare and reload-of-bare
+// produced two different states for the same URL). The write-back
+// below then stamps ?tenant_id=<default> back onto the URL — replace,
+// no history entry — which is fine: the canonical form of "default
+// scope" is the explicit param. If tenants haven't loaded yet,
+// defaultTenantId() is '' (clears the filter) and the mount flow's
+// loadTenants picks the default once the list lands. The tenantFilter
+// watcher above refetches on either change; the write-back is
+// loop-safe (it skips when URL and ref already agree).
 watch(() => route.query.tenant_id, (v) => {
+  // Route-identity guard: this watcher also fires while navigating AWAY
+  // (before unmount), and a destination route can carry its own
+  // ?tenant_id (e.g. /budgets?tenant_id=beta) — ignore query changes
+  // that belong to another route.
+  if (route.name !== 'reservations') return
   if (typeof v === 'string' && v) {
     if (v !== tenantFilter.value) tenantFilter.value = v
-  } else if (tenantFilter.value) {
-    tenantFilter.value = ''
+  } else {
+    const next = defaultTenantId()
+    if (tenantFilter.value !== next) tenantFilter.value = next
   }
 })
 

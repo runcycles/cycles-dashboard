@@ -84,11 +84,17 @@ const parentFromQuery = computed<string>(() => readParentFromQuery())
 
 // Browser back/forward: sync filters when the URL changes without a
 // re-mount. Not `immediate: true` — initial values are set above.
+// Route-identity guards: these watchers also fire while navigating AWAY
+// (before unmount), and a destination route can carry same-named params
+// (e.g. /budgets?status=FROZEN) — ignore query changes that belong to
+// another route.
 watch(() => route.query.parent, () => {
+  if (route.name !== 'tenants') return
   const p = readParentFromQuery()
   if (parentFilter.value !== p) parentFilter.value = p
 })
 watch(() => route.query.status, () => {
+  if (route.name !== 'tenants') return
   const s = readStatusFromQuery()
   if (statusFilter.value !== s) statusFilter.value = s
 })
