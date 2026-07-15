@@ -249,16 +249,31 @@ function applyFilters(force = false) {
 async function loadMore() {
   if (!nextCursor.value || loadingMore.value) return
   loadingMore.value = true
+  // Discard the page if the FILTERS change while it is in flight: a
+  // stale old-filter page-2 resolving after applyFilters committed the
+  // new filter would interleave wrong-filter rows, overwrite nextCursor
+  // with the old filter's cursor (the next Load more then 400s on the
+  // server's filter-hash check), and flip loadedMorePages so the
+  // merge-from-head poll preserves the stale rows indefinitely. The
+  // signature — not loadSeq — is the right invalidator here: a routine
+  // 15s poll load() must NOT cancel a legitimate same-filter loadMore
+  // (the merge-from-head logic exists to let them coexist), and polls
+  // never touch the signature while filter changes always do.
+  const sigAtStart = lastAppliedSignature
   try {
     const params = { ...buildFilterParams(), cursor: nextCursor.value }
     const res = await listEvents(params)
+    if (lastAppliedSignature !== sigAtStart) return // filters changed mid-flight — stale page
     events.value = [...events.value, ...res.events]
     hasMore.value = res.has_more
     nextCursor.value = res.next_cursor ?? ''
     // Flip the flag so subsequent polls merge-from-head rather than
     // overwriting the tail we just loaded.
     loadedMorePages.value = true
-  } catch (e) { error.value = toMessage(e) }
+  } catch (e) {
+    if (lastAppliedSignature !== sigAtStart) return
+    error.value = toMessage(e)
+  }
   finally { loadingMore.value = false }
 }
 

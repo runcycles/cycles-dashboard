@@ -196,6 +196,35 @@ describe('EventsView — same-route URL sync (round 5 F3)', () => {
     expect(w.text()).not.toContain('Load more')
   })
 
+  it('a stale loadMore resolving AFTER a filter change is discarded (round 9: no cursor poisoning, no merge-mode flip)', async () => {
+    // Mount with a page that has more to load.
+    listEventsMock.mockResolvedValue({ events: [], has_more: true, next_cursor: 'cur-f1' })
+    const w = await mountView()
+    listEventsMock.mockClear()
+
+    // Load more under filter F1 — response held in flight.
+    let resolveMore!: (v: unknown) => void
+    const more = new Promise((r) => { resolveMore = r })
+    let calls = 0
+    listEventsMock.mockImplementation((params: Record<string, string>) =>
+      params?.cursor ? more : (calls++, Promise.resolve({ events: [], has_more: false })))
+    await w.find('button:not([disabled])').element // ensure render settled
+    const loadMoreBtn = w.findAll('button').find(b => b.text() === 'Load more')!
+    await loadMoreBtn.trigger('click')
+
+    // Filter change while the loadMore page is in flight: the guarded
+    // load() commits F2 with has_more=false (no cursor, no Load more).
+    routeRef.query = { search: 'f2' }
+    await flushPromises()
+    expect(w.text()).not.toContain('Load more')
+
+    // Stale F1 page-2 resolves late — must be fully discarded: no
+    // cursor poisoning (Load more must NOT reappear via has_more=true).
+    resolveMore({ events: [], has_more: true, next_cursor: 'cur-f1-page3' })
+    await flushPromises()
+    expect(w.text()).not.toContain('Load more')
+  })
+
   it('explicit form submit (Enter) with an UNCHANGED signature still reloads — the manual retry path', async () => {
     const w = await mountView()
     listEventsMock.mockClear()

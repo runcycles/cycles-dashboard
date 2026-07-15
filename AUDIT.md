@@ -226,6 +226,19 @@ Same monotonic-guard fix; stale successes and stale failures both
 discarded. Round-8 validation: vue-tsc clean; 1,162/1,162 tests
 (97 files); line coverage 96.16%.
 
+**Review round 9** (net PR state after round 8; 2 of 4 finder angles
+empty): 2 findings, fixed. EventsView `loadMore()` bypassed the sequence
+guard — a stale old-filter page-2 resolving after a filter change
+interleaved wrong-filter rows, poisoned the cursor (next Load more 400s
+on the server's filter-hash check), and flipped merge-from-head mode so
+polls preserved the stale rows indefinitely (invalidated by SIGNATURE,
+not loadSeq: a routine 15s poll must not cancel a legitimate same-filter
+loadMore); README's RESET_SPENT row still said "without touching
+allocated" — reworded to state the raw `allocated = amount` semantics,
+that the single-budget flow preserves allocation by passing the current
+value, and the bulk clobber warning. Round-9 validation: vue-tsc clean;
+1,163/1,163 tests (97 files); line coverage 96.16%.
+
 **Validation:** vue-tsc clean; 1,097/1,097 tests (92 files); line coverage
 96.1% (gate ≥95%); production `npm run build` + full `docker build` pass;
 built image live-smoke-tested (index no-cache + full security headers, SPA

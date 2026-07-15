@@ -43,8 +43,8 @@ Tier 1 incident-response actions available directly from the dashboard (capabili
 | **Unfreeze budget** | Budget detail | Re-enables normal operations |
 | **Create budget** | Budgets list, Tenant detail | Admin-on-behalf-of (dual-auth) — modal with ScopeBuilder + tenant selector |
 | **Adjust budget allocation** | Budget detail | Inline form — uses fund endpoint with RESET operation |
-| **Rollover billing period (RESET_SPENT)** | Budget detail → Fund → RESET_SPENT | Resets `spent` tally without touching `allocated`; optional exact-spent override (blank = zero). Requires cycles-server-admin v0.1.25.18+ |
-| **Bulk budget action (CREDIT / DEBIT / RESET / RESET_SPENT / REPAY_DEBT)** | Budgets list | Filter-apply — single tenant required (spec constraint); preview walk + expected_count gate + per-row result dialog for failed/skipped rows. Requires cycles-server-admin v0.1.25.29+ |
+| **Rollover billing period (RESET_SPENT)** | Budget detail → Fund → RESET_SPENT | Resets `spent` tally; optional exact-spent override (blank = zero). The raw operation sets `allocated = amount` — this single-budget flow preserves the allocation by passing the budget's current `allocated` for you. Requires cycles-server-admin v0.1.25.18+ |
+| **Bulk budget action (CREDIT / DEBIT / RESET / RESET_SPENT / REPAY_DEBT)** | Budgets list | Filter-apply — single tenant required (spec constraint); preview walk + expected_count gate + per-row result dialog for failed/skipped rows. **Bulk RESET / RESET_SPENT set every matched budget's `allocated` to the single amount given** (budgets with differing allocations are all overwritten — the form's hint spells this out); FROZEN budgets in the selection fail per-row. Requires cycles-server-admin v0.1.25.29+ |
 | **Emergency Freeze (tenant-wide)** | Tenant detail | Sequential freeze across all ACTIVE budgets — one-click lockdown with confirm + blast-radius summary |
 | **Create policy** | Policies tab (Tenant detail) | Admin-on-behalf-of — modal form, tenant-scoped |
 | **Edit policy** | Policies tab | Admin-on-behalf-of — patch policy_id, server resolves owning tenant |
