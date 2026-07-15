@@ -243,7 +243,17 @@ function buildListParams(extra: Record<string, string> = {}): Record<string, str
   return params
 }
 
+// Monotonic sequence guard for loadList. A same-route ?search navigation
+// (the /budget palette command) fires TWO staggered requests: the route
+// watcher calls loadList() while debouncedSearch still holds the stale
+// value (unfiltered R1), then the debouncedSearch watcher fires the
+// filtered R2 ~300ms later. Without sequencing, a slow R1 resolving
+// after R2 commits the UNFILTERED fleet over the filtered view while
+// the URL and search box claim ?search=… . Only the newest request may
+// commit; stale responses (results AND errors) are discarded.
+let listLoadSeq = 0
 async function loadList() {
+  const seq = ++listLoadSeq
   // Reset pagination state up-front. Without this, a filter change that
   // refetches page-1 still leaves the OLD nextCursor live; if the user
   // clicks "Load more" between the watcher firing and the fetch returning,
@@ -253,12 +263,16 @@ async function loadList() {
   hasMore.value = false
   try {
     const res = await listBudgets(buildListParams())
+    if (seq !== listLoadSeq) return // superseded by a newer load — discard
     budgets.value = res.ledgers
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
     error.value = ''
     initialLoadDone.value = true
-  } catch (e) { error.value = toMessage(e) }
+  } catch (e) {
+    if (seq !== listLoadSeq) return
+    error.value = toMessage(e)
+  }
 }
 
 async function loadDetail() {

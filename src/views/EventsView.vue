@@ -191,7 +191,13 @@ async function load() {
     }
     error.value = ''
     initialLoadDone.value = true
-  } catch (e) { error.value = toMessage(e) }
+  } catch (e) {
+    error.value = toMessage(e)
+    // A failed load must not leave its signature marked as applied —
+    // the next applyFilters with identical filters (watcher echo or
+    // poll-adjacent retry) would be deduped into a silent no-op.
+    invalidateAppliedSignature()
+  }
 }
 
 // applyFilters is invoked once per changed ref (selects immediately,
@@ -199,13 +205,19 @@ async function load() {
 // navigation that syncs several refs fans out into N identical calls —
 // a CorrelationIdChip pivot fired two identical listEvents requests,
 // and a back-nav clearing several text filters fired one per cleared
-// filter. Since applyFilters ONLY ever runs from those ref watchers,
-// an unchanged filter signature is always a redundant echo — skip it.
-// Polling and loadMore call load()/listEvents directly, unaffected.
+// filter. An unchanged filter signature from those WATCHER calls is a
+// redundant echo — skip it. EXPLICIT calls (the form's Enter submit,
+// the Clear buttons) pass force=true and always reload: pressing Enter
+// to retry the exact same query after a transient failure is the
+// operator's manual-retry path and must never be swallowed. The
+// signature is also invalidated when load() fails, so even a watcher
+// echo can retry after an error. Polling and loadMore call
+// load()/listEvents directly, unaffected.
 let lastAppliedSignature: string | null = null
-function applyFilters() {
+function invalidateAppliedSignature() { lastAppliedSignature = null }
+function applyFilters(force = false) {
   const sig = JSON.stringify(buildFilterParams())
-  if (sig === lastAppliedSignature) return
+  if (!force && sig === lastAppliedSignature) return
   lastAppliedSignature = sig
   router.replace({ query: {
     ...(category.value && { category: category.value }),
@@ -246,7 +258,7 @@ function clearFilters() {
   traceId.value = ''; requestId.value = ''
   fromDate.value = ''; toDate.value = ''
   loadedMorePages.value = false
-  applyFilters()
+  applyFilters(true)
 }
 
 // Instant-apply on filter change. Best-practice UX (Linear / Notion /
@@ -445,7 +457,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
          the primary filters (category/type/tenant/scope/search/time);
          row 2 groups the three correlation-id filters together with
          a Clear filters affordance on the right. -->
-    <form @submit.prevent="applyFilters" class="card p-4 mb-4 space-y-3">
+    <form @submit.prevent="applyFilters(true)" class="card p-4 mb-4 space-y-3">
       <!-- Two 5-col rows at xl+, stacks to 2 cols below. Balanced
            split groups the primary filters (when + what + who) on row
            1 and the text/id lookup (free-text search + three

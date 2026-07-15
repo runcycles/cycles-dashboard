@@ -169,6 +169,25 @@ describe('EventsView — same-route URL sync (round 5 F3)', () => {
     expect(routeRef.query.trace_id).toBeUndefined()
   })
 
+  it('explicit form submit (Enter) with an UNCHANGED signature still reloads — the manual retry path', async () => {
+    const w = await mountView()
+    listEventsMock.mockClear()
+
+    // Transient failure leaves an error banner; the operator presses
+    // Enter to re-run the identical query. The signature dedupe must
+    // not swallow the explicit submit.
+    listEventsMock.mockRejectedValueOnce(new Error('502 upstream'))
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(w.text()).toContain('502 upstream')
+    expect(listEventsMock).toHaveBeenCalledTimes(1)
+
+    listEventsMock.mockResolvedValueOnce({ events: [], has_more: false })
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(listEventsMock).toHaveBeenCalledTimes(2)
+  })
+
   it('one same-route navigation changing several params fires exactly ONE listEvents call', async () => {
     routeRef.query = { category: 'budget', tenant_id: 't-alpha' }
     const w = await mountView()

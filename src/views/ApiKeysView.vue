@@ -471,18 +471,20 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
         // (cheap) tenants refresh above, skip the multi-page walk.
         return
       }
-      forceWalk = false
       const walk = await walkCursorPages<KeyWithTenant>(async (cursor) => {
         const page = await fetchKeysPage(cursor || undefined, { status: 'ACTIVE' })
         return { items: page.keys, hasMore: page.hasMore, nextCursor: page.nextCursor }
       })
       if (expiringWithin7d.value !== tickMode) return // mode flipped mid-walk — discard
-      // Commit the cadence window only on a successful, committed walk.
-      // A thrown walk lands in the catch below with the counter still
-      // past the threshold, so the next 60s tick retries — the same
-      // self-heal cadence the pre-walk single-page fetch had. (One
+      // Consume the gate state (forced flag AND cadence window) only on
+      // a successful, committed walk. A thrown walk lands in the catch
+      // below with both left armed, so the next 60s tick retries — the
+      // same self-heal cadence the pre-walk single-page fetch had. (One
       // retried walk per minute; not the every-30s four-walk storm the
-      // Overview backoff exists to prevent.)
+      // Overview backoff exists to prevent.) Consuming forceWalk BEFORE
+      // the await meant a failed user-triggered walk mid-window sat out
+      // the remaining ~4 min behind the ambient-tick early-return.
+      forceWalk = false
       ticksSinceWalk = 0
       keys.value = walk.items
       expiringWalkPartial.value = walk.partial

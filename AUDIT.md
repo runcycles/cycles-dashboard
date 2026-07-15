@@ -200,6 +200,23 @@ per-ref applyFilters watchers (identical-signature echoes now dedup to
 one fetch). Round-6 validation: vue-tsc clean; 1,157/1,157 tests
 (96 files); line coverage 96.16%.
 
+**Review round 7** (net PR state after round 6): 3 findings — two in
+round-6's own fixes — all fixed. BudgetsView's same-route `?search`
+navigation fired two staggered NON-identical loads (route watcher reads
+the 300ms-stale debounced ref) with no sequencing, so a slow unfiltered
+response could commit over the filtered view (`loadList` now carries a
+monotonic sequence guard; stale results AND stale errors are discarded);
+ApiKeysView consumed `forceWalk` before the awaited walk, so a failed
+user-triggered walk mid-window sat out ~4 min behind the ambient-tick
+early-return (gate state now consumed only on a successful walk — mirrors
+the round-6 counter fix it should have shipped with); EventsView's
+signature dedupe was justified on the false premise that applyFilters had
+no explicit call sites — the form's Enter submit (the operator's manual
+retry after a transient failure) was silently swallowed (explicit
+submit/Clear now pass `force`, and a failed load invalidates the applied
+signature). Round-7 validation: vue-tsc clean; 1,161/1,161 tests
+(97 files); line coverage 96.16%.
+
 **Validation:** vue-tsc clean; 1,097/1,097 tests (92 files); line coverage
 96.1% (gate ≥95%); production `npm run build` + full `docker build` pass;
 built image live-smoke-tested (index no-cache + full security headers, SPA

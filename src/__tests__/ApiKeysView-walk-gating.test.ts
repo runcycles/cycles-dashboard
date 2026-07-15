@@ -230,6 +230,33 @@ describe('ApiKeysView — expiring-walk gating on background ticks (round 5 F5)'
     expect(listApiKeysMock).not.toHaveBeenCalled()
   })
 
+  it('a FORCED walk that fails mid-window is retried on the next tick (forceWalk consumed only on success)', async () => {
+    routeRef.query = { expiring_within_7d: '1' }
+    listApiKeysMock.mockResolvedValue({ keys: [key('k-soon', { expires_at: in7d(3) })], has_more: false })
+    const w = await mountView()
+    listApiKeysMock.mockClear()
+
+    // One ambient tick runs the cadence window down (counter = 1 of 5).
+    await pollState.callback!()
+    await flushPromises()
+    expect(listApiKeysMock).not.toHaveBeenCalled()
+
+    // User-triggered walk (search change) fails with a transient 502.
+    listApiKeysMock.mockRejectedValueOnce(new Error('502 upstream'))
+    await w.find('[aria-label="Search by key_id or name substring"]').setValue('acme')
+    await flushPromises()
+    expect(w.text()).toContain('502 upstream')
+    listApiKeysMock.mockClear()
+
+    // Pre-fix: forceWalk was consumed BEFORE the await, and the counter
+    // (2 < 5) sat behind the ambient early-return — no retry for ~4 min.
+    // The next 60s tick must retry the walk.
+    await pollState.callback!()
+    await flushPromises()
+    expect(listApiKeysMock).toHaveBeenCalled()
+    expect((listApiKeysMock.mock.calls[0][0] as Record<string, string>).status).toBe('ACTIVE')
+  })
+
   it('a sort change walks immediately (user-initiated, not gated)', async () => {
     routeRef.query = { expiring_within_7d: '1' }
     listApiKeysMock.mockResolvedValue({ keys: [key('k-soon', { expires_at: in7d(3) })], has_more: false })
