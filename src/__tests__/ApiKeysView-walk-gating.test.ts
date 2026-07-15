@@ -207,6 +207,29 @@ describe('ApiKeysView — expiring-walk gating on background ticks (round 5 F5)'
     expect((listApiKeysMock.mock.calls[0][0] as Record<string, string>).status).toBe('ACTIVE')
   })
 
+  it('a failed walk is retried on the next tick — the cadence window is committed only on success', async () => {
+    routeRef.query = { expiring_within_7d: '1' }
+    // Mount-time walk fails (transient 502 on page 1).
+    listApiKeysMock.mockRejectedValueOnce(new Error('502 upstream'))
+    listApiKeysMock.mockResolvedValue({ keys: [key('k-soon', { expires_at: in7d(3) })], has_more: false })
+    const w = await mountView()
+    expect(w.text()).toContain('502 upstream')
+    listApiKeysMock.mockClear()
+
+    // Next 60s tick must RETRY the walk (pre-gating self-heal cadence),
+    // not sit out the 5-tick window over an error banner.
+    await pollState.callback!()
+    await flushPromises()
+    expect(listApiKeysMock).toHaveBeenCalled()
+    expect((listApiKeysMock.mock.calls[0][0] as Record<string, string>).status).toBe('ACTIVE')
+    listApiKeysMock.mockClear()
+
+    // The successful retry committed the window: ambient ticks skip again.
+    await pollState.callback!()
+    await flushPromises()
+    expect(listApiKeysMock).not.toHaveBeenCalled()
+  })
+
   it('a sort change walks immediately (user-initiated, not gated)', async () => {
     routeRef.query = { expiring_within_7d: '1' }
     listApiKeysMock.mockResolvedValue({ keys: [key('k-soon', { expires_at: in7d(3) })], has_more: false })

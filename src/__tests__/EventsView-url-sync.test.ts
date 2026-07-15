@@ -169,6 +169,25 @@ describe('EventsView — same-route URL sync (round 5 F3)', () => {
     expect(routeRef.query.trace_id).toBeUndefined()
   })
 
+  it('one same-route navigation changing several params fires exactly ONE listEvents call', async () => {
+    routeRef.query = { category: 'budget', tenant_id: 't-alpha' }
+    const w = await mountView()
+    listEventsMock.mockClear()
+
+    // CorrelationIdChip-style pivot: category+tenant out, trace_id in —
+    // three refs change, but the identical-signature echoes from the
+    // per-ref applyFilters watchers must collapse into a single fetch.
+    routeRef.query = { trace_id: TRACE }
+    await flushPromises()
+
+    expect((w.find('#ev-trace').element as HTMLInputElement).value).toBe(TRACE)
+    expect(listEventsMock).toHaveBeenCalledTimes(1)
+    const params = listEventsMock.mock.calls[0][0] as Record<string, string>
+    expect(params.trace_id).toBe(TRACE)
+    expect(params.category).toBeUndefined()
+    expect(params.tenant_id).toBeUndefined()
+  })
+
   it('syncs the params the old watcher missed (category/type/tenant/scope/from/to) reset-style', async () => {
     routeRef.query = { category: 'runtime', tenant_id: 'acme', from: '2026-04-01T00:00' }
     const w = await mountView()

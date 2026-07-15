@@ -159,6 +159,10 @@ describe('CommandPalette', () => {
     expect(text).toContain('/key')
     expect(text).toContain('/audit')
     expect(text).toContain('/event')
+    // /event must advertise what the server's search actually matches
+    // (correlation_id + scope) — NOT event_id, which listEvents' search
+    // never covers (an event_id arg returns a guaranteed-empty list).
+    expect(text).not.toContain('event_id substring')
     expect(text).toContain('/tenant')
     expect(text).toContain('/budget')
     expect(text).toContain('/res')

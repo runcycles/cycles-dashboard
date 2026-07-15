@@ -88,8 +88,11 @@ const COMMANDS: CommandDef[] = [
   {
     name: 'event',
     label: 'Search events',
-    argLabel: 'event_id',
-    help: 'Events list filtered by event_id substring.',
+    // listEvents `search` matches correlation_id + scope substrings ONLY
+    // (see EventsView's search input) — advertising event_id here sent
+    // operators to a guaranteed-empty list during triage.
+    argLabel: 'correlation_id or scope',
+    help: 'Events list filtered by correlation_id or scope substring.',
     execute: (id, r) => r.push({ name: 'events', query: { search: id } }),
   },
   {

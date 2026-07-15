@@ -194,7 +194,19 @@ async function load() {
   } catch (e) { error.value = toMessage(e) }
 }
 
+// applyFilters is invoked once per changed ref (selects immediately,
+// each debounced text ref again ~300ms later), so one same-route
+// navigation that syncs several refs fans out into N identical calls —
+// a CorrelationIdChip pivot fired two identical listEvents requests,
+// and a back-nav clearing several text filters fired one per cleared
+// filter. Since applyFilters ONLY ever runs from those ref watchers,
+// an unchanged filter signature is always a redundant echo — skip it.
+// Polling and loadMore call load()/listEvents directly, unaffected.
+let lastAppliedSignature: string | null = null
 function applyFilters() {
+  const sig = JSON.stringify(buildFilterParams())
+  if (sig === lastAppliedSignature) return
+  lastAppliedSignature = sig
   router.replace({ query: {
     ...(category.value && { category: category.value }),
     ...(eventType.value && { type: eventType.value }),

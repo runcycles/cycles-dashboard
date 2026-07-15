@@ -187,6 +187,19 @@ copy (the old 'permission denied' wording misdiagnosed insecure
 contexts). Round-5 validation: vue-tsc clean; 1,155/1,155 tests
 (96 files); line coverage 96.16%.
 
+**Review round 6** (net PR state after round 5; 2 of 5 verifier candidates
+refuted): 3 findings, all fixed. The `/event` palette command advertised
+`event_id` but listEvents' `search` matches only correlation_id + scope —
+a guaranteed-empty list during triage (command relabeled to what the
+server actually searches); ApiKeysView committed the 5-tick walk window
+BEFORE awaiting the walk, so one transient 502 left the expiring view
+broken ~5 min with no retry (window now commits only on a successful
+walk — next 60s tick retries, the pre-gating self-heal cadence); one
+same-route navigation fanned into N identical listEvents calls via the
+per-ref applyFilters watchers (identical-signature echoes now dedup to
+one fetch). Round-6 validation: vue-tsc clean; 1,157/1,157 tests
+(96 files); line coverage 96.16%.
+
 **Validation:** vue-tsc clean; 1,097/1,097 tests (92 files); line coverage
 96.1% (gate ≥95%); production `npm run build` + full `docker build` pass;
 built image live-smoke-tested (index no-cache + full security headers, SPA
