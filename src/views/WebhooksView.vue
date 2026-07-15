@@ -108,9 +108,17 @@ const statusFromQuery = computed<string | null>(() => {
 // (e.g. /tenants?status=ACTIVE) — ignore query changes that belong to
 // another route. (The immediate run happens at setup, where route.name
 // is already 'webhooks'.)
+//
+// URL-AUTHORITATIVE FILTER (deliberate — do not flip back): the URL is
+// the single source of truth for the synced ?status filter, per the
+// GitHub/Linear list-view convention. Param present → adopt it; param
+// ABSENT (or unrecognized) → reset to the unfiltered default, so Back
+// to a bare /webhooks entry clears a deep-linked status instead of
+// keeping stale filtered data on a bare URL.
 watch(statusFromQuery, s => {
   if (route.name !== 'webhooks') return
-  if (s && statusFilter.value !== s) statusFilter.value = s
+  const next = s ?? ''
+  if (statusFilter.value !== next) statusFilter.value = next
 }, { immediate: true })
 const failingFromQuery = computed<boolean>(() => {
   const f = route.query.failing

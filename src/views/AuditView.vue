@@ -26,6 +26,8 @@ import { formatDateTime } from '../utils/format'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 import { safeJsonStringify } from '../utils/safe'
+import { writeClipboardJson } from '../utils/clipboard'
+import { dateParamOrEmpty } from '../utils/dateParam'
 import { hasBulkAuditShape } from '../utils/auditMetadata'
 
 const toast = useToast()
@@ -51,14 +53,13 @@ function toggleExpanded(id: string) {
 const copiedLogId = ref<string | null>(null)
 let copiedResetTimer: ReturnType<typeof setTimeout> | null = null
 async function copyLogJson(entry: AuditLogEntry) {
-  try {
-    await navigator.clipboard.writeText(safeJsonStringify(entry))
+  if (await writeClipboardJson(entry)) {
     copiedLogId.value = entry.log_id
     if (copiedResetTimer) clearTimeout(copiedResetTimer)
     copiedResetTimer = setTimeout(() => {
       if (copiedLogId.value === entry.log_id) copiedLogId.value = null
     }, 2000)
-  } catch {
+  } else {
     // Clipboard permission denied or insecure context. Toast so the
     // failure isn't silent (same copy as TenantsView) — the operator
     // can still select-and-copy from the metadata pre element.
@@ -205,8 +206,12 @@ function buildFilterParams(): Record<string, string> {
   // requires empty → absent.
   const q = search.value.trim()
   if (q) params.search = q
-  if (fromDate.value) params.from = new Date(fromDate.value).toISOString()
-  if (toDate.value) params.to = new Date(toDate.value).toISOString()
+  // Belt-and-suspenders parse guard: applyQueryParams already drops
+  // junk URL dates, but an unparseable value reaching this point would
+  // make toISOString() throw RangeError ("Invalid time value") and
+  // hard-fail the whole query — skip it instead.
+  if (fromDate.value && !Number.isNaN(Date.parse(fromDate.value))) params.from = new Date(fromDate.value).toISOString()
+  if (toDate.value && !Number.isNaN(Date.parse(toDate.value))) params.to = new Date(toDate.value).toISOString()
   if (sortKey.value) {
     params.sort_by = sortKey.value
     params.sort_dir = sortDir.value
@@ -323,8 +328,10 @@ function applyQueryParams() {
   requestId.value = route.query.request_id ? String(route.query.request_id) : ''
   // from/to round-trip as raw datetime-local strings (same format
   // EventsView writes) — buildFilterParams normalizes to ISO at send.
-  fromDate.value = route.query.from ? String(route.query.from) : ''
-  toDate.value = route.query.to ? String(route.query.to) : ''
+  // Junk values (?from=lastweek) are dropped on hydration rather than
+  // crashing the query at conversion time (see dateParamOrEmpty).
+  fromDate.value = dateParamOrEmpty(route.query.from)
+  toDate.value = dateParamOrEmpty(route.query.to)
   const sb = route.query.status_band
   statusBand.value = (sb === 'success' || sb === 'errors' || sb === '4xx' || sb === '5xx') ? sb : ''
 }

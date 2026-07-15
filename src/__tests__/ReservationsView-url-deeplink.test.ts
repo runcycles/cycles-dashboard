@@ -45,11 +45,15 @@ vi.mock('../api/client', async () => {
 const routeRef: { query: Record<string, string>; params: Record<string, string>; name: string } =
   reactive({ query: {}, params: {}, name: 'reservations' })
 
+// Shared replace spy so tests can assert the URL write-back / correction
+// calls the view makes (F4 strips unknown ?tenant_id values, for one).
+const replaceMock = vi.fn()
+
 vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
   return {
     ...actual,
-    useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+    useRouter: () => ({ push: vi.fn(), replace: replaceMock }),
     useRoute: () => routeRef,
     RouterLink: { template: '<a><slot /></a>' },
   }
@@ -110,6 +114,7 @@ describe('ReservationsView — URL deep-link smoke', () => {
     auth.capabilities = FULL_CAPS
     listReservationsMock.mockReset()
     listTenantsMock.mockReset()
+    replaceMock.mockReset()
     listReservationsMock.mockResolvedValue({ reservations: [], has_more: false })
     listTenantsMock.mockResolvedValue({ tenants: [], has_more: false })
     routeRef.query = {}
@@ -246,5 +251,105 @@ describe('ReservationsView — URL deep-link smoke', () => {
     await flushPromises()
     expect(listReservationsMock).not.toHaveBeenCalled()
     expect((w.find('#res-tenant').element as HTMLSelectElement).value).toBe('alpha')
+  })
+
+  // Round 4 (F3): the ?status watcher was adopt-only — Back to a bare
+  // /reservations kept a deep-linked status, so a bare URL showed
+  // filtered data. Param absent now resets to the 'ACTIVE' default a
+  // fresh bare-URL mount picks.
+  it('Back to a bare URL (status param removed) resets a deep-linked ?status to ACTIVE', async () => {
+    routeRef.query = { tenant_id: 'alpha', status: 'RELEASED' }
+    listTenantsMock.mockResolvedValue({
+      tenants: [{ tenant_id: 'alpha', status: 'ACTIVE' }],
+      has_more: false,
+    })
+    const { default: ReservationsView } = await import('../views/ReservationsView.vue')
+    const w = mount(ReservationsView, stdMount())
+    await flushPromises()
+    expect((w.find('#res-status').element as HTMLSelectElement).value).toBe('RELEASED')
+    listReservationsMock.mockClear()
+
+    // Browser Back to /reservations?tenant_id=alpha — status removed.
+    routeRef.query = { tenant_id: 'alpha' }
+    await flushPromises()
+    expect((w.find('#res-status').element as HTMLSelectElement).value).toBe('ACTIVE')
+    // The reset refetched under the default status.
+    const call = listReservationsMock.mock.calls.at(-1)
+    expect((call?.[1] as { status?: string } | undefined)?.status).toBe('ACTIVE')
+  })
+
+  // Round 4 (F4): the ?tenant_id watcher adopted ANY string — the mount
+  // path validates against the loaded tenant list, but a mid-session
+  // '/res acme-typo' palette command blanked the dropdown, 404'd the
+  // fetch, and stamped the junk param into the URL. The watcher now
+  // validates too: unknown id → keep the current filter, warn, and
+  // correct the URL back to the current (valid) value.
+  it('F4: a ?tenant_id change to an unknown id keeps the filter, warns, and corrects the URL', async () => {
+    const { toasts } = await import('../composables/useToast')
+    toasts.value = []
+    routeRef.query = { tenant_id: 'alpha' }
+    listTenantsMock.mockResolvedValue({
+      tenants: [
+        { tenant_id: 'alpha', status: 'ACTIVE' },
+        { tenant_id: 'beta', status: 'ACTIVE' },
+      ],
+      has_more: false,
+    })
+    const { default: ReservationsView } = await import('../views/ReservationsView.vue')
+    const w = mount(ReservationsView, stdMount())
+    await flushPromises()
+    expect((w.find('#res-tenant').element as HTMLSelectElement).value).toBe('alpha')
+    listReservationsMock.mockClear()
+    replaceMock.mockReset()
+
+    // Palette typo: /reservations?tenant_id=acme-typo — no remount.
+    routeRef.query = { tenant_id: 'acme-typo' }
+    await flushPromises()
+
+    // Filter unchanged, no fetch under the junk id.
+    expect((w.find('#res-tenant').element as HTMLSelectElement).value).toBe('alpha')
+    expect(listReservationsMock.mock.calls.some(args => args[0] === 'acme-typo')).toBe(false)
+    // Operator told why nothing happened.
+    expect(toasts.value.some(t => t.type === 'warning' && t.message.includes('acme-typo'))).toBe(true)
+    // URL corrected back to the current (valid) tenant.
+    expect(replaceMock).toHaveBeenCalled()
+    const arg = replaceMock.mock.calls.at(-1)![0] as { query: Record<string, string | undefined> }
+    expect(arg.query.tenant_id).toBe('alpha')
+    toasts.value = []
+  })
+
+  it('F4: a ?tenant_id change to a known id still adopts (regression guard)', async () => {
+    routeRef.query = { tenant_id: 'alpha' }
+    listTenantsMock.mockResolvedValue({
+      tenants: [
+        { tenant_id: 'alpha', status: 'ACTIVE' },
+        { tenant_id: 'beta', status: 'ACTIVE' },
+      ],
+      has_more: false,
+    })
+    const { default: ReservationsView } = await import('../views/ReservationsView.vue')
+    const w = mount(ReservationsView, stdMount())
+    await flushPromises()
+    listReservationsMock.mockClear()
+
+    routeRef.query = { tenant_id: 'beta' }
+    await flushPromises()
+    expect((w.find('#res-tenant').element as HTMLSelectElement).value).toBe('beta')
+    expect(listReservationsMock.mock.calls.some(args => args[0] === 'beta')).toBe(true)
+  })
+
+  it('F4: the mount path warns too when a deep-linked tenant does not exist', async () => {
+    const { toasts } = await import('../composables/useToast')
+    toasts.value = []
+    routeRef.query = { tenant_id: 'deleted-tenant' }
+    listTenantsMock.mockResolvedValue({
+      tenants: [{ tenant_id: 'acme', status: 'ACTIVE' }],
+      has_more: false,
+    })
+    const { default: ReservationsView } = await import('../views/ReservationsView.vue')
+    mount(ReservationsView, stdMount())
+    await flushPromises()
+    expect(toasts.value.some(t => t.type === 'warning' && t.message.includes('deleted-tenant'))).toBe(true)
+    toasts.value = []
   })
 })

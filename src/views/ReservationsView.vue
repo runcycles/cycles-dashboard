@@ -80,13 +80,19 @@ const statusFromQuery = computed<string | null>(() => {
   return (RESERVATION_STATUSES as readonly string[]).includes(s) ? s : null
 })
 const statusFilter = ref<string>(statusFromQuery.value ?? 'ACTIVE')
+// URL-AUTHORITATIVE FILTER (deliberate — do not flip back): param
+// present → adopt it; param ABSENT (or invalid) → reset to the 'ACTIVE'
+// default a fresh bare-URL mount picks, so Back to a bare /reservations
+// entry clears a deep-linked status instead of keeping stale filtered
+// data on a bare URL (same convention as the ?tenant_id watcher below).
 watch(statusFromQuery, s => {
   // Route-identity guard: this watcher also fires while navigating AWAY
   // (before unmount), and a destination route can carry its own ?status
   // (e.g. /webhooks?status=PAUSED) — ignore query changes that belong to
   // another route.
   if (route.name !== 'reservations') return
-  if (s && statusFilter.value !== s) statusFilter.value = s
+  const next = s ?? 'ACTIVE'
+  if (statusFilter.value !== next) statusFilter.value = next
 })
 
 // ─── Advanced filters (protocol additive surface) ───────────────────
@@ -252,7 +258,11 @@ async function loadTenants() {
       const found = tenants.value.some(t => t.tenant_id === tenantFilter.value)
       if (!found && tenants.value.length > 0) {
         // URL tenant doesn't exist — drop to the default and clear the
-        // stale query param so reloading doesn't resurrect it.
+        // stale query param so reloading doesn't resurrect it (the
+        // tenantFilter write-back below stamps the corrected value).
+        // Warn so the silent fallback is explainable — same message the
+        // ?tenant_id watcher shows for a mid-session unknown id.
+        toast.warning(`Unknown tenant id: ${tenantFilter.value}`)
         tenantFilter.value = ''
       }
     }
@@ -406,6 +416,24 @@ watch(() => route.query.tenant_id, (v) => {
   // that belong to another route.
   if (route.name !== 'reservations') return
   if (typeof v === 'string' && v) {
+    // Validate against the loaded tenant list — mirrors loadTenants'
+    // mount-path validation. A palette typo ('/res acme-typo') or an
+    // outdated link otherwise blanks the dropdown, 404s the fetch, and
+    // stamps the junk param into the URL. Don't adopt: keep the current
+    // (valid) filter, correct the URL back to it (the tenantFilter
+    // write-back below can't fire because the ref doesn't change), and
+    // tell the operator why nothing happened. If tenants haven't loaded
+    // yet, adopt provisionally — loadTenants validates once they land.
+    if (tenants.value.length > 0 && !tenants.value.some(t => t.tenant_id === v)) {
+      toast.warning(`Unknown tenant id: ${v}`)
+      router.replace({
+        query: {
+          ...route.query,
+          tenant_id: tenantFilter.value || undefined,
+        },
+      })
+      return
+    }
     if (v !== tenantFilter.value) tenantFilter.value = v
   } else {
     const next = defaultTenantId()

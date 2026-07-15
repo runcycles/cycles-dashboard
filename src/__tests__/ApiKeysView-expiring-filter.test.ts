@@ -373,6 +373,101 @@ describe('ApiKeysView — ?expiring_within_7d URL write-back (F5)', () => {
   })
 })
 
+// Round 4 (F2) — the deep link filtered only page 1. The Overview badge
+// counts a 1,000-key cursor walk, but /api-keys?expiring_within_7d=1
+// fetched ONE page (100 newest by created_at desc — old keys, which
+// expire soonest, sort LAST) and client-filtered it: the landing view
+// could show zero of the promised keys. While the filter is active,
+// page 1 is now a cursor walk of the ACTIVE set (same 10-page cap as
+// Overview's walkApiKeysPages); the walk replaces pagination (load-more
+// disabled) and truncation surfaces the partial hint.
+describe('ApiKeysView — expiring filter fetches via cursor walk (round 4 F2)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    const auth = useAuthStore()
+    auth.apiKey = 'test-key'
+    auth.capabilities = FULL_CAPS
+    listApiKeysMock.mockReset()
+    listTenantsMock.mockReset()
+    replaceMock.mockReset()
+    listTenantsMock.mockResolvedValue({ tenants: [] })
+    for (const k of Object.keys(routeQuery)) delete routeQuery[k]
+  })
+
+  async function mountView() {
+    const { default: ApiKeysView } = await import('../views/ApiKeysView.vue')
+    const w = mount(ApiKeysView, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
+    await flushPromises(); await flushPromises(); await flushPromises()
+    return w
+  }
+
+  it('deep link on a 2-page fleet shows expiring keys from page 2', async () => {
+    routeQuery.expiring_within_7d = '1'
+    listApiKeysMock.mockImplementation((params: Record<string, string>) => {
+      // Page 1: newest keys (long expiry). Page 2: the old, soon-expiring
+      // key the Overview badge counted — pre-fix it was never fetched.
+      if (!params.cursor) {
+        return Promise.resolve({
+          keys: [key('k-new', { expires_at: in7d(60) })],
+          has_more: true,
+          next_cursor: 'c2',
+        })
+      }
+      return Promise.resolve({
+        keys: [key('k-old-expiring', { expires_at: in7d(2) })],
+        has_more: false,
+      })
+    })
+    const w = await mountView()
+
+    // The page-2 expiring key is on screen; the long-expiry key is
+    // filtered out client-side as before.
+    expect(w.text()).toContain('k-old-expiring')
+    expect(w.text()).not.toContain('k-new')
+    // Every walk page was ACTIVE-scoped (filterExpiringKeys only
+    // considers ACTIVE keys — same base set as Overview's walk).
+    expect(listApiKeysMock.mock.calls.every(c => (c[0] as Record<string, string>).status === 'ACTIVE')).toBe(true)
+    // Walk replaces pagination — no load-more in this mode.
+    expect(w.text()).not.toContain('Load more')
+    // Full walk completed — no partial hint.
+    expect(w.find('[data-testid="api-keys-expiring-partial-note"]').exists()).toBe(false)
+  })
+
+  it('shows the partial hint when the walk truncates at the 10-page cap', async () => {
+    routeQuery.expiring_within_7d = '1'
+    let page = 0
+    listApiKeysMock.mockImplementation(() => {
+      page++
+      return Promise.resolve({
+        keys: [key(`k-${page}`, { expires_at: in7d(3) })],
+        has_more: true,
+        next_cursor: `c${page}`,
+      })
+    })
+    const w = await mountView()
+
+    // Walk stopped at the cap with the server still reporting more.
+    expect(page).toBe(10)
+    expect(w.find('[data-testid="api-keys-expiring-partial-note"]').exists()).toBe(true)
+    // Load-more stays disabled even though the server reported more —
+    // the walk owns pagination in this mode.
+    expect(w.text()).not.toContain('Load more')
+  })
+
+  it('unfiltered mode keeps the single-page + load-more behavior', async () => {
+    listApiKeysMock.mockResolvedValue({
+      keys: [key('k-1', { expires_at: in7d(60) })],
+      has_more: true,
+      next_cursor: 'c2',
+    })
+    const w = await mountView()
+    // One fetch, not a walk, and no forced status param.
+    expect(listApiKeysMock).toHaveBeenCalledTimes(1)
+    expect((listApiKeysMock.mock.calls[0][0] as Record<string, string>).status).toBeUndefined()
+    expect(w.text()).toContain('Load more')
+  })
+})
+
 // F6 — the sync was one-way: ?search= hydrated the ref, but operator
 // edits never wrote back, so reloading/sharing the URL re-applied a
 // cleared filter. The debounced write-back mirrors TenantsView's

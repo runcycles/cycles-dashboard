@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, onUnmounted, watch } from 'vue'
+import { ref, computed, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { useFocusTrap } from '../composables/useFocusTrap'
@@ -186,14 +186,16 @@ const closeConfirmInput = ref('')
 const closeTenantLoading = ref(false)
 
 // A11y for the hand-rolled CLOSE dialog — parity with what
-// ConfirmAction gets from being a dedicated component: Tab trapped
-// inside (useFocusTrap acts only while closeDialogRef is populated),
-// document-level Escape (gated on in-flight), focus moves to the
-// confirmation input on open and returns to the trigger on close.
+// ConfirmAction gets from being a dedicated component. useFocusTrap
+// (which activates on closeDialogRef populate) owns the whole focus
+// contract: Tab cycling, initial focus (its first-focusable target IS
+// the typed-confirmation input — nothing focusable precedes it in the
+// dialog), and restoring focus to the trigger on close. Only the
+// document-level Escape (gated on in-flight) is added here — a second
+// manual save/restore alongside the trap ran a duplicate restore on
+// every close.
 const closeDialogRef = ref<HTMLElement | null>(null)
-const closeConfirmInputRef = ref<HTMLInputElement | null>(null)
 useFocusTrap(closeDialogRef)
-let closeDialogPrevFocus: HTMLElement | null = null
 function onCloseDialogKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') cancelCloseTenant()
 }
@@ -202,16 +204,11 @@ function cancelCloseTenant() {
   pendingTenantAction.value = null
   closeConfirmInput.value = ''
 }
-watch(() => pendingTenantAction.value === 'CLOSED', async (open, was) => {
+watch(() => pendingTenantAction.value === 'CLOSED', (open, was) => {
   if (open && !was) {
-    closeDialogPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
     document.addEventListener('keydown', onCloseDialogKeydown)
-    await nextTick()
-    closeConfirmInputRef.value?.focus()
   } else if (!open && was) {
     document.removeEventListener('keydown', onCloseDialogKeydown)
-    closeDialogPrevFocus?.focus()
-    closeDialogPrevFocus = null
   }
 })
 onUnmounted(() => document.removeEventListener('keydown', onCloseDialogKeydown))
@@ -1197,7 +1194,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
         </ul>
         <p class="text-sm text-gray-600 mb-2">Afterwards, any mutation against these objects will return <code class="text-xs bg-gray-100 rounded px-1 py-0.5">TENANT_CLOSED</code> (409). There is no re-open path.</p>
         <p class="text-sm text-gray-600 mb-2">To confirm, type the tenant name below:</p>
-        <input ref="closeConfirmInputRef" v-model="closeConfirmInput" type="text" :placeholder="tenant?.name || id" :disabled="closeTenantLoading" class="form-input mb-4 font-mono" autocomplete="off" aria-label="Type the tenant name to confirm" />
+        <input v-model="closeConfirmInput" type="text" :placeholder="tenant?.name || id" :disabled="closeTenantLoading" class="form-input mb-4 font-mono" autocomplete="off" aria-label="Type the tenant name to confirm" />
         <!-- Visually-hidden wait announcement while the close PATCH is
              in flight — both buttons are :disabled, so screen readers
              need the state change surfaced (mirrors ConfirmAction). -->

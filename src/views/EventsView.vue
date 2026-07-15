@@ -27,6 +27,8 @@ import { formatDateTime } from '../utils/format'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 import { safeJsonStringify } from '../utils/safe'
+import { writeClipboardJson } from '../utils/clipboard'
+import { dateParamOrEmpty } from '../utils/dateParam'
 
 const route = useRoute()
 const router = useRouter()
@@ -88,14 +90,13 @@ const loadedMorePages = ref(false)
 const copiedEventId = ref<string | null>(null)
 let copiedResetTimer: ReturnType<typeof setTimeout> | null = null
 async function copyEventJson(e: Event) {
-  try {
-    await navigator.clipboard.writeText(safeJsonStringify(e))
+  if (await writeClipboardJson(e)) {
     copiedEventId.value = e.event_id
     if (copiedResetTimer) clearTimeout(copiedResetTimer)
     copiedResetTimer = setTimeout(() => {
       if (copiedEventId.value === e.event_id) copiedEventId.value = null
     }, 2000)
-  } catch {
+  } else {
     // Clipboard permission denied or insecure context. Toast so the
     // failure isn't silent (same copy as TenantsView) — the operator
     // can still select-and-copy from the pre element.
@@ -123,9 +124,11 @@ const search = ref((route.query.search as string) || '')
 // Spec: listEvents accepts `from` / `to` as RFC 3339 date-time.
 // TimeRangePicker emits datetime-local strings (YYYY-MM-DDTHH:MM,
 // local tz) which the server normalizes — matches what AuditView
-// already sends.
-const fromDate = ref((route.query.from as string) || '')
-const toDate = ref((route.query.to as string) || '')
+// already sends. Junk URL values (?from=lastweek) are dropped on
+// hydration rather than crashing the query at conversion time (see
+// dateParamOrEmpty).
+const fromDate = ref(dateParamOrEmpty(route.query.from))
+const toDate = ref(dateParamOrEmpty(route.query.to))
 const timeRange = computed({
   get: () => ({ from: fromDate.value, to: toDate.value }),
   set: (v: { from: string; to: string }) => { fromDate.value = v.from; toDate.value = v.to },
@@ -148,8 +151,11 @@ function buildFilterParams(): Record<string, string> {
   // the spec's `from`/`to` are RFC 3339 date-time, which the server
   // validates strictly. new Date(...).toISOString() normalizes the
   // local-time input to UTC ISO 8601 — matches AuditView's wire format.
-  if (fromDate.value) params.from = new Date(fromDate.value).toISOString()
-  if (toDate.value) params.to = new Date(toDate.value).toISOString()
+  // Parse guard (belt-and-suspenders on top of the hydration check):
+  // an unparseable value would make toISOString() throw RangeError and
+  // hard-fail the whole fetch — skip it instead.
+  if (fromDate.value && !Number.isNaN(Date.parse(fromDate.value))) params.from = new Date(fromDate.value).toISOString()
+  if (toDate.value && !Number.isNaN(Date.parse(toDate.value))) params.to = new Date(toDate.value).toISOString()
   if (sortKey.value) {
     params.sort_by = sortKey.value
     params.sort_dir = sortDir.value

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref } from 'vue'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
 import { POLL_FAST_MS } from '../composables/pollingConstants'
@@ -277,10 +277,29 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
 // Manual refresh (PageHeader button) always re-runs the walks — the
 // operator is explicitly asking for fresh data, so the counter gate
 // must not skip the walk-backed cards.
+//
+// usePolling's refresh() is a deliberate no-op while a tick is in
+// flight (in-flight dedup — other views rely on it, so the composable
+// semantics stay untouched). Walk rounds make Overview ticks span
+// seconds, which turned a mid-round click into a silent drop until the
+// next 30s tick. Queue the click instead: the isLoading watcher below
+// consumes the flag on the true→false edge and re-invokes refreshAll,
+// so forceWalks is armed for the replayed run.
+const pendingManualRefresh = ref(false)
 function refreshAll() {
+  if (isLoading.value) {
+    pendingManualRefresh.value = true
+    return
+  }
   forceWalks = true
   refresh()
 }
+watch(isLoading, (now, was) => {
+  if (was && !now && pendingManualRefresh.value) {
+    pendingManualRefresh.value = false
+    refreshAll()
+  }
+})
 
 // Per-card partial hints. Each walk-backed card is partial if its own
 // walk truncated OR the closed-tenant exclusion walk did (an incomplete

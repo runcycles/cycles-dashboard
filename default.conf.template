@@ -4,6 +4,16 @@
 # the header from $scheme would clobber the edge's "https" and make the
 # backends see every request as insecure. Only fall back to $scheme when
 # no terminator set the header (direct-to-container deployments).
+#
+# TRUST BOUNDARY: the pass-through is only trustworthy behind a TLS
+# terminator that overwrites forwarded headers from untrusted clients.
+# The shipped prod topology does — Caddy replaces incoming X-Forwarded-*
+# from untrusted clients by default, and nginx-ssl.conf.example sets the
+# header explicitly. If this container is exposed directly instead, the
+# header is client-controlled: a plain-HTTP caller can claim "https" and
+# the backends will believe it. Direct-to-container exposure is dev-only
+# (the dev compose binds every port to loopback); production must sit
+# behind a terminator that owns this header.
 map $http_x_forwarded_proto $forwarded_proto {
     default $http_x_forwarded_proto;
     ""      $scheme;

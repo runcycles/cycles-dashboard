@@ -79,11 +79,14 @@ services:
       - no-new-privileges:true
     # The JVM sizes its heap as 75% of the *container* limit
     # (MaxRAMPercentage below). Without a limit it sees the whole host and
-    # the two JVMs can overcommit it together.
+    # the two JVMs can overcommit it together. Env-parameterized so large
+    # fleets can raise it without editing this file — the 2g default
+    # (≈1.5g heap) suits small/mid fleets; see OPERATIONS.md "Memory
+    # limits" for sizing guidance.
     deploy:
       resources:
         limits:
-          memory: 1g
+          memory: ${CYCLES_SERVER_MEM_LIMIT:-2g}
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -122,10 +125,11 @@ services:
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
+    # See cycles-server note — env-parameterized, 2g default.
     deploy:
       resources:
         limits:
-          memory: 1g
+          memory: ${CYCLES_EVENTS_MEM_LIMIT:-2g}
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -153,10 +157,11 @@ services:
     security_opt:
       - no-new-privileges:true
     # See cycles-server note — heap is sized off this limit.
+    # Env-parameterized, 2g default.
     deploy:
       resources:
         limits:
-          memory: 1g
+          memory: ${CYCLES_ADMIN_MEM_LIMIT:-2g}
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -188,13 +193,23 @@ services:
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
+    # Keep REDIS_MAXMEMORY (dataset cap, below) comfortably under this
+    # cgroup limit — AOF rewrites and persistence forks need headroom
+    # beyond the dataset, and a cgroup-only limit ends in a kernel
+    # OOM-kill → AOF-replay crash loop that takes down all three planes.
+    # Defaults leave 256m of headroom.
     deploy:
       resources:
         limits:
-          memory: 512m
+          memory: ${REDIS_MEM_LIMIT:-768m}
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
-    command: ["sh", "-c", "redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD}\""]
+    # --maxmemory-policy noeviction: governance data (budgets, ledgers,
+    # audit) must never be silently evicted. Hitting the cap produces
+    # visible write errors (OOM command not allowed) the operators can
+    # act on, instead of Redis quietly dropping keys or the kernel
+    # OOM-killing the container.
+    command: ["sh", "-c", "redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-512mb} --maxmemory-policy noeviction --requirepass \"$${REDIS_PASSWORD}\""]
     volumes:
       - redis-data:/data
     healthcheck:

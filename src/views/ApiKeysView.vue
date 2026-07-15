@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, onUnmounted, watch } from 'vue'
+import { ref, computed, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { usePolling } from '../composables/usePolling'
@@ -28,6 +28,7 @@ import SecretReveal from '../components/SecretReveal.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { writeClipboardJson } from '../utils/clipboard'
 import { filterExpiringKeys } from '../utils/expiringKeys'
+import { walkCursorPages, CURSOR_WALK_MAX_PAGES, LIST_PAGE_LIMIT } from '../utils/cursorWalk'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import DownloadIcon from '../components/icons/DownloadIcon.vue'
@@ -59,11 +60,20 @@ const filterTenant = ref('')
 // v0.1.25.53: client-side URL filter for the Overview "Expiring keys"
 // drill-down. The admin spec has no server-side `expires_before` param
 // on listApiKeys (only `status=ACTIVE|REVOKED|EXPIRED`), so the
-// filter runs client-side on top of the loaded page. Same 7-day window
-// used by OverviewView's expiring-keys card — clicking "View all" on
-// that card should land on this view showing *those* keys, not the
-// whole fleet.
+// filter runs client-side. Same 7-day window used by OverviewView's
+// expiring-keys card — clicking "View all" on that card should land on
+// this view showing *those* keys, not the whole fleet.
+//
+// v0.1.25.68: while this filter is active, page 1 is fetched via a
+// cursor walk (walkCursorPages, ACTIVE-only, same 10-page cap as
+// Overview's walkApiKeysPages) instead of a single page. The server
+// sorts by created_at desc — old keys, which expire soonest, sort LAST
+// — so one 100-row page could contain zero of the keys the Overview
+// badge promised. The walk replaces pagination in this mode (load-more
+// is disabled; hasMore stays false) and truncation surfaces via the
+// partial hint next to the filter chip.
 const expiringWithin7d = ref(route.query.expiring_within_7d === '1')
+const expiringWalkPartial = ref(false)
 // URL → ref sync. URL-AUTHORITATIVE (deliberate — do not flip back):
 // the URL is the single source of truth for this synced filter, per the
 // GitHub/Linear list-view convention — param present → filter on, param
@@ -392,12 +402,12 @@ function decorate(list: ApiKey[]): KeyWithTenant[] {
   return list.map((k) => ({ ...k, tenant_name: tenantsById.value.get(k.tenant_id)?.name }))
 }
 
-async function fetchKeysPage(cursor?: string): Promise<{
+async function fetchKeysPage(cursor?: string, extraParams: Record<string, string> = {}): Promise<{
   keys: KeyWithTenant[]
   hasMore: boolean
   nextCursor: string
 }> {
-  const params: Record<string, string> = { limit: String(PAGE_SIZE) }
+  const params: Record<string, string> = { limit: String(PAGE_SIZE), ...extraParams }
   if (filterTenant.value) params.tenant_id = filterTenant.value
   if (cursor) params.cursor = cursor
   if (sortKey.value) {
@@ -421,14 +431,32 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
   try {
     const tRes = await listTenants()
     tenants.value = tRes.tenants
-    // Single cross-tenant listApiKeys — no per-tenant fan-out. Polling
-    // always refetches page 1 and drops any accumulated "Load more"
-    // pages; tenants' key sets change infrequently enough that this
-    // is the right trade-off (fresh data > accumulated scroll state).
-    const first = await fetchKeysPage()
-    keys.value = first.keys
-    hasMore.value = first.hasMore
-    nextCursor.value = first.nextCursor
+    if (expiringWithin7d.value) {
+      // Expiring-filter mode: cursor-walk the ACTIVE set (the only
+      // status filterExpiringKeys considers) so soon-expiring keys —
+      // which sort LAST under the server's created_at-desc order —
+      // aren't cut off by a single-page fetch. Server-side search /
+      // sort / tenant params still apply per page via fetchKeysPage;
+      // the walk replaces pagination, so load-more stays disabled.
+      const walk = await walkCursorPages<KeyWithTenant>(async (cursor) => {
+        const page = await fetchKeysPage(cursor || undefined, { status: 'ACTIVE' })
+        return { items: page.keys, hasMore: page.hasMore, nextCursor: page.nextCursor }
+      })
+      keys.value = walk.items
+      expiringWalkPartial.value = walk.partial
+      hasMore.value = false
+      nextCursor.value = ''
+    } else {
+      // Single cross-tenant listApiKeys — no per-tenant fan-out. Polling
+      // always refetches page 1 and drops any accumulated "Load more"
+      // pages; tenants' key sets change infrequently enough that this
+      // is the right trade-off (fresh data > accumulated scroll state).
+      expiringWalkPartial.value = false
+      const first = await fetchKeysPage()
+      keys.value = first.keys
+      hasMore.value = first.hasMore
+      nextCursor.value = first.nextCursor
+    }
     error.value = ''
     initialLoadDone.value = true
   } catch (e) { error.value = toMessage(e) }
@@ -448,6 +476,10 @@ async function loadMore() {
 
 // Refresh on filter change so we restart page-1 scoped to the new tenant.
 watch(filterTenant, () => { refresh() })
+// Toggling the expiring filter switches fetch mode (single page ↔
+// cursor walk), so a refetch is required — the client-side filter
+// alone can't surface keys that were never loaded.
+watch(expiringWithin7d, () => { refresh() })
 // Refetch page 1 whenever the debounced search changes so the cursor
 // stays aligned with the server's (sort_by, sort_dir, search) tuple.
 // Same rationale as useSort's onChange — the opaque cursor is
@@ -541,29 +573,24 @@ function openPermsViewer(k: KeyWithTenant) { viewingPermsFor.value = k }
 function closePermsViewer() { viewingPermsFor.value = null }
 
 // A11y for the hand-rolled perms-viewer modal — parity with what
-// FormDialog / ConfirmAction get from being dedicated components:
-// Tab is trapped inside the dialog (useFocusTrap acts only while
-// permsDialogRef is populated, i.e. while the v-if renders), Escape
-// closes from anywhere in the document (pre-fix it only worked when
-// focus happened to be inside the modal), focus moves into the dialog
-// on open and is restored to the triggering pill on close.
+// FormDialog / ConfirmAction get from being dedicated components.
+// useFocusTrap (which activates on permsDialogRef populate, i.e. while
+// the v-if renders) owns the whole focus contract: Tab cycling, moving
+// focus into the dialog on open (its first-focusable target IS the
+// header Close button), and restoring focus to the triggering pill on
+// close. Only document-level Escape is added here — a second manual
+// save/restore alongside the trap ran a duplicate restore on every
+// close.
 const permsDialogRef = ref<HTMLElement | null>(null)
 useFocusTrap(permsDialogRef)
-let permsPrevFocus: HTMLElement | null = null
 function onPermsViewerKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') closePermsViewer()
 }
-watch(viewingPermsFor, async (now, before) => {
+watch(viewingPermsFor, (now, before) => {
   if (now && !before) {
-    permsPrevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
     document.addEventListener('keydown', onPermsViewerKeydown)
-    await nextTick()
-    // First focusable element is the header Close button.
-    permsDialogRef.value?.querySelector<HTMLElement>('button')?.focus()
   } else if (!now && before) {
     document.removeEventListener('keydown', onPermsViewerKeydown)
-    permsPrevFocus?.focus()
-    permsPrevFocus = null
   }
 })
 onUnmounted(() => document.removeEventListener('keydown', onPermsViewerKeydown))
@@ -654,6 +681,14 @@ onUnmounted(() => document.removeEventListener('keydown', onPermsViewerKeydown))
             @click="expiringWithin7d = false"
           >×</button>
         </span>
+        <!-- Walk-truncation hint — mirrors Overview's "counts may be
+             partial" convention. Rendered when the ACTIVE-set cursor
+             walk hit its page cap with the server reporting more rows. -->
+        <span
+          v-if="expiringWithin7d && expiringWalkPartial"
+          class="muted-sm"
+          data-testid="api-keys-expiring-partial-note"
+        >Scanned the first {{ (CURSOR_WALK_MAX_PAGES * LIST_PAGE_LIMIT).toLocaleString() }} ACTIVE keys — results may be partial</span>
         <button v-if="hasActiveFilters" @click="clearFilters" class="muted-sm hover:text-gray-700 cursor-pointer">Clear</button>
         <div v-if="isLoading" class="flex items-center">
           <Spinner class="w-4 h-4 muted" />

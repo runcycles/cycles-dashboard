@@ -125,6 +125,40 @@ Tab (mirror of the Shift+Tab path) and moves focus into the new
 container on a direct element-to-element ref swap. Round-3 validation:
 vue-tsc clean; 1,111/1,111 tests (92 files); line coverage 96.13%.
 
+**Review round 4** (whole-PR view): 10 more findings, all fixed. Worst:
+unvalidated `?from`/`?to` URL dates crashed the Audit/Events queries
+(`new Date('lastweek').toISOString()` → RangeError, error banner, zero
+rows) — junk is now dropped on hydration (shared `dateParamOrEmpty`) with
+a parse guard at the conversion site; the `?expiring_within_7d=1` deep
+link filtered only page 1 while the Overview badge counted a 1,000-key
+walk (soonest-expiring keys sort LAST under created_at-desc) — the filter
+now drives an ACTIVE-set cursor walk (same 10-page cap, partial hint,
+load-more disabled in that mode). Also: Webhooks/Reservations `?status`
+watchers were adopt-only (param-absent now resets to the view default —
+the same URL-authoritative gap rounds 2–3 closed for other params); the
+Reservations `?tenant_id` watcher adopted unvalidated ids ('/res typo' →
+blank dropdown + 404 + junk URL) — unknown ids now keep the filter, warn,
+and correct the URL (mount path warns too); Overview's manual Refresh was
+silently dropped during multi-second walk rounds by usePolling's
+in-flight dedup — the click is queued and replayed when the tick settles,
+walks forced (composable semantics untouched). Ops: the prod-compose
+memory limits are env-parameterized (`CYCLES_{SERVER,ADMIN,EVENTS}_MEM_LIMIT`
+default 2g — the fixed 1g caps regressed large fleets to 768m heaps;
+`REDIS_MEM_LIMIT` 768m) and Redis gains `--maxmemory` (`REDIS_MAXMEMORY`
+default 512mb) with `noeviction` — governance data must never be silently
+evicted; the cap surfaces as visible write errors instead of a kernel
+OOM-kill → AOF-replay crash loop; the `X-Forwarded-Proto` pass-through
+trust boundary is documented (template + OPERATIONS.md: trustworthy only
+behind a header-overwriting TLS terminator; direct exposure is dev-only).
+Cleanups: Audit/Events/EventTimeline copy handlers rebuilt on
+`writeClipboardJson` (EventTimeline's silent failure now toasts); the
+duplicate manual focus save/restore under useFocusTrap removed from the
+perms viewer + close-tenant dialog (the trap's first-focusable target
+already matches both dialogs' intended initial focus). Round-4
+validation: vue-tsc clean; 1,129/1,129 tests (93 files); line coverage
+96.13%; `docker compose -f docker-compose.prod.yml config` validated
+with the new memory knobs.
+
 **Validation:** vue-tsc clean; 1,097/1,097 tests (92 files); line coverage
 96.1% (gate ≥95%); production `npm run build` + full `docker build` pass;
 built image live-smoke-tested (index no-cache + full security headers, SPA

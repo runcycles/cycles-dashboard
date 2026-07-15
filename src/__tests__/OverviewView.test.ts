@@ -47,16 +47,21 @@ const pollState = vi.hoisted(() => ({
   callback: null as null | (() => Promise<void> | void),
 }))
 
-vi.mock('../composables/usePolling', () => ({
-  usePolling: (fn: () => Promise<void> | void) => {
-    pollState.callback = fn
-    void fn()
-    return {
-      refresh: async () => { void fn() },
-      isLoading: { value: false },
-    }
-  },
-}))
+vi.mock('../composables/usePolling', async () => {
+  // Real ref — the view watches isLoading (round-4 F5 queued manual
+  // refresh), and a plain {value} object is not a valid watch source.
+  const { ref } = await import('vue')
+  return {
+    usePolling: (fn: () => Promise<void> | void) => {
+      pollState.callback = fn
+      void fn()
+      return {
+        refresh: async () => { void fn() },
+        isLoading: ref(false),
+      }
+    },
+  }
+})
 
 // Simulate one scheduled poll tick (NOT a manual refresh).
 async function pollTick() {

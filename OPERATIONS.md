@@ -63,9 +63,20 @@ a default admin key, so nothing in it may be reachable from other hosts. Use
 a local override file if you knowingly need wider exposure.
 
 **Memory limits (prod).** `docker-compose.prod.yml` caps each service via
-`deploy.resources.limits.memory`: 1g per Java service, 512m Redis, 256m
-dashboard/caddy. The JVMs size their heap as 75% of the container limit
-(`-XX:MaxRAMPercentage=75`), so raise the 1g caps together with load.
+`deploy.resources.limits.memory`. The caps are env-parameterized:
+`CYCLES_SERVER_MEM_LIMIT` / `CYCLES_ADMIN_MEM_LIMIT` /
+`CYCLES_EVENTS_MEM_LIMIT` (default 2g each), `REDIS_MEM_LIMIT` (default
+768m); dashboard and caddy stay fixed at 256m. *Memory sizing:* the
+defaults suit small/mid fleets. The JVMs size their heap as 75% of the
+container limit (`-XX:MaxRAMPercentage=75`), so a 2g cap ≈ 1.5g heap —
+raise the three JVM knobs together with tenant/key/webhook volume. Redis
+additionally runs with `--maxmemory` (`REDIS_MAXMEMORY`, default 512mb)
+and `--maxmemory-policy noeviction`: governance data must never be
+silently evicted, so hitting the cap surfaces as visible Redis write
+errors instead of a kernel OOM-kill → AOF-replay crash loop that takes
+down all three planes. Always keep `REDIS_MAXMEMORY` comfortably below
+`REDIS_MEM_LIMIT` (the defaults leave 256m headroom) — AOF rewrites and
+persistence forks need memory beyond the dataset; raise the two together.
 Requires Docker Compose v2 (the `docker compose` plugin), which applies
 `deploy.resources.limits` outside swarm mode.
 
@@ -122,6 +133,16 @@ hashed assets would both 404 and hard-fail integrity after a deploy — the
 `no-cache` header prevents that failure class. An edge proxy or CDN in
 front should pass these headers through (it may cache `/assets/*`
 aggressively; it must not cache `index.html` beyond revalidation).
+
+**X-Forwarded-Proto trust.** The bundled nginx passes an incoming
+`X-Forwarded-Proto` through to the backends verbatim (falling back to its
+own scheme only when the header is absent). That is trustworthy only behind
+a TLS terminator that overwrites forwarded headers from untrusted clients —
+the shipped topologies do (Caddy replaces incoming `X-Forwarded-*` by
+default; `nginx-ssl.conf.example` sets the header explicitly). Exposing the
+dashboard container directly makes the header client-controlled — a
+plain-HTTP caller can spoof `https` — so direct exposure is dev-only (the
+dev compose binds to loopback).
 
 **Security headers** live in `/etc/nginx/snippets/security-headers.conf`
 inside the image (shipped from `security-headers.conf` in this repo). They

@@ -7,7 +7,8 @@ import CorrelationIdChip from './CorrelationIdChip.vue'
 import CopyJsonIcon from './icons/CopyJsonIcon.vue'
 import ChevronRightIcon from './icons/ChevronRightIcon.vue'
 import { formatDateTime } from '../utils/format'
-import { safeJsonStringify } from '../utils/safe'
+import { writeClipboardJson } from '../utils/clipboard'
+import { useToast } from '../composables/useToast'
 
 // Phase 5 polish — virtualization parity with EventsView.
 //
@@ -35,18 +36,21 @@ function toggle(id: string) {
 // expanded-panel button. Copies the whole Event object (including
 // metadata like actor, request_id, correlation_id) rather than just
 // the data blob which is already select-and-copyable from the <pre>.
+const toast = useToast()
 const copiedEventId = ref<string | null>(null)
 let copiedResetTimer: ReturnType<typeof setTimeout> | null = null
 async function copyEventJson(e: Event) {
-  try {
-    await navigator.clipboard.writeText(safeJsonStringify(e))
+  if (await writeClipboardJson(e)) {
     copiedEventId.value = e.event_id
     if (copiedResetTimer) clearTimeout(copiedResetTimer)
     copiedResetTimer = setTimeout(() => {
       if (copiedEventId.value === e.event_id) copiedEventId.value = null
     }, 2000)
-  } catch {
-    // Clipboard permission denied or insecure context — silent fallback.
+  } else {
+    // Clipboard permission denied or insecure context. Toast so the
+    // failure isn't silent (same copy as EventsView / AuditView) — the
+    // operator can still select-and-copy from the data pre element.
+    toast.error('Copy failed — clipboard unavailable')
   }
 }
 
