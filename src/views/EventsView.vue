@@ -167,9 +167,17 @@ function buildFilterParams(): Record<string, string> {
   return params
 }
 
+// Monotonic sequence guard — same rule as BudgetsView.loadList. The 15s
+// poll tick and operator filter changes both funnel through load(), so
+// a slow poll response can resolve AFTER a newer filtered load and
+// overwrite events/hasMore/nextCursor with old-filter rows (or paint a
+// superseded error over a fresh success). Only the newest load commits.
+let loadSeq = 0
 async function load() {
+  const seq = ++loadSeq
   try {
     const res = await listEvents(buildFilterParams())
+    if (seq !== loadSeq) return // superseded by a newer load — discard
     if (loadedMorePages.value && events.value.length > 0) {
       // Extended view: merge page-1 results from the head, preserving
       // the already-loaded tail. Dedup by event_id — events are
@@ -192,6 +200,7 @@ async function load() {
     error.value = ''
     initialLoadDone.value = true
   } catch (e) {
+    if (seq !== loadSeq) return // stale failure — a newer load owns the view
     error.value = toMessage(e)
     // A failed load must not leave its signature marked as applied —
     // the next applyFilters with identical filters (watcher echo or

@@ -217,6 +217,15 @@ submit/Clear now pass `force`, and a failed load invalidates the applied
 signature). Round-7 validation: vue-tsc clean; 1,161/1,161 tests
 (97 files); line coverage 96.16%.
 
+**Review round 8** (net PR state after round 7; 3 of 4 finder angles came
+back empty): 1 finding, fixed. EventsView's `load()` lacked the sequence
+guard round 7 gave BudgetsView — the 15s poll and operator filter changes
+both funnel through it, so a slow poll response could commit old-filter
+rows/cursor state (or a superseded error) over a newer filtered result.
+Same monotonic-guard fix; stale successes and stale failures both
+discarded. Round-8 validation: vue-tsc clean; 1,162/1,162 tests
+(97 files); line coverage 96.16%.
+
 **Validation:** vue-tsc clean; 1,097/1,097 tests (92 files); line coverage
 96.1% (gate ≥95%); production `npm run build` + full `docker build` pass;
 built image live-smoke-tested (index no-cache + full security headers, SPA

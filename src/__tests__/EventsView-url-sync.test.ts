@@ -169,6 +169,33 @@ describe('EventsView — same-route URL sync (round 5 F3)', () => {
     expect(routeRef.query.trace_id).toBeUndefined()
   })
 
+  it('a stale in-flight load resolving AFTER a newer one is discarded (round 9 sequence guard)', async () => {
+    // This harness doesn't stub the virtualizer, so rows never render in
+    // jsdom — assert on the Load-more affordance instead: the stale R1
+    // carries has_more:true, so if it wrongly commits, the button appears.
+    const w = await mountView()
+    listEventsMock.mockClear()
+
+    // R1 = slow poll-style load; R2 = newer filtered load. R2 resolves
+    // first; R1 late — must not overwrite the newer committed state.
+    let resolveR1!: (v: unknown) => void
+    const r1 = new Promise((r) => { resolveR1 = r })
+    let calls = 0
+    listEventsMock.mockImplementation(() =>
+      calls++ === 0 ? r1 : Promise.resolve({ events: [], has_more: false }))
+
+    await w.find('form').trigger('submit')      // R1 in flight (slow)
+    routeRef.query = { search: 'abc' }          // newer load R2
+    await flushPromises()
+    expect(calls).toBeGreaterThanOrEqual(2)
+    expect(w.text()).not.toContain('Load more')
+
+    resolveR1({ events: [], has_more: true, next_cursor: 'cur-old' })
+    await flushPromises()
+    // Pre-guard, the stale R1 committed has_more=true here.
+    expect(w.text()).not.toContain('Load more')
+  })
+
   it('explicit form submit (Enter) with an UNCHANGED signature still reloads — the manual retry path', async () => {
     const w = await mountView()
     listEventsMock.mockClear()
