@@ -19,6 +19,15 @@ const AUTO_DISMISS_MS = 4000
 // as a soft overflow instead — it auto-dismisses in 4s, restoring the
 // cap, whereas evicting an unacknowledged error for a 4-second advisory
 // would silently vanish a failure.
+//
+// The eviction for an incoming ERROR must LOOP, not evict a single
+// toast: a soft-overflowed stack (5 errors + a transient) is above the
+// cap, and a single non-error eviction followed by the push converts
+// the overflow slot into a PERMANENT error (6 errors). Interleaved
+// (transient, error) pairs inside the 4s window then ratcheted the
+// persistent-error population unboundedly (6, 7, 8…). Evicting while
+// total >= cap (non-errors first, then oldest errors) restores the
+// invariant that errors can never exceed the cap.
 const MAX_TOASTS = 5
 
 let nextId = 0
@@ -34,17 +43,30 @@ export function useToast() {
   function show(message: string, type: Toast['type'] = 'success') {
     const id = nextId++
     // Evict BEFORE pushing so the incoming toast can never be its own
-    // eviction candidate. Oldest non-error first; on an all-error stack
-    // only an incoming ERROR evicts (oldest error) — a transient
-    // success/warning soft-overflows past the cap instead, since its
-    // own auto-dismiss restores the cap in 4s and unacknowledged errors
-    // must never be evicted by transients. See MAX_TOASTS above.
+    // eviction candidate. Incoming ERROR: evict oldest non-errors WHILE
+    // the stack is at/above the cap (a soft-overflowed stack sits above
+    // it — a single eviction would let the push ratchet the persistent
+    // error count past MAX_TOASTS, see the comment on the constant);
+    // if only errors remain and the stack is still at the cap, evict
+    // oldest errors until the push fits. Incoming transient: evict one
+    // oldest transient if any, else soft-overflow onto the all-error
+    // stack — its own auto-dismiss restores the cap in 4s, and
+    // unacknowledged errors must never be evicted by transients.
     if (toasts.value.length >= MAX_TOASTS) {
-      const evictIdx = toasts.value.findIndex(t => t.type !== 'error')
-      if (evictIdx !== -1) {
-        toasts.value = toasts.value.filter((_, i) => i !== evictIdx)
-      } else if (type === 'error') {
-        toasts.value = toasts.value.slice(1)
+      if (type === 'error') {
+        while (toasts.value.length >= MAX_TOASTS) {
+          const evictIdx = toasts.value.findIndex(t => t.type !== 'error')
+          if (evictIdx === -1) break
+          toasts.value = toasts.value.filter((_, i) => i !== evictIdx)
+        }
+        while (toasts.value.length >= MAX_TOASTS) {
+          toasts.value = toasts.value.slice(1)
+        }
+      } else {
+        const evictIdx = toasts.value.findIndex(t => t.type !== 'error')
+        if (evictIdx !== -1) {
+          toasts.value = toasts.value.filter((_, i) => i !== evictIdx)
+        }
       }
     }
     toasts.value.push({ id, message, type })

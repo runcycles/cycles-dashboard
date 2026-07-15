@@ -5,6 +5,7 @@ import { reactive } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '../stores/auth'
+import { toasts } from '../composables/useToast'
 import { ApiError } from '../api/client'
 
 const getEvidenceMock = vi.fn()
@@ -187,5 +188,47 @@ describe('EvidenceView', () => {
     await flushPromises()
     expect(w.text()).not.toContain('release envelope')
     expect(w.text()).toContain('No envelope loaded')
+  })
+
+  // Round 5 (F6): copyEnvelope rebuilt on the shared writeClipboardJson
+  // helper — success keeps the toast, failure uses the app-wide
+  // 'clipboard unavailable' copy instead of throwing hand-rolled.
+  it('Copy JSON copies the full envelope and toasts success', async () => {
+    routeRef.query = { id: HEX64 }
+    getEvidenceMock.mockResolvedValue(ENVELOPE)
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText }, writable: true, configurable: true,
+    })
+    toasts.value = []
+    const w = await mountView()
+
+    const btn = w.findAll('button').find(b => b.text() === 'Copy JSON')
+    expect(btn).toBeTruthy()
+    await btn!.trigger('click')
+    await flushPromises()
+
+    expect(writeText).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(writeText.mock.calls[0][0]).evidence_id).toBe(HEX64)
+    expect(toasts.value.some(t => t.type === 'success' && t.message === 'Envelope JSON copied')).toBe(true)
+    toasts.value = []
+  })
+
+  it('Copy JSON failure toasts the unified "Copy failed — clipboard unavailable"', async () => {
+    routeRef.query = { id: HEX64 }
+    getEvidenceMock.mockResolvedValue(ENVELOPE)
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
+      writable: true, configurable: true,
+    })
+    toasts.value = []
+    const w = await mountView()
+
+    const btn = w.findAll('button').find(b => b.text() === 'Copy JSON')
+    await btn!.trigger('click')
+    await flushPromises()
+
+    expect(toasts.value.some(t => t.type === 'error' && t.message === 'Copy failed — clipboard unavailable')).toBe(true)
+    toasts.value = []
   })
 })

@@ -11,6 +11,7 @@ import { useListExport } from '../composables/useListExport'
 import { listBudgets, lookupBudget, listTenants, listEvents, fundBudget, freezeBudget, unfreezeBudget, updateBudgetConfig, bulkActionBudgets, ApiError } from '../api/client'
 import { COMMIT_OVERAGE_POLICIES } from '../types'
 import { tenantFromScope, parsePositiveAmount } from '../utils/safe'
+import { stringParam } from '../utils/dateParam'
 import { useAuthStore } from '../stores/auth'
 import type { BudgetLedger, Tenant, Event, BudgetBulkAction, BudgetBulkFilter, BudgetBulkActionRequest, BudgetBulkActionResponse } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -51,7 +52,11 @@ const auth = useAuthStore()
 const canManage = computed(() => auth.capabilities?.manage_budgets !== false)
 
 const isDetail = computed(() => !!route.query.scope && !!route.query.unit)
-const activeFilter = computed(() => (route.query.filter as string) || '')
+// stringParam, not bare `as string` casts (here and below): a
+// duplicated param (?search=a&search=b) hydrates as an ARRAY and the
+// downstream string ops would misfire or throw — the normalizer takes
+// the first string element instead.
+const activeFilter = computed(() => stringParam(route.query.filter))
 const isCrossTenantFilter = computed(() => activeFilter.value === 'over_limit' || activeFilter.value === 'has_debt')
 
 const tenants = ref<Tenant[]>([])
@@ -59,7 +64,7 @@ const tenants = ref<Tenant[]>([])
 // "View budget" link land on the right tenant's budget list (per-row
 // triage from a bulk-action result → specific ledger row). Query key
 // is `tenant_id` for consistency with AuditView's filter deep-links.
-const selectedTenant = ref((route.query.tenant_id as string) || '')
+const selectedTenant = ref(stringParam(route.query.tenant_id))
 const budgets = ref<BudgetLedger[]>([])
 // P1-H3: gates the cold-load skeleton. Set true after the first
 // successful list fetch so EmptyState doesn't flash "No budgets found"
@@ -102,7 +107,7 @@ const detailEventsCursor = ref('')
 const detailEventsHasMore = ref(false)
 const detailEventsLoadingMore = ref(false)
 
-const filterStatus = ref((route.query.status as string) || '')
+const filterStatus = ref(stringParam(route.query.status))
 const filterUnit = ref('')
 const filterScope = ref('')
 
@@ -161,7 +166,7 @@ const filterUtilMax = ref<number | string>(parseUtilPct(route.query.utilization_
 // matches tenant_id + scope only (NOT ledger_id — verified against
 // BudgetListFilters.java#search), so the dialog passes the scope
 // label from labelById as the search term, not the opaque UUID.
-const search = ref((route.query.search as string) || '')
+const search = ref(stringParam(route.query.search))
 
 // V5 (Phase 3): debounced refs so filter auto-applies 300ms after
 // the operator stops typing. Pre-fix, the form relied on @change
@@ -257,8 +262,8 @@ async function loadList() {
 }
 
 async function loadDetail() {
-  const scope = route.query.scope as string
-  const unit = route.query.unit as string
+  const scope = stringParam(route.query.scope)
+  const unit = stringParam(route.query.unit)
   try {
     detail.value = await lookupBudget(scope, unit)
     detailEventsCursor.value = ''
@@ -277,7 +282,7 @@ async function loadDetail() {
 
 async function loadMoreDetailEvents() {
   if (!detailEventsCursor.value || detailEventsLoadingMore.value) return
-  const scope = route.query.scope as string
+  const scope = stringParam(route.query.scope)
   detailEventsLoadingMore.value = true
   try {
     const evRes = await listEvents({
@@ -1024,9 +1029,9 @@ watch(() => route.query, (q) => {
   // (e.g. /reservations?tenant_id=beta) — ignore query changes that
   // belong to another route.
   if (route.name !== 'budgets') return
-  const nextTenant = (q.tenant_id as string) || ''
+  const nextTenant = stringParam(q.tenant_id)
   if (nextTenant !== selectedTenant.value) selectedTenant.value = nextTenant
-  const nextSearch = (q.search as string) || ''
+  const nextSearch = stringParam(q.search)
   if (nextSearch !== search.value) search.value = nextSearch
   const nextUtilMin = parseUtilPct(q.utilization_min)
   if (nextUtilMin !== filterUtilMin.value) filterUtilMin.value = nextUtilMin

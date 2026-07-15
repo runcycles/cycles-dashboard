@@ -39,7 +39,7 @@ import SecretReveal from '../components/SecretReveal.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
-import { safeJsonStringify } from '../utils/safe'
+import { writeClipboardJson, writeClipboardText } from '../utils/clipboard'
 
 const toast = useToast()
 import { formatDateTime } from '../utils/format'
@@ -729,38 +729,27 @@ const deliveryGridTemplate = '100px 80px 72px 200px minmax(240px,1fr) 150px 40px
 // logs); Copy delivery ID / Copy event ID cover the 80% case where the
 // operator only needs the ID to paste elsewhere. Kebab auto-closes
 // on click so confirmation goes to the toast, not a label swap.
+// All four are built on the shared clipboard helpers (writeClipboardJson
+// for payloads, writeClipboardText for bare ids) with the app-wide
+// failure copy — 'clipboard unavailable' covers denied permission AND
+// insecure contexts / missing API, which the old hand-rolled
+// 'permission denied' wording misdiagnosed.
 async function copyDeliveryJson(d: WebhookDelivery) {
-  try {
-    await navigator.clipboard.writeText(safeJsonStringify(d))
-    toast.success('Delivery JSON copied')
-  } catch {
-    toast.error('Copy failed — clipboard permission denied')
-  }
+  if (await writeClipboardJson(d)) toast.success('Delivery JSON copied')
+  else toast.error('Copy failed — clipboard unavailable')
 }
 async function copySubscriptionJson() {
   if (!webhook.value) return
-  try {
-    await navigator.clipboard.writeText(safeJsonStringify(webhook.value))
-    toast.success('Subscription JSON copied')
-  } catch {
-    toast.error('Copy failed — clipboard permission denied')
-  }
+  if (await writeClipboardJson(webhook.value)) toast.success('Subscription JSON copied')
+  else toast.error('Copy failed — clipboard unavailable')
 }
 async function copyDeliveryId(d: WebhookDelivery) {
-  try {
-    await navigator.clipboard.writeText(d.delivery_id)
-    toast.success('Delivery ID copied')
-  } catch {
-    toast.error('Copy failed — clipboard permission denied')
-  }
+  if (await writeClipboardText(d.delivery_id)) toast.success('Delivery ID copied')
+  else toast.error('Copy failed — clipboard unavailable')
 }
 async function copyEventId(d: WebhookDelivery) {
-  try {
-    await navigator.clipboard.writeText(d.event_id)
-    toast.success('Event ID copied')
-  } catch {
-    toast.error('Copy failed — clipboard permission denied')
-  }
+  if (await writeClipboardText(d.event_id)) toast.success('Event ID copied')
+  else toast.error('Copy failed — clipboard unavailable')
 }
 function deliveryActions(d: WebhookDelivery) {
   return [

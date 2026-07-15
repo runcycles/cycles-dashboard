@@ -3,6 +3,7 @@ import { ref, computed, onUnmounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useRoute } from 'vue-router'
 import { sanitizeRedirect } from '../utils/sanitize'
+import { stringParam } from '../utils/dateParam'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -59,7 +60,9 @@ async function submit() {
       navigating = true
       failedAttempts.value = 0
       if (lockTimer) { clearInterval(lockTimer); lockTimer = null }
-      const redirect = (route.query.redirect as string) || '/'
+      // stringParam: a duplicated ?redirect= param arrives as an array;
+      // the bare cast handed that array to sanitizeRedirect/location.
+      const redirect = stringParam(route.query.redirect) || '/'
       const target = sanitizeRedirect(redirect, window.location.origin)
       // Use full page navigation to guarantee clean state — avoids stale
       // router query params (expired=1) and session checker race conditions

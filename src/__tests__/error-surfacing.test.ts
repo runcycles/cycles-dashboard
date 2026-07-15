@@ -126,15 +126,19 @@ vi.mock('@tanstack/vue-virtual', async () => {
   }
 })
 
-vi.mock('../composables/usePolling', () => ({
-  usePolling: (fn: () => Promise<void> | void) => {
-    void fn()
-    return {
-      refresh: async () => { void fn() },
-      isLoading: { value: false },
-    }
-  },
-}))
+vi.mock('../composables/usePolling', async () => {
+  const { ref } = await import('vue')
+  return {
+    usePolling: (fn: () => Promise<void> | void) => {
+      void fn()
+      return {
+        refresh: async () => { void fn() },
+        // Real ref — ApiKeysView edge-watches isLoading (round-5 F2).
+        isLoading: ref(false),
+      }
+    },
+  }
+})
 
 const FULL_CAPS: Capabilities = {
   view_overview: true, view_budgets: true, view_events: true,

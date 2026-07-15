@@ -26,7 +26,8 @@ import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
-import { writeClipboardJson } from '../utils/clipboard'
+import { writeClipboardJson, writeClipboardText } from '../utils/clipboard'
+import { stringParam } from '../utils/dateParam'
 import { filterExpiringKeys } from '../utils/expiringKeys'
 import { walkCursorPages, CURSOR_WALK_MAX_PAGES, LIST_PAGE_LIMIT } from '../utils/cursorWalk'
 import ExportDialog from '../components/ExportDialog.vue'
@@ -120,7 +121,12 @@ watch(expiringWithin7d, (v) => {
 // Overview "Expiring API keys" card links each key here via
 // ?search=<key_id>, which the server matches exactly (substring over
 // key_id + name), so the landing state shows the single matching key.
-const search = ref((route.query.search as string) || '')
+//
+// stringParam, not a bare `as string` cast: a duplicated param
+// (?search=a&search=b) hydrates as an ARRAY, and the downstream
+// `.toLowerCase()` / `.trim()` calls threw TypeError and blanked the
+// view. The normalizer takes the first string element instead.
+const search = ref(stringParam(route.query.search))
 const debouncedSearch = useDebouncedRef(search, 200)
 // URL → ref sync for ?search= (deep-links + back/forward when the
 // component stays mounted). The debouncedSearch watcher below then
@@ -133,7 +139,9 @@ watch(() => route.query.search, (v) => {
   // (e.g. /audit?search=…) — ignore query changes that belong to
   // another route.
   if (route.name !== 'api-keys') return
-  const next = typeof v === 'string' ? v : ''
+  // Same stringParam normalization as the ref init — a duplicated
+  // param must not clear (or crash) the filter on later URL changes.
+  const next = stringParam(v)
   if (next !== search.value) search.value = next
 })
 // Ref → URL write-back (piggybacks the existing 200ms search debounce)
@@ -178,7 +186,7 @@ async function executeRevoke() {
   try {
     await revokeApiKey(pendingRevoke.value.key_id, 'Revoked via admin dashboard')
     toast.success('API key revoked')
-    await refresh()
+    requestRefresh()
   } catch (e) {
     const msg = toMessage(e)
     error.value = msg
@@ -225,12 +233,8 @@ const editError = ref('')
 const editForm = ref({ name: '', permissions: [] as string[], scope_filter: '' })
 
 async function copyKeyId(id: string) {
-  try {
-    await navigator.clipboard.writeText(id)
-    toast.success('Key ID copied')
-  } catch {
-    toast.error('Copy failed — clipboard unavailable')
-  }
+  if (await writeClipboardText(id)) toast.success('Key ID copied')
+  else toast.error('Copy failed — clipboard unavailable')
 }
 
 async function copyApiKeyJson(k: KeyWithTenant) {
@@ -328,7 +332,7 @@ async function submitEdit() {
     await updateApiKey(original.key_id, body as any)
     toast.success('API key updated')
     editingKey.value = null
-    await refresh()
+    requestRefresh()
   } catch (e) { editError.value = toMessage(e) }
   finally { editLoading.value = false }
 }
@@ -366,7 +370,7 @@ const { sortKey, sortDir, toggle, sorted: columnSortedKeys } = useSort(
   'created_at',
   'desc',
   undefined,
-  { serverSide: true, onChange: () => { refresh() } },
+  { serverSide: true, onChange: () => { requestRefresh() } },
 )
 
 // v0.1.25.46: hide REVOKED + EXPIRED api keys by default. Both are
@@ -427,21 +431,53 @@ async function fetchKeysPage(cursor?: string, extraParams: Record<string, string
   }
 }
 
+// Walk gating (expiring-filter mode). The cursor walk spans up to 11
+// requests (tenants + 10 pages), so replaying it on EVERY 60s poll
+// tick — per open tab — hammered the admin API for data that changes
+// at human cadence (keys expire over days, not seconds). User-initiated
+// triggers (mode entry, manual refresh, sort/search/tenant change) arm
+// `forceWalk` via requestRefresh() and walk immediately; ambient
+// background ticks re-walk only every WALK_EVERY_N_TICKS-th tick
+// (~5 min at POLL_SLOW_MS) and otherwise skip the keys fetch entirely.
+const WALK_EVERY_N_TICKS = 5
+let forceWalk = false
+// Seeded at the threshold so the FIRST tick in walk mode (deep-link
+// mount with ?expiring_within_7d=1) always walks.
+let ticksSinceWalk = WALK_EVERY_N_TICKS
+
 const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
   try {
     const tRes = await listTenants()
     tenants.value = tRes.tenants
-    if (expiringWithin7d.value) {
+    // Capture the mode for this tick. Walk-mode ticks span up to 11
+    // requests — an operator can toggle the expiring chip (or press
+    // Back to a bare URL) mid-flight, and the settling fetch must NOT
+    // commit wrong-mode data (an ACTIVE-only walk presented as the
+    // full list, load-more gone — or a single page presented as the
+    // walked expiring set). The queued requestRefresh (see below)
+    // refetches under the new mode right after this tick settles;
+    // the commit-time check is the belt-and-suspenders half.
+    const tickMode = expiringWithin7d.value
+    if (tickMode) {
       // Expiring-filter mode: cursor-walk the ACTIVE set (the only
       // status filterExpiringKeys considers) so soon-expiring keys —
       // which sort LAST under the server's created_at-desc order —
       // aren't cut off by a single-page fetch. Server-side search /
       // sort / tenant params still apply per page via fetchKeysPage;
       // the walk replaces pagination, so load-more stays disabled.
+      ticksSinceWalk++
+      if (!forceWalk && ticksSinceWalk < WALK_EVERY_N_TICKS) {
+        // Ambient background tick between walk windows — keep the
+        // (cheap) tenants refresh above, skip the multi-page walk.
+        return
+      }
+      forceWalk = false
+      ticksSinceWalk = 0
       const walk = await walkCursorPages<KeyWithTenant>(async (cursor) => {
         const page = await fetchKeysPage(cursor || undefined, { status: 'ACTIVE' })
         return { items: page.keys, hasMore: page.hasMore, nextCursor: page.nextCursor }
       })
+      if (expiringWithin7d.value !== tickMode) return // mode flipped mid-walk — discard
       keys.value = walk.items
       expiringWalkPartial.value = walk.partial
       hasMore.value = false
@@ -451,8 +487,9 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
       // always refetches page 1 and drops any accumulated "Load more"
       // pages; tenants' key sets change infrequently enough that this
       // is the right trade-off (fresh data > accumulated scroll state).
-      expiringWalkPartial.value = false
       const first = await fetchKeysPage()
+      if (expiringWithin7d.value !== tickMode) return // mode flipped mid-fetch — discard
+      expiringWalkPartial.value = false
       keys.value = first.keys
       hasMore.value = first.hasMore
       nextCursor.value = first.nextCursor
@@ -461,6 +498,35 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
     initialLoadDone.value = true
   } catch (e) { error.value = toMessage(e) }
 }, POLL_SLOW_MS)
+
+// User-initiated refresh — every trigger below (manual header refresh,
+// expiring-mode toggle, tenant/search filter change, sort change,
+// post-mutation refetch) funnels through here so it (a) forces the
+// walk in expiring mode and (b) survives an in-flight tick.
+//
+// usePolling's refresh() is a documented no-op while a tick is in
+// flight (in-flight dedup — other views rely on it, so the composable
+// semantics stay untouched). Walk-mode ticks span up to 11 requests,
+// which turned a mid-walk toggle into a silent drop: wrong-mode data
+// stayed on screen for up to 60s (POLL_SLOW_MS). Same queued pattern
+// as OverviewView's pendingManualRefresh: set a pending flag while
+// loading; the isLoading true→false edge-watcher consumes it and
+// replays the refresh, with forceWalk still armed.
+const pendingRefresh = ref(false)
+function requestRefresh() {
+  forceWalk = true
+  if (isLoading.value) {
+    pendingRefresh.value = true
+    return
+  }
+  refresh()
+}
+watch(isLoading, (now, was) => {
+  if (was && !now && pendingRefresh.value) {
+    pendingRefresh.value = false
+    requestRefresh()
+  }
+})
 
 async function loadMore() {
   if (loadingMore.value || !nextCursor.value) return
@@ -475,16 +541,19 @@ async function loadMore() {
 }
 
 // Refresh on filter change so we restart page-1 scoped to the new tenant.
-watch(filterTenant, () => { refresh() })
+watch(filterTenant, () => { requestRefresh() })
 // Toggling the expiring filter switches fetch mode (single page ↔
 // cursor walk), so a refetch is required — the client-side filter
-// alone can't surface keys that were never loaded.
-watch(expiringWithin7d, () => { refresh() })
+// alone can't surface keys that were never loaded. requestRefresh, not
+// refresh: a toggle during an in-flight walk tick would otherwise be
+// silently dropped by the in-flight dedup, leaving wrong-mode data on
+// screen until the next slow poll tick.
+watch(expiringWithin7d, () => { requestRefresh() })
 // Refetch page 1 whenever the debounced search changes so the cursor
 // stays aligned with the server's (sort_by, sort_dir, search) tuple.
 // Same rationale as useSort's onChange — the opaque cursor is
 // filter-scoped, so carrying it across a filter change would 400.
-watch(debouncedSearch, () => { refresh() })
+watch(debouncedSearch, () => { requestRefresh() })
 
 // Export. ApiKeysView is a cross-tenant aggregation (no cursor
 // endpoint) — since the server now exposes cursor-paginated cross-tenant
@@ -609,7 +678,7 @@ onUnmounted(() => document.removeEventListener('keydown', onPermsViewerKeydown))
       :loaded="sortedKeys.length"
       :loading="isLoading"
       :last-updated-at="lastSuccessAt"
-      @refresh="refresh"
+      @refresh="requestRefresh"
     >
       <template #actions>
         <button @click="confirmExport('csv')" :disabled="sortedKeys.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
@@ -859,7 +928,7 @@ onUnmounted(() => document.removeEventListener('keydown', onPermsViewerKeydown))
     </FormDialog>
 
     <!-- Secret reveal after creation -->
-    <SecretReveal v-if="createdSecret" title="API Key Created" :secret="createdSecret.key_secret" label="API Key Secret" @close="createdSecret = null; refresh()" />
+    <SecretReveal v-if="createdSecret" title="API Key Created" :secret="createdSecret.key_secret" label="API Key Secret" @close="createdSecret = null; requestRefresh()" />
 
     <!-- Edit API Key dialog -->
     <FormDialog v-if="editingKey" title="Edit API Key" submit-label="Save Changes" :loading="editLoading" :error="editError" @submit="submitEdit" @cancel="editingKey = null">

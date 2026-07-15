@@ -159,6 +159,34 @@ validation: vue-tsc clean; 1,129/1,129 tests (93 files); line coverage
 96.13%; `docker compose -f docker-compose.prod.yml config` validated
 with the new memory knobs.
 
+**Review round 5** (whole-PR view, incl. round-4 fixes): 6 more findings,
+all fixed. Worst: a duplicated URL param (`?search=a&search=b`) hydrates
+as an ARRAY through vue-router, and the views' bare `as string` casts let
+it reach `.toLowerCase()` / `.trim()` — TypeError, blank view (new shared
+`stringParam` normalizer next to `dateParamOrEmpty`; swept ApiKeys /
+Events / Budgets / Audit / Login hydration + watcher sites); toggling the
+ApiKeys expiring filter mid-walk was silently dropped by usePolling's
+in-flight dedup AND a settling walk could commit ACTIVE-only data as the
+full list (queued-refresh pattern from Overview + commit-time mode check,
+belt and suspenders); EventsView's same-route watcher synced only the
+three correlation ids, so the `/event <id>` palette push never reached
+the search ref and a pre-set trace filter made the write-back strip
+`?search` from the URL (watcher now re-syncs every hydrated param,
+reset-style URL-authoritative, aligned with AuditView); the toast cap's
+single-eviction logic let interleaved (transient, error) pairs ratchet
+the persistent-error population past the cap — each soft-overflow slot
+converted into a permanent 6th/7th error (while-loop eviction: non-errors
+first, then oldest errors, until the push fits); the expiring-keys walk
+(up to 11 requests) replayed on EVERY 60s background tick per tab —
+user-initiated triggers still walk immediately, ambient ticks re-walk
+every 5th tick (~5 min; expiry changes at human cadence); clipboard
+consolidation finished — WebhookDetailView's four copy handlers +
+EvidenceView's `copyEnvelope` rebuilt on `writeClipboardJson` /
+`writeClipboardText` with the unified 'clipboard unavailable' failure
+copy (the old 'permission denied' wording misdiagnosed insecure
+contexts). Round-5 validation: vue-tsc clean; 1,155/1,155 tests
+(96 files); line coverage 96.16%.
+
 **Validation:** vue-tsc clean; 1,097/1,097 tests (92 files); line coverage
 96.1% (gate ≥95%); production `npm run build` + full `docker build` pass;
 built image live-smoke-tested (index no-cache + full security headers, SPA

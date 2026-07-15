@@ -27,7 +27,7 @@ import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 import { safeJsonStringify } from '../utils/safe'
 import { writeClipboardJson } from '../utils/clipboard'
-import { dateParamOrEmpty } from '../utils/dateParam'
+import { dateParamOrEmpty, stringParam } from '../utils/dateParam'
 import { hasBulkAuditShape } from '../utils/auditMetadata'
 
 const toast = useToast()
@@ -311,21 +311,25 @@ function hasDetail(_e: AuditLogEntry): boolean {
 const route = useRoute()
 const router = useRouter()
 function applyQueryParams() {
-  tenantId.value = route.query.tenant_id ? String(route.query.tenant_id) : ''
-  keyId.value = route.query.key_id ? String(route.query.key_id) : ''
-  operation.value = route.query.operation ? String(route.query.operation) : ''
-  resourceType.value = route.query.resource_type ? String(route.query.resource_type) : ''
-  resourceId.value = route.query.resource_id ? String(route.query.resource_id) : ''
-  search.value = route.query.search ? String(route.query.search) : ''
+  // stringParam, not String(v): a duplicated param arrives as an ARRAY
+  // and String() would join it ('a,b') — diverging from
+  // serializeRouteQuery below, which takes the first element for the
+  // self-write comparison. Normalize both the same way.
+  tenantId.value = stringParam(route.query.tenant_id)
+  keyId.value = stringParam(route.query.key_id)
+  operation.value = stringParam(route.query.operation)
+  resourceType.value = stringParam(route.query.resource_type)
+  resourceId.value = stringParam(route.query.resource_id)
+  search.value = stringParam(route.query.search)
   // v0.1.25.24: deep-links can pre-fill error_code / error_code_exclude
   // (both comma-lists) and status band. Used by OverviewView's Recent
   // Denials pill → /audit?error_code=X.
-  errorCode.value = route.query.error_code ? String(route.query.error_code) : ''
-  errorCodeExclude.value = route.query.error_code_exclude ? String(route.query.error_code_exclude) : ''
+  errorCode.value = stringParam(route.query.error_code)
+  errorCodeExclude.value = stringParam(route.query.error_code_exclude)
   // v0.1.25.39: trace_id + request_id deep-link. CorrelationIdChip pivots
   // from EventsView / WebhookDetailView land here via these params.
-  traceId.value = route.query.trace_id ? String(route.query.trace_id) : ''
-  requestId.value = route.query.request_id ? String(route.query.request_id) : ''
+  traceId.value = stringParam(route.query.trace_id)
+  requestId.value = stringParam(route.query.request_id)
   // from/to round-trip as raw datetime-local strings (same format
   // EventsView writes) — buildFilterParams normalizes to ISO at send.
   // Junk values (?from=lastweek) are dropped on hydration rather than

@@ -61,12 +61,16 @@ vi.mock('vue-router', async (importOriginal) => {
   }
 })
 
-vi.mock('../composables/usePolling', () => ({
-  usePolling: (fn: () => Promise<void> | void) => {
-    void fn()
-    return { refresh: async () => { void fn() }, isLoading: { value: false } }
-  },
-}))
+vi.mock('../composables/usePolling', async () => {
+  const { ref } = await import('vue')
+  return {
+    usePolling: (fn: () => Promise<void> | void) => {
+      void fn()
+      // Real ref — ApiKeysView edge-watches isLoading (round-5 F2).
+      return { refresh: async () => { void fn() }, isLoading: ref(false) }
+    },
+  }
+})
 
 vi.mock('../composables/useDebouncedRef', () => ({
   useDebouncedRef: <T>(source: { value: T }) => source,

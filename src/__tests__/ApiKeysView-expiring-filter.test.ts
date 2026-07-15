@@ -46,15 +46,19 @@ vi.mock('../composables/useDebouncedRef', () => ({
   useDebouncedRef: <T>(source: { value: T }) => source,
 }))
 
-vi.mock('../composables/usePolling', () => ({
-  usePolling: (fn: () => Promise<void> | void) => {
-    void fn()
-    return {
-      refresh: async () => { void fn() },
-      isLoading: { value: false },
-    }
-  },
-}))
+vi.mock('../composables/usePolling', async () => {
+  const { ref } = await import('vue')
+  return {
+    usePolling: (fn: () => Promise<void> | void) => {
+      void fn()
+      return {
+        refresh: async () => { void fn() },
+        // Real ref — ApiKeysView edge-watches isLoading (round-5 F2).
+        isLoading: ref(false),
+      }
+    },
+  }
+})
 
 vi.mock('@tanstack/vue-virtual', async () => {
   const { computed, isRef } = await import('vue')
@@ -227,6 +231,28 @@ describe('ApiKeysView — ?search= deep-link hydration (Overview expiring-key ro
     // …and the initial fetch is already scoped server-side.
     const firstCall = listApiKeysMock.mock.calls[0]?.[0] ?? {}
     expect(firstCall.search).toBe('key-soon')
+  })
+
+  // Round 5 (F1): a duplicated param (?search=a&search=b) hydrates as
+  // an ARRAY through vue-router. The old `as string` cast let the array
+  // reach `.toLowerCase()` (filteredKeys) and `.trim()` (fetchKeysPage)
+  // — TypeError, blank view. stringParam takes the first element.
+  it('mounts fine on a duplicated ?search param and uses the first value', async () => {
+    ;(routeQuery as Record<string, unknown>).search = ['key-soon', 'key-other']
+    listApiKeysMock.mockResolvedValue({
+      keys: [key('key-soon', { expires_at: in7d(3) })],
+      has_more: false,
+    })
+    const { default: ApiKeysView } = await import('../views/ApiKeysView.vue')
+    const w = mount(ApiKeysView, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
+    await flushPromises(); await flushPromises()
+
+    // No crash: the view rendered and the input holds the FIRST value.
+    expect((w.find('#keys-search').element as HTMLInputElement).value).toBe('key-soon')
+    // The fetch went out scoped to the first value, not the array.
+    const firstCall = listApiKeysMock.mock.calls[0]?.[0] ?? {}
+    expect(firstCall.search).toBe('key-soon')
+    expect(w.text()).toContain('key-soon')
   })
 
   it('client-side filter also applies, so the landing state shows only the match', async () => {

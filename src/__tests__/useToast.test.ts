@@ -217,6 +217,39 @@ describe('useToast', () => {
     expect(toasts.value.map(x => x.message)).toEqual(['err-0', 'err-1', 'err-2', 'err-3', 'done'])
   })
 
+  // F4 (round 5): the single-eviction cap logic let interleaved
+  // (transient, error) pairs inside the 4s window ratchet the
+  // persistent-error population past the cap — the incoming error
+  // evicted ONE transient from the soft-overflowed 6-stack and pushed,
+  // converting each overflow slot into a permanent 6th/7th/8th error.
+  it('an error arriving on a soft-overflowed stack (5 errors + success) stays at exactly 5 errors', () => {
+    const t = useToast()
+    for (let i = 0; i < 5; i++) t.error(`err-${i}`)
+    t.success('done') // soft overflow — 6 toasts
+    expect(toasts.value).toHaveLength(6)
+
+    t.error('err-new') // before the success auto-dismisses
+    expect(toasts.value).toHaveLength(5)
+    expect(toasts.value.every(x => x.type === 'error')).toBe(true)
+    // The transient went first; then the oldest error made room.
+    expect(toasts.value.map(x => x.message)).toEqual(['err-1', 'err-2', 'err-3', 'err-4', 'err-new'])
+  })
+
+  it('repeated (success, error) pairs within the dismiss window never grow the error population past the cap', () => {
+    const t = useToast()
+    for (let i = 0; i < 5; i++) t.error(`err-${i}`)
+    for (let i = 0; i < 4; i++) {
+      t.success(`ok-${i}`)
+      t.error(`late-${i}`)
+      const errors = toasts.value.filter(x => x.type === 'error')
+      expect(errors.length).toBeLessThanOrEqual(5)
+      expect(toasts.value.length).toBeLessThanOrEqual(5)
+    }
+    expect(toasts.value.filter(x => x.type === 'error')).toHaveLength(5)
+    // Newest failure always survives.
+    expect(toasts.value.at(-1)!.message).toBe('late-3')
+  })
+
   it('stack below the cap is untouched by the cap logic', () => {
     const t = useToast()
     for (let i = 0; i < 5; i++) t.error(`err-${i}`)

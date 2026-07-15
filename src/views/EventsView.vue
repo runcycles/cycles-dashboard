@@ -28,7 +28,7 @@ import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 import { safeJsonStringify } from '../utils/safe'
 import { writeClipboardJson } from '../utils/clipboard'
-import { dateParamOrEmpty } from '../utils/dateParam'
+import { dateParamOrEmpty, stringParam } from '../utils/dateParam'
 
 const route = useRoute()
 const router = useRouter()
@@ -104,23 +104,27 @@ async function copyEventJson(e: Event) {
   }
 }
 
-const category = ref((route.query.category as string) || '')
-const eventType = ref((route.query.type as string) || '')
-const tenantId = ref((route.query.tenant_id as string) || '')
-const scope = ref((route.query.scope as string) || '')
-const correlationId = ref((route.query.correlation_id as string) || '')
+// stringParam, not bare `as string` casts: a duplicated param
+// (?search=a&search=b) hydrates as an ARRAY and the downstream string
+// methods (`.trim()` in buildFilterParams) would throw and blank the
+// view. The normalizer takes the first string element instead.
+const category = ref(stringParam(route.query.category))
+const eventType = ref(stringParam(route.query.type))
+const tenantId = ref(stringParam(route.query.tenant_id))
+const scope = ref(stringParam(route.query.scope))
+const correlationId = ref(stringParam(route.query.correlation_id))
 // cycles-server-admin v0.1.25.31 / protocol v0.1.25.28: W3C Trace Context
 // cross-surface correlation. `trace_id` (32-hex) is auto-populated on
 // every HTTP-originated event; `request_id` is the per-request id.
 // Exact-match server-side filters on listEvents.
-const traceId = ref((route.query.trace_id as string) || '')
-const requestId = ref((route.query.request_id as string) || '')
+const traceId = ref(stringParam(route.query.trace_id))
+const requestId = ref(stringParam(route.query.request_id))
 // cycles-governance-admin v0.1.25.21: free-text `search` query param
 // on listEvents (case-insensitive substring match on correlation_id +
 // scope). Sits alongside the existing correlation_id and scope
 // exact/prefix filters for the case where the operator has only a
 // partial id. Debounced via the shared 300ms cadence.
-const search = ref((route.query.search as string) || '')
+const search = ref(stringParam(route.query.search))
 // Spec: listEvents accepts `from` / `to` as RFC 3339 date-time.
 // TimeRangePicker emits datetime-local strings (YYYY-MM-DDTHH:MM,
 // local tz) which the server normalizes — matches what AuditView
@@ -265,21 +269,47 @@ watch(debouncedSearch, () => applyFilters())
 watch(fromDate, () => applyFilters())
 watch(toDate, () => applyFilters())
 
-// Route-query watcher: CorrelationIdChip pivots that land on /events
-// with a different query (e.g. another EventsView row's request_id chip
-// click, or a back-nav) need to re-sync refs so the filter form reflects
-// the URL. Ref watchers above then fire applyFilters() → load(). The
-// router.replace inside applyFilters() becomes a no-op when the URL
-// already matches, so there's no loop.
+// Route-query watcher: same-route navigations — CorrelationIdChip
+// pivots, the `/event <id>` palette command (pushes ?search=…),
+// back/forward — update route.query without remounting, so the
+// setup-time hydration above doesn't re-run. Re-sync EVERY param the
+// view hydrates on mount, reset-style (URL-AUTHORITATIVE, matching
+// AuditView: param absent means filter cleared). Pre-fix only the
+// three correlation ids synced — a push to /events?search=abc while
+// mounted never reached the search ref, and if a trace filter was set
+// the watcher cleared it, so the debounced applyFilters rewrote the
+// URL from the refs and STRIPPED ?search entirely (the palette command
+// undid itself).
+//
+// Ref watchers above then fire applyFilters() → load(). Loop-safe
+// without AuditView's self-write marker: applyFilters builds the URL
+// from these same refs, so its own replace re-syncs every ref to the
+// value it already holds — no ref changes, no second applyFilters.
+// The one divergence is `search`, which applyFilters writes TRIMMED;
+// compare against the trimmed ref so the write-back can't clobber
+// in-progress typing (e.g. a trailing space) with the trimmed echo.
 watch(() => route.query, (q) => {
   // Route-identity guard: fires while navigating AWAY too (before
   // unmount), and a destination route can carry same-named params
   // (e.g. /audit?trace_id=…) — ignore query changes that belong to
   // another route.
   if (route.name !== 'events') return
-  if ((q.trace_id as string || '') !== traceId.value) traceId.value = (q.trace_id as string) || ''
-  if ((q.request_id as string || '') !== requestId.value) requestId.value = (q.request_id as string) || ''
-  if ((q.correlation_id as string || '') !== correlationId.value) correlationId.value = (q.correlation_id as string) || ''
+  const syncs: Array<[typeof category, string]> = [
+    [category, stringParam(q.category)],
+    [eventType, stringParam(q.type)],
+    [tenantId, stringParam(q.tenant_id)],
+    [scope, stringParam(q.scope)],
+    [correlationId, stringParam(q.correlation_id)],
+    [traceId, stringParam(q.trace_id)],
+    [requestId, stringParam(q.request_id)],
+    [fromDate, dateParamOrEmpty(q.from)],
+    [toDate, dateParamOrEmpty(q.to)],
+  ]
+  for (const [r, next] of syncs) {
+    if (next !== r.value) r.value = next
+  }
+  const nextSearch = stringParam(q.search)
+  if (nextSearch !== search.value.trim()) search.value = nextSearch
 })
 
 // Shared export (useListExport). CSV column spec + fetchPage adapter

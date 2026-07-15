@@ -28,6 +28,7 @@ import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import EmptyState from '../components/EmptyState.vue'
 import { formatDateTime } from '../utils/format'
 import { safeJsonStringify } from '../utils/safe'
+import { writeClipboardJson } from '../utils/clipboard'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 
@@ -162,12 +163,10 @@ async function resolveSigner() {
 
 async function copyEnvelope() {
   if (!envelope.value) return
-  try {
-    await navigator.clipboard.writeText(safeJsonStringify(envelope.value))
-    toast.success('Envelope JSON copied')
-  } catch {
-    toast.error('Copy failed — clipboard unavailable')
-  }
+  // Shared helper (same as every list view's Copy-as-JSON) — resolves
+  // false on denied permission / insecure context instead of throwing.
+  if (await writeClipboardJson(envelope.value)) toast.success('Envelope JSON copied')
+  else toast.error('Copy failed — clipboard unavailable')
 }
 
 onMounted(() => { if (evidenceId.value) fetchEvidence() })
