@@ -19,6 +19,16 @@ describe('build-time CSP import-map binding', () => {
     expect(rendered.output).not.toContain('__CSP_IMPORTMAP_HASH__')
   })
 
+  it('accepts valid whitespace before the script closing-tag delimiter', () => {
+    const content = '{"integrity":{"/assets/lazy.js":"sha384-value"}}'
+    const rendered = renderSecurityHeaders(
+      `<script type="importmap">${content}</script >`,
+      template,
+    )
+
+    expect(rendered.output).toContain(`'${rendered.cspSource}'`)
+  })
+
   it.each([
     ['no import map', '<script type="module" src="/assets/main.js"></script>'],
     ['multiple import maps', '<script type="importmap">{}</script><script type="importmap">{}</script>'],

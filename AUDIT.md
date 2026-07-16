@@ -46,6 +46,13 @@ build-specific source, `nginx -t` passed, and Chromium independently recomputed
 the served import-map hash, found it in CSP, rendered Login, and logged zero CSP
 violations (18 direct integrity attributes also present).
 
+**PR CodeQL follow-up.** The initial import-map extractor required the closing
+tag to be spelled exactly `</script>`, while HTML also permits whitespace before
+the delimiter (`</script >`). CodeQL correctly flagged the incomplete parser.
+The expression now accepts that whitespace and a regression test exercises the
+valid alternate spelling; extraction remains constrained to one inline
+`type="importmap"` script and fails closed otherwise.
+
 ### 2026-07-15 — v0.1.25.68: four-plane audit (spec ↔ server ↔ UI/UX ↔ ops) + fixes
 
 Full conformance audit of the dashboard against spec v0.1.25.41 (file

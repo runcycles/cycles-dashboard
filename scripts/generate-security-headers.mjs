@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 const CSP_HASH_PLACEHOLDER = '__CSP_IMPORTMAP_HASH__'
 
 export function renderSecurityHeaders(indexHtml, headerTemplate) {
-  const importMaps = [...indexHtml.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)]
+  const importMaps = [...indexHtml.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)]
     .filter(([, attributes]) => /\btype\s*=\s*(["'])importmap\1/i.test(attributes))
 
   if (importMaps.length !== 1) {
