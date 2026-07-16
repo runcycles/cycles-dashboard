@@ -208,6 +208,27 @@ dashboard image does not need to change for an admin-only version bump.
 
 ## Upgrades and rollback
 
+**Pinned server fleet (dashboard v0.1.25.68):** runtime `0.1.25.58`, admin
+`0.1.25.52`, events `0.1.25.24`. These are exact tags, not floating aliases.
+
+**Upgrading an existing fleet to the pinned versions.** Upgrade events before
+admin: admin `.51+` assumes the ownership boundary enforced by events `.23+`.
+Events `.24` also changes the internal members of `evidence:processing` from
+raw source JSON to claim IDs. If evidence signing is enabled, stop every older
+events replica and use the older workers to drain or recover
+`evidence:processing` before starting `.24`; records in `evidence:pending` may
+remain queued. Then deploy events `.24`, admin `.52`, and runtime `.58`:
+
+```bash
+docker compose -f docker-compose.prod.yml pull \
+  cycles-events cycles-admin cycles-server
+docker compose -f docker-compose.prod.yml up -d cycles-events
+docker compose -f docker-compose.prod.yml up -d cycles-admin cycles-server
+```
+
+Fresh deployments and fleets with evidence signing disabled have no
+`evidence:processing` migration and may bring up the pinned stack normally.
+
 **Admin-only bump.** Edit the `cycles-server-admin` image pin in
 `docker-compose.prod.yml`, then recycle just that service:
 

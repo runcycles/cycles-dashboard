@@ -391,7 +391,7 @@ services:
       - cycles
 
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.48
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.52
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
@@ -415,15 +415,15 @@ services:
       - cycles
 
   # Runtime plane — serves /v1/reservations, /v1/evidence, and the signer
-  # JWKS the dashboard's Reservations + Evidence views consume. Pinned to
-  # .37: .36+ surfaces reservation committed/finalized/metadata, .37+ adds
-  # the include=evidence projection (reservation->evidence links). Older
-  # versions degrade gracefully (fields omitted, no links). Evidence signing
+  # JWKS the dashboard's Reservations + Evidence views consume. The .58 pin
+  # includes the reservation/evidence surface plus current replay, pagination,
+  # recovery, and observability hardening. Older versions degrade gracefully
+  # (fields omitted, no links). Evidence signing
   # is not enabled by the default compose file; use docker-compose.override.yml
   # for the local demo identity, or set the CyclesEvidence env vars on both
   # cycles-server and cycles-events in your deployment.
   cycles-server:
-    image: ghcr.io/runcycles/cycles-server:0.1.25.46
+    image: ghcr.io/runcycles/cycles-server:0.1.25.58
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
@@ -447,10 +447,11 @@ services:
     networks:
       - cycles
 
-  # Webhook-delivery worker (consumes events from Redis, fans out to
-  # subscriber endpoints).
+  # Webhook-delivery worker. Existing evidence-enabled fleets upgrading to
+  # .24 must first drain evidence:processing with the old workers; see
+  # OPERATIONS.md. Fresh deployments require no migration.
   cycles-events:
-    image: ghcr.io/runcycles/cycles-server-events:0.1.25.22
+    image: ghcr.io/runcycles/cycles-server-events:0.1.25.24
     restart: unless-stopped
     environment:
       REDIS_HOST: redis

@@ -70,6 +70,14 @@ UX work that does not advance spec alignment.
 
 ### Changed
 
+- Docker deployments now pin the latest published server fleet as of
+  2026-07-16: `cycles-server` `0.1.25.46 → 0.1.25.58`,
+  `cycles-server-admin` `0.1.25.48 → 0.1.25.52`, and
+  `cycles-server-events` `0.1.25.22 → 0.1.25.24` in both development and
+  production Compose plus the README example. Existing evidence-enabled
+  fleets must drain/recover `evidence:processing` with their older workers
+  before starting events `.24`; OPERATIONS documents the ordered rollout.
+
 - Error toasts persist until dismissed (success toasts still auto-dismiss);
   all toasts have a dismiss button and are announced to screen readers. The
   stack is capped at 5 (oldest dropped), and advisory messages use a new
