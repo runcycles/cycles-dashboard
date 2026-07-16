@@ -1,6 +1,6 @@
 [![CI](https://github.com/runcycles/cycles-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/runcycles/cycles-dashboard/actions)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Spec](https://img.shields.io/badge/spec-v0.1.25.35-blue)](https://github.com/runcycles/cycles-protocol/blob/main/cycles-governance-admin-v0.1.25.yaml)
+[![Spec](https://img.shields.io/badge/spec-v0.1.25.41-blue)](https://github.com/runcycles/cycles-protocol/blob/main/cycles-governance-admin-v0.1.25.yaml)
 [![Vue](https://img.shields.io/badge/vue-3-brightgreen)](https://vuejs.org)
 [![TypeScript](https://img.shields.io/badge/typescript-strict-blue)](https://www.typescriptlang.org)
 
@@ -8,7 +8,7 @@
 
 **Operations-first admin dashboard for the Cycles AI agent governance platform — visualize tenant budgets, action-authority enforcement, reservations, and webhook delivery in real time.** Multi-tenant by default, designed around operator workflows for incident response, not CRUD entity lists.
 
-Pairs with the [Cycles Admin API](https://github.com/runcycles/cycles-server-admin) and the [Cycles Server](https://github.com/runcycles/cycles-server) to provide end-to-end observability into agent spend, risk, and tool action enforcement. Aligned with [governance spec v0.1.25.34](https://github.com/runcycles/cycles-protocol/blob/main/cycles-governance-admin-v0.1.25.yaml).
+Pairs with the [Cycles Admin API](https://github.com/runcycles/cycles-server-admin) and the [Cycles Server](https://github.com/runcycles/cycles-server) to provide end-to-end observability into agent spend, risk, and tool action enforcement. Aligned with [governance spec v0.1.25.41](https://github.com/runcycles/cycles-protocol/blob/main/cycles-governance-admin-v0.1.25.yaml).
 
 **Documentation:** [CHANGELOG](CHANGELOG.md) (downstream release notes) · [OPERATIONS](OPERATIONS.md) (production runbook) · [AUDIT](AUDIT.md) (engineering narrative).
 
@@ -43,8 +43,8 @@ Tier 1 incident-response actions available directly from the dashboard (capabili
 | **Unfreeze budget** | Budget detail | Re-enables normal operations |
 | **Create budget** | Budgets list, Tenant detail | Admin-on-behalf-of (dual-auth) — modal with ScopeBuilder + tenant selector |
 | **Adjust budget allocation** | Budget detail | Inline form — uses fund endpoint with RESET operation |
-| **Rollover billing period (RESET_SPENT)** | Budget detail → Fund → RESET_SPENT | Resets `spent` tally without touching `allocated`; optional exact-spent override (blank = zero). Requires cycles-server-admin v0.1.25.18+ |
-| **Bulk budget action (CREDIT / DEBIT / RESET / RESET_SPENT / REPAY_DEBT)** | Budgets list | Filter-apply — single tenant required (spec constraint); preview walk + expected_count gate + per-row result dialog for failed/skipped rows. Requires cycles-server-admin v0.1.25.29+ |
+| **Rollover billing period (RESET_SPENT)** | Budget detail → Fund → RESET_SPENT | Resets `spent` tally; optional exact-spent override (blank = zero). The raw operation sets `allocated = amount` — this single-budget flow preserves the allocation by passing the budget's current `allocated` for you. Requires cycles-server-admin v0.1.25.18+ |
+| **Bulk budget action (CREDIT / DEBIT / RESET / RESET_SPENT / REPAY_DEBT)** | Budgets list | Filter-apply — single tenant required (spec constraint); preview walk + expected_count gate + per-row result dialog for failed/skipped rows. **Bulk RESET / RESET_SPENT set every matched budget's `allocated` to the single amount given** (budgets with differing allocations are all overwritten — the form's hint spells this out); FROZEN budgets in the selection fail per-row. Requires cycles-server-admin v0.1.25.29+ |
 | **Emergency Freeze (tenant-wide)** | Tenant detail | Sequential freeze across all ACTIVE budgets — one-click lockdown with confirm + blast-radius summary |
 | **Create policy** | Policies tab (Tenant detail) | Admin-on-behalf-of — modal form, tenant-scoped |
 | **Edit policy** | Policies tab | Admin-on-behalf-of — patch policy_id, server resolves owning tenant |
@@ -369,7 +369,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.67
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.68
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]
@@ -391,7 +391,7 @@ services:
       - cycles
 
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.48
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.52
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
@@ -415,15 +415,15 @@ services:
       - cycles
 
   # Runtime plane — serves /v1/reservations, /v1/evidence, and the signer
-  # JWKS the dashboard's Reservations + Evidence views consume. Pinned to
-  # .37: .36+ surfaces reservation committed/finalized/metadata, .37+ adds
-  # the include=evidence projection (reservation->evidence links). Older
-  # versions degrade gracefully (fields omitted, no links). Evidence signing
+  # JWKS the dashboard's Reservations + Evidence views consume. The .58 pin
+  # includes the reservation/evidence surface plus current replay, pagination,
+  # recovery, and observability hardening. Older versions degrade gracefully
+  # (fields omitted, no links). Evidence signing
   # is not enabled by the default compose file; use docker-compose.override.yml
   # for the local demo identity, or set the CyclesEvidence env vars on both
   # cycles-server and cycles-events in your deployment.
   cycles-server:
-    image: ghcr.io/runcycles/cycles-server:0.1.25.46
+    image: ghcr.io/runcycles/cycles-server:0.1.25.58
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
@@ -447,10 +447,11 @@ services:
     networks:
       - cycles
 
-  # Webhook-delivery worker (consumes events from Redis, fans out to
-  # subscriber endpoints).
+  # Webhook-delivery worker. Existing evidence-enabled fleets upgrading to
+  # .24 must first drain evidence:processing with the old workers; see
+  # OPERATIONS.md. Fresh deployments require no migration.
   cycles-events:
-    image: ghcr.io/runcycles/cycles-server-events:0.1.25.22
+    image: ghcr.io/runcycles/cycles-server-events:0.1.25.24
     restart: unless-stopped
     environment:
       REDIS_HOST: redis

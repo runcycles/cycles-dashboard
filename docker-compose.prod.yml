@@ -7,8 +7,16 @@ x-logging: &default-logging
 services:
   caddy:
     logging: *default-logging
-    image: caddy:2-alpine
+    # Pinned to the current stable minor (floating 2-alpine could silently
+    # jump majors/minors). Bump deliberately.
+    image: caddy:2.11-alpine
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 256m
     ports:
       - "443:443"
       - "80:80"
@@ -23,8 +31,14 @@ services:
 
   dashboard:
     logging: *default-logging
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.67
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.68
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 256m
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]
       interval: 30s
@@ -49,18 +63,23 @@ services:
   cycles-server:
     logging: *default-logging
     # Runtime-plane server. Release cadence is independent of dashboard +
-    # cycles-server-admin. Pinned to .46 for dashboard 0.1.25.66: adds
-    # default-on 429 rate limiting on the public evidence/JWKS endpoints
-    # (anonymous surface only; dashboard traffic is far below the limit); it
-    # surfaces reservation committed/finalized/metadata, the include=
-    # projection on listReservations — including include=evidence, the
-    # reservation->evidence link — and serves /v1/evidence + the signer
-    # JWKS the Evidence view consumes. Older runtime servers still work —
-    # the dashboard degrades gracefully (fields omitted, 404 on evidence) —
-    # but the full Reservations/Evidence surface needs .37+. .38 also
-    # stops queuing evidence source records when evidence is unconfigured.
-    image: ghcr.io/runcycles/cycles-server:0.1.25.46
+    # cycles-server-admin. .58 is the latest published runtime release and
+    # rolls up reservation/evidence, replay, pagination, Redis recovery,
+    # scheduled-maintenance, and observability hardening through .58.
+    image: ghcr.io/runcycles/cycles-server:0.1.25.58
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    # The JVM sizes its heap as 75% of the *container* limit
+    # (MaxRAMPercentage below). Without a limit it sees the whole host and
+    # the two JVMs can overcommit it together. Env-parameterized so large
+    # fleets can raise it without editing this file — the 2g default
+    # (≈1.5g heap) suits small/mid fleets; see OPERATIONS.md "Memory
+    # limits" for sizing guidance.
+    deploy:
+      resources:
+        limits:
+          memory: ${CYCLES_SERVER_MEM_LIMIT:-2g}
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -87,16 +106,19 @@ services:
     logging: *default-logging
     # Event-dispatch / webhook delivery worker. Consumes events from
     # Redis and fans them out to registered webhook endpoints. Keep
-    # pinned to the version published alongside the current cycles-admin
-    # release — bump in lockstep with protocol revisions that affect
-    # WebhookDelivery. `.14` ("CyclesEvidence signing tier") adds the
-    # evidence-envelope signer (consumes evidence:pending) on top of the
-    # trace_id / trace_flags / traceparent_inbound_valid WebhookDelivery
-    # fields — needed for the Evidence viewer when evidence emission is on.
-    # `.15` gates the signer on evidence config (no dead-letter / failed-queue
-    # noise when unconfigured) + fixes a retention-scan WRONGTYPE error.
-    image: ghcr.io/runcycles/cycles-server-events:0.1.25.22
+    # pinned to the latest published worker. .24 adds owner-fenced dispatch,
+    # durable terminal transitions/outboxes, and hardened evidence signing.
+    # Evidence-enabled upgrades MUST follow OPERATIONS.md's .24 processing-
+    # list migration sequence before starting the new worker.
+    image: ghcr.io/runcycles/cycles-server-events:0.1.25.24
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    # See cycles-server note — env-parameterized, 2g default.
+    deploy:
+      resources:
+        limits:
+          memory: ${CYCLES_EVENTS_MEM_LIMIT:-2g}
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -119,8 +141,16 @@ services:
 
   cycles-admin:
     logging: *default-logging
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.48
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.52
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    # See cycles-server note — heap is sized off this limit.
+    # Env-parameterized, 2g default.
+    deploy:
+      resources:
+        limits:
+          memory: ${CYCLES_ADMIN_MEM_LIMIT:-2g}
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -146,11 +176,29 @@ services:
 
   redis:
     logging: *default-logging
-    image: redis:7-alpine
+    # Pinned to the current stable 7.x minor (floating 7-alpine could
+    # silently jump minors). Bump deliberately.
+    image: redis:7.4-alpine
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    # Keep REDIS_MAXMEMORY (dataset cap, below) comfortably under this
+    # cgroup limit — AOF rewrites and persistence forks need headroom
+    # beyond the dataset, and a cgroup-only limit ends in a kernel
+    # OOM-kill → AOF-replay crash loop that takes down all three planes.
+    # Defaults leave 256m of headroom.
+    deploy:
+      resources:
+        limits:
+          memory: ${REDIS_MEM_LIMIT:-768m}
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
-    command: ["sh", "-c", "redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD}\""]
+    # --maxmemory-policy noeviction: governance data (budgets, ledgers,
+    # audit) must never be silently evicted. Hitting the cap produces
+    # visible write errors (OOM command not allowed) the operators can
+    # act on, instead of Redis quietly dropping keys or the kernel
+    # OOM-killing the container.
+    command: ["sh", "-c", "redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-512mb} --maxmemory-policy noeviction --requirepass \"$${REDIS_PASSWORD}\""]
     volumes:
       - redis-data:/data
     healthcheck:

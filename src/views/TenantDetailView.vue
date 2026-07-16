@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
+import { useFocusTrap } from '../composables/useFocusTrap'
 import { POLL_SLOW_MS } from '../composables/pollingConstants'
 import { useTerminalAwareList } from '../composables/useTerminalAwareList'
 import { getTenant, listTenants, listBudgets, listApiKeys, listPolicies, listWebhooks, updateTenantStatus, updateTenant, revokeApiKey, createApiKey, updateApiKey, createBudget, createPolicy, updatePolicy, freezeBudget, ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { Tenant, BudgetLedger, ApiKey, Policy, WebhookSubscription, ApiKeyCreateResponse, BudgetCreateRequest, PolicyCreateRequest, PolicyUpdateRequest } from '../types'
-import { COMMIT_OVERAGE_POLICIES, PERMISSIONS, RESERVATION_EXPIRY_POLICIES } from '../types'
+import { COMMIT_OVERAGE_POLICIES, PERMISSIONS } from '../types'
 import PermissionPicker from '../components/PermissionPicker.vue'
 import PolicyAdvancedFields from '../components/PolicyAdvancedFields.vue'
 import {
@@ -28,6 +29,7 @@ import SecretReveal from '../components/SecretReveal.vue'
 import ScopeBuilder from '../components/ScopeBuilder.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { writeClipboardJson } from '../utils/clipboard'
+import { formatDateTime } from '../utils/format'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 import { isTerminalTenant, cascadePendingCounts, cascadeIsIncomplete } from '../utils/tenantStatus'
@@ -176,11 +178,65 @@ const childTenants = computed<Tenant[]>(() =>
 const pendingTenantAction = ref<'SUSPENDED' | 'ACTIVE' | 'CLOSED' | null>(null)
 const closeConfirmInput = ref('')
 
+// In-flight flag for the typed-confirmation CLOSE dialog. While the
+// PATCH is pending, both buttons are disabled and Escape / backdrop
+// are ignored (mirrors ConfirmAction's `loading` contract) — pre-fix
+// a double-click fired the PATCH twice and Cancel closed the dialog
+// mid-flight, hiding the outcome.
+const closeTenantLoading = ref(false)
+
+// A11y for the hand-rolled CLOSE dialog — parity with what
+// ConfirmAction gets from being a dedicated component. useFocusTrap
+// (which activates on closeDialogRef populate) owns the whole focus
+// contract: Tab cycling, initial focus (its first-focusable target IS
+// the typed-confirmation input — nothing focusable precedes it in the
+// dialog), and restoring focus to the trigger on close. Only the
+// document-level Escape (gated on in-flight) is added here — a second
+// manual save/restore alongside the trap ran a duplicate restore on
+// every close.
+const closeDialogRef = ref<HTMLElement | null>(null)
+useFocusTrap(closeDialogRef)
+function onCloseDialogKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') cancelCloseTenant()
+}
+function cancelCloseTenant() {
+  if (closeTenantLoading.value) return
+  pendingTenantAction.value = null
+  closeConfirmInput.value = ''
+}
+watch(() => pendingTenantAction.value === 'CLOSED', (open, was) => {
+  if (open && !was) {
+    document.addEventListener('keydown', onCloseDialogKeydown)
+  } else if (!open && was) {
+    document.removeEventListener('keydown', onCloseDialogKeydown)
+  }
+})
+onUnmounted(() => document.removeEventListener('keydown', onCloseDialogKeydown))
+
 async function executeTenantAction() {
   if (!pendingTenantAction.value) return
   const action = pendingTenantAction.value
+  // Double-submit guard for the CLOSE flow (defense in depth alongside
+  // the :disabled binding on the confirm button).
+  if (action === 'CLOSED') {
+    if (closeTenantLoading.value) return
+    closeTenantLoading.value = true
+  }
   try {
-    await updateTenantStatus(id, action)
+    // Keep mutation failures separate from the best-effort refresh below.
+    // The PATCH response is the authoritative new tenant state, so commit it
+    // immediately: if a follow-up GET fails, the UI must not keep offering
+    // actions that are no longer legal for the now-closed tenant.
+    try {
+      tenant.value = await updateTenantStatus(id, action)
+    } catch (e) {
+      const msg = toMessage(e)
+      error.value = msg
+      toast.error(`Tenant status change failed: ${msg}`)
+      return
+    }
+
+    error.value = ''
     const labels: Record<string, string> = { SUSPENDED: 'Tenant suspended', ACTIVE: 'Tenant reactivated', CLOSED: 'Tenant permanently closed' }
     toast.success(labels[action])
     // On CLOSE, refetch the cascade children alongside the tenant so
@@ -190,26 +246,38 @@ async function executeTenantAction() {
     // even when the cascade completed cleanly, since the stale refs
     // still showed ACTIVE/FROZEN children. Other actions (suspend/
     // reactivate) don't trigger cascade — tenant-only refetch suffices.
-    if (action === 'CLOSED') {
-      const [tRes, bRes, wRes, kRes] = await Promise.all([
-        getTenant(id),
-        listBudgets({ tenant_id: id }),
-        listWebhooks({ tenant_id: id }),
-        listApiKeys({ tenant_id: id }),
-      ])
-      tenant.value = tRes
-      budgets.value = bRes.ledgers
-      webhooks.value = wRes.subscriptions
-      apiKeys.value = kRes.keys
-    } else {
-      tenant.value = await getTenant(id)
+    try {
+      if (action === 'CLOSED') {
+        const results = await Promise.allSettled([
+          getTenant(id),
+          listBudgets({ tenant_id: id }),
+          listWebhooks({ tenant_id: id }),
+          listApiKeys({ tenant_id: id }),
+        ] as const)
+        const [tRes, bRes, wRes, kRes] = results
+        if (tRes.status === 'fulfilled') tenant.value = tRes.value
+        if (bRes.status === 'fulfilled') budgets.value = bRes.value.ledgers
+        if (wRes.status === 'fulfilled') webhooks.value = wRes.value.subscriptions
+        if (kRes.status === 'fulfilled') apiKeys.value = kRes.value.keys
+
+        // Preserve every successful sibling refresh, but still tell the
+        // operator that one of the post-mutation reads needs a retry.
+        const failed = results.find(result => result.status === 'rejected')
+        if (failed?.status === 'rejected') throw failed.reason
+      } else {
+        tenant.value = await getTenant(id)
+      }
+    } catch (e) {
+      const msg = toMessage(e)
+      error.value = `Tenant status changed, but refresh failed: ${msg}`
+      toast.warning(error.value)
     }
-  } catch (e) {
-    const msg = toMessage(e)
-    error.value = msg
-    toast.error(`Tenant status change failed: ${msg}`)
   }
-  finally { pendingTenantAction.value = null }
+  finally {
+    closeTenantLoading.value = false
+    pendingTenantAction.value = null
+    closeConfirmInput.value = ''
+  }
 }
 
 // API key revoke action
@@ -249,11 +317,14 @@ async function executeKeyRevoke() {
   finally { pendingKeyRevoke.value = null }
 }
 
-// Edit tenant
+// Edit tenant. No reservation_expiry_policy field — the spec's PATCH
+// body is additionalProperties:false and the policy is create-only
+// (TenantCreateRequest); the server would silently drop it (200 OK,
+// policy unchanged). The dialog shows it read-only instead.
 const showEditTenant = ref(false)
 const editTenantLoading = ref(false)
 const editTenantError = ref('')
-const editTenantForm = ref({ name: '', default_commit_overage_policy: '', default_reservation_ttl_ms: '', max_reservation_ttl_ms: '', max_reservation_extensions: '', reservation_expiry_policy: '' })
+const editTenantForm = ref({ name: '', default_commit_overage_policy: '', default_reservation_ttl_ms: '', max_reservation_ttl_ms: '', max_reservation_extensions: '' })
 
 function openEditTenant() {
   const t = tenant.value
@@ -263,7 +334,6 @@ function openEditTenant() {
     default_reservation_ttl_ms: t?.default_reservation_ttl_ms != null ? String(t.default_reservation_ttl_ms) : '',
     max_reservation_ttl_ms: t?.max_reservation_ttl_ms != null ? String(t.max_reservation_ttl_ms) : '',
     max_reservation_extensions: t?.max_reservation_extensions != null ? String(t.max_reservation_extensions) : '',
-    reservation_expiry_policy: t?.reservation_expiry_policy || '',
   }
   editTenantError.value = ''
   showEditTenant.value = true
@@ -281,7 +351,7 @@ async function submitEditTenant() {
     // coerces an entered 0 to the number 0 (falsy), and 0 is the natural
     // "disable extensions" value an operator must be able to set.
     if (String(editTenantForm.value.max_reservation_extensions).trim() !== '') body.max_reservation_extensions = Number(editTenantForm.value.max_reservation_extensions)
-    if (editTenantForm.value.reservation_expiry_policy) body.reservation_expiry_policy = editTenantForm.value.reservation_expiry_policy
+    // reservation_expiry_policy is never sent — create-only per spec.
     await updateTenant(id, body as any)
     toast.success('Tenant updated')
     tenant.value = await getTenant(id)
@@ -326,18 +396,9 @@ async function submitCreateKey() {
 const editingKey = ref<ApiKey | null>(null)
 const editKeyLoading = ref(false)
 const editKeyError = ref('')
-const editKeyForm = ref({ name: '', permissions: [] as string[], scope_filter: '', expires_at: '' })
-
-// ISO 8601 → datetime-local input value (local time, minute precision).
-// Mirrors ApiKeysView so the tenant-detail key editor can pre-fill the
-// expiry picker from a stored key.
-function keyIsoToLocalInput(iso: string | undefined): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return ''
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
+// No expires_at field — immutable per spec (revoke + recreate); shown
+// read-only in the dialog. Same rationale as ApiKeysView.
+const editKeyForm = ref({ name: '', permissions: [] as string[], scope_filter: '' })
 
 function openEditKey(k: ApiKey) {
   // Drop any stored permission that isn't in the canonical set — same
@@ -350,12 +411,12 @@ function openEditKey(k: ApiKey) {
     name: k.name || '',
     permissions: kept,
     scope_filter: k.scope_filter?.join(', ') || '',
-    expires_at: keyIsoToLocalInput(k.expires_at),
   }
   editKeyError.value = ''
   editingKey.value = k
   if (dropped.length) {
-    toast.error(`Unrecognized permissions will be removed on save: ${dropped.join(', ')}`)
+    // Advisory, not a failure — same rationale as ApiKeysView.openEdit.
+    toast.warning(`Unrecognized permissions will be removed on save: ${dropped.join(', ')}`)
   }
 }
 
@@ -398,14 +459,7 @@ async function submitEditKey() {
     if (!sameKeyStringSet(scopes, original.scope_filter)) {
       body.scope_filter = scopes
     }
-    // expires_at: compare the minute-precision input against the prefilled
-    // value (not regenerated-ISO vs original full ISO) so a rename-only save
-    // doesn't silently truncate the original's seconds. Only send on a real
-    // change; blank leaves the existing expiry unchanged. (Same fix as
-    // ApiKeysView.)
-    if (editKeyForm.value.expires_at && editKeyForm.value.expires_at !== keyIsoToLocalInput(original.expires_at)) {
-      body.expires_at = new Date(editKeyForm.value.expires_at).toISOString()
-    }
+    // expires_at is never sent — immutable per spec (revoke + recreate).
     if (Object.keys(body).length === 0) {
       editingKey.value = null
       return
@@ -887,6 +941,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
     } else {
       error.value = toMessage(e)
     }
+    return false
   }
 }, POLL_SLOW_MS)
 </script>
@@ -1150,8 +1205,8 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
     />
 
     <!-- Close tenant — requires typing tenant name -->
-    <div v-if="pendingTenantAction === 'CLOSED'" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50" @click.self="pendingTenantAction = null">
-      <div class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 max-w-md mx-4" role="dialog" aria-modal="true" aria-label="Close tenant permanently">
+    <div v-if="pendingTenantAction === 'CLOSED'" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 overflow-y-auto p-4 sm:p-8" @click.self="!closeTenantLoading && cancelCloseTenant()">
+      <div ref="closeDialogRef" class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto" role="dialog" aria-modal="true" aria-label="Close tenant permanently" :aria-busy="closeTenantLoading || undefined">
         <h3 class="text-sm font-semibold text-red-600 mb-2">Permanently close this tenant?</h3>
         <p class="text-sm text-gray-600 mb-3">This action is <strong>irreversible</strong>. Closing <strong>{{ tenant?.name || id }}</strong> cascades every owned object into its terminal state (spec v0.1.25.29 Rule 1):</p>
         <ul class="text-sm text-gray-600 list-disc pl-5 mb-3 space-y-0.5">
@@ -1161,10 +1216,14 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
         </ul>
         <p class="text-sm text-gray-600 mb-2">Afterwards, any mutation against these objects will return <code class="text-xs bg-gray-100 rounded px-1 py-0.5">TENANT_CLOSED</code> (409). There is no re-open path.</p>
         <p class="text-sm text-gray-600 mb-2">To confirm, type the tenant name below:</p>
-        <input v-model="closeConfirmInput" type="text" :placeholder="tenant?.name || id" class="form-input mb-4 font-mono" autocomplete="off" />
+        <input v-model="closeConfirmInput" type="text" :placeholder="tenant?.name || id" :disabled="closeTenantLoading" class="form-input mb-4 font-mono" autocomplete="off" aria-label="Type the tenant name to confirm" />
+        <!-- Visually-hidden wait announcement while the close PATCH is
+             in flight — both buttons are :disabled, so screen readers
+             need the state change surfaced (mirrors ConfirmAction). -->
+        <div aria-live="polite" class="sr-only">{{ closeTenantLoading ? 'Closing tenant, please wait' : '' }}</div>
         <div class="flex justify-end gap-2">
-          <button @click="pendingTenantAction = null; closeConfirmInput = ''" class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 rounded hover:bg-gray-100 cursor-pointer">Cancel</button>
-          <button @click="executeTenantAction(); closeConfirmInput = ''" :disabled="closeConfirmInput !== (tenant?.name || id)" class="px-3 py-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Close Permanently</button>
+          <button @click="cancelCloseTenant" :disabled="closeTenantLoading" class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 rounded hover:bg-gray-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Cancel</button>
+          <button @click="executeTenantAction()" :disabled="closeTenantLoading || closeConfirmInput !== (tenant?.name || id)" class="px-3 py-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">{{ closeTenantLoading ? 'Closing…' : 'Close Permanently' }}</button>
         </div>
       </div>
     </div>
@@ -1225,12 +1284,13 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
           <label for="et-max-ext" class="form-label">Max Reservation Extensions</label>
           <input id="et-max-ext" v-model="editTenantForm.max_reservation_extensions" type="number" min="0" step="1" class="form-input" placeholder="10" />
         </div>
-        <div>
-          <label for="et-expiry" class="form-label">Reservation Expiry Policy</label>
-          <select id="et-expiry" v-model="editTenantForm.reservation_expiry_policy" class="form-select w-full">
-            <option value="">Inherit / unchanged</option>
-            <option v-for="p in RESERVATION_EXPIRY_POLICIES" :key="p" :value="p">{{ p }}</option>
-          </select>
+        <!-- Read-only: reservation_expiry_policy is create-only per spec
+             (PATCH body is additionalProperties:false without it) — the
+             old select was a silent no-op the server dropped. -->
+        <div data-testid="tenant-expiry-policy-readonly">
+          <span class="form-label">Reservation Expiry Policy</span>
+          <p class="text-sm text-gray-700 dark:text-gray-200">{{ tenant?.reservation_expiry_policy || 'Inherit' }}</p>
+          <p class="muted-sm mt-0.5">Set at creation — cannot be changed on an existing tenant.</p>
         </div>
       </div>
     </FormDialog>
@@ -1295,10 +1355,13 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
         <label for="ek2-scope" class="form-label">Scope filter (comma-separated)</label>
         <input id="ek2-scope" v-model="editKeyForm.scope_filter" class="form-input-mono" />
       </div>
+      <!-- Expiry is read-only: immutable on PATCH per spec — the server
+           silently dropped the field pre-fix, making the old picker a
+           no-op. Same rationale as ApiKeysView's edit dialog. -->
       <div>
-        <label for="ek2-expires" class="form-label">Expires at</label>
-        <input id="ek2-expires" v-model="editKeyForm.expires_at" type="datetime-local" class="form-input" />
-        <p class="muted-sm mt-0.5">Leave unchanged to keep the current expiry. Clearing the field does not remove an existing expiry.</p>
+        <span class="form-label">Expires at</span>
+        <p class="text-sm text-gray-700 dark:text-gray-200">{{ editingKey.expires_at ? formatDateTime(editingKey.expires_at) : 'Never' }}</p>
+        <p class="muted-sm mt-0.5">Expiry is immutable — revoke and recreate the key to change it.</p>
       </div>
     </FormDialog>
 

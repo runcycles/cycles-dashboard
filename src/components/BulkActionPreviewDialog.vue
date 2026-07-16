@@ -39,6 +39,13 @@ const props = defineProps<{
   error?: string
   /** Submit error (after Confirm). Renders an inline alert. */
   submitError?: string
+  /**
+   * Advisory context (e.g. "N FROZEN rows will fail per-row"). Renders
+   * as an amber informational box (role="status"), visually distinct
+   * from the red submitError alert — a real submit failure must never
+   * compete with (or be replaced by) advisory context.
+   */
+  notice?: string
   /** True while the bulk-action POST is in flight after Confirm. Confirm spinner. */
   submitting: boolean
   /** Use red Confirm button styling for destructive actions (suspend, delete). */
@@ -78,12 +85,12 @@ const SERVER_MAX = props.serverMaxPerRequest ?? 500
 
 <template>
   <div
-    class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
+    class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 overflow-y-auto p-4 sm:p-8"
     @click.self="!submitting && $emit('cancel')"
   >
     <div
       ref="dialogRef"
-      class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 w-full max-w-md mx-4"
+      class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto"
       role="dialog"
       aria-modal="true"
       :aria-label="`${actionVerb} ${itemNounPlural} matching filter`"
@@ -163,6 +170,17 @@ const SERVER_MAX = props.serverMaxPerRequest ?? 500
       >
         Server applies bulk actions to a maximum of {{ SERVER_MAX }} {{ itemNounPlural }} per request.
         Narrow the filter before retrying.
+      </div>
+
+      <!-- Advisory notice — informational amber box (role="status"),
+           kept separate from the red submit-error alert below. -->
+      <div
+        v-if="notice"
+        role="status"
+        data-testid="bulk-preview-notice"
+        class="mb-3 px-3 py-2 rounded text-xs bg-amber-50 border border-amber-200 text-amber-800 dark:bg-amber-950 dark:border-amber-800 dark:text-amber-200"
+      >
+        {{ notice }}
       </div>
 
       <!-- Submit error (renders after Confirm) -->

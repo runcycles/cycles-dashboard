@@ -132,4 +132,41 @@ describe('AuditView — URL deep-link smoke', () => {
       expect(w.find('h1').exists()).toBe(true)
     })
   }
+
+  // Round 4 (F1): ?from/?to are operator-editable text. Pre-fix a junk
+  // value (?from=lastweek) hydrated straight into fromDate and
+  // buildFilterParams' new Date(v).toISOString() threw RangeError —
+  // error banner "Invalid time value", zero rows, no hint. Junk is now
+  // dropped on hydration (filter ignored, query still runs) and the
+  // conversion site is parse-guarded.
+  it('ignores an unparseable ?from and still runs the query without crashing', async () => {
+    routeRef.query = { from: 'lastweek', tenant_id: 'acme' }
+    const { default: AuditView } = await import('../views/AuditView.vue')
+    const w = mount(AuditView, stdMount())
+    await flushPromises()
+    expect(listAuditLogsMock).toHaveBeenCalled()
+    const params = listAuditLogsMock.mock.calls[0][0] as Record<string, string>
+    expect(params.from).toBeUndefined()
+    // Other params still apply — the junk date is dropped, not the query.
+    expect(params.tenant_id).toBe('acme')
+    expect(w.text()).not.toContain('Invalid time value')
+  })
+
+  it('ignores an unparseable ?to too', async () => {
+    routeRef.query = { to: 'not-a-date' }
+    const { default: AuditView } = await import('../views/AuditView.vue')
+    mount(AuditView, stdMount())
+    await flushPromises()
+    const params = listAuditLogsMock.mock.calls[0][0] as Record<string, string>
+    expect(params.to).toBeUndefined()
+  })
+
+  it('round-trips a valid ?from into the wire query as ISO 8601', async () => {
+    routeRef.query = { from: '2026-04-01T00:00' }
+    const { default: AuditView } = await import('../views/AuditView.vue')
+    mount(AuditView, stdMount())
+    await flushPromises()
+    const params = listAuditLogsMock.mock.calls[0][0] as Record<string, string>
+    expect(params.from).toBe(new Date('2026-04-01T00:00').toISOString())
+  })
 })

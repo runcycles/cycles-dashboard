@@ -55,8 +55,8 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
-  <div class="fixed inset-0 bg-black/40 flex items-center justify-center z-50" @click.self="!loading && $emit('cancel')">
-    <div ref="dialogRef" class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 max-w-sm mx-4" role="dialog" aria-modal="true" :aria-label="title" :aria-busy="loading || undefined">
+  <div class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 overflow-y-auto p-4 sm:p-8" @click.self="!loading && $emit('cancel')">
+    <div ref="dialogRef" class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 w-full max-w-sm max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain" role="dialog" aria-modal="true" :aria-label="title" :aria-busy="loading || undefined">
       <h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">{{ title }}</h3>
       <p class="text-sm text-gray-600 dark:text-gray-300 mb-4">{{ message }}</p>
       <div v-if="error" class="mb-4 px-3 py-2 rounded text-xs bg-red-50 border border-red-200 text-red-700 dark:bg-red-950 dark:border-red-800 dark:text-red-300" role="alert">{{ error }}</div>

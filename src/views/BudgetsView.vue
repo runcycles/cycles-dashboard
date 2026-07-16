@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
+import { POLLING_STALE } from '../composables/pollingResult'
 import { POLL_SLOW_MS } from '../composables/pollingConstants'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
@@ -11,6 +12,7 @@ import { useListExport } from '../composables/useListExport'
 import { listBudgets, lookupBudget, listTenants, listEvents, fundBudget, freezeBudget, unfreezeBudget, updateBudgetConfig, bulkActionBudgets, ApiError } from '../api/client'
 import { COMMIT_OVERAGE_POLICIES } from '../types'
 import { tenantFromScope, parsePositiveAmount } from '../utils/safe'
+import { stringParam } from '../utils/dateParam'
 import { useAuthStore } from '../stores/auth'
 import type { BudgetLedger, Tenant, Event, BudgetBulkAction, BudgetBulkFilter, BudgetBulkActionRequest, BudgetBulkActionResponse } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -19,6 +21,7 @@ import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
 import TenantLink from '../components/TenantLink.vue'
 import EmptyState from '../components/EmptyState.vue'
+import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import InlineErrorBanner from '../components/InlineErrorBanner.vue'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
@@ -50,7 +53,11 @@ const auth = useAuthStore()
 const canManage = computed(() => auth.capabilities?.manage_budgets !== false)
 
 const isDetail = computed(() => !!route.query.scope && !!route.query.unit)
-const activeFilter = computed(() => (route.query.filter as string) || '')
+// stringParam, not bare `as string` casts (here and below): a
+// duplicated param (?search=a&search=b) hydrates as an ARRAY and the
+// downstream string ops would misfire or throw — the normalizer takes
+// the first string element instead.
+const activeFilter = computed(() => stringParam(route.query.filter))
 const isCrossTenantFilter = computed(() => activeFilter.value === 'over_limit' || activeFilter.value === 'has_debt')
 
 const tenants = ref<Tenant[]>([])
@@ -58,8 +65,13 @@ const tenants = ref<Tenant[]>([])
 // "View budget" link land on the right tenant's budget list (per-row
 // triage from a bulk-action result → specific ledger row). Query key
 // is `tenant_id` for consistency with AuditView's filter deep-links.
-const selectedTenant = ref((route.query.tenant_id as string) || '')
+const selectedTenant = ref(stringParam(route.query.tenant_id))
 const budgets = ref<BudgetLedger[]>([])
+// P1-H3: gates the cold-load skeleton. Set true after the first
+// successful list fetch so EmptyState doesn't flash "No budgets found"
+// while the initial request is still in flight. Same pattern as
+// TenantsView / EventsView.
+const initialLoadDone = ref(false)
 const hasMore = ref(false)
 const nextCursor = ref('')
 const loadingMore = ref(false)
@@ -96,7 +108,7 @@ const detailEventsCursor = ref('')
 const detailEventsHasMore = ref(false)
 const detailEventsLoadingMore = ref(false)
 
-const filterStatus = ref((route.query.status as string) || '')
+const filterStatus = ref(stringParam(route.query.status))
 const filterUnit = ref('')
 const filterScope = ref('')
 
@@ -108,9 +120,11 @@ const filterScope = ref('')
 // auto-shows closed budgets even with the toggle off.
 const {
   includeTerminal,
+  showTerminal,
   visibleRows: sortedBudgets,
   terminalCount: hiddenTerminalCount,
   terminalVerb,
+  isTerminal: isTerminalBudget,
 } = useTerminalAwareList<BudgetLedger>({
   kind: 'budget',
   source: columnSortedBudgets,
@@ -155,7 +169,7 @@ const filterUtilMax = ref<number | string>(parseUtilPct(route.query.utilization_
 // matches tenant_id + scope only (NOT ledger_id — verified against
 // BudgetListFilters.java#search), so the dialog passes the scope
 // label from labelById as the search term, not the opaque UUID.
-const search = ref((route.query.search as string) || '')
+const search = ref(stringParam(route.query.search))
 
 // V5 (Phase 3): debounced refs so filter auto-applies 300ms after
 // the operator stops typing. Pre-fix, the form relied on @change
@@ -183,8 +197,10 @@ async function loadTenants() {
     const res = await listTenants()
     tenants.value = res.tenants
     tenantsError.value = ''
+    return true
   } catch (e) {
     tenantsError.value = `Could not load tenant list: ${toMessage(e)}`
+    return false
   }
 }
 
@@ -232,7 +248,17 @@ function buildListParams(extra: Record<string, string> = {}): Record<string, str
   return params
 }
 
+// Monotonic sequence guard for loadList. A same-route ?search navigation
+// (the /budget palette command) fires TWO staggered requests: the route
+// watcher calls loadList() while debouncedSearch still holds the stale
+// value (unfiltered R1), then the debouncedSearch watcher fires the
+// filtered R2 ~300ms later. Without sequencing, a slow R1 resolving
+// after R2 commits the UNFILTERED fleet over the filtered view while
+// the URL and search box claim ?search=… . Only the newest request may
+// commit; stale responses (results AND errors) are discarded.
+let listLoadSeq = 0
 async function loadList() {
+  const seq = ++listLoadSeq
   // Reset pagination state up-front. Without this, a filter change that
   // refetches page-1 still leaves the OLD nextCursor live; if the user
   // clicks "Load more" between the watcher firing and the fetch returning,
@@ -242,21 +268,41 @@ async function loadList() {
   hasMore.value = false
   try {
     const res = await listBudgets(buildListParams())
+    if (seq !== listLoadSeq) return POLLING_STALE // superseded by a newer load — discard
     budgets.value = res.ledgers
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
     error.value = ''
-  } catch (e) { error.value = toMessage(e) }
+    initialLoadDone.value = true
+    return true
+  } catch (e) {
+    if (seq !== listLoadSeq) return POLLING_STALE
+    error.value = toMessage(e)
+    return false
+  }
 }
 
+let detailLoadSeq = 0
 async function loadDetail() {
-  const scope = route.query.scope as string
-  const unit = route.query.unit as string
+  const seq = ++detailLoadSeq
+  const scope = stringParam(route.query.scope)
+  const unit = stringParam(route.query.unit)
+  const changedLedger = !detail.value || detail.value.scope !== scope || detail.value.unit !== unit
+  if (changedLedger) {
+    detail.value = null
+    detailEvents.value = []
+    detailEventsCursor.value = ''
+    detailEventsHasMore.value = false
+  }
+  detailEventsLoadingMore.value = false
   try {
-    detail.value = await lookupBudget(scope, unit)
+    const ledger = await lookupBudget(scope, unit)
+    if (seq !== detailLoadSeq) return POLLING_STALE
+    detail.value = ledger
     detailEventsCursor.value = ''
     detailEventsHasMore.value = false
     const evRes = await listEvents({ scope, limit: String(DETAIL_EVENTS_PAGE_SIZE) })
+    if (seq !== detailLoadSeq) return POLLING_STALE
     // Server already filters by scope via the query param but we also
     // filter client-side because listEvents' scope param is a prefix
     // match on some server versions; the precise-match belt-and-suspenders
@@ -265,25 +311,39 @@ async function loadDetail() {
     detailEventsHasMore.value = !!evRes.has_more
     detailEventsCursor.value = evRes.next_cursor ?? ''
     error.value = ''
-  } catch (e) { error.value = toMessage(e) }
+    return true
+  } catch (e) {
+    if (seq === detailLoadSeq) {
+      error.value = toMessage(e)
+      return false
+    }
+    return POLLING_STALE
+  }
 }
 
 async function loadMoreDetailEvents() {
   if (!detailEventsCursor.value || detailEventsLoadingMore.value) return
-  const scope = route.query.scope as string
+  const seq = detailLoadSeq
+  const scope = stringParam(route.query.scope)
+  const cursor = detailEventsCursor.value
   detailEventsLoadingMore.value = true
   try {
     const evRes = await listEvents({
       scope,
       limit: String(DETAIL_EVENTS_PAGE_SIZE),
-      cursor: detailEventsCursor.value,
+      cursor,
     })
+    if (seq !== detailLoadSeq) return
     const filtered = evRes.events.filter(e => e.scope === scope)
     detailEvents.value = [...detailEvents.value, ...filtered]
     detailEventsHasMore.value = !!evRes.has_more
     detailEventsCursor.value = evRes.next_cursor ?? ''
-  } catch (e) { error.value = toMessage(e) }
-  finally { detailEventsLoadingMore.value = false }
+  } catch (e) {
+    if (seq === detailLoadSeq) error.value = toMessage(e)
+  }
+  finally {
+    if (seq === detailLoadSeq) detailEventsLoadingMore.value = false
+  }
 }
 
 async function loadMore() {
@@ -303,8 +363,12 @@ function clearFilter() {
 }
 
 async function tick() {
-  if (isDetail.value) await loadDetail()
-  else { await loadTenants(); await loadList() }
+  if (isDetail.value) return loadDetail()
+  const tenantsLoaded = await loadTenants()
+  const budgetsLoaded = await loadList()
+  if (tenantsLoaded === false || budgetsLoaded === false) return false
+  if (budgetsLoaded === POLLING_STALE) return POLLING_STALE
+  return true
 }
 
 const { refresh, isLoading, lastSuccessAt } = usePolling(tick, POLL_SLOW_MS)
@@ -459,13 +523,13 @@ async function submitFund() {
   if (fundLoading.value) return // double-submit guard (defense in depth alongside :disabled)
   fundLoading.value = true
   try {
-    // Date.now() alone collides if the user double-clicks within the same
-    // millisecond. Mix in 64 bits of crypto randomness so each Execute is
-    // a distinct idempotency key and the server treats them as separate
-    // operations (or rejects the second as a true duplicate when intended).
-    const rand = crypto.getRandomValues(new Uint8Array(8))
-    const suffix = Array.from(rand, b => b.toString(16).padStart(2, '0')).join('')
-    const idempotencyKey = `dashboard-${fundForm.value.operation.toLowerCase()}-${target.scope}-${Date.now()}-${suffix}`
+    // UUID v4 via the shared helper — same as the bulk path. The prior
+    // `dashboard-{op}-{scope}-{ts}-{rand}` shape embedded the scope, and
+    // scope segments run up to 128 chars each, so deep scopes overflowed
+    // the server's 256-char idempotency-key cap → 400. A UUID is bounded,
+    // unique per Execute (double-clicks get distinct keys), and the
+    // server treats the key as opaque anyway.
+    const idempotencyKey = generateIdempotencyKey()
     await fundBudget(tenantId, target.scope, target.unit, fundForm.value.operation, amount, idempotencyKey, fundForm.value.reason || `${fundForm.value.operation} via admin dashboard`, spent)
     if (isDetail.value) await loadDetail()
     else await loadList()
@@ -533,21 +597,29 @@ const bulkSetupForm = ref<{ action: BudgetBulkAction; unit: string; amount: numb
 })
 const bulkSetupError = ref('')
 
-// Mirrors the single-row fundHints map so operators see the same
-// per-action copy in the bulk setup form as in the one-off Fund dialog.
+// Per-action copy for the bulk setup form. NOT a copy of the single-row
+// fundHints: bulk RESET / RESET_SPENT apply ONE amount to EVERY matched
+// budget (FUND_LUA runs `allocated = amount` before touching spent), so
+// budgets with differing allocations all get clobbered to the same value
+// — the hints must say so. Any FROZEN budget the filter matches is
+// rejected before dispatch and lands in failed[] per-row.
 const bulkActionHints: Record<BudgetBulkAction, string> = {
   CREDIT: 'Adds funds to each matching budget\'s allocated and remaining balance.',
   DEBIT: 'Removes funds from each matching budget. Rows whose remaining would go negative fail per-row with BUDGET_EXCEEDED.',
-  RESET: 'Sets each matching budget\'s allocated to the exact amount; remaining is recalculated.',
-  RESET_SPENT: 'Billing-period rollover — resets each matching budget\'s spent counter to the override (default 0). Allocated and reserved are preserved.',
+  RESET: 'Sets EVERY matching budget\'s allocated to this one amount — budgets with differing allocations are all overwritten to the same value. FROZEN budgets matched by the filter fail per-row; unfreeze first.',
+  RESET_SPENT: 'Billing-period rollover — sets EVERY matching budget\'s allocated to this one amount AND resets its spent counter to the override (default 0). Budgets with differing allocations are all overwritten to the same value; reserved and debt carry over. FROZEN budgets matched by the filter fail per-row; unfreeze first.',
   REPAY_DEBT: 'Reduces outstanding debt on each matching budget by this amount.',
 }
 
 // Per-action eligibility mirrors the single-row Fund action's server-side
 // behaviour: CREDIT / DEBIT / REPAY_DEBT require status==='ACTIVE', otherwise
 // the server would return INVALID_TRANSITION per-row. Client-side filtering
-// keeps the preview count honest. RESET / RESET_SPENT run against all
-// statuses — used for billing rollover that must touch FROZEN budgets too.
+// keeps the preview count honest. RESET / RESET_SPENT carry no status gate
+// because the server MATCHES them by filter regardless of status — but any
+// FROZEN row is still rejected per-row at dispatch (lands in failed[]).
+// Do NOT exclude FROZEN rows from the preview count here: the server's
+// total_matched includes them, so a filtered expected_count would trigger
+// COUNT_MISMATCH on every submit.
 function bulkActionEligibleStatus(action: BudgetBulkAction): string | null {
   if (action === 'CREDIT' || action === 'DEBIT' || action === 'REPAY_DEBT') return 'ACTIVE'
   return null
@@ -565,6 +637,19 @@ const filterBulkUnit = ref<string>('')
 const filterBulkReason = ref<string>('')
 const filterBulkRunning = ref(false)
 const filterBulkSubmitError = ref('')
+// FROZEN rows matched during the preview walk (only reachable for
+// RESET / RESET_SPENT — the other actions gate on ACTIVE in filterFn).
+// The server rejects each FROZEN row before dispatch, so these are
+// guaranteed per-row failures; surface the count in the preview dialog
+// so the operator isn't surprised by a partially-failed run. The rows
+// stay IN the preview count — excluding them would make expected_count
+// diverge from the server's total_matched and 409 COUNT_MISMATCH.
+const filterBulkFrozenCount = ref(0)
+const filterBulkFrozenWarning = computed<string>(() => {
+  const n = filterBulkFrozenCount.value
+  if (n === 0) return ''
+  return `${n} FROZEN budget${n === 1 ? '' : 's'} in this selection will fail per-row — unfreeze ${n === 1 ? 'it' : 'them'} first. ${n === 1 ? 'It is' : 'They are'} still included in the count above (the server matches by filter regardless of status).`
+})
 // Per-row result dialog — opens after submit iff failed[] or skipped[]
 // is non-empty.
 const bulkResult = ref<{
@@ -604,6 +689,9 @@ watch(
 // wrong filter). Re-running loadList resets nextCursor/hasMore
 // up-front and re-fetches page 1 under the new filter.
 watch(() => route.query.filter, () => {
+  // Route-identity guard: fires while navigating AWAY too (before
+  // unmount) — ignore query changes that belong to another route.
+  if (route.name !== 'budgets') return
   selected.value = new Set()
   if (!isDetail.value) void loadList()
 })
@@ -749,6 +837,10 @@ const filterBulkPreview = useBulkActionPreview<BudgetLedger>({
     if (!filterBulkAction.value) return false
     const required = bulkActionEligibleStatus(filterBulkAction.value)
     if (required && b.status !== required) return false
+    // Matched row that will still fail at dispatch — see
+    // filterBulkFrozenCount. Counted here (not excluded) so the
+    // preview count stays aligned with the server's total_matched.
+    if (b.status === 'FROZEN') filterBulkFrozenCount.value++
     return true
   },
   toSample: (b) => ({
@@ -797,10 +889,16 @@ function submitBulkSetup() {
   }
   // Spec v0.1.25.26: amount is required for ALL five actions including
   // RESET_SPENT (that action sets allocated to `amount`; `spent` is the
-  // optional counter override that defaults to 0).
+  // optional counter override that defaults to 0). Zero is legal for
+  // RESET / RESET_SPENT (server Amount is @Min(0); zero-allocation
+  // rollover mirrors the single-op RESET_SPENT path) but meaningless
+  // for CREDIT / DEBIT / REPAY_DEBT, which stay strictly positive.
+  const allowZero = action === 'RESET' || action === 'RESET_SPENT'
   const n = Number(bulkSetupForm.value.amount)
-  if (!Number.isFinite(n) || n <= 0) {
-    bulkSetupError.value = 'Amount must be a positive number'
+  if (!Number.isFinite(n) || (allowZero ? n < 0 : n <= 0)) {
+    bulkSetupError.value = allowZero
+      ? 'Amount must be zero or a positive number'
+      : 'Amount must be a positive number'
     return
   }
   filterBulkAmount.value = n
@@ -822,6 +920,8 @@ function submitBulkSetup() {
   filterBulkReason.value = bulkSetupForm.value.reason.trim()
   filterBulkAction.value = action
   filterBulkSubmitError.value = ''
+  // Fresh walk, fresh frozen tally — filterFn increments it per match.
+  filterBulkFrozenCount.value = 0
   showBulkSetup.value = false
   void filterBulkPreview.startPreview()
 }
@@ -866,6 +966,7 @@ function cancelFilterBulk() {
   filterBulkUnit.value = ''
   filterBulkReason.value = ''
   filterBulkSubmitError.value = ''
+  filterBulkFrozenCount.value = 0
 }
 
 async function executeFilterBulk() {
@@ -975,16 +1076,29 @@ watch(() => route.query, (q) => {
   // route with different query params — Vue Router keeps the component
   // mounted, so the setup-time hydration above doesn't re-run. Sync
   // the refs explicitly when URL-driven filters change.
-  const nextTenant = (q.tenant_id as string) || ''
+  // Route-identity guard: fires while navigating AWAY too (before
+  // unmount), and a destination route can carry same-named params
+  // (e.g. /reservations?tenant_id=beta) — ignore query changes that
+  // belong to another route.
+  if (route.name !== 'budgets') return
+  const nextTenant = stringParam(q.tenant_id)
   if (nextTenant !== selectedTenant.value) selectedTenant.value = nextTenant
-  const nextSearch = (q.search as string) || ''
+  const nextSearch = stringParam(q.search)
   if (nextSearch !== search.value) search.value = nextSearch
   const nextUtilMin = parseUtilPct(q.utilization_min)
   if (nextUtilMin !== filterUtilMin.value) filterUtilMin.value = nextUtilMin
   const nextUtilMax = parseUtilPct(q.utilization_max)
   if (nextUtilMax !== filterUtilMax.value) filterUtilMax.value = nextUtilMax
-  if (isDetail.value) loadDetail()
-  else loadList()
+  if (isDetail.value) {
+    loadDetail()
+  } else {
+    // A detail request may still be resolving while Back removes scope/unit.
+    // Invalidate it before loading the list so its late error/result cannot
+    // leak into the list shell after navigation.
+    detailLoadSeq++
+    detailEventsLoadingMore.value = false
+    loadList()
+  }
 })
 
 // V5 debounce auto-apply on text/numeric filter changes. All three
@@ -1021,6 +1135,9 @@ const {
     const res = await listBudgets(buildListParams({ cursor }))
     return { items: res.ledgers, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
   },
+  // Server-side params cover the explicit filters; terminal visibility is
+  // a local presentation rule and must be applied to every cursor page.
+  filterFn: b => showTerminal.value || !isTerminalBudget(b),
   columns: [
     { header: 'tenant_id',             value: b => b.tenant_id ?? '' },
     { header: 'scope',                 value: b => b.scope },
@@ -1192,6 +1309,26 @@ function rowTenantId(b: BudgetLedger): string {
       </div>
     </template>
 
+    <!-- Detail lookup in flight — the URL says detail mode but the
+         ledger hasn't resolved yet. Render a skeleton (mirrors
+         TenantDetailView's initial-loading state) instead of falling
+         through to the full list UI, which flashed the filter bar +
+         "No budgets found" for a beat before the detail card mounted. -->
+    <LoadingSkeleton
+      v-else-if="isDetail && !error"
+      data-testid="budget-detail-loading"
+    />
+
+    <!-- Keep detail failures in the detail shell. Falling through to the
+         list made the Budget Detail header sit above unrelated filters and
+         rows, which looked like a successful navigation to the wrong page. -->
+    <div v-else-if="isDetail" class="card p-6" data-testid="budget-detail-error-state">
+      <EmptyState
+        message="Budget details unavailable"
+        hint="Use Back to budgets to choose another ledger, or retry with the page refresh control."
+      />
+    </div>
+
     <!-- List mode. Wrap the list-mode subtree in its own flex-col so
          the virtualized table below can flex-fill without polluting
          the detail-mode (natural block flow) layout. -->
@@ -1308,11 +1445,15 @@ function rowTenantId(b: BudgetLedger): string {
            fall back to the document default 16px, break their grid
            column width, and overflow into neighbors. -->
       <div
-        class="bg-white rounded-lg shadow overflow-hidden text-sm flex-1 min-h-0 flex flex-col"
+        class="bg-white rounded-lg shadow overflow-x-auto overflow-y-hidden text-sm flex-1 min-h-0 flex flex-col"
         role="table"
         :aria-rowcount="sortedBudgets.length + 1"
         :aria-colcount="canManage ? 9 : 7"
       >
+        <div
+          :style="{ minWidth: canManage ? '1210px' : '1070px' }"
+          class="wide-table-canvas flex flex-col flex-1 min-h-0"
+        >
         <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
           <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
             <div v-if="canManage" role="columnheader" class="table-cell">
@@ -1333,7 +1474,7 @@ function rowTenantId(b: BudgetLedger): string {
           v-if="sortedBudgets.length > 0"
           ref="scrollEl"
           role="rowgroup"
-          class="flex-1 overflow-auto min-h-[240px]"
+          class="flex-1 overflow-y-auto overflow-x-hidden min-h-[240px]"
         >
           <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
             <div
@@ -1393,8 +1534,13 @@ function rowTenantId(b: BudgetLedger): string {
             </div>
           </div>
         </div>
+        </div>
 
-        <div v-else>
+        <!-- P1-H3: cold-load skeleton. -->
+        <div v-if="sortedBudgets.length === 0 && !initialLoadDone && !error" class="responsive-table-state px-4 py-6">
+          <LoadingSkeleton />
+        </div>
+        <div v-else-if="sortedBudgets.length === 0" class="responsive-table-state">
           <EmptyState message="No budgets found" :hint="!selectedTenant ? 'Select a tenant to view budgets' : undefined" />
         </div>
       </div>
@@ -1428,10 +1574,10 @@ function rowTenantId(b: BudgetLedger): string {
           v-if="canManage && selectedVisibleCount > 0"
           role="toolbar"
           aria-label="Bulk budget actions"
-          class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-gray-900 dark:border dark:border-gray-700 border-2 border-blue-400 shadow-2xl rounded-lg px-4 py-2.5 flex items-center gap-3 max-w-[90vw]"
+          class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-gray-900 dark:border dark:border-gray-700 border-2 border-blue-400 shadow-2xl rounded-lg px-4 py-2.5 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 max-w-[90vw]"
         >
           <span class="text-sm font-semibold text-blue-900 dark:text-blue-300 tabular-nums">{{ selectedVisibleCount }} selected</span>
-          <div class="w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
+          <div class="hidden sm:block w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
           <button @click="openBulkStatus('freeze')" class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer">Freeze</button>
           <button @click="openBulkStatus('unfreeze')" class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer">Unfreeze</button>
           <button
@@ -1627,6 +1773,7 @@ function rowTenantId(b: BudgetLedger): string {
       :reached-end="filterBulkPreview.reachedEnd.value"
       :error="filterBulkPreview.previewError.value"
       :submit-error="filterBulkSubmitError"
+      :notice="filterBulkFrozenWarning"
       :submitting="filterBulkRunning"
       :confirm-danger="filterBulkAction === 'DEBIT'"
       @confirm="executeFilterBulk"

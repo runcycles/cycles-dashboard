@@ -15,7 +15,100 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
-## [0.1.25.67] — 2026-07-04
+## [0.1.25.68] — 2026-07-15
+
+### Fixed
+
+- **API-key expiry is no longer editable** — the edit dialogs offered an
+  expiry picker, but `expires_at` is immutable per spec (the server silently
+  ignored it, so the edit was a no-op that reported success). Expiry now
+  shows read-only with a revoke-and-recreate hint. Same fix for the tenant
+  edit dialog's `reservation_expiry_policy` (create-only field).
+- **Bulk RESET / RESET_SPENT hints now state the real semantics**: the single
+  `amount` sets every matched budget's *allocated* to that value (it is not
+  preserved), and FROZEN budgets in the selection fail per-row (the preview
+  now warns with a count). Bulk `amount: 0` is accepted for RESET/RESET_SPENT
+  (zero-allocation rollover), matching the single-budget path.
+- **Overview counts are accurate on large fleets** — at-cap budgets, closed
+  tenants, failing webhooks, and expiring keys are now aggregated via cursor
+  walks (the server caps every list page at 100 rows; the old single-request
+  fetches silently under-counted). Cards show a "counts may be partial" note
+  if a walk exceeds 1,000 rows.
+- Overview → API keys expiring-key links now land pre-filtered (the old
+  `?key_id=` param was never read).
+- Deep budget scopes no longer 400 on Fund (idempotency key overflowed the
+  server's 256-char cap).
+- Stale `index.html` after deploys: the container now serves `index.html`
+  with `Cache-Control: no-cache` and hashed assets as `immutable`, preventing
+  the SRI-mismatch failure documented in OPERATIONS troubleshooting.
+- **List refresh and pagination ownership is race-safe.** Superseded page-one
+  requests no longer overwrite newer filter results or count as successful
+  polling ticks. Audit pagination and multi-page exports reuse the applied
+  filter tuple, so unsubmitted form edits cannot be paired with an old cursor.
+- Successful Webhooks filter and sort reloads now update the page freshness
+  timestamp immediately instead of waiting for the next background poll.
+
+### Added
+
+- Spec alignment moves `v0.1.25.35 → v0.1.25.41`: category-only webhook
+  subscriptions can be saved on edit (`.39` selector clearing), and
+  tenant-owned subscriptions gate out admin-only event types
+  (`api_key.*`/`policy.*`/`webhook.*`/`system.*`) per the `.38`/`.40`/`.41`
+  tenant-owned category boundary — matching what `.40+` servers reject.
+- API-keys table shows the `key_prefix` column (the visible secret prefix;
+  the key-id column is masked, so this is the correlation handle) and
+  includes it in exports.
+- Command palette: `/budget <query>` and `/res <tenant>` slash commands.
+- Audit view: filters persist to the URL (shareable queries) and the standard
+  refresh button renders in the header. URL-synced filters across list views
+  now treat the URL as authoritative: navigating to a bare URL (sidebar
+  click, browser Back) resets the synced filters; submitted filter state
+  stays one Back-press away in history.
+- gzip compression, `X-Forwarded-Proto`, JSON `502/503/504` error bodies for
+  `/v1/*`, and a tightened CSP in the container nginx config; HSTS +
+  `encode` in `Caddyfile.example`.
+
+### Changed
+
+- Docker deployments now pin the latest published server fleet as of
+  2026-07-16: `cycles-server` `0.1.25.46 → 0.1.25.58`,
+  `cycles-server-admin` `0.1.25.48 → 0.1.25.52`, and
+  `cycles-server-events` `0.1.25.22 → 0.1.25.24` in both development and
+  production Compose plus the README example. Existing evidence-enabled
+  fleets must drain/recover `evidence:processing` with their older workers
+  before starting events `.24`; OPERATIONS documents the ordered rollout.
+
+- Error toasts persist until dismissed (success toasts still auto-dismiss);
+  all toasts have a dismiss button and are announced to screen readers. The
+  stack is capped at 5 (oldest dropped), and advisory messages use a new
+  auto-dismissing amber warning style instead of red error toasts.
+- Dialogs can no longer be dismissed while a mutation is in flight
+  (Escape/backdrop/Cancel are gated — prevents duplicate submissions).
+- `StatusBadge` renders terminal-but-not-error states (`CLOSED`, `REVOKED`,
+  `EXPIRED`) in neutral gray; `FAILED` and webhook `DISABLED` (server
+  auto-disable after delivery failures) stay red.
+- Budgets/API-keys lists show loading skeletons instead of flashing
+  "No … found" on cold load.
+- Wide virtualized tables keep loading and empty states visible at viewport
+  width on phones while preserving aligned, horizontally scrollable headers
+  and data rows. Bulk-action toolbars wrap instead of clipping narrow screens.
+- Toasts use one live-region role each (`alert` for errors, `status` for
+  success/warnings), avoiding nested-live-region double announcements.
+- `nginx-ssl.conf.example` rewritten as a pure TLS terminator in front of the
+  container (the old example reproduced the documented `proxy_pass`
+  path-stripping regression and skipped the runtime plane entirely).
+- Dev compose binds all published ports to `127.0.0.1` (Redis was previously
+  reachable on all interfaces without a password); prod compose pins
+  `redis:7.4-alpine` / `caddy:2.11-alpine`, adds per-service memory limits
+  and `no-new-privileges`.
+- The Redis backup runbook now requires a short maintenance window: stop
+  writers, force a snapshot, stop Redis, then archive the AOF-backed volume.
+  This avoids capturing an AOF manifest during a concurrent rewrite.
+
+### Security
+
+- Release images are now published with SBOM + provenance attestations; the
+  shared CI workflow is SHA-pinned.
 
 ### Changed
 

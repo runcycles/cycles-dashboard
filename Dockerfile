@@ -26,6 +26,13 @@ COPY --from=build /app/dist /usr/share/nginx/html
 # ADMIN_UPSTREAM / RUNTIME_UPSTREAM placeholders below are filled while
 # nginx's own $host / $request_uri / $upstream variables are preserved.
 COPY default.conf.template /etc/nginx/templates/default.conf.template
+# Shared security-header include referenced by the rendered config. Placed
+# outside /etc/nginx/templates on purpose — it contains no substitutable
+# variables and must not go through envsubst.
+COPY security-headers.conf /etc/nginx/snippets/security-headers.conf
+# JSON body served for proxy 502/503/504 errors (error_page in the template)
+# so API callers never get nginx's HTML error page.
+COPY 50x.json /usr/share/nginx/html/50x.json
 # Default upstreams match the bundled docker-compose service names, so the
 # image works out of the box. Override either var at deploy time to point
 # the bundled proxy at different admin / runtime hosts without rebuilding.

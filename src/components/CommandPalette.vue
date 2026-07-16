@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter, type Router } from 'vue-router'
 import { useCommandPalette } from '../composables/useCommandPalette'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
+import { useFocusTrap } from '../composables/useFocusTrap'
 import type { Tenant } from '../types'
 import SearchIcon from './icons/SearchIcon.vue'
 
@@ -26,6 +27,8 @@ const router = useRouter()
 const { isOpen, close, loadInitial, loadMore } = useCommandPalette()
 
 const input = ref<HTMLInputElement | null>(null)
+const dialogRef = ref<HTMLElement | null>(null)
+useFocusTrap(dialogRef)
 const query = ref('')
 const debouncedQuery = useDebouncedRef(query, 150)
 const tenants = ref<Tenant[]>([])
@@ -40,10 +43,11 @@ const listboxId = 'command-palette-listbox'
 //
 // Each command's `execute` performs a router.push to the relevant
 // detail or pre-filtered list view. Filter routing relies on the
-// destination view reading the query param on mount (verified for
-// AuditView `key_id`/`search`, EventsView `search`); reservations
-// and budgets are intentionally omitted — those views don't yet
-// honor URL filters and would need their own change first.
+// destination view BOTH reading the query param on mount AND watching
+// route.query for same-route navigation (the push doesn't remount a
+// view the operator is already on). Verified for AuditView
+// `key_id`/`search`, EventsView `search`, BudgetsView `search`,
+// ReservationsView `tenant_id`.
 type CommandDef = {
   name: string
   aliases?: string[]
@@ -87,9 +91,27 @@ const COMMANDS: CommandDef[] = [
   {
     name: 'event',
     label: 'Search events',
-    argLabel: 'event_id',
-    help: 'Events list filtered by event_id substring.',
+    // listEvents `search` matches correlation_id + scope substrings ONLY
+    // (see EventsView's search input) — advertising event_id here sent
+    // operators to a guaranteed-empty list during triage.
+    argLabel: 'correlation_id or scope',
+    help: 'Events list filtered by correlation_id or scope substring.',
     execute: (id, r) => r.push({ name: 'events', query: { search: id } }),
+  },
+  {
+    name: 'budget',
+    label: 'Search budgets',
+    argLabel: 'tenant_id or scope',
+    help: 'Budgets list filtered by tenant_id or scope substring.',
+    execute: (q, r) => r.push({ name: 'budgets', query: { search: q } }),
+  },
+  {
+    name: 'res',
+    aliases: ['reservation'],
+    label: 'Open reservations for tenant',
+    argLabel: 'tenant_id',
+    help: 'Reservations list filtered to a tenant.',
+    execute: (id, r) => r.push({ name: 'reservations', query: { tenant_id: id } }),
   },
 ]
 
@@ -347,14 +369,15 @@ const placeholder = computed(() => {
         role="dialog"
         aria-modal="true"
         aria-labelledby="command-palette-title"
-        class="fixed inset-0 z-50 flex items-start justify-center pt-[15vh] px-4 bg-black/40"
+        class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:px-4 sm:pb-4 sm:pt-[15vh] bg-black/40"
         @click.self="close"
       >
         <div
-          class="w-full max-w-xl bg-white dark:bg-gray-900 rounded-lg shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
+          ref="dialogRef"
+          class="w-full max-w-xl max-h-[calc(100dvh-2rem)] sm:max-h-[calc(85dvh-1rem)] flex flex-col bg-white dark:bg-gray-900 rounded-lg shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
           @keydown="onKeydown"
         >
-          <div class="flex items-center gap-2 border-b border-gray-200 dark:border-gray-700 px-3">
+          <div class="flex items-center gap-2 shrink-0 border-b border-gray-200 dark:border-gray-700 px-3">
             <SearchIcon class="w-4 h-4 text-gray-400 shrink-0" />
             <label id="command-palette-title" class="sr-only" for="command-palette-input">Search tenants or run a command</label>
             <input
@@ -380,7 +403,7 @@ const placeholder = computed(() => {
             ref="listEl"
             role="listbox"
             aria-label="Command palette results"
-            class="max-h-80 overflow-y-auto overflow-x-hidden"
+            class="max-h-80 flex-1 min-h-0 overflow-y-auto overflow-x-hidden"
           >
             <!-- Tenant search mode (default) -->
             <template v-if="parsed.mode === 'search'">

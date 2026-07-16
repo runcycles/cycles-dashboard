@@ -1,13 +1,16 @@
-// Regression: a rename-only edit of an API key must NOT silently rewrite
-// expires_at. The datetime-local picker is minute-precision, so prefilling
-// a key expiring at 12:34:56Z and re-saving used to PATCH 12:34:00Z (seconds
-// truncated). The submit now diffs the input against the prefilled value and
-// only sends expires_at when the operator actually changed it.
+// expires_at is IMMUTABLE on PATCH per the admin spec (the body is
+// additionalProperties:false; "revoke and recreate" is the documented
+// path). The server's ApiKeyUpdateRequest has no expires_at field, so
+// the old edit-dialog expiry picker was a silent no-op — PATCH returned
+// 200 and the expiry never changed. These specs pin the fix: the edit
+// dialog shows expiry read-only with the immutability hint and NEVER
+// sends expires_at; the create dialog keeps its picker (the spec allows
+// expires_at at creation).
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '../stores/auth'
-import { updateApiKey } from '../api/client'
+import { updateApiKey, createApiKey } from '../api/client'
 import type { Capabilities } from '../types'
 
 const listApiKeysMock = vi.fn()
@@ -20,7 +23,7 @@ vi.mock('../api/client', async () => {
     listTenants: (...a: unknown[]) => listTenantsMock(...a),
     listApiKeys: (...a: unknown[]) => listApiKeysMock(...a),
     revokeApiKey: vi.fn(),
-    createApiKey: vi.fn(),
+    createApiKey: vi.fn().mockResolvedValue({ key_id: 'k-new', key_secret: 's3cret', key_prefix: 'ck_', tenant_id: 't-alpha', created_at: '2026-04-01T00:00:00Z' }),
     updateApiKey: vi.fn().mockResolvedValue({}),
   }
 })
@@ -35,12 +38,16 @@ vi.mock('vue-router', async (importOriginal) => {
   }
 })
 
-vi.mock('../composables/usePolling', () => ({
-  usePolling: (fn: () => Promise<void> | void) => {
-    void fn()
-    return { refresh: async () => { void fn() }, isLoading: { value: false } }
-  },
-}))
+vi.mock('../composables/usePolling', async () => {
+  const { ref } = await import('vue')
+  return {
+    usePolling: (fn: () => Promise<void> | void) => {
+      void fn()
+      // Real ref — ApiKeysView edge-watches isLoading (round-5 F2).
+      return { refresh: async () => { void fn() }, isLoading: ref(false) }
+    },
+  }
+})
 
 vi.mock('@tanstack/vue-virtual', async () => {
   const { computed, isRef } = await import('vue')
@@ -70,7 +77,7 @@ const FULL_CAPS: Capabilities = {
 const KEY = {
   key_id: 'k1', tenant_id: 't-alpha', name: 'orig', status: 'ACTIVE',
   permissions: [] as string[], created_at: '2026-04-01T00:00:00Z',
-  expires_at: '2027-01-01T12:34:56.000Z', // note the :56 seconds
+  expires_at: '2027-01-01T12:34:56.000Z',
 }
 
 function stdMount() {
@@ -87,7 +94,7 @@ async function openEditDialog(w: ReturnType<typeof mount>) {
   await flushPromises()
 }
 
-describe('ApiKeysView — edit does not silently rewrite expiry', () => {
+describe('ApiKeysView — expiry is immutable on edit (revoke and recreate)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     const auth = useAuthStore()
@@ -96,11 +103,37 @@ describe('ApiKeysView — edit does not silently rewrite expiry', () => {
     listApiKeysMock.mockReset()
     listTenantsMock.mockReset()
     vi.mocked(updateApiKey).mockClear()
+    vi.mocked(createApiKey).mockClear()
     listTenantsMock.mockResolvedValue({ tenants: [{ tenant_id: 't-alpha', name: 'Alpha', status: 'ACTIVE', created_at: '2026-04-01T00:00:00Z' }] })
     listApiKeysMock.mockResolvedValue({ keys: [KEY], has_more: false })
   })
 
-  it('rename-only save omits expires_at (no second-truncation)', async () => {
+  it('edit dialog renders NO expiry input — expiry is read-only with the immutability hint', async () => {
+    const { default: ApiKeysView } = await import('../views/ApiKeysView.vue')
+    const w = mount(ApiKeysView, stdMount())
+    await flushPromises(); await flushPromises()
+
+    await openEditDialog(w)
+    const dialog = w.get('[aria-label="Edit API Key"]')
+    // Old picker gone.
+    expect(dialog.find('#ek-expires').exists()).toBe(false)
+    expect(dialog.find('input[type="datetime-local"]').exists()).toBe(false)
+    // Read-only display + hint present.
+    expect(dialog.text()).toContain('Expires at')
+    expect(dialog.text()).toContain('Expiry is immutable — revoke and recreate the key to change it.')
+  })
+
+  it('edit dialog shows "Never" for keys without an expiry', async () => {
+    listApiKeysMock.mockResolvedValue({ keys: [{ ...KEY, expires_at: undefined }], has_more: false })
+    const { default: ApiKeysView } = await import('../views/ApiKeysView.vue')
+    const w = mount(ApiKeysView, stdMount())
+    await flushPromises(); await flushPromises()
+
+    await openEditDialog(w)
+    expect(w.get('[aria-label="Edit API Key"]').text()).toContain('Never')
+  })
+
+  it('rename save PATCHes only the name — expires_at is never sent', async () => {
     const { default: ApiKeysView } = await import('../views/ApiKeysView.vue')
     const w = mount(ApiKeysView, stdMount())
     await flushPromises(); await flushPromises()
@@ -116,17 +149,39 @@ describe('ApiKeysView — edit does not silently rewrite expiry', () => {
     expect('expires_at' in body).toBe(false)
   })
 
-  it('sends expires_at only when the picker is actually changed', async () => {
+  it('scope_filter save also omits expires_at', async () => {
     const { default: ApiKeysView } = await import('../views/ApiKeysView.vue')
     const w = mount(ApiKeysView, stdMount())
     await flushPromises(); await flushPromises()
 
     await openEditDialog(w)
-    await w.find('#ek-expires').setValue('2028-02-02T09:00')
+    await w.find('#ek-scope').setValue('tenant:t-alpha/*')
     await w.get('[aria-label="Edit API Key"] form').trigger('submit')
     await flushPromises()
 
     const body = vi.mocked(updateApiKey).mock.calls[0][1] as Record<string, unknown>
+    expect(body.scope_filter).toEqual(['tenant:t-alpha/*'])
+    expect('expires_at' in body).toBe(false)
+  })
+
+  it('CREATE dialog keeps the expiry picker and sends expires_at (spec allows it at creation)', async () => {
+    const { default: ApiKeysView } = await import('../views/ApiKeysView.vue')
+    const w = mount(ApiKeysView, stdMount())
+    await flushPromises(); await flushPromises()
+
+    const createBtn = w.findAll('button').find(b => b.text() === 'Create API Key')!
+    await createBtn.trigger('click')
+    await flushPromises()
+
+    const expires = w.find('#ck-expires')
+    expect(expires.exists()).toBe(true)
+    await w.find('#ck-name').setValue('new-key')
+    await expires.setValue('2028-02-02T09:00')
+    await w.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(createApiKey).toHaveBeenCalledTimes(1)
+    const body = vi.mocked(createApiKey).mock.calls[0][0] as unknown as Record<string, unknown>
     expect(body.expires_at).toBe(new Date('2028-02-02T09:00').toISOString())
   })
 })

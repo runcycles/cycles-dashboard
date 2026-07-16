@@ -423,6 +423,12 @@ export const bulkActionBudgets = (body: import('../types').BudgetBulkActionReque
 // the budget's current allocated for a pure rollover. The server only reads
 // `spent` when operation === 'RESET_SPENT'; for all other operations it's
 // omitted from the body so we don't send payload the server would ignore.
+//
+// v0.1.25.41 catch-up: the response is the spec's BudgetFundingResponse
+// (§BudgetFundingResponse, lines 986-1016) — a before/after delta of the
+// funding operation — NOT the full BudgetLedger this wrapper previously
+// claimed. Callers that need the updated ledger must refetch it (the one
+// call site, BudgetsView.submitFund, already reloads the list/detail).
 export function fundBudget(
   tenantId: string,
   scope: string,
@@ -432,13 +438,13 @@ export function fundBudget(
   idempotencyKey: string,
   reason?: string,
   spent?: number,
-): Promise<import('../types').BudgetLedger> {
+): Promise<import('../types').BudgetFundingResponse> {
   const body: Record<string, unknown> = { operation, amount: { unit, amount }, idempotency_key: idempotencyKey }
   if (reason) body.reason = reason
   if (operation === 'RESET_SPENT' && typeof spent === 'number') {
     body.spent = { unit, amount: spent }
   }
-  return post<import('../types').BudgetLedger>(`${BASE}/admin/budgets/fund`, body, { tenant_id: tenantId, scope, unit })
+  return post<import('../types').BudgetFundingResponse>(`${BASE}/admin/budgets/fund`, body, { tenant_id: tenantId, scope, unit })
 }
 
 // Webhook — rotate signing secret (generate cryptographically strong secret).

@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import CorrelationIdChip from '../components/CorrelationIdChip.vue'
+import { toasts } from '../composables/useToast'
 
 function makeRouter() {
   return createRouter({
@@ -37,6 +38,7 @@ async function mountChip(props: {
 
 describe('CorrelationIdChip', () => {
   beforeEach(() => {
+    toasts.value = []
     Object.assign(navigator, {
       clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
     })
@@ -118,12 +120,16 @@ describe('CorrelationIdChip', () => {
     expect(parentHandler).not.toHaveBeenCalled()
   })
 
-  it('silently no-ops when navigator.clipboard is missing (insecure context)', async () => {
+  it('reports when navigator.clipboard is missing (insecure context)', async () => {
     // Simulate clipboard unavailable (e.g. http:// dev preview).
     Object.assign(navigator, { clipboard: undefined })
     const { w } = await mountChip({ kind: 'trace', value: 'abc'.repeat(10) + 'de', pivot: 'events' })
-    // Should not throw.
     await w.find('button[aria-label^="Copy trace id"]').trigger('click')
+    await flushPromises()
+    expect(toasts.value.at(-1)).toMatchObject({
+      type: 'error',
+      message: 'Copy failed — clipboard unavailable',
+    })
     // And the chip still pivots normally.
     await w.find('button[aria-label^="Filter by trace id"]').trigger('click')
   })

@@ -16,6 +16,7 @@ import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { usePolling } from '../composables/usePolling'
+import { POLLING_STALE } from '../composables/pollingResult'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { POLL_FAST_MS } from '../composables/pollingConstants'
 import { useSort } from '../composables/useSort'
@@ -42,6 +43,7 @@ import { formatDateTime, formatRelative } from '../utils/format'
 import { safeJsonStringify } from '../utils/safe'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
+import { stringParam } from '../utils/dateParam'
 
 const toast = useToast()
 const route = useRoute()
@@ -66,8 +68,7 @@ const tenants = ref<Tenant[]>([])
 // through to the first-ACTIVE-tenant default below when the URL has
 // no tenant_id.
 const tenantFromQuery = (): string => {
-  const q = route.query.tenant_id
-  return typeof q === 'string' ? q : ''
+  return stringParam(route.query.tenant_id)
 }
 const tenantFilter = ref(tenantFromQuery())
 // Accept ?status= from the URL so Overview-style drill-downs and shared
@@ -75,13 +76,24 @@ const tenantFilter = ref(tenantFromQuery())
 // invalid (the operationally-interesting default — active reservations
 // past grace are the "stuck" ones that ops force-releases).
 const statusFromQuery = computed<string | null>(() => {
-  const s = route.query.status
-  if (typeof s !== 'string') return null
+  const s = stringParam(route.query.status)
+  if (!s) return null
   return (RESERVATION_STATUSES as readonly string[]).includes(s) ? s : null
 })
 const statusFilter = ref<string>(statusFromQuery.value ?? 'ACTIVE')
+// URL-AUTHORITATIVE FILTER (deliberate — do not flip back): param
+// present → adopt it; param ABSENT (or invalid) → reset to the 'ACTIVE'
+// default a fresh bare-URL mount picks, so Back to a bare /reservations
+// entry clears a deep-linked status instead of keeping stale filtered
+// data on a bare URL (same convention as the ?tenant_id watcher below).
 watch(statusFromQuery, s => {
-  if (s && statusFilter.value !== s) statusFilter.value = s
+  // Route-identity guard: this watcher also fires while navigating AWAY
+  // (before unmount), and a destination route can carry its own ?status
+  // (e.g. /webhooks?status=PAUSED) — ignore query changes that belong to
+  // another route.
+  if (route.name !== 'reservations') return
+  const next = s ?? 'ACTIVE'
+  if (statusFilter.value !== next) statusFilter.value = next
 })
 
 // ─── Advanced filters (protocol additive surface) ───────────────────
@@ -221,17 +233,25 @@ const { sortKey, sortDir, toggle, sorted: sortedReservations } = useSort(
   { serverSide: true, onChange: () => { loadReservations() } },
 )
 
+// Default tenant — the first ACTIVE tenant, falling back to the first
+// tenant of any status ('' while tenants haven't loaded). Suspended and
+// closed tenants typically have no live reservations, so defaulting to
+// one renders an empty table that looks broken. Shared by loadTenants'
+// first-render default AND the URL-watcher's param-removed branch below
+// so a bare /reservations always means the SAME scope — pre-fix, Back
+// to bare cleared the filter while a reload of the same bare URL
+// auto-selected the default: one URL, two states.
+function defaultTenantId(): string {
+  if (tenants.value.length === 0) return ''
+  const firstActive = tenants.value.find((t) => t.status === 'ACTIVE')
+  return (firstActive ?? tenants.value[0]).tenant_id
+}
+
 async function loadTenants() {
   try {
     const res = await listTenants()
     tenants.value = res.tenants
-    // Default the tenant filter to the first ACTIVE tenant so the view
-    // has something to show on first render. Suspended/closed tenants
-    // typically have no live reservations — picking one by accident
-    // renders an empty table that looks broken. Fall back to the
-    // first tenant of any status if none are ACTIVE.
-    //
-    // Skip this default when `?tenant_id=` pre-selected one already
+    // Skip the default when `?tenant_id=` pre-selected one already
     // (M14). Also validate that a URL-supplied tenant actually exists
     // in the list; an outdated/malformed link otherwise silently holds
     // the dropdown on a non-existent value.
@@ -239,23 +259,39 @@ async function loadTenants() {
       const found = tenants.value.some(t => t.tenant_id === tenantFilter.value)
       if (!found && tenants.value.length > 0) {
         // URL tenant doesn't exist — drop to the default and clear the
-        // stale query param so reloading doesn't resurrect it.
+        // stale query param so reloading doesn't resurrect it (the
+        // tenantFilter write-back below stamps the corrected value).
+        // Warn so the silent fallback is explainable — same message the
+        // ?tenant_id watcher shows for a mid-session unknown id.
+        toast.warning(`Unknown tenant id: ${tenantFilter.value}`)
         tenantFilter.value = ''
       }
     }
-    if (!tenantFilter.value && tenants.value.length > 0) {
-      const firstActive = tenants.value.find((t) => t.status === 'ACTIVE')
-      tenantFilter.value = (firstActive ?? tenants.value[0]).tenant_id
+    if (!tenantFilter.value) {
+      tenantFilter.value = defaultTenantId()
     }
-  } catch (e) { error.value = toMessage(e) }
+    return true
+  } catch (e) {
+    error.value = toMessage(e)
+    return false
+  }
 }
 
+// One generation owns the complete visible reservation result set. Polls,
+// URL-driven tenant changes, filters, sort changes, and load-more requests
+// can overlap; only work started under the latest generation may commit.
+let listGeneration = 0
 async function loadReservations() {
-  if (!tenantFilter.value) {
+  const generation = ++listGeneration
+  const tenantId = tenantFilter.value
+  // A page-one refresh invalidates any in-flight load-more immediately.
+  loadingMore.value = false
+  if (!tenantId) {
     reservations.value = []
     hasMore.value = false
     nextCursor.value = ''
-    return
+    loadingList.value = false
+    return true
   }
   loadingList.value = true
   // Reset pagination state up-front — same rationale as BudgetsView:
@@ -271,17 +307,28 @@ async function loadReservations() {
       sort_by: sortKey.value || undefined,
       sort_dir: sortKey.value ? sortDir.value : undefined,
     }
-    const res = await listReservations(tenantFilter.value, params)
+    const res = await listReservations(tenantId, params)
+    if (generation !== listGeneration) return POLLING_STALE
     reservations.value = res.reservations
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
     error.value = ''
-  } catch (e) { error.value = toMessage(e) }
-  finally { loadingList.value = false }
+    return true
+  } catch (e) {
+    if (generation !== listGeneration) return POLLING_STALE
+    error.value = toMessage(e)
+    return false
+  }
+  finally {
+    if (generation === listGeneration) loadingList.value = false
+  }
 }
 
 async function loadMore() {
   if (!nextCursor.value || loadingMore.value || !tenantFilter.value) return
+  const generation = listGeneration
+  const tenantId = tenantFilter.value
+  const cursor = nextCursor.value
   loadingMore.value = true
   try {
     // Pass the same filter + sort tuple the server validates against the
@@ -292,17 +339,22 @@ async function loadMore() {
     const params: ListReservationsParams = {
       ...buildFilterParams(),
       limit: PAGE_SIZE,
-      cursor: nextCursor.value,
+      cursor,
       sort_by: sortKey.value || undefined,
       sort_dir: sortKey.value ? sortDir.value : undefined,
     }
-    const res = await listReservations(tenantFilter.value, params)
+    const res = await listReservations(tenantId, params)
+    if (generation !== listGeneration) return
     reservations.value = [...reservations.value, ...res.reservations]
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
     error.value = ''
-  } catch (e) { error.value = toMessage(e) }
-  finally { loadingMore.value = false }
+  } catch (e) {
+    if (generation === listGeneration) error.value = toMessage(e)
+  }
+  finally {
+    if (generation === listGeneration) loadingMore.value = false
+  }
 }
 
 // Export. Server-side filter (tenant + status) — the fetchPage passes
@@ -367,12 +419,68 @@ watch([
 ], () => { loadReservations() })
 watch(debouncedSubjectKey, () => { loadReservations() })
 
+// URL → ref sync for ?tenant_id= while mounted (the setup-time read
+// above only covers first mount). Same-route navigation — the /res
+// palette command, browser back/forward — updates route.query without
+// remounting, so without this watch the command was a no-op when the
+// operator was already on Reservations.
+//
+// URL-AUTHORITATIVE FILTER (deliberate — do not flip back): the URL is
+// the single source of truth for the synced ?tenant_id filter, per the
+// GitHub/Linear list-view convention. Param present and different →
+// adopt it; param ABSENT → bare URL means DEFAULT TENANT, the same
+// scope loadTenants picks on a fresh mount of the bare URL (pre-fix
+// this branch cleared the filter, so Back-to-bare and reload-of-bare
+// produced two different states for the same URL). The write-back
+// below then stamps ?tenant_id=<default> back onto the URL — replace,
+// no history entry — which is fine: the canonical form of "default
+// scope" is the explicit param. If tenants haven't loaded yet,
+// defaultTenantId() is '' (clears the filter) and the mount flow's
+// loadTenants picks the default once the list lands. The tenantFilter
+// watcher above refetches on either change; the write-back is
+// loop-safe (it skips when URL and ref already agree).
+watch(() => route.query.tenant_id, (v) => {
+  // Route-identity guard: this watcher also fires while navigating AWAY
+  // (before unmount), and a destination route can carry its own
+  // ?tenant_id (e.g. /budgets?tenant_id=beta) — ignore query changes
+  // that belong to another route.
+  if (route.name !== 'reservations') return
+  const nextTenantId = stringParam(v)
+  if (nextTenantId) {
+    // Validate against the loaded tenant list — mirrors loadTenants'
+    // mount-path validation. A palette typo ('/res acme-typo') or an
+    // outdated link otherwise blanks the dropdown, 404s the fetch, and
+    // stamps the junk param into the URL. Don't adopt: keep the current
+    // (valid) filter, correct the URL back to it (the tenantFilter
+    // write-back below can't fire because the ref doesn't change), and
+    // tell the operator why nothing happened. If tenants haven't loaded
+    // yet, adopt provisionally — loadTenants validates once they land.
+    if (tenants.value.length > 0 && !tenants.value.some(t => t.tenant_id === nextTenantId)) {
+      toast.warning(`Unknown tenant id: ${nextTenantId}`)
+      router.replace({
+        query: {
+          ...route.query,
+          tenant_id: tenantFilter.value || undefined,
+        },
+      })
+      return
+    }
+    if (nextTenantId !== tenantFilter.value) tenantFilter.value = nextTenantId
+  } else {
+    const next = defaultTenantId()
+    if (tenantFilter.value !== next) tenantFilter.value = next
+  }
+})
+
 // M14: keep the URL in sync with tenantFilter so the filtered view is
 // shareable. `replace` (not push) — filter changes shouldn't clutter
 // history; deep links + browser-back still restore the correct scope.
+// Compare against '' (not undefined) for the absent param so clearing
+// the filter when the URL is already bare is a no-op — keeps the
+// URL → ref watcher above from ping-ponging with this write-back.
 watch(tenantFilter, (tenantId) => {
-  const current = typeof route.query.tenant_id === 'string' ? route.query.tenant_id : undefined
-  if (current === tenantId) return
+  const current = stringParam(route.query.tenant_id)
+  if (current === (tenantId || '')) return
   router.replace({
     query: {
       ...route.query,
@@ -382,11 +490,11 @@ watch(tenantFilter, (tenantId) => {
 })
 
 const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
-  try {
-    if (tenants.value.length === 0) await loadTenants()
-    await loadReservations()
-    error.value = ''
-  } catch (e) { error.value = toMessage(e) }
+  if (tenants.value.length === 0) {
+    const tenantsLoaded = await loadTenants()
+    if (!tenantsLoaded) return false
+  }
+  return loadReservations()
 }, POLL_FAST_MS)
 
 // ─── Force-release flow ─────────────────────────────────────────────
@@ -701,11 +809,15 @@ const gridTemplate = computed(() =>
          flex-1 min-h-0 flex-col so the scroll body below expands to
          fill remaining viewport. -->
     <div
-      class="bg-white rounded-lg shadow overflow-hidden text-sm flex-1 min-h-0 flex flex-col"
+      class="bg-white rounded-lg shadow overflow-x-auto overflow-y-hidden text-sm flex-1 min-h-0 flex flex-col"
       role="table"
       :aria-rowcount="reservations.length + 1"
       :aria-colcount="canManage ? 9 : 8"
     >
+      <div
+        :style="{ minWidth: canManage ? '1240px' : '1120px' }"
+        class="wide-table-canvas flex flex-col flex-1 min-h-0"
+      >
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
         <div
           role="row"
@@ -736,7 +848,7 @@ const gridTemplate = computed(() =>
         v-if="sortedReservations.length > 0"
         ref="scrollEl"
         role="rowgroup"
-        class="flex-1 overflow-auto min-h-[200px]"
+        class="flex-1 overflow-y-auto overflow-x-hidden min-h-[200px]"
       >
         <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
           <div
@@ -801,16 +913,17 @@ const gridTemplate = computed(() =>
           </div>
         </div>
       </div>
+      </div>
 
       <!-- Empty state lives outside the virtualized body — the virtualizer
            only understands row-indexed content. -->
       <!-- P1-H3: wire the existing loadingList flag to a LoadingSkeleton
            so the initial fetch no longer shows a blank panel below the
            filter bar. EmptyState only renders once loading finishes. -->
-      <div v-else-if="loadingList" class="px-4 py-6">
+      <div v-if="sortedReservations.length === 0 && loadingList" class="responsive-table-state px-4 py-6">
         <LoadingSkeleton />
       </div>
-      <div v-else>
+      <div v-else-if="sortedReservations.length === 0" class="responsive-table-state">
         <EmptyState
           :message="tenantFilter
             ? (statusFilter ? `No ${statusFilter} reservations for this tenant` : 'No reservations for this tenant')

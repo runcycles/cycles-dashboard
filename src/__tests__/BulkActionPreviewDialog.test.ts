@@ -172,6 +172,45 @@ describe('BulkActionPreviewDialog', () => {
     })
   })
 
+  // F5 — advisory notice channel, separate from the submit-error alert.
+  // Callers route informational context (e.g. "N FROZEN rows will fail
+  // per-row") here so it renders as an amber role="status" box instead
+  // of a red role="alert" error, and a real submit error can render
+  // alongside it instead of replacing it.
+  describe('notice prop (advisory, not an error)', () => {
+    it('renders the notice as an amber role="status" box, not role="alert"', () => {
+      const w = mount(BulkActionPreviewDialog, {
+        props: { ...baseProps, count: 3, samples: [sample('a')], reachedEnd: true,
+          notice: '2 FROZEN budgets in this selection will fail per-row' },
+      })
+      const notice = w.find('[data-testid="bulk-preview-notice"]')
+      expect(notice.exists()).toBe(true)
+      expect(notice.attributes('role')).toBe('status')
+      expect(notice.text()).toContain('2 FROZEN budgets')
+      expect(notice.classes()).toContain('bg-amber-50')
+      // Not piped through the error alert channel.
+      expect(w.findAll('[role="alert"]')).toHaveLength(0)
+    })
+
+    it('notice and submit-error render simultaneously (error does not displace the advisory)', () => {
+      const w = mount(BulkActionPreviewDialog, {
+        props: { ...baseProps, count: 3, samples: [sample('a')], reachedEnd: true,
+          notice: '2 FROZEN budgets in this selection will fail per-row',
+          submitError: 'COUNT_MISMATCH — the matched set changed since preview.' },
+      })
+      expect(w.find('[data-testid="bulk-preview-notice"]').text()).toContain('FROZEN')
+      const alert = w.findAll('[role="alert"]').find(a => a.text().includes('COUNT_MISMATCH'))
+      expect(alert).toBeDefined()
+    })
+
+    it('renders no notice box when the prop is absent or empty', () => {
+      const w = mount(BulkActionPreviewDialog, {
+        props: { ...baseProps, count: 3, samples: [sample('a')], reachedEnd: true },
+      })
+      expect(w.find('[data-testid="bulk-preview-notice"]').exists()).toBe(false)
+    })
+  })
+
   describe('Cancel and backdrop', () => {
     it('emits cancel when Cancel button clicked', async () => {
       const w = mount(BulkActionPreviewDialog, { props: baseProps })

@@ -27,10 +27,12 @@ backend planes:
 2. [Reverse-proxy wiring](#reverse-proxy-wiring)
 3. [CORS](#cors)
 4. [Admin-server version compatibility](#admin-server-version-compatibility)
-5. [Auth and session](#auth-and-session)
-6. [Capability gating](#capability-gating)
-7. [Cross-surface correlation](#cross-surface-correlation-trace--request--correlation)
-8. [Troubleshooting](#troubleshooting)
+5. [Upgrades and rollback](#upgrades-and-rollback)
+6. [Backup and restore](#backup-and-restore)
+7. [Auth and session](#auth-and-session)
+8. [Capability gating](#capability-gating)
+9. [Cross-surface correlation](#cross-surface-correlation-trace--request--correlation)
+10. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -54,6 +56,36 @@ covers the Caddy path. Health-check path: `GET /` (returns the SPA shell).
 The container is stateless — scale horizontally for availability. There is no
 session-affinity requirement; the API key lives in the operator's browser
 (`sessionStorage`), not the dashboard.
+
+**Dev stack ports are loopback-only.** `docker-compose.yml` (the dev stack)
+binds every published port to `127.0.0.1` — it runs a passwordless Redis and
+a default admin key, so nothing in it may be reachable from other hosts. Use
+a local override file if you knowingly need wider exposure.
+
+**Memory limits (prod).** `docker-compose.prod.yml` caps each service via
+`deploy.resources.limits.memory`. The caps are env-parameterized:
+`CYCLES_SERVER_MEM_LIMIT` / `CYCLES_ADMIN_MEM_LIMIT` /
+`CYCLES_EVENTS_MEM_LIMIT` (default 2g each), `REDIS_MEM_LIMIT` (default
+768m); dashboard and caddy stay fixed at 256m. *Memory sizing:* the
+defaults suit small/mid fleets. The JVMs size their heap as 75% of the
+container limit (`-XX:MaxRAMPercentage=75`), so a 2g cap ≈ 1.5g heap —
+raise the three JVM knobs together with tenant/key/webhook volume. Redis
+additionally runs with `--maxmemory` (`REDIS_MAXMEMORY`, default 512mb)
+and `--maxmemory-policy noeviction`: governance data must never be
+silently evicted, so hitting the cap surfaces as visible Redis write
+errors instead of a kernel OOM-kill → AOF-replay crash loop that takes
+down all three planes. Always keep `REDIS_MAXMEMORY` comfortably below
+`REDIS_MEM_LIMIT` (the defaults leave 256m headroom) — AOF rewrites and
+persistence forks need memory beyond the dataset; raise the two together.
+Requires Docker Compose v2 (the `docker compose` plugin), which applies
+`deploy.resources.limits` outside swarm mode.
+
+**Further hardening (deliberate non-defaults).** The stock nginx and caddy
+images need root at startup (port bind, config render, privilege drop), so
+the compose files stop at `no-new-privileges` + memory limits. `read_only`
+rootfs with tmpfs mounts and `cap_drop` are the next steps if your platform
+needs them — they require image-specific tuning and are intentionally not
+shipped as defaults.
 
 ## Reverse-proxy wiring
 
@@ -92,6 +124,40 @@ calls them directly, so no CORS or CSP changes are needed when retargeting.
 original path + query string is preserved. Do not edit this. A prior regression
 (`v0.1.25.22 → v0.1.25.23` hotfix) stripped the path for non-reservations
 endpoints; the variable form is the fix.
+
+**Cache headers.** The bundled nginx serves `index.html` with
+`Cache-Control: no-cache` (revalidate on every load) and `/assets/*` with
+`public, max-age=31536000, immutable`. The build embeds SRI hashes
+(vite-plugin-sri-gen), so a stale cached `index.html` referencing purged
+hashed assets would both 404 and hard-fail integrity after a deploy — the
+`no-cache` header prevents that failure class. An edge proxy or CDN in
+front should pass these headers through (it may cache `/assets/*`
+aggressively; it must not cache `index.html` beyond revalidation).
+
+**X-Forwarded-Proto trust.** The bundled nginx passes an incoming
+`X-Forwarded-Proto` through to the backends verbatim (falling back to its
+own scheme only when the header is absent). That is trustworthy only behind
+a TLS terminator that overwrites forwarded headers from untrusted clients —
+the shipped topologies do (Caddy replaces incoming `X-Forwarded-*` by
+default; `nginx-ssl.conf.example` sets the header explicitly). Exposing the
+dashboard container directly makes the header client-controlled — a
+plain-HTTP caller can spoof `https` — so direct exposure is dev-only (the
+dev compose binds to loopback).
+
+**Security headers** live in `/etc/nginx/snippets/security-headers.conf`
+inside the image (shipped from `security-headers.conf` in this repo). They
+are re-`include`d in every location that sets its own header because
+nginx's `add_header` does not merge across levels — a location-level
+`add_header` silently drops all inherited headers. Keep that invariant
+when editing the template.
+
+**JSON errors on proxy failure.** When an upstream plane is down or
+unreachable, the proxy answers 502/503/504 with a JSON body
+(`{"error": "UPSTREAM_UNAVAILABLE", "message": …}`, served from
+`/50x.json` with the original status code) instead of nginx's HTML error
+page, so `/v1/*` callers can always parse the error. Error bodies produced
+by the upstreams themselves pass through unmodified
+(`proxy_intercept_errors` stays off).
 
 ## CORS
 
@@ -137,8 +203,108 @@ current matrix. High-level rules:
   BudgetsView row-select fund flow continues to work. The filter-apply
   bulk button will surface a 404 toast on submit.
 
-**Upgrade path:** bump the admin pin in `docker-compose.prod.yml` and recycle.
-The dashboard image does not need to change for an admin-only version bump.
+**Upgrade path:** see [Upgrades and rollback](#upgrades-and-rollback). The
+dashboard image does not need to change for an admin-only version bump.
+
+## Upgrades and rollback
+
+**Pinned server fleet (dashboard v0.1.25.68):** runtime `0.1.25.58`, admin
+`0.1.25.52`, events `0.1.25.24`. These are exact tags, not floating aliases.
+
+**Upgrading an existing fleet to the pinned versions.** Upgrade events before
+admin: admin `.51+` assumes the ownership boundary enforced by events `.23+`.
+Events `.24` also changes the internal members of `evidence:processing` from
+raw source JSON to claim IDs. If evidence signing is enabled, stop every older
+events replica and use the older workers to drain or recover
+`evidence:processing` before starting `.24`; records in `evidence:pending` may
+remain queued. Then deploy events `.24`, admin `.52`, and runtime `.58`:
+
+```bash
+docker compose -f docker-compose.prod.yml pull \
+  cycles-events cycles-admin cycles-server
+docker compose -f docker-compose.prod.yml up -d cycles-events
+docker compose -f docker-compose.prod.yml up -d cycles-admin cycles-server
+```
+
+Fresh deployments and fleets with evidence signing disabled have no
+`evidence:processing` migration and may bring up the pinned stack normally.
+
+**Admin-only bump.** Edit the `cycles-server-admin` image pin in
+`docker-compose.prod.yml`, then recycle just that service:
+
+```bash
+docker compose -f docker-compose.prod.yml pull cycles-admin
+docker compose -f docker-compose.prod.yml up -d cycles-admin
+```
+
+**Dashboard bump.** Same pattern with the `dashboard` service pin
+(`ghcr.io/runcycles/cycles-dashboard:<version>`). Check the release entry in
+[`CHANGELOG.md`](CHANGELOG.md) for an admin-server minimum bump first — if
+the minimum moved, bump admin in the same maintenance window:
+
+```bash
+docker compose -f docker-compose.prod.yml pull dashboard
+docker compose -f docker-compose.prod.yml up -d dashboard
+```
+
+Operators with an open tab pick up the new build on their next page load —
+`index.html` is served `Cache-Control: no-cache`, so no hard refresh is
+needed.
+
+**Rollback.** Every image in the stack is pinned by tag, so rollback is
+editing the pin back to the previous version and re-running `up -d` — compose
+recreates only the changed service. Previous dashboard versions are listed in
+[`CHANGELOG.md`](CHANGELOG.md); published tags are never reused. Roll back
+the dashboard alone unless the release notes say the admin minimum moved.
+An image rollback does not touch Redis data — but take a backup (below)
+before rolling the admin plane back across a release that changed data
+shapes.
+
+## Backup and restore
+
+**All governance state lives in the `redis-data` volume** — tenants, budgets,
+policies, API keys, webhooks, events, audit; both planes share the one Redis.
+Dashboard and caddy containers are stateless. The compose volumes are the
+only persistence on the host.
+
+Take a short maintenance window for backups. Redis is configured with AOF
+enabled, and Redis 7 stores AOF data as a manifest plus multiple files. Tarring
+the volume while Redis is running can race an AOF rewrite and capture a file set
+that does not match the manifest. Stop the writers first, force an RDB snapshot,
+then stop Redis before a throwaway container reads the volume:
+
+```bash
+docker compose -f docker-compose.prod.yml stop \
+  cycles-admin cycles-server cycles-events
+docker compose -f docker-compose.prod.yml exec redis \
+  sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli SAVE'
+docker compose -f docker-compose.prod.yml stop redis
+docker run --rm -v <project>_redis-data:/data -v "$PWD":/backup alpine \
+  tar czf /backup/redis-data-$(date +%F).tar.gz -C /data .
+docker compose -f docker-compose.prod.yml up -d
+```
+
+`REDISCLI_AUTH` is set inside the Redis container, so the command uses the
+password Compose supplied from `.env` even when the host shell did not export
+`REDIS_PASSWORD`. If any backup step fails after services are stopped, run the
+final `up -d` command to restore the stack before investigating.
+
+Restore into a stopped stack:
+
+```bash
+docker compose -f docker-compose.prod.yml down
+docker run --rm -v <project>_redis-data:/data -v "$PWD":/backup alpine \
+  sh -c "rm -rf /data/* && tar xzf /backup/redis-data-<date>.tar.gz -C /data"
+docker compose -f docker-compose.prod.yml up -d
+```
+
+`<project>` is the compose project name — `docker volume ls` shows the exact
+volume name.
+
+**`caddy-data` persists the Let's Encrypt certificates.** Deleting it forces
+re-issuance on next start, which can trip Let's Encrypt rate limits (5
+duplicate certificates per week). Leave it in place across redeploys; include
+it in backups if you rebuild hosts often.
 
 ## Auth and session
 
@@ -261,15 +427,19 @@ all zero, the donut block is intentionally hidden (no empty-chart
 placeholder). Create or fund a budget and refresh. (2) The ECharts chunk
 failed to load — the chart is lazy-split (`BaseChart-*.js`, ~142 KB gz).
 DevTools → Network → look for a failed JS fetch; the Overview shell still
-renders its counter strip and attention cards regardless. This is almost
-always a reverse-proxy caching miss — verify your nginx / Caddy / CDN
-allows all `/assets/*.js` through without path rewriting.
+renders its counter strip and attention cards regardless. The container
+itself serves `/assets/*` with correct immutable cache headers — a failed
+chunk fetch points at an edge proxy / CDN in front rewriting `/assets/*.js`
+paths or caching a stale `index.html` in violation of its
+`Cache-Control: no-cache` header.
 
 **"Dark-mode palette on a chart looks wrong after a theme toggle."** The
 chart theme reactively rebinds when `isDark` flips. If colors look frozen
 on the old palette, the browser's service worker may be serving a stale
 `BaseChart-*.js` from before a deployment. Hard-refresh (Ctrl+Shift+R)
-clears it.
+clears it. (`index.html` is served `no-cache`, so a normal reload picks up
+the new asset manifest — persistent staleness means an extension/service
+worker or an edge cache ignoring the container's cache headers.)
 
 **Bulk action "N failed" with no dialog.** Older bulk paths (pre-v0.1.25.37
 extension) dropped failures to browser console. Open DevTools Console for the

@@ -13,14 +13,26 @@
 //
 // Plus garbage values + combinations + ?status=BOGUS (must ignore, not crash).
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { reactive } from 'vue'
+import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
+
+// The reactive routeRef below is shared across tests — auto-unmount so
+// a previous test's still-mounted component can't react to the next
+// test's route mutations.
+enableAutoUnmount(afterEach)
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '../stores/auth'
 import type { Capabilities } from '../types'
 
 const listWebhooksMock = vi.fn()
 const listTenantsMock = vi.fn()
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(res => { resolve = res })
+  return { promise, resolve }
+}
 
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
@@ -32,7 +44,12 @@ vi.mock('../api/client', async () => {
   }
 })
 
-const routeRef: { query: Record<string, string>; params: Record<string, string> } = { query: {}, params: {} }
+// `name` matches the real route — the view's URL → ref watchers are
+// route-identity-guarded (F3), and their `immediate` hydration run
+// checks it at setup. Reactive so tests can reassign routeRef.query to
+// simulate same-route navigation (back/forward) without a remount.
+const routeRef: { query: Record<string, string>; params: Record<string, string>; name: string } =
+  reactive({ query: {}, params: {}, name: 'webhooks' })
 
 vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
@@ -109,6 +126,7 @@ describe('WebhooksView — URL deep-link smoke', () => {
     listTenantsMock.mockResolvedValue({ tenants: [], has_more: false })
     routeRef.query = {}
     routeRef.params = {}
+    routeRef.name = 'webhooks'
   })
 
   for (const [label, query] of QUERIES) {
@@ -144,6 +162,25 @@ describe('WebhooksView — URL deep-link smoke', () => {
     expect(params?.status).toBe('PAUSED')
   })
 
+  it('advances freshness when a direct filter reload commits successfully', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-07-16T12:00:00Z'))
+      const { default: WebhooksView } = await import('../views/WebhooksView.vue')
+      const w = mount(WebhooksView, stdMount())
+      await flushPromises()
+      expect((w.vm as unknown as { lastSuccessAt: Date }).lastSuccessAt.toISOString()).toBe('2026-07-16T12:00:00.000Z')
+
+      vi.setSystemTime(new Date('2026-07-16T12:05:00Z'))
+      routeRef.query = { status: 'PAUSED' }
+      await flushPromises()
+
+      expect((w.vm as unknown as { lastSuccessAt: Date }).lastSuccessAt.toISOString()).toBe('2026-07-16T12:05:00.000Z')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('does not send status param when no filter is set', async () => {
     routeRef.query = {}
     const { default: WebhooksView } = await import('../views/WebhooksView.vue')
@@ -151,5 +188,84 @@ describe('WebhooksView — URL deep-link smoke', () => {
     await flushPromises()
     const params = listWebhooksMock.mock.calls.at(-1)?.[0] as Record<string, string> | undefined
     expect(params?.status).toBeUndefined()
+  })
+
+  // Round 4 (F3): the ?status watcher was adopt-only — Back to a bare
+  // /webhooks kept the stale deep-linked filter, so a bare URL showed
+  // filtered data (the defect class rounds 2–3 fixed for the other
+  // params). Param absent now resets to the unfiltered default.
+  it('Back to a bare URL (param removed) resets a deep-linked status filter', async () => {
+    routeRef.query = { status: 'PAUSED' }
+    const { default: WebhooksView } = await import('../views/WebhooksView.vue')
+    const w = mount(WebhooksView, stdMount())
+    await flushPromises()
+    const select = w.find('select[aria-label="Filter webhooks by status"]')
+    expect((select.element as HTMLSelectElement).value).toBe('PAUSED')
+    listWebhooksMock.mockClear()
+
+    // Browser Back to bare /webhooks — same-route, no remount.
+    routeRef.query = {}
+    await flushPromises()
+    expect((select.element as HTMLSelectElement).value).toBe('')
+    // The reset refetched without the status param.
+    const params = listWebhooksMock.mock.calls.at(-1)?.[0] as Record<string, string> | undefined
+    expect(params?.status).toBeUndefined()
+  })
+
+  it('keeps the bare-URL result when the prior status request resolves last', async () => {
+    const paused = deferred<any>()
+    const unfiltered = deferred<any>()
+    listWebhooksMock.mockImplementation((params?: Record<string, string>) =>
+      params?.status === 'PAUSED' ? paused.promise : unfiltered.promise,
+    )
+    routeRef.query = { status: 'PAUSED' }
+    const { default: WebhooksView } = await import('../views/WebhooksView.vue')
+    const w = mount(WebhooksView, stdMount())
+    await vi.waitFor(() => {
+      expect(listWebhooksMock.mock.calls.some(args => args[0]?.status === 'PAUSED')).toBe(true)
+    })
+
+    routeRef.query = {}
+    await vi.waitFor(() => {
+      expect(listWebhooksMock.mock.calls.some(args => args[0]?.status === undefined)).toBe(true)
+    })
+    unfiltered.resolve({
+      subscriptions: [{
+        subscription_id: 'sub-current', url: 'https://current.example/hook', status: 'ACTIVE',
+        event_types: ['budget.updated'], created_at: '2026-01-01T00:00:00Z', tenant_id: 'acme',
+      }],
+      has_more: false,
+    })
+    await flushPromises()
+    expect(w.text()).toContain('current.example')
+
+    paused.resolve({
+      subscriptions: [{
+        subscription_id: 'sub-stale', url: 'https://stale.example/hook', status: 'PAUSED',
+        event_types: ['budget.updated'], created_at: '2026-01-01T00:00:00Z', tenant_id: 'acme',
+      }],
+      has_more: false,
+    })
+    await flushPromises()
+    expect((w.find('select[aria-label="Filter webhooks by status"]').element as HTMLSelectElement).value).toBe('')
+    expect(w.text()).toContain('current.example')
+    expect(w.text()).not.toContain('stale.example')
+  })
+
+  // Route-identity guard still holds: navigating AWAY to a route that
+  // carries its own ?status must not clear or adopt into this view.
+  it('a navigation away to /tenants?status=ACTIVE does not touch the filter', async () => {
+    routeRef.query = { status: 'PAUSED' }
+    const { default: WebhooksView } = await import('../views/WebhooksView.vue')
+    const w = mount(WebhooksView, stdMount())
+    await flushPromises()
+    listWebhooksMock.mockClear()
+
+    routeRef.name = 'tenants'
+    routeRef.query = { status: 'ACTIVE' }
+    await flushPromises()
+    const select = w.find('select[aria-label="Filter webhooks by status"]')
+    expect((select.element as HTMLSelectElement).value).toBe('PAUSED')
+    expect(listWebhooksMock).not.toHaveBeenCalled()
   })
 })

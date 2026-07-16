@@ -12,7 +12,7 @@
 //     linger on the system clipboard for the rest of the session
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import SecretReveal from '../components/SecretReveal.vue'
 
 const baseProps = {
@@ -23,6 +23,7 @@ const baseProps = {
 
 describe('SecretReveal', () => {
   beforeEach(() => {
+    document.body.innerHTML = ''
     vi.useFakeTimers()
     // JSDOM doesn't provide a real clipboard; stub it. Individual tests
     // replace these when they need to assert against the stubs.
@@ -36,6 +37,7 @@ describe('SecretReveal', () => {
   })
 
   afterEach(() => {
+    document.body.innerHTML = ''
     vi.useRealTimers()
     vi.restoreAllMocks()
   })
@@ -105,6 +107,7 @@ describe('SecretReveal', () => {
     const w = mount(SecretReveal, { props: baseProps })
     const copyBtn = () => w.findAll('button').find(b => b.text() === 'Copy' || b.text() === 'Copied!')!
     await copyBtn().trigger('click')
+    await flushPromises()
     expect(copyBtn().text()).toBe('Copied!')
     vi.advanceTimersByTime(2000)
     await w.vm.$nextTick()
@@ -122,6 +125,7 @@ describe('SecretReveal', () => {
     })
     const w = mount(SecretReveal, { props: baseProps })
     await w.findAll('button').find(b => b.text() === 'Copy')!.trigger('click')
+    await flushPromises()
 
     writeText.mockClear()
     vi.advanceTimersByTime(60_000)
@@ -133,6 +137,27 @@ describe('SecretReveal', () => {
     expect(readText).toHaveBeenCalled()
     // The wipe calls writeText('') — a regression that skipped the
     // wipe would leave writeText uncalled after the copy's initial call.
+    expect(writeText).toHaveBeenCalledWith('')
+  })
+
+  it('still wipes the clipboard after the dialog closes', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    const readText = vi.fn().mockResolvedValue(baseProps.secret)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText, readText },
+    })
+    const w = mount(SecretReveal, { props: baseProps })
+    await w.findAll('button').find(b => b.text() === 'Copy')!.trigger('click')
+    await flushPromises()
+
+    writeText.mockClear()
+    w.unmount()
+    vi.advanceTimersByTime(60_000)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(readText).toHaveBeenCalled()
     expect(writeText).toHaveBeenCalledWith('')
   })
 
@@ -148,6 +173,7 @@ describe('SecretReveal', () => {
     })
     const w = mount(SecretReveal, { props: baseProps })
     await w.findAll('button').find(b => b.text() === 'Copy')!.trigger('click')
+    await flushPromises()
 
     writeText.mockClear()
     vi.advanceTimersByTime(60_000)
@@ -163,5 +189,44 @@ describe('SecretReveal', () => {
     expect(dialog.exists()).toBe(true)
     expect(dialog.attributes('aria-modal')).toBe('true')
     expect(dialog.attributes('aria-label')).toBe(baseProps.title)
+  })
+
+  it('reports clipboard failure instead of claiming the secret was copied', async () => {
+    const writeText = vi.fn().mockRejectedValue(new DOMException('denied', 'NotAllowedError'))
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText, readText: vi.fn() },
+    })
+    const w = mount(SecretReveal, { props: baseProps })
+
+    await w.findAll('button').find(b => b.text() === 'Copy')!.trigger('click')
+    await flushPromises()
+
+    expect(w.text()).not.toContain('Copied!')
+    const alert = w.get('[role="alert"]')
+    expect(alert.text()).toContain('clipboard unavailable')
+    expect(alert.text()).toContain('copy it manually')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('traps focus in the one-time-secret modal and restores it on close', async () => {
+    const trigger = document.createElement('button')
+    trigger.textContent = 'Create API key'
+    document.body.appendChild(trigger)
+    trigger.focus()
+
+    const w = mount(SecretReveal, { props: baseProps, attachTo: document.body })
+    await w.vm.$nextTick()
+    expect((document.activeElement as HTMLElement)?.textContent).toBe('Copy')
+
+    // Shift+Tab from the first focusable control wraps to the disabled-
+    // filtered checkbox rather than escaping to the page behind the modal.
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Tab', shiftKey: true, bubbles: true, cancelable: true,
+    }))
+    expect(document.activeElement).toBe(w.get('input[type="checkbox"]').element)
+
+    w.unmount()
+    expect(document.activeElement).toBe(trigger)
   })
 })

@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
+import { POLLING_STALE } from '../composables/pollingResult'
 import { POLL_EVENTS_MS } from '../composables/pollingConstants'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
@@ -24,16 +25,17 @@ import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import TimeRangePicker from '../components/TimeRangePicker.vue'
 import CorrelationIdChip from '../components/CorrelationIdChip.vue'
 import { formatDateTime } from '../utils/format'
+import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 import { safeJsonStringify } from '../utils/safe'
+import { writeClipboardJson } from '../utils/clipboard'
+import { dateParamOrEmpty, stringParam } from '../utils/dateParam'
 
 const route = useRoute()
 const router = useRouter()
+const toast = useToast()
 
 const events = ref<Event[]>([])
-// P1-H3: gates the cold-load skeleton. Flipped true after the first
-// successful poll resolves.
-const initialLoadDone = ref(false)
 const hasMore = ref(false)
 const nextCursor = ref('')
 const loadingMore = ref(false)
@@ -51,16 +53,25 @@ function toggleExpanded(id: string) {
 // `loadedMorePages` because a new sort order invalidates the tail
 // cursor — page 1 under the new order is a different tuple and the
 // merge-from-head dedup wouldn't know about the displaced rows.
+//
+// Seeded with timestamp desc — the server returns newest-first by
+// default, and an unseeded useSort left the Time column advertising
+// "unsorted" while the rows were in fact sorted. timestamp is in the
+// sort_by enum (the Time SortHeader already sends it), so explicitly
+// requesting the default order is wire-safe.
 const { sortKey, sortDir, toggle, sorted: sortedEvents } = useSort(
   events,
-  undefined,
-  'asc',
+  'timestamp',
+  'desc',
   undefined,
   {
     serverSide: true,
     onChange: () => {
       loadedMorePages.value = false
-      load()
+      // Sorting changes the cursor tuple just like filtering does. Commit
+      // the new tuple before loading so polling/export/load-more all use
+      // the same applied state.
+      applyFilters(true)
     },
   },
 )
@@ -80,43 +91,49 @@ const loadedMorePages = ref(false)
 const copiedEventId = ref<string | null>(null)
 let copiedResetTimer: ReturnType<typeof setTimeout> | null = null
 async function copyEventJson(e: Event) {
-  try {
-    await navigator.clipboard.writeText(safeJsonStringify(e))
+  if (await writeClipboardJson(e)) {
     copiedEventId.value = e.event_id
     if (copiedResetTimer) clearTimeout(copiedResetTimer)
     copiedResetTimer = setTimeout(() => {
       if (copiedEventId.value === e.event_id) copiedEventId.value = null
     }, 2000)
-  } catch {
-    // Clipboard permission denied or insecure context — silently
-    // fail rather than toast. The operator can still select-and-copy
-    // from the pre element.
+  } else {
+    // Clipboard permission denied or insecure context. Toast so the
+    // failure isn't silent (same copy as TenantsView) — the operator
+    // can still select-and-copy from the pre element.
+    toast.error('Copy failed — clipboard unavailable')
   }
 }
 
-const category = ref((route.query.category as string) || '')
-const eventType = ref((route.query.type as string) || '')
-const tenantId = ref((route.query.tenant_id as string) || '')
-const scope = ref((route.query.scope as string) || '')
-const correlationId = ref((route.query.correlation_id as string) || '')
+// stringParam, not bare `as string` casts: a duplicated param
+// (?search=a&search=b) hydrates as an ARRAY and the downstream string
+// methods (`.trim()` in buildFilterParams) would throw and blank the
+// view. The normalizer takes the first string element instead.
+const category = ref(stringParam(route.query.category))
+const eventType = ref(stringParam(route.query.type))
+const tenantId = ref(stringParam(route.query.tenant_id))
+const scope = ref(stringParam(route.query.scope))
+const correlationId = ref(stringParam(route.query.correlation_id))
 // cycles-server-admin v0.1.25.31 / protocol v0.1.25.28: W3C Trace Context
 // cross-surface correlation. `trace_id` (32-hex) is auto-populated on
 // every HTTP-originated event; `request_id` is the per-request id.
 // Exact-match server-side filters on listEvents.
-const traceId = ref((route.query.trace_id as string) || '')
-const requestId = ref((route.query.request_id as string) || '')
+const traceId = ref(stringParam(route.query.trace_id))
+const requestId = ref(stringParam(route.query.request_id))
 // cycles-governance-admin v0.1.25.21: free-text `search` query param
 // on listEvents (case-insensitive substring match on correlation_id +
 // scope). Sits alongside the existing correlation_id and scope
 // exact/prefix filters for the case where the operator has only a
 // partial id. Debounced via the shared 300ms cadence.
-const search = ref((route.query.search as string) || '')
+const search = ref(stringParam(route.query.search))
 // Spec: listEvents accepts `from` / `to` as RFC 3339 date-time.
 // TimeRangePicker emits datetime-local strings (YYYY-MM-DDTHH:MM,
 // local tz) which the server normalizes — matches what AuditView
-// already sends.
-const fromDate = ref((route.query.from as string) || '')
-const toDate = ref((route.query.to as string) || '')
+// already sends. Junk URL values (?from=lastweek) are dropped on
+// hydration rather than crashing the query at conversion time (see
+// dateParamOrEmpty).
+const fromDate = ref(dateParamOrEmpty(route.query.from))
+const toDate = ref(dateParamOrEmpty(route.query.to))
 const timeRange = computed({
   get: () => ({ from: fromDate.value, to: toDate.value }),
   set: (v: { from: string; to: string }) => { fromDate.value = v.from; toDate.value = v.to },
@@ -139,8 +156,11 @@ function buildFilterParams(): Record<string, string> {
   // the spec's `from`/`to` are RFC 3339 date-time, which the server
   // validates strictly. new Date(...).toISOString() normalizes the
   // local-time input to UTC ISO 8601 — matches AuditView's wire format.
-  if (fromDate.value) params.from = new Date(fromDate.value).toISOString()
-  if (toDate.value) params.to = new Date(toDate.value).toISOString()
+  // Parse guard (belt-and-suspenders on top of the hydration check):
+  // an unparseable value would make toISOString() throw RangeError and
+  // hard-fail the whole fetch — skip it instead.
+  if (fromDate.value && !Number.isNaN(Date.parse(fromDate.value))) params.from = new Date(fromDate.value).toISOString()
+  if (toDate.value && !Number.isNaN(Date.parse(toDate.value))) params.to = new Date(toDate.value).toISOString()
   if (sortKey.value) {
     params.sort_by = sortKey.value
     params.sort_dir = sortDir.value
@@ -148,9 +168,39 @@ function buildFilterParams(): Record<string, string> {
   return params
 }
 
+// Keep the server-visible filter tuple separate from the live form refs.
+// Text inputs intentionally wait 300ms before they become applied. During
+// that window polling, export pagination, and Load more must continue using
+// the tuple that produced the current rows/cursor; mixing a new text value
+// with the old cursor fails the server's cursor filter-hash validation.
+const appliedFilterParams = ref<Record<string, string>>(buildFilterParams())
+// False while page one for the applied tuple is unresolved (or its load
+// failed). Rows are cleared as soon as the tuple changes so operators can
+// never act on old-filter results under new filter controls.
+const resultsMatchAppliedFilters = ref(false)
+const filterTransitionPending = ref(false)
+const hasPendingFilterChanges = computed(() =>
+  JSON.stringify(buildFilterParams()) !== JSON.stringify(appliedFilterParams.value),
+)
+const paginationUnavailable = computed(() =>
+  hasPendingFilterChanges.value || filterTransitionPending.value || !resultsMatchAppliedFilters.value,
+)
+
+function getAppliedFilterParams(): Record<string, string> {
+  return { ...appliedFilterParams.value }
+}
+
+// Monotonic sequence guard — same rule as BudgetsView.loadList. The 15s
+// poll tick and operator filter changes both funnel through load(), so
+// a slow poll response can resolve AFTER a newer filtered load and
+// overwrite events/hasMore/nextCursor with old-filter rows (or paint a
+// superseded error over a fresh success). Only the newest load commits.
+let loadSeq = 0
 async function load() {
+  const seq = ++loadSeq
   try {
-    const res = await listEvents(buildFilterParams())
+    const res = await listEvents(getAppliedFilterParams())
+    if (seq !== loadSeq) return POLLING_STALE // superseded by a newer load — discard
     if (loadedMorePages.value && events.value.length > 0) {
       // Extended view: merge page-1 results from the head, preserving
       // the already-loaded tail. Dedup by event_id — events are
@@ -171,11 +221,53 @@ async function load() {
       nextCursor.value = res.next_cursor ?? ''
     }
     error.value = ''
-    initialLoadDone.value = true
-  } catch (e) { error.value = toMessage(e) }
+    resultsMatchAppliedFilters.value = true
+    return true
+  } catch (e) {
+    if (seq !== loadSeq) return POLLING_STALE // stale failure — a newer load owns the view
+    error.value = toMessage(e)
+    // A failed load must not leave its signature marked as applied —
+    // the next applyFilters with identical filters (watcher echo or
+    // poll-adjacent retry) would be deduped into a silent no-op.
+    invalidateAppliedSignature()
+    return false
+  } finally {
+    if (seq === loadSeq) filterTransitionPending.value = false
+  }
 }
 
-function applyFilters() {
+// applyFilters is invoked once per changed ref (selects immediately,
+// each debounced text ref again ~300ms later), so one same-route
+// navigation that syncs several refs fans out into N identical calls —
+// a CorrelationIdChip pivot fired two identical listEvents requests,
+// and a back-nav clearing several text filters fired one per cleared
+// filter. An unchanged filter signature from those WATCHER calls is a
+// redundant echo — skip it. EXPLICIT calls (the form's Enter submit,
+// the Clear buttons) pass force=true and always reload: pressing Enter
+// to retry the exact same query after a transient failure is the
+// operator's manual-retry path and must never be swallowed. The
+// signature is also invalidated when load() fails, so even a watcher
+// echo can retry after an error. Polling and loadMore call
+// load()/listEvents directly, unaffected.
+let lastAppliedSignature: string | null = null
+let appliedFilterGeneration = 0
+function invalidateAppliedSignature() { lastAppliedSignature = null }
+function applyFilters(force = false) {
+  const params = buildFilterParams()
+  const sig = JSON.stringify(params)
+  if (!force && sig === lastAppliedSignature) return
+  lastAppliedSignature = sig
+  appliedFilterGeneration++
+  appliedFilterParams.value = params
+  // Invalidate the cursor synchronously. Between this point and the page-one
+  // response, the visible rows/cursor still belong to the previous tuple.
+  // Keeping either cursor live permits Load more/export to mix filter hashes.
+  resultsMatchAppliedFilters.value = false
+  filterTransitionPending.value = true
+  events.value = []
+  expanded.value = new Set()
+  hasMore.value = false
+  nextCursor.value = ''
   router.replace({ query: {
     ...(category.value && { category: category.value }),
     ...(eventType.value && { type: eventType.value }),
@@ -195,18 +287,33 @@ function applyFilters() {
 }
 
 async function loadMore() {
-  if (!nextCursor.value || loadingMore.value) return
+  if (!nextCursor.value || loadingMore.value || paginationUnavailable.value) return
   loadingMore.value = true
+  // Discard the page if the FILTERS change while it is in flight: a
+  // stale old-filter page-2 resolving after applyFilters committed the
+  // new filter would interleave wrong-filter rows, overwrite nextCursor
+  // with the old filter's cursor (the next Load more then 400s on the
+  // server's filter-hash check), and flip loadedMorePages so the
+  // merge-from-head poll preserves the stale rows indefinitely. The
+  // filter generation — not loadSeq — is the right invalidator here: a routine
+  // 15s poll load() must NOT cancel a legitimate same-filter loadMore
+  // (the merge-from-head logic exists to let them coexist), and polls
+  // never touch the signature while filter changes always do.
+  const filterGenerationAtStart = appliedFilterGeneration
   try {
-    const params = { ...buildFilterParams(), cursor: nextCursor.value }
+    const params = { ...getAppliedFilterParams(), cursor: nextCursor.value }
     const res = await listEvents(params)
+    if (paginationUnavailable.value || appliedFilterGeneration !== filterGenerationAtStart) return // filters changed mid-flight — stale page
     events.value = [...events.value, ...res.events]
     hasMore.value = res.has_more
     nextCursor.value = res.next_cursor ?? ''
     // Flip the flag so subsequent polls merge-from-head rather than
     // overwriting the tail we just loaded.
     loadedMorePages.value = true
-  } catch (e) { error.value = toMessage(e) }
+  } catch (e) {
+    if (paginationUnavailable.value || appliedFilterGeneration !== filterGenerationAtStart) return
+    error.value = toMessage(e)
+  }
   finally { loadingMore.value = false }
 }
 
@@ -215,7 +322,7 @@ function clearFilters() {
   traceId.value = ''; requestId.value = ''
   fromDate.value = ''; toDate.value = ''
   loadedMorePages.value = false
-  applyFilters()
+  applyFilters(true)
 }
 
 // Instant-apply on filter change. Best-practice UX (Linear / Notion /
@@ -250,16 +357,47 @@ watch(debouncedSearch, () => applyFilters())
 watch(fromDate, () => applyFilters())
 watch(toDate, () => applyFilters())
 
-// Route-query watcher: CorrelationIdChip pivots that land on /events
-// with a different query (e.g. another EventsView row's request_id chip
-// click, or a back-nav) need to re-sync refs so the filter form reflects
-// the URL. Ref watchers above then fire applyFilters() → load(). The
-// router.replace inside applyFilters() becomes a no-op when the URL
-// already matches, so there's no loop.
+// Route-query watcher: same-route navigations — CorrelationIdChip
+// pivots, the `/event <id>` palette command (pushes ?search=…),
+// back/forward — update route.query without remounting, so the
+// setup-time hydration above doesn't re-run. Re-sync EVERY param the
+// view hydrates on mount, reset-style (URL-AUTHORITATIVE, matching
+// AuditView: param absent means filter cleared). Pre-fix only the
+// three correlation ids synced — a push to /events?search=abc while
+// mounted never reached the search ref, and if a trace filter was set
+// the watcher cleared it, so the debounced applyFilters rewrote the
+// URL from the refs and STRIPPED ?search entirely (the palette command
+// undid itself).
+//
+// Ref watchers above then fire applyFilters() → load(). Loop-safe
+// without AuditView's self-write marker: applyFilters builds the URL
+// from these same refs, so its own replace re-syncs every ref to the
+// value it already holds — no ref changes, no second applyFilters.
+// The one divergence is `search`, which applyFilters writes TRIMMED;
+// compare against the trimmed ref so the write-back can't clobber
+// in-progress typing (e.g. a trailing space) with the trimmed echo.
 watch(() => route.query, (q) => {
-  if ((q.trace_id as string || '') !== traceId.value) traceId.value = (q.trace_id as string) || ''
-  if ((q.request_id as string || '') !== requestId.value) requestId.value = (q.request_id as string) || ''
-  if ((q.correlation_id as string || '') !== correlationId.value) correlationId.value = (q.correlation_id as string) || ''
+  // Route-identity guard: fires while navigating AWAY too (before
+  // unmount), and a destination route can carry same-named params
+  // (e.g. /audit?trace_id=…) — ignore query changes that belong to
+  // another route.
+  if (route.name !== 'events') return
+  const syncs: Array<[typeof category, string]> = [
+    [category, stringParam(q.category)],
+    [eventType, stringParam(q.type)],
+    [tenantId, stringParam(q.tenant_id)],
+    [scope, stringParam(q.scope)],
+    [correlationId, stringParam(q.correlation_id)],
+    [traceId, stringParam(q.trace_id)],
+    [requestId, stringParam(q.request_id)],
+    [fromDate, dateParamOrEmpty(q.from)],
+    [toDate, dateParamOrEmpty(q.to)],
+  ]
+  for (const [r, next] of syncs) {
+    if (next !== r.value) r.value = next
+  }
+  const nextSearch = stringParam(q.search)
+  if (nextSearch !== search.value.trim()) search.value = nextSearch
 })
 
 // Shared export (useListExport). CSV column spec + fetchPage adapter
@@ -271,10 +409,10 @@ const {
   exportError,
   exportCancellable,
   maxRows: EXPORT_MAX_ROWS,
-  confirmExport,
+  confirmExport: openExportConfirm,
   cancelExport,
   cancelRunningExport,
-  executeExport,
+  executeExport: runExport,
 } = useListExport<Event>({
   itemNoun: 'event',
   filenameStem: 'events',
@@ -282,7 +420,7 @@ const {
   hasMore,
   nextCursor,
   fetchPage: async (cursor) => {
-    const res = await listEvents({ ...buildFilterParams(), cursor })
+    const res = await listEvents({ ...getAppliedFilterParams(), cursor })
     return { items: res.events, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
   },
   columns: [
@@ -302,11 +440,33 @@ const {
   ],
 })
 
+function confirmExport(format: 'csv' | 'json') {
+  if (!paginationUnavailable.value) openExportConfirm(format)
+}
+
+async function executeExport() {
+  if (paginationUnavailable.value) {
+    cancelExport()
+    return
+  }
+  await runExport()
+}
+
+// A same-route navigation can change filters while a confirmation dialog or
+// cursor-following export is open. Close/cancel immediately so an old row seed
+// cannot be combined with the newly-applied tuple behind the modal.
+watch(paginationUnavailable, (blocked) => {
+  if (!blocked) return
+  cancelExport()
+  if (exporting.value) cancelRunningExport()
+})
+
 watch(exportError, (v) => { if (v) error.value = v })
 
 const hasActiveFilters = computed(() => !!(category.value || eventType.value || tenantId.value || scope.value || correlationId.value || traceId.value || requestId.value || search.value || fromDate.value || toDate.value))
 
 const { refresh, isLoading, lastSuccessAt } = usePolling(load, POLL_EVENTS_MS)
+const listLoading = computed(() => isLoading.value || filterTransitionPending.value)
 
 // V1 virtualization (Phase 2c) — variable row heights via measureElement.
 // Collapsed rows are ~52px; expanded rows grow with metadata grid + JSON
@@ -356,16 +516,16 @@ function measureRow(el: Element | { $el?: Element } | null) {
       item-noun="event"
       :loaded="events.length"
       :has-more="hasMore"
-      :loading="isLoading"
+      :loading="listLoading"
       :last-updated-at="lastSuccessAt"
       @refresh="refresh"
     >
       <template #actions>
-        <button @click="confirmExport('csv')" :disabled="events.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 dark:hover:text-gray-200 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed">
+        <button @click="confirmExport('csv')" :disabled="events.length === 0 || paginationUnavailable" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 dark:hover:text-gray-200 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed">
           <DownloadIcon class="w-3.5 h-3.5" />
           Export CSV
         </button>
-        <button @click="confirmExport('json')" :disabled="events.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 dark:hover:text-gray-200 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed">
+        <button @click="confirmExport('json')" :disabled="events.length === 0 || paginationUnavailable" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 dark:hover:text-gray-200 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed">
           <DownloadIcon class="w-3.5 h-3.5" />
           Export JSON
         </button>
@@ -383,7 +543,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
          the primary filters (category/type/tenant/scope/search/time);
          row 2 groups the three correlation-id filters together with
          a Clear filters affordance on the right. -->
-    <form @submit.prevent="applyFilters" class="card p-4 mb-4 space-y-3">
+    <form @submit.prevent="applyFilters(true)" class="card p-4 mb-4 space-y-3">
       <!-- Two 5-col rows at xl+, stacks to 2 cols below. Balanced
            split groups the primary filters (when + what + who) on row
            1 and the text/id lookup (free-text search + three
@@ -482,11 +642,16 @@ function measureRow(el: Element | { $el?: Element } | null) {
          getItemKey) so Vue's reactivity doesn't destroy the measured
          element identity across sort or filter changes. -->
     <div
-      class="bg-white rounded-lg shadow overflow-hidden text-sm flex-1 min-h-0 flex flex-col"
+      class="bg-white rounded-lg shadow overflow-x-auto overflow-y-hidden text-sm flex-1 min-h-0 flex flex-col"
       role="table"
       :aria-rowcount="events.length + 1"
       :aria-colcount="6"
+      :aria-busy="listLoading || undefined"
     >
+      <!-- Header and virtualized body share one minimum-width wrapper so
+           the outer card owns horizontal scrolling and columns stay aligned
+           on phone/tablet widths. -->
+      <div style="min-width: 800px" class="wide-table-canvas flex flex-col flex-1 min-h-0">
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
         <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
           <div role="columnheader" class="table-cell"></div>
@@ -502,7 +667,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
         v-if="sortedEvents.length > 0"
         ref="scrollEl"
         role="rowgroup"
-        class="flex-1 overflow-auto min-h-[240px]"
+        class="flex-1 overflow-y-auto overflow-x-hidden min-h-[240px]"
       >
         <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
           <div
@@ -589,12 +754,16 @@ function measureRow(el: Element | { $el?: Element } | null) {
           </div>
         </div>
       </div>
+      </div>
 
       <!-- P1-H3: cold-load skeleton. -->
-      <div v-else-if="!initialLoadDone && !error" class="px-4 py-6">
+      <div v-if="sortedEvents.length === 0 && listLoading && !error" class="responsive-table-state px-4 py-6">
         <LoadingSkeleton />
       </div>
-      <div v-else>
+      <div v-else-if="sortedEvents.length === 0 && error" class="responsive-table-state">
+        <EmptyState message="Events unavailable" hint="Use Refresh to retry the current filters" />
+      </div>
+      <div v-else-if="sortedEvents.length === 0" class="responsive-table-state">
         <EmptyState
           item-noun="event"
           :has-active-filter="hasActiveFilters"
@@ -608,8 +777,13 @@ function measureRow(el: Element | { $el?: Element } | null) {
     <!-- Load more — outside the virtualized scroll region so it
          doesn't participate in row-height measurement. -->
     <div v-if="hasMore || loadingMore" class="mt-3 flex justify-end">
-      <button @click="loadMore" :disabled="loadingMore" class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50 cursor-pointer">
-        {{ loadingMore ? 'Loading…' : 'Load more' }}
+      <button
+        @click="loadMore"
+        :disabled="loadingMore || paginationUnavailable"
+        :title="paginationUnavailable ? 'Waiting for filter changes to apply' : undefined"
+        class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+      >
+        {{ paginationUnavailable ? 'Applying filters…' : loadingMore ? 'Loading…' : 'Load more' }}
       </button>
     </div>
 

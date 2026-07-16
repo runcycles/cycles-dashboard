@@ -14,7 +14,7 @@ import { useSort } from '../composables/useSort'
 import { getWebhook, listDeliveries, updateWebhook, deleteWebhook, testWebhook, replayWebhookEvents, rotateWebhookSecret, ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { WebhookSubscription, WebhookDelivery, WebhookTestResponse, ReplayEventsRequest } from '../types'
-import { EVENT_TYPES, EVENT_CATEGORIES } from '../types'
+import { EVENT_TYPES, EVENT_CATEGORIES, TENANT_ALLOWED_EVENT_TYPES, TENANT_ALLOWED_EVENT_CATEGORIES } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
@@ -39,7 +39,7 @@ import SecretReveal from '../components/SecretReveal.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
-import { safeJsonStringify } from '../utils/safe'
+import { writeClipboardJson, writeClipboardText } from '../utils/clipboard'
 
 const toast = useToast()
 import { formatDateTime } from '../utils/format'
@@ -389,12 +389,36 @@ interface EditForm {
 }
 const editForm = ref<EditForm>({ name: '', description: '', url: '', event_types: [], event_categories: [], scope_filter: '', disable_after_failures: '', metadata: '' })
 const editInitial = ref<EditForm | null>(null)
+
+// TENANT-OWNED CATEGORY BOUNDARY (spec revisions 0.1.25.38/.40/.41,
+// updateWebhookSubscription lines 6560-6574): when the subscription's
+// owning tenant is a CONCRETE tenant (tenant_id present and !=
+// "__system__"), any provided event_types / event_categories must stay
+// within the tenant-accessible sets (budget / reservation / tenant) —
+// servers at .40+ reject admin-only selectors with 400 INVALID_REQUEST
+// regardless of auth context. Filter the edit pickers to those sets for
+// tenant-owned rows; system-owned rows keep the full lists (system-wide
+// admin monitoring is legitimate).
+const SYSTEM_TENANT_ID = '__system__'
+const isTenantOwned = computed(() =>
+  !!webhook.value?.tenant_id && webhook.value.tenant_id !== SYSTEM_TENANT_ID,
+)
+const editEventTypes = computed<readonly string[]>(() =>
+  isTenantOwned.value ? TENANT_ALLOWED_EVENT_TYPES : EVENT_TYPES,
+)
+const editEventCategories = computed<readonly string[]>(() =>
+  isTenantOwned.value ? TENANT_ALLOWED_EVENT_CATEGORIES : EVENT_CATEGORIES,
+)
 // Thresholds + retry policy, edited via the shared WebhookAdvancedFields
 // component. Diffed against a frozen baseline the same way as editForm so
 // an unchanged advanced section never enters the PATCH body.
 const editAdvanced = ref(emptyWebhookAdvancedForm())
 const editAdvancedInitial = ref('')
 const editAdvancedHasConfig = ref(false)
+// How many legacy admin-only selectors openEdit stripped from the
+// pickers on a tenant-owned row. > 0 renders a muted hint in the edit
+// dialog so the empty checkboxes aren't mistaken for the server state.
+const hiddenLegacySelectorCount = ref(0)
 
 function snapshotForm(w: WebhookSubscription): EditForm {
   return {
@@ -417,6 +441,33 @@ function openEdit() {
   // both refs.
   editForm.value = snapshotForm(webhook.value)
   editInitial.value = snapshotForm(webhook.value)
+  // Tenant-owned rows: strip admin-only selectors (persisted by servers
+  // pre-dating the .40 boundary enforcement) from BOTH snapshots. The
+  // picker no longer renders their checkboxes, so leaving them in the
+  // form would keep invisible un-uncheckable selections; stripping only
+  // editForm would make every save carry a phantom event_types diff.
+  // With both stripped, an untouched selector stays out of the PATCH
+  // (server keeps the stored value; a rename must not silently change
+  // delivery) and a deliberate selector edit heals the legacy row —
+  // submitEdit sends BOTH cleaned arrays whenever anything was hidden,
+  // so a stripped-to-empty field goes out as an explicit [] (clear)
+  // instead of being omitted (keep). See the legacy-clear block there.
+  hiddenLegacySelectorCount.value = 0
+  if (isTenantOwned.value) {
+    const allowedTypes = new Set<string>(TENANT_ALLOWED_EVENT_TYPES)
+    const allowedCategories = new Set<string>(TENANT_ALLOWED_EVENT_CATEGORIES)
+    const before = editForm.value.event_types.length + editForm.value.event_categories.length
+    for (const form of [editForm.value, editInitial.value]) {
+      form.event_types = form.event_types.filter(et => allowedTypes.has(et))
+      form.event_categories = form.event_categories.filter(ec => allowedCategories.has(ec))
+    }
+    // Count what stripping hid so the dialog can say so — otherwise a
+    // legacy row whose ONLY selectors are admin-only renders an all-
+    // empty picker that reads like the server state (it isn't; the
+    // stored selectors stay active until the operator edits them).
+    hiddenLegacySelectorCount.value =
+      before - (editForm.value.event_types.length + editForm.value.event_categories.length)
+  }
   editAdvanced.value = webhookToAdvancedForm(webhook.value)
   editAdvancedInitial.value = JSON.stringify(editAdvanced.value)
   editAdvancedHasConfig.value = !!(webhook.value.thresholds || webhook.value.retry_policy)
@@ -428,10 +479,31 @@ function openEdit() {
 async function submitEdit() {
   editError.value = ''
   editMetadataError.value = ''
-  if (!editForm.value.event_types.length) { editError.value = 'Select at least one event type'; return }
+  // SELECTOR CLEARING (spec revision 0.1.25.39, WebhookUpdateRequest
+  // lines 2781-2813): an update MAY set event_types to [] to convert the
+  // subscription to category-only, PROVIDED event_categories is (or
+  // remains) non-empty. The form holds the full resulting state for both
+  // selectors, so both-empty is the only invalid combination (the server
+  // rejects it 400 per the SUBSCRIPTION SELECTOR INVARIANT). The diff
+  // below sends event_types: [] explicitly when cleared — the spec
+  // distinguishes empty-array (clear) from omitted (leave unchanged).
+  //
+  // Only enforce when the operator actually CHANGED the selectors: on a
+  // legacy tenant-owned row whose only selectors are admin-only, openEdit
+  // strips both snapshots to empty — an untouched save then omits the
+  // selector fields entirely (server keeps the stored values), so a
+  // URL/name-only edit must not be blocked by the invariant. A deliberate
+  // selector edit still sends the cleaned arrays and gets validated.
   const body: Record<string, unknown> = {}
   const init = editInitial.value
   if (!init) return
+  const selectorsChanged =
+    JSON.stringify(editForm.value.event_types) !== JSON.stringify(init.event_types) ||
+    JSON.stringify(editForm.value.event_categories) !== JSON.stringify(init.event_categories)
+  if (selectorsChanged && !editForm.value.event_types.length && !editForm.value.event_categories.length) {
+    editError.value = 'Select at least one event type or category.'
+    return
+  }
   // Diff each field. For strings, empty → undefined so we don't echo
   // an empty value that would overwrite a server default.
   if (editForm.value.name !== init.name) body.name = editForm.value.name || null
@@ -439,6 +511,20 @@ async function submitEdit() {
   if (editForm.value.url !== init.url) body.url = editForm.value.url
   if (JSON.stringify(editForm.value.event_types) !== JSON.stringify(init.event_types)) body.event_types = editForm.value.event_types
   if (JSON.stringify(editForm.value.event_categories) !== JSON.stringify(init.event_categories)) body.event_categories = editForm.value.event_categories
+  // LEGACY-SELECTOR CLEAR: when openEdit hid legacy admin-only selectors
+  // and the operator deliberately edited EITHER selector field, send
+  // BOTH cleaned arrays explicitly. The per-field diffs above miss the
+  // stripped field when the edit only touched the other one (stripped-
+  // empty == stripped-empty → omitted → server KEEPS the hidden legacy
+  // selectors, which keep delivering admin telemetry to the tenant
+  // endpoint) — and an unchanged-empty field must go out as the spec's
+  // explicit `event_types: []` clear. Untouched-selectors saves still
+  // omit both (guarded by selectorsChanged), so a rename never silently
+  // changes delivery.
+  if (selectorsChanged && hiddenLegacySelectorCount.value > 0) {
+    body.event_types = editForm.value.event_types
+    body.event_categories = editForm.value.event_categories
+  }
   if (editForm.value.scope_filter !== init.scope_filter) body.scope_filter = editForm.value.scope_filter || null
   if (editForm.value.disable_after_failures !== init.disable_after_failures) body.disable_after_failures = Number(editForm.value.disable_after_failures)
   if (editForm.value.metadata !== init.metadata) {
@@ -597,6 +683,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async (signal) => {
     } else {
       error.value = toMessage(e)
     }
+    return false
   }
 }, POLL_FAST_MS)
 
@@ -643,38 +730,27 @@ const deliveryGridTemplate = '100px 80px 72px 200px minmax(240px,1fr) 150px 40px
 // logs); Copy delivery ID / Copy event ID cover the 80% case where the
 // operator only needs the ID to paste elsewhere. Kebab auto-closes
 // on click so confirmation goes to the toast, not a label swap.
+// All four are built on the shared clipboard helpers (writeClipboardJson
+// for payloads, writeClipboardText for bare ids) with the app-wide
+// failure copy — 'clipboard unavailable' covers denied permission AND
+// insecure contexts / missing API, which the old hand-rolled
+// 'permission denied' wording misdiagnosed.
 async function copyDeliveryJson(d: WebhookDelivery) {
-  try {
-    await navigator.clipboard.writeText(safeJsonStringify(d))
-    toast.success('Delivery JSON copied')
-  } catch {
-    toast.error('Copy failed — clipboard permission denied')
-  }
+  if (await writeClipboardJson(d)) toast.success('Delivery JSON copied')
+  else toast.error('Copy failed — clipboard unavailable')
 }
 async function copySubscriptionJson() {
   if (!webhook.value) return
-  try {
-    await navigator.clipboard.writeText(safeJsonStringify(webhook.value))
-    toast.success('Subscription JSON copied')
-  } catch {
-    toast.error('Copy failed — clipboard permission denied')
-  }
+  if (await writeClipboardJson(webhook.value)) toast.success('Subscription JSON copied')
+  else toast.error('Copy failed — clipboard unavailable')
 }
 async function copyDeliveryId(d: WebhookDelivery) {
-  try {
-    await navigator.clipboard.writeText(d.delivery_id)
-    toast.success('Delivery ID copied')
-  } catch {
-    toast.error('Copy failed — clipboard permission denied')
-  }
+  if (await writeClipboardText(d.delivery_id)) toast.success('Delivery ID copied')
+  else toast.error('Copy failed — clipboard unavailable')
 }
 async function copyEventId(d: WebhookDelivery) {
-  try {
-    await navigator.clipboard.writeText(d.event_id)
-    toast.success('Event ID copied')
-  } catch {
-    toast.error('Copy failed — clipboard permission denied')
-  }
+  if (await writeClipboardText(d.event_id)) toast.success('Event ID copied')
+  else toast.error('Copy failed — clipboard unavailable')
 }
 function deliveryActions(d: WebhookDelivery) {
   return [
@@ -986,7 +1062,7 @@ watch(exportError, (v) => { if (v) error.value = v })
            view — "CSV" / "JSON" was a lone abbreviation. Status filter
            applied server-side so pagination stays consistent;
            Load-more appends. -->
-      <div class="bg-white rounded-lg shadow overflow-hidden text-sm" role="table" :aria-rowcount="filteredDeliveries.length + 1" :aria-colcount="5">
+      <div class="bg-white rounded-lg shadow overflow-hidden text-sm" role="table" :aria-rowcount="filteredDeliveries.length + 1" :aria-colcount="7">
         <div class="table-cell border-b border-gray-100 space-y-2">
           <h3 class="text-sm font-medium text-gray-700">Delivery History</h3>
           <div class="flex items-center gap-x-3 gap-y-2 flex-wrap">
@@ -1013,6 +1089,8 @@ watch(exportError, (v) => { if (v) error.value = v })
           </div>
         </div>
 
+        <div class="overflow-x-auto overflow-y-hidden">
+        <div style="min-width: 882px" class="wide-table-canvas">
         <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
           <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: deliveryGridTemplate }">
             <SortHeader as="div" label="Status" column="status" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" />
@@ -1029,7 +1107,7 @@ watch(exportError, (v) => { if (v) error.value = v })
           v-if="sortedDeliveries.length > 0"
           ref="deliveryScrollEl"
           role="rowgroup"
-          class="overflow-y-auto max-h-[60vh] min-h-[200px]"
+          class="overflow-y-auto overflow-x-hidden max-h-[60vh] min-h-[200px]"
         >
           <div role="presentation" :style="{ height: deliveryTotalHeight + 'px', position: 'relative' }">
             <div
@@ -1066,8 +1144,10 @@ watch(exportError, (v) => { if (v) error.value = v })
             </div>
           </div>
         </div>
+        </div>
+        </div>
 
-        <div v-else>
+        <div v-if="sortedDeliveries.length === 0" class="responsive-table-state">
           <EmptyState
             item-noun="delivery"
             :has-active-filter="!!deliveryStatusFilter"
@@ -1206,16 +1286,20 @@ watch(exportError, (v) => { if (v) error.value = v })
       <div>
         <label class="form-label">Event types</label>
         <div class="grid grid-cols-2 gap-1 max-h-48 overflow-y-auto border border-gray-200 rounded p-2">
-          <label v-for="et in EVENT_TYPES" :key="et" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+          <label v-for="et in editEventTypes" :key="et" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
             <input type="checkbox" :value="et" v-model="editForm.event_types" class="rounded" />
             {{ et }}
           </label>
         </div>
+        <p v-if="isTenantOwned" class="muted-sm mt-1">Tenant-owned subscriptions can only receive tenant-scoped events (budget.*, reservation.*, tenant.*).</p>
+        <p v-if="hiddenLegacySelectorCount" class="muted-sm mt-1" data-testid="hidden-legacy-selectors-hint">
+          {{ hiddenLegacySelectorCount }} legacy admin-only selector{{ hiddenLegacySelectorCount === 1 ? ' is' : 's are' }} hidden here; {{ hiddenLegacySelectorCount === 1 ? 'it remains' : 'they remain' }} active until you edit the selectors, at which point {{ hiddenLegacySelectorCount === 1 ? 'it is' : 'they are' }} cleared.
+        </p>
       </div>
       <div>
         <label class="form-label">Event categories <span class="muted-sm">(additive — subscribes to all events in category, including future ones)</span></label>
         <div class="flex flex-wrap gap-2 border border-gray-200 rounded p-2">
-          <label v-for="ec in EVENT_CATEGORIES" :key="ec" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+          <label v-for="ec in editEventCategories" :key="ec" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
             <input type="checkbox" :value="ec" v-model="editForm.event_categories" class="rounded" />
             {{ ec }}
           </label>

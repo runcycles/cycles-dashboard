@@ -15,6 +15,7 @@ import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import BulkActionResultDialog from '../components/BulkActionResultDialog.vue'
 import type { BulkActionRowOutcome } from '../types'
+import { toasts } from '../composables/useToast'
 
 function outcome(id: string, extras: Partial<BulkActionRowOutcome> = {}): BulkActionRowOutcome {
   return { id, ...extras }
@@ -29,6 +30,7 @@ const baseResponse = {
 
 describe('BulkActionResultDialog', () => {
   beforeEach(() => {
+    toasts.value = []
     // Global clipboard stub — jsdom ships it undefined.
     Object.assign(navigator, {
       clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
@@ -142,6 +144,27 @@ describe('BulkActionResultDialog', () => {
     await Promise.resolve()
     await nextTick()
     expect(copyBtn.text()).toBe('Copied')
+  })
+
+  it('reports a clipboard failure instead of failing silently', async () => {
+    Object.assign(navigator, {
+      clipboard: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
+    })
+    const response = {
+      succeeded: [],
+      failed: [outcome('tenant-alpha', { error_code: 'INTERNAL_ERROR' })],
+      skipped: [],
+      total_matched: 1,
+    }
+    const w = mount(BulkActionResultDialog, {
+      props: { actionVerb: 'Suspend', itemNounPlural: 'tenants', response },
+    })
+    await w.find('button[aria-label="Copy ID tenant-alpha"]').trigger('click')
+    await Promise.resolve()
+    expect(toasts.value.at(-1)).toMatchObject({
+      type: 'error',
+      message: 'Copy failed — clipboard unavailable',
+    })
   })
 
   it('emits close on Close button click', async () => {

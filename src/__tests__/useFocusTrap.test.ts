@@ -109,6 +109,72 @@ describe('useFocusTrap', () => {
     expect((document.activeElement as HTMLElement)?.id).toBe('c')
   })
 
+  it('Shift+Tab from a middle element is not intercepted (native reverse-tab order applies)', async () => {
+    const Dialog = makeDialogComponent(() => [
+      h('button', { id: 'a' }, 'a'),
+      h('button', { id: 'b' }, 'b'),
+      h('button', { id: 'c' }, 'c'),
+    ])
+    mount(Dialog, { attachTo: document.body })
+    await flushPromises()
+
+    ;(document.getElementById('b') as HTMLButtonElement).focus()
+    const evt = tabEvent(true)
+    document.dispatchEvent(evt)
+    // Handler leaves the event alone — jsdom performs no native focus
+    // move, so focus stays put and the event is not defaultPrevented.
+    expect((document.activeElement as HTMLElement)?.id).toBe('b')
+    expect(evt.defaultPrevented).toBe(false)
+  })
+
+  it('Shift+Tab from OUTSIDE the container pulls focus back to the last element', async () => {
+    const Dialog = makeDialogComponent(() => [
+      h('button', { id: 'a' }, 'a'),
+      h('button', { id: 'b' }, 'b'),
+    ])
+    mount(Dialog, { attachTo: document.body })
+    await flushPromises()
+
+    // Focus escaped to the page behind the dialog (e.g. programmatic).
+    outsideButton.focus()
+    document.dispatchEvent(tabEvent(true))
+    expect((document.activeElement as HTMLElement)?.id).toBe('b')
+  })
+
+  // F7(b): the forward-Tab branch must mirror the Shift+Tab recapture —
+  // pre-fix it only wrapped when active === last, so escaped focus
+  // tabbed freely through the page behind the modal.
+  it('forward Tab from OUTSIDE the container pulls focus back to the first element', async () => {
+    const Dialog = makeDialogComponent(() => [
+      h('button', { id: 'a' }, 'a'),
+      h('button', { id: 'b' }, 'b'),
+    ])
+    mount(Dialog, { attachTo: document.body })
+    await flushPromises()
+
+    outsideButton.focus()
+    document.dispatchEvent(tabEvent(false))
+    expect((document.activeElement as HTMLElement)?.id).toBe('a')
+  })
+
+  it('forward Tab from a middle element is not intercepted (native forward-tab order applies)', async () => {
+    const Dialog = makeDialogComponent(() => [
+      h('button', { id: 'a' }, 'a'),
+      h('button', { id: 'b' }, 'b'),
+      h('button', { id: 'c' }, 'c'),
+    ])
+    mount(Dialog, { attachTo: document.body })
+    await flushPromises()
+
+    ;(document.getElementById('b') as HTMLButtonElement).focus()
+    const evt = tabEvent(false)
+    document.dispatchEvent(evt)
+    // Handler leaves the event alone — the recapture applies only to
+    // ESCAPED focus, not to normal in-container tabbing.
+    expect((document.activeElement as HTMLElement)?.id).toBe('b')
+    expect(evt.defaultPrevented).toBe(false)
+  })
+
   it('does not intercept non-Tab keys', async () => {
     const Dialog = makeDialogComponent(() => [
       h('button', { id: 'a' }, 'a'),
@@ -143,5 +209,242 @@ describe('useFocusTrap', () => {
     // We can do this by dispatching a Tab and asserting no wrapper-related
     // errors / no DOM changes.
     expect(() => document.dispatchEvent(tabEvent(false))).not.toThrow()
+  })
+
+  // F8 — views invoke useFocusTrap at setup scope for v-if'd dialogs
+  // (ApiKeysView perms viewer, TenantDetailView close dialog). The trap
+  // must key off the container REF, not the component lifecycle:
+  // inactive while the dialog is closed, activate on open, deactivate +
+  // restore focus on close, and be a no-op at unmount when the dialog
+  // never opened (pre-fix, leaving the view yanked focus to whatever was
+  // focused at view mount).
+  describe('view-scope usage — v-if\'d dialog', () => {
+    // Host component with a toggleable dialog, mirroring the view pattern.
+    function makeToggleComponent() {
+      return defineComponent({
+        setup() {
+          const open = ref(false)
+          const dialogRef = ref<HTMLElement | null>(null)
+          useFocusTrap(dialogRef)
+          return { open, dialogRef }
+        },
+        render() {
+          return h('div', [
+            h('button', { id: 'trigger' }, 'open dialog'),
+            this.open
+              ? h('div', { ref: 'dialogRef' }, [
+                  h('input', { id: 'inside-first' }),
+                  h('button', { id: 'inside-last' }, 'ok'),
+                ])
+              : null,
+          ])
+        },
+      })
+    }
+
+    it('stays inert while the dialog is closed — no focus steal, no trap', async () => {
+      mount(makeToggleComponent(), { attachTo: document.body })
+      await flushPromises()
+      // Setup/mount must not move focus anywhere.
+      expect(document.activeElement).toBe(outsideButton)
+      document.dispatchEvent(tabEvent(false))
+      expect(document.activeElement).toBe(outsideButton)
+    })
+
+    it('unmounting with the dialog never opened does not restore/steal focus', async () => {
+      const wrapper = mount(makeToggleComponent(), { attachTo: document.body })
+      await flushPromises()
+      // Operator moved focus elsewhere during the view's lifetime.
+      const other = document.createElement('button')
+      document.body.appendChild(other)
+      other.focus()
+
+      wrapper.unmount()
+      // Pre-fix: onBeforeUnmount restored focus to outsideButton (the
+      // element focused at view MOUNT) on every route navigation.
+      expect(document.activeElement).toBe(other)
+    })
+
+    it('activates when the dialog opens: captures prior focus and focuses the first focusable', async () => {
+      const wrapper = mount(makeToggleComponent(), { attachTo: document.body })
+      await flushPromises()
+      ;(document.getElementById('trigger') as HTMLButtonElement).focus()
+
+      wrapper.vm.open = true
+      await flushPromises()
+      expect((document.activeElement as HTMLElement)?.id).toBe('inside-first')
+
+      // Tab now cycles inside the dialog (last → first).
+      ;(document.getElementById('inside-last') as HTMLButtonElement).focus()
+      document.dispatchEvent(tabEvent(false))
+      expect((document.activeElement as HTMLElement)?.id).toBe('inside-first')
+    })
+
+    it('closing the dialog (ref → null, no unmount) detaches the trap and restores focus', async () => {
+      const wrapper = mount(makeToggleComponent(), { attachTo: document.body })
+      await flushPromises()
+      ;(document.getElementById('trigger') as HTMLButtonElement).focus()
+
+      wrapper.vm.open = true
+      await flushPromises()
+      expect((document.activeElement as HTMLElement)?.id).toBe('inside-first')
+
+      wrapper.vm.open = false
+      await flushPromises()
+      // Focus returns to the pre-open element…
+      expect((document.activeElement as HTMLElement)?.id).toBe('trigger')
+      // …and the document-level handler is gone: Tab from the outside
+      // button is not intercepted back into anything.
+      outsideButton.focus()
+      document.dispatchEvent(tabEvent(false))
+      expect(document.activeElement).toBe(outsideButton)
+    })
+
+    it('open → close → reopen re-arms the trap', async () => {
+      const wrapper = mount(makeToggleComponent(), { attachTo: document.body })
+      await flushPromises()
+      wrapper.vm.open = true
+      await flushPromises()
+      wrapper.vm.open = false
+      await flushPromises()
+
+      ;(document.getElementById('trigger') as HTMLButtonElement).focus()
+      wrapper.vm.open = true
+      await flushPromises()
+      expect((document.activeElement as HTMLElement)?.id).toBe('inside-first')
+      ;(document.getElementById('inside-first') as HTMLInputElement).focus()
+      document.dispatchEvent(tabEvent(true))
+      expect((document.activeElement as HTMLElement)?.id).toBe('inside-last')
+    })
+
+    it('unmounting while the dialog is open cleans up and restores focus once', async () => {
+      const wrapper = mount(makeToggleComponent(), { attachTo: document.body })
+      await flushPromises()
+      ;(document.getElementById('trigger') as HTMLButtonElement).focus()
+      wrapper.vm.open = true
+      await flushPromises()
+      expect((document.activeElement as HTMLElement)?.id).toBe('inside-first')
+
+      wrapper.unmount()
+      // deactivate() ran in onBeforeUnmount (before DOM removal), so
+      // focus was handed back to #trigger; the whole component is then
+      // torn down, so the browser drops focus to body. The key
+      // assertions: no crash, no dangling trap.
+      expect(document.activeElement).toBe(document.body)
+      document.dispatchEvent(tabEvent(false))
+      expect(document.activeElement).toBe(document.body)
+    })
+
+    // F7(a): a direct element-to-element swap (no null in between) used
+    // to leave focus wherever it was — typically stranded on a detached
+    // node or the page behind the modal. The watcher now moves focus
+    // into the new container (same first-focusable/fallback logic as
+    // activation) whenever the swap left it outside.
+    it('re-pointing the ref to a new element while active moves focus into the new container', async () => {
+      // Drive the composable with a hand-managed ref (not a template
+      // ref) so the swap is guaranteed not to pass through null.
+      const containerRef = ref<HTMLElement | null>(null)
+      const Host = defineComponent({
+        setup() {
+          useFocusTrap(containerRef)
+          return () => h('div')
+        },
+      })
+      mount(Host, { attachTo: document.body })
+
+      const makeContainer = (btnId: string) => {
+        const div = document.createElement('div')
+        const btn = document.createElement('button')
+        btn.id = btnId
+        div.appendChild(btn)
+        document.body.appendChild(div)
+        return div
+      }
+      const a = makeContainer('in-a')
+      const b = makeContainer('in-b')
+
+      containerRef.value = a
+      await flushPromises()
+      expect((document.activeElement as HTMLElement)?.id).toBe('in-a')
+
+      // Swap a → b with no null in between: the trap stays active (no
+      // deactivate/reactivate churn) and focus follows into the new
+      // container instead of stranding on the old element.
+      containerRef.value = b
+      await flushPromises()
+      expect((document.activeElement as HTMLElement)?.id).toBe('in-b')
+      // The keydown handler reads the ref live, so cycling follows the
+      // NEW container.
+      document.dispatchEvent(tabEvent(true))
+      expect((document.activeElement as HTMLElement)?.id).toBe('in-b')
+
+      // Race hardening: a Tab that lands after the ref is nulled but
+      // before the watcher flush (listener still attached) is a no-op.
+      containerRef.value = null
+      expect(() => document.dispatchEvent(tabEvent(false))).not.toThrow()
+      await flushPromises()
+    })
+
+    it('a swap does not re-capture focus when it already sits inside the new container', async () => {
+      const containerRef = ref<HTMLElement | null>(null)
+      const Host = defineComponent({
+        setup() {
+          useFocusTrap(containerRef)
+          return () => h('div')
+        },
+      })
+      mount(Host, { attachTo: document.body })
+
+      const makeContainer = (firstId: string, secondId: string) => {
+        const div = document.createElement('div')
+        for (const id of [firstId, secondId]) {
+          const btn = document.createElement('button')
+          btn.id = id
+          div.appendChild(btn)
+        }
+        document.body.appendChild(div)
+        return div
+      }
+      const a = makeContainer('a-1', 'a-2')
+      const b = makeContainer('b-1', 'b-2')
+
+      containerRef.value = a
+      await flushPromises()
+      // Operator (or the opening component) already put focus inside
+      // the incoming container — the swap must not yank it to b-1.
+      ;(document.getElementById('b-2') as HTMLButtonElement).focus()
+      containerRef.value = b
+      await flushPromises()
+      expect((document.activeElement as HTMLElement)?.id).toBe('b-2')
+    })
+
+    it('a container swap without passing through null keeps the trap active on the new element', async () => {
+      const Swapper = defineComponent({
+        setup() {
+          const which = ref(1)
+          const dialogRef = ref<HTMLElement | null>(null)
+          useFocusTrap(dialogRef)
+          return { which, dialogRef }
+        },
+        render() {
+          return this.which === 1
+            ? h('div', { ref: 'dialogRef', key: 1 }, [h('button', { id: 'one-a' }, 'a'), h('button', { id: 'one-b' }, 'b')])
+            : h('div', { ref: 'dialogRef', key: 2 }, [h('button', { id: 'two-a' }, 'a'), h('button', { id: 'two-b' }, 'b')])
+        },
+      })
+      const wrapper = mount(Swapper, { attachTo: document.body })
+      await flushPromises()
+      expect((document.activeElement as HTMLElement)?.id).toBe('one-a')
+
+      wrapper.vm.which = 2
+      await flushPromises()
+      // F7(a): the old container was replaced in the DOM (focus fell to
+      // <body>) — the trap moves focus into the replacement.
+      expect((document.activeElement as HTMLElement)?.id).toBe('two-a')
+      // Trap still cycles — now within the replacement container.
+      ;(document.getElementById('two-b') as HTMLButtonElement).focus()
+      document.dispatchEvent(tabEvent(false))
+      expect((document.activeElement as HTMLElement)?.id).toBe('two-a')
+    })
   })
 })

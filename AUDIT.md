@@ -1,21 +1,303 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.67 (2026-07-04)
+**Current release:** v0.1.25.68 (2026-07-15)
 
 ## Baseline requirements
 
 | Component | Minimum | Shipped (compose) | Notes |
 |---|---|---|---|
-| cycles-server (runtime plane) | v0.1.25.8+ | v0.1.25.46 | `.39`–`.44` are additive runtime + ops/deployment changes (SCAN pagination, idempotent event replay, auth-cache freshness, structured logging + CR/LF sanitization, Redis-aware `/actuator/health/readiness`, stateless API-key-only Spring Security, prod-Compose hardening: Prometheus tenant-label + SpringDoc off) — no dashboard-visible wire change; e2e green against `.44`. `.13` bounds `listReservationsSorted` at `SORTED_HYDRATE_CAP=2000`. `.14` adds W3C Trace Context on the runtime plane (`X-Cycles-Trace-Id` response header, `trace_id` on runtime events + audit entries, MDC `traceId`). `.15` adds audit-log retention TTL (default 400 days, matches admin). `.16`–`.17` are additive runtime-plane patches with no dashboard-visible wire change (reservations contract unchanged; the dashboard required no client changes and e2e passes against the pinned `.17` image). All additive — no wire breakage. Pre-`.14` runtime rows carry no trace chip; dashboard tolerates the absence. The `.62` Evidence viewer + reservation `committed_metadata`/window filters are additive runtime-plane reads — servers that don't publish `/v1/evidence` or the projections degrade gracefully (404 / omitted fields). Compose shipped pin moved `.17 → .37`: `.37` surfaces reservation `committed`/`finalized_at_ms`/metadata, the `include=` projection on `listReservations` — including `include=evidence`, the reservation→evidence link (`.63`) — and serves `/v1/evidence` + JWKS, so the full Reservations/Evidence surface is exercisable against the shipped stack. Minimum stays `.8+` (graceful degradation below `.37`: evidence/projection fields omitted, no links render). `.38` stops the producer queuing evidence source records when evidence is unconfigured (this dashboard's bundled stack does not configure evidence), so `evidence:pending` stays quiet. |
-| cycles-admin (governance plane) | v0.1.25.17+ | v0.1.25.48 | `.42`–`.47` are ops/security/deployment hardening (Tomcat CVE pin, log sanitization, operational-endpoint auth gating `/actuator`+`/api-docs` behind the admin key, auth-failure rate limiting, webhook-secret encryption enforcement, Jedis/springdoc alignment, prod-deployment hardening) — no dashboard-visible wire change; the dashboard never calls `/actuator` or `/api-docs`. (prior notes preserved through `.37` — see release history.) `.38` is a security/polish release with no dashboard-visible wire change. `.39` implements spec v0.1.25.33 webhook lifecycle events — emits `webhook.{created,updated,paused,resumed,disabled,deleted}` on the `webhook` category on create / update / delete / bulk-action flows; dashboard `.59` surfaces these in EventsView filters. `.40` is post-review polish on the webhook-lifecycle emit; `.41` drops the tomcat override (SB 3.5.14 BOM-managed) + aligns Jedis — both dependency/hygiene only, no dashboard-visible wire change. |
-| cycles-events (dispatch worker) | v0.1.25.6+ | v0.1.25.22 | `.16`–`.20` harden webhook dispatch (reliable claim/ack queue, startup recovery, multi-replica-safe stale-only recovery, fail-closed delivery-state writes, tenant-metric label off) — worker internals, no dashboard-visible wire change. `.8` captured trace context on `WebhookDelivery` (protocol v0.1.25.28). `.11` emits `webhook.disabled` on the dispatcher auto-disable path (spec v0.1.25.33) so the Events view shows consecutive-failure auto-pause, not just operator pause. `.14` ("CyclesEvidence signing tier") adds the evidence-envelope signer (consumes `evidence:pending`, signs + stores) — required for the Evidence viewer to resolve a real envelope when evidence emission is configured; webhook-delivery behaviour unchanged. `.15` gates that signer on evidence config so an unconfigured stack (the default here) no longer dead-letters records into `evidence:failed`, and fixes a retention-scan `WRONGTYPE` startup error. |
-| Spec alignment | — | v0.1.25.35 | Pin moves on end-to-end support. `.32` formalized per-row event emission for `bulkActionBudgets` / `bulkActionTenants` (docs-only, no wire change). `.33` added six `webhook.*` EventType values + `EventDataWebhookLifecycle` payload schema. `.34` expanded `EventCategory` enum to include `webhook` so the `.33` events pass server-side validation. `.35` added the four `*_via_tenant_cascade` EventType values (+ `EventDataTenantCascade` payload schema) the admin server has emitted since implementing the tenant-close cascade; dashboard `.65` adds them to `EVENT_TYPES` so they are pickable in webhook subscriptions and suggested in the Events type filter. All additive — pre-`.31` servers tolerate unknown enum values per the spec's forward-compat rule, so the dashboard is backwards-compatible with every deployed admin version. |
+| cycles-server (runtime plane) | v0.1.25.8+ | v0.1.25.58 | `.37+` supplies the complete reservation/evidence surface used by the dashboard. `.47`–`.58` add tenant-close guards, replay/idempotency integrity, scalable sorted reservation queries, typed query boundaries, leased Redis maintenance/recovery, rolling-upgrade guidance, and replay metrics. The `.58` release is metrics-only relative to `.57`; no public wire break. Older runtimes remain tolerated with graceful omission/404 behavior, but the shipped stack uses the latest published release. |
+| cycles-admin (governance plane) | v0.1.25.17+ | v0.1.25.52 | `.49`–`.51` align webhook matcher/ownership boundaries; `.52` hardens truthful cursor pagination, equal-score continuation, sorted-query limits, API-key collision handling, durable tenant-close cascades, bulk idempotency, CORS trace headers, and strict request DTO parsing. Public response compatibility is preserved; `.51+` should deploy after events `.23+`. |
+| cycles-events (dispatch worker) | v0.1.25.6+ | v0.1.25.24 | `.23` enforces the webhook ownership boundary expected by admin `.51+`. `.24` adds owner-fenced dispatch, atomic terminal transitions, durable outboxes, bounded quarantine/DLQs, and authoritative evidence canonicalization. Its `evidence:processing` member format changes internally; existing evidence-enabled fleets must drain/recover that list with older workers before starting `.24` (OPERATIONS.md). |
+| Spec alignment | — | v0.1.25.41 | Pin moves on end-to-end support. `.36` adds `admin_on_behalf_of` actor type, `.37` adds `TENANT_CLOSED` reason code (both tolerated — open string types). `.38`/`.40`/`.41` define the tenant-owned category boundary (admin-only `api_key.*`/`policy.*`/`webhook.*`/`system.*` types are 400'd on tenant-owned subscriptions; dashboard `.68` gates the pickers). `.39` allows category-only subscriptions on update (dashboard `.68` permits clearing `event_types` when categories remain). Earlier: (prior `.32`–`.35` notes preserved in release history.) `.32` formalized per-row event emission for `bulkActionBudgets` / `bulkActionTenants` (docs-only, no wire change). `.33` added six `webhook.*` EventType values + `EventDataWebhookLifecycle` payload schema. `.34` expanded `EventCategory` enum to include `webhook` so the `.33` events pass server-side validation. `.35` added the four `*_via_tenant_cascade` EventType values (+ `EventDataTenantCascade` payload schema) the admin server has emitted since implementing the tenant-close cascade; dashboard `.65` adds them to `EVENT_TYPES` so they are pickable in webhook subscriptions and suggested in the Events type filter. All additive — pre-`.31` servers tolerate unknown enum values per the spec's forward-compat rule, so the dashboard is backwards-compatible with every deployed admin version. |
 
 **Pre-baseline compatibility:** dashboard `TenantLink.isSystem` accepts both legacy `<unauthenticated>` and new `__`-prefixed sentinels (shipped v0.1.25.31). Row-select bulk paths (Tenants/Webhooks suspend, Budgets freeze, Emergency-freeze) fan out per-row and work against any admin version.
 
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-07-15 — v0.1.25.68: four-plane audit (spec ↔ server ↔ UI/UX ↔ ops) + fixes
+
+Full conformance audit of the dashboard against spec v0.1.25.41 (file
+authority), the actual admin-server handler code, and UI/UX + ops review.
+Four findings were silent-data-integrity bugs; all fixed in this release.
+
+**Compliance fixes** (each verified against spec text AND server handler code):
+
+| Finding | Root cause | Fix |
+|---|---|---|
+| Key-expiry "edit" was a no-op | `expires_at` immutable per spec; server DTO lacks the field, Jackson drops unknowns silently → 200 + "updated" toast, expiry unchanged | Edit dialogs show expiry read-only ("revoke and recreate"); field removed from `ApiKeyUpdateRequest` |
+| Tenant `reservation_expiry_policy` edit was a no-op | Create-only field sent on PATCH; same silent-drop | Removed from edit form + `TenantUpdateRequest`; shown read-only |
+| Bulk RESET_SPENT hint said "allocated preserved" | Server `FUND_LUA` runs `allocated = amount` first — one amount clobbers every matched budget | Hints state real semantics; preview warns on FROZEN rows (fail per-row); `amount: 0` allowed for resets |
+| Overview counts wrong at scale | Server clamps every list `limit` to 100; view requested 2000/1000/200 | New `walkCursorPages` util (100/page, 10-page cap, `partial` flag → "counts may be partial" note) |
+
+**Spec catch-up `.35 → .41`:** category-only subscriptions on edit (`.39`),
+tenant-owned event-type gating (`.38`/`.40`/`.41`), `key_prefix` typed +
+shown as a column (key-id is masked; prefix is the correlation handle),
+`BudgetFundingResponse` (fund was mistyped as `BudgetLedger`), phantom
+type fields removed (`PolicyUpdateRequest.scope_pattern`,
+`ApiKeyCreateResponse.name`).
+
+**UX/a11y batch:** dialogs un-dismissible mid-mutation (duplicate-write
+guard); error toasts persist + dismiss button + `aria-live`; focus traps on
+the two hand-rolled modals (perms viewer, close-tenant — which also gained
+an in-flight state fixing a double-PATCH window); Overview→keys deep link
+(`?key_id` → `?search`); cold-load skeletons on Budgets/API keys; Audit
+URL write-back + refresh button; `/budget` + `/res` palette commands;
+terminal states gray in `StatusBadge` (webhook `DISABLED` stays red —
+it's the server's auto-disable-on-failures state, not an operator pause).
+
+**Ops:** `nginx-ssl.conf.example` rewritten as pure TLS terminator (old one
+reproduced the documented `proxy_pass` variable path-stripping bug and
+skipped the runtime plane); `Cache-Control` no-cache on `index.html` +
+immutable assets (closes the SRI stale-deploy failure); security headers
+moved to an include (add_header inheritance pitfall); gzip;
+`X-Forwarded-Proto`; JSON 5xx for `/v1/*`; dev compose loopback-bound
+(passwordless Redis was on 0.0.0.0); prod pins redis 7.4 / caddy 2.11 +
+memory limits + `no-new-privileges`; HSTS + `encode` in Caddyfile; shared
+CI workflow SHA-pinned; release images get SBOM + provenance. OPERATIONS.md
+gains rollback, redis-data backup/restore, caddy-data cert-volume notes.
+
+**Review round:** high-effort multi-agent review of the full diff surfaced
+10 confirmed regressions in the fix batches themselves — all fixed before
+commit. Notable: legacy tenant-owned webhooks (admin-only selectors) became
+un-editable under the new gating (validation now only fires on deliberate
+selector edits, with a hidden-legacy hint); two AuditView URL-sync defects
+(stale results on back-nav, bare `/audit` nav wiping filters — replaced the
+form-compare guard with a last-self-written-query marker + empty-query
+skip); `/res` palette command was a no-op when already on Reservations
+(added a route watcher); persistent error toasts had no stack cap (5, oldest
+dropped) and two advisories misused `toast.error` (new `warning` type); the
+FROZEN bulk advisory rendered in the red submit-error slot (separate amber
+`notice` prop); ApiKeys `?search` sync was one-way (write-back added);
+Overview re-ran all four cursor walks every 30s tick (now gated on
+overview-counter change + every-10th-tick fallback); the container nginx
+clobbered the TLS edge's `X-Forwarded-Proto` with `http` (map pass-through);
+the TLS example dropped HSTS `preload` (restored).
+
+**Review round 2** (full committed diff, incl. round-1 fixes): 7 more
+confirmed correctness bugs, all fixed in the follow-up commit. Worst:
+legacy admin-only webhook event_types could never be cleared (a category-
+only edit omitted the stripped-empty types field — hidden admin telemetry
+kept flowing to the tenant endpoint; selector edits on legacy rows now send
+BOTH cleaned arrays, emitting the spec's explicit `event_types: []`); the
+Overview walk gate committed its signature before the walks settled (failed
+walks went unretried ~5 min while the banner cleared — signature now
+commits only on full success, any rejection forces a retry); the rewritten
+nginx-ssl example pinned the container IP at startup (restored the
+resolver + no-URI-variable proxy_pass pattern). Rounds 1 and 2 flagged
+opposite behaviors for bare-URL navigation (preserve vs reset filters) —
+resolved with URL-authoritative semantics everywhere (GitHub/Linear
+convention: bare URL = default filters; history preserves submitted state):
+AuditView bare-nav resets + refetches, ReservationsView clears its tenant
+filter on param removal, ApiKeysView writes expiring_within_7d removal back
+to the URL. Also: toast cap now evicts oldest non-error first (persistent
+errors survive transient toasts); useFocusTrap activates on container-ref
+populate/clear instead of view lifetime (no more document-level listeners
+on closed dialogs or focus-yank on navigation).
+
+**Review round 3** (working diff on top of rounds 1–2): 7 more confirmed
+findings, all fixed. Worst: the round-2 walk-retry fix over-corrected —
+any rejected walk re-fired all four multi-page cursor walks EVERY 30s
+tick for the duration of an outage (request amplification against a
+degraded API); replaced with exponential backoff (retry after 2 → 4 → 8
+ticks, capped at the 10-tick fallback, reset on a full success) plus a
+persistent walk-error banner that no longer clears between retries
+(manual refresh still forces an immediate attempt; counter-change
+triggers respect an active backoff). Also: ReservationsView bare-URL
+states were contradictory (Back-to-bare cleared the filter, reload of
+the same bare URL picked the default tenant) — bare URL now consistently
+means default tenant via a shared `defaultTenantId()`; route-identity
+guards added to every `route.query` watcher in Reservations / Audit /
+ApiKeys / Tenants / Budgets / Events / Webhooks (they fire during
+navigation AWAY, so a destination carrying a same-named param mutated
+the unmounting view and fired spurious fetches); toast eviction refined
+(a transient landing on an all-error stack soft-overflows past the cap
+instead of evicting an unacknowledged error — only an incoming error
+evicts the oldest error); ApiKeys `?expiring_within_7d=<junk>` is now
+stripped on landing (presence-normalized write-back — previously
+re-propagated forever by the `?search` spread); AuditView's one-shot
+self-write marker is armed only when the replace actually changes the
+URL (router dedupe left it stale, swallowing the next real navigation
+to the same query); useFocusTrap recaptures escaped focus on forward
+Tab (mirror of the Shift+Tab path) and moves focus into the new
+container on a direct element-to-element ref swap. Round-3 validation:
+vue-tsc clean; 1,111/1,111 tests (92 files); line coverage 96.13%.
+
+**Review round 4** (whole-PR view): 10 more findings, all fixed. Worst:
+unvalidated `?from`/`?to` URL dates crashed the Audit/Events queries
+(`new Date('lastweek').toISOString()` → RangeError, error banner, zero
+rows) — junk is now dropped on hydration (shared `dateParamOrEmpty`) with
+a parse guard at the conversion site; the `?expiring_within_7d=1` deep
+link filtered only page 1 while the Overview badge counted a 1,000-key
+walk (soonest-expiring keys sort LAST under created_at-desc) — the filter
+now drives an ACTIVE-set cursor walk (same 10-page cap, partial hint,
+load-more disabled in that mode). Also: Webhooks/Reservations `?status`
+watchers were adopt-only (param-absent now resets to the view default —
+the same URL-authoritative gap rounds 2–3 closed for other params); the
+Reservations `?tenant_id` watcher adopted unvalidated ids ('/res typo' →
+blank dropdown + 404 + junk URL) — unknown ids now keep the filter, warn,
+and correct the URL (mount path warns too); Overview's manual Refresh was
+silently dropped during multi-second walk rounds by usePolling's
+in-flight dedup — the click is queued and replayed when the tick settles,
+walks forced (composable semantics untouched). Ops: the prod-compose
+memory limits are env-parameterized (`CYCLES_{SERVER,ADMIN,EVENTS}_MEM_LIMIT`
+default 2g — the fixed 1g caps regressed large fleets to 768m heaps;
+`REDIS_MEM_LIMIT` 768m) and Redis gains `--maxmemory` (`REDIS_MAXMEMORY`
+default 512mb) with `noeviction` — governance data must never be silently
+evicted; the cap surfaces as visible write errors instead of a kernel
+OOM-kill → AOF-replay crash loop; the `X-Forwarded-Proto` pass-through
+trust boundary is documented (template + OPERATIONS.md: trustworthy only
+behind a header-overwriting TLS terminator; direct exposure is dev-only).
+Cleanups: Audit/Events/EventTimeline copy handlers rebuilt on
+`writeClipboardJson` (EventTimeline's silent failure now toasts); the
+duplicate manual focus save/restore under useFocusTrap removed from the
+perms viewer + close-tenant dialog (the trap's first-focusable target
+already matches both dialogs' intended initial focus). Round-4
+validation: vue-tsc clean; 1,129/1,129 tests (93 files); line coverage
+96.13%; `docker compose -f docker-compose.prod.yml config` validated
+with the new memory knobs.
+
+**Review round 5** (whole-PR view, incl. round-4 fixes): 6 more findings,
+all fixed. Worst: a duplicated URL param (`?search=a&search=b`) hydrates
+as an ARRAY through vue-router, and the views' bare `as string` casts let
+it reach `.toLowerCase()` / `.trim()` — TypeError, blank view (new shared
+`stringParam` normalizer next to `dateParamOrEmpty`; swept ApiKeys /
+Events / Budgets / Audit / Login hydration + watcher sites); toggling the
+ApiKeys expiring filter mid-walk was silently dropped by usePolling's
+in-flight dedup AND a settling walk could commit ACTIVE-only data as the
+full list (queued-refresh pattern from Overview + commit-time mode check,
+belt and suspenders); EventsView's same-route watcher synced only the
+three correlation ids, so the `/event <id>` palette push never reached
+the search ref and a pre-set trace filter made the write-back strip
+`?search` from the URL (watcher now re-syncs every hydrated param,
+reset-style URL-authoritative, aligned with AuditView); the toast cap's
+single-eviction logic let interleaved (transient, error) pairs ratchet
+the persistent-error population past the cap — each soft-overflow slot
+converted into a permanent 6th/7th error (while-loop eviction: non-errors
+first, then oldest errors, until the push fits); the expiring-keys walk
+(up to 11 requests) replayed on EVERY 60s background tick per tab —
+user-initiated triggers still walk immediately, ambient ticks re-walk
+every 5th tick (~5 min; expiry changes at human cadence); clipboard
+consolidation finished — WebhookDetailView's four copy handlers +
+EvidenceView's `copyEnvelope` rebuilt on `writeClipboardJson` /
+`writeClipboardText` with the unified 'clipboard unavailable' failure
+copy (the old 'permission denied' wording misdiagnosed insecure
+contexts). Round-5 validation: vue-tsc clean; 1,155/1,155 tests
+(96 files); line coverage 96.16%.
+
+**Review round 6** (net PR state after round 5; 2 of 5 verifier candidates
+refuted): 3 findings, all fixed. The `/event` palette command advertised
+`event_id` but listEvents' `search` matches only correlation_id + scope —
+a guaranteed-empty list during triage (command relabeled to what the
+server actually searches); ApiKeysView committed the 5-tick walk window
+BEFORE awaiting the walk, so one transient 502 left the expiring view
+broken ~5 min with no retry (window now commits only on a successful
+walk — next 60s tick retries, the pre-gating self-heal cadence); one
+same-route navigation fanned into N identical listEvents calls via the
+per-ref applyFilters watchers (identical-signature echoes now dedup to
+one fetch). Round-6 validation: vue-tsc clean; 1,157/1,157 tests
+(96 files); line coverage 96.16%.
+
+**Review round 7** (net PR state after round 6): 3 findings — two in
+round-6's own fixes — all fixed. BudgetsView's same-route `?search`
+navigation fired two staggered NON-identical loads (route watcher reads
+the 300ms-stale debounced ref) with no sequencing, so a slow unfiltered
+response could commit over the filtered view (`loadList` now carries a
+monotonic sequence guard; stale results AND stale errors are discarded);
+ApiKeysView consumed `forceWalk` before the awaited walk, so a failed
+user-triggered walk mid-window sat out ~4 min behind the ambient-tick
+early-return (gate state now consumed only on a successful walk — mirrors
+the round-6 counter fix it should have shipped with); EventsView's
+signature dedupe was justified on the false premise that applyFilters had
+no explicit call sites — the form's Enter submit (the operator's manual
+retry after a transient failure) was silently swallowed (explicit
+submit/Clear now pass `force`, and a failed load invalidates the applied
+signature). Round-7 validation: vue-tsc clean; 1,161/1,161 tests
+(97 files); line coverage 96.16%.
+
+**Review round 8** (net PR state after round 7; 3 of 4 finder angles came
+back empty): 1 finding, fixed. EventsView's `load()` lacked the sequence
+guard round 7 gave BudgetsView — the 15s poll and operator filter changes
+both funnel through it, so a slow poll response could commit old-filter
+rows/cursor state (or a superseded error) over a newer filtered result.
+Same monotonic-guard fix; stale successes and stale failures both
+discarded. Round-8 validation: vue-tsc clean; 1,162/1,162 tests
+(97 files); line coverage 96.16%.
+
+**Review round 9** (net PR state after round 8; 2 of 4 finder angles
+empty): 2 findings, fixed. EventsView `loadMore()` bypassed the sequence
+guard — a stale old-filter page-2 resolving after a filter change
+interleaved wrong-filter rows, poisoned the cursor (next Load more 400s
+on the server's filter-hash check), and flipped merge-from-head mode so
+polls preserved the stale rows indefinitely (invalidated by SIGNATURE,
+not loadSeq: a routine 15s poll must not cancel a legitimate same-filter
+loadMore); README's RESET_SPENT row still said "without touching
+allocated" — reworded to state the raw `allocated = amount` semantics,
+that the single-budget flow preserves allocation by passing the current
+value, and the bulk clobber warning. Round-9 validation: vue-tsc clean;
+1,163/1,163 tests (97 files); line coverage 96.16%.
+
+**Review round 10** (whole-PR correctness + UI/UX pass): all confirmed
+findings fixed. Poll callbacks now distinguish a committed success, handled
+failure, and superseded/stale result so discarded requests cannot advance the
+freshness stamp or reset retry backoff; the affected Events, Budgets,
+Reservations, Webhooks, ApiKeys, and Overview paths return that protocol
+consistently. Audit/Events/Reservations/Webhooks page-one and load-more races
+now keep the newest result owner authoritative. Loading and empty states for
+wide virtualized tables render at viewport width on narrow screens while the
+column headers and row canvases retain one aligned horizontal scroller.
+Accessibility and usability fixes cover per-toast live-region roles, modal
+labels/focus, masked-value keyboard behavior, responsive bulk toolbars, and
+terminal-row visibility/count consistency. The Redis backup runbook now stops
+writers, forces an RDB snapshot, stops Redis before archiving its AOF-backed
+volume, and documents stack recovery after a failed backup step.
+
+**Review round 11** (review of the round-10 commit): 3 actionable findings,
+all fixed. AuditView pagination and multi-page export rebuilt params from live,
+unsubmitted form refs and could pair a new filter with the applied result's old
+cursor; page-one now commits an `appliedFilterParams` tuple that both paths
+reuse. Successful Webhooks filter/sort reloads bypassed `usePolling` and left
+the freshness timestamp describing the previous result set; freshness now
+advances whenever the generation-owning page-one result commits. This entry
+and the downstream CHANGELOG close the round-10 documentation omission under
+the repo's strict audit rule. A reviewer also noted that some assistive-
+technology combinations may not announce a newly inserted `role="status"`;
+the current markup is ARIA-conformant and avoids duplicate error announcements,
+so a persistent polite announcer remains deferred until screen-reader testing
+demonstrates a compatibility need.
+
+**Review round 12 — deployment pin audit (2026-07-16):** GitHub's published
+releases were queried directly before editing. Both committed Compose variants
+and the README deployment example now pin runtime `0.1.25.58` (was `.46`),
+admin `0.1.25.52` (was `.48`), and events `0.1.25.24` (was `.22`). Runtime
+`.58` is wire-compatible and metrics-only relative to `.57`; admin `.52`
+preserves the public response contract while correcting pagination,
+idempotency, cascade durability, and request-boundary behavior. Events `.24`
+has one rollout-sensitive internal migration: evidence-enabled fleets must
+drain or recover `evidence:processing` with older workers before starting
+`.24`, and events must precede admin because admin `.51+` assumes the ownership
+boundary from events `.23+`. OPERATIONS.md documents that sequence; fresh or
+evidence-disabled stacks can start normally. Exact image tags remain deliberate
+to prevent silent fleet drift.
+
+**Validation:** vue-tsc clean; 1,218/1,218 tests (103 files); line coverage
+96.28% (gate ≥95%); production `npm run build` + full `docker build` pass;
+built image live-smoke-tested (index no-cache + full security headers, SPA
+fallback headers, immutable assets, gzip, JSON 502 on dead upstream,
+container healthcheck healthy); nginx template re-rendered through the real
+image's envsubst + `nginx -t` after the X-Forwarded-Proto map change.
+
+**Known deferrals:** session-expiry countdown warning, dirty-form discard
+guard, suspend/reactivate `:loading` wiring, policy disable/enable UI +
+policy-list pagination (>50 truncates), `GET /v1/admin/events/{id}` unused.
+Structural (review round 2, consolidation not defects): extract a shared
+`useUrlSyncedRef` composable (the per-view URL↔ref watcher pairs in
+Tenants/Budgets/Events/Audit/ApiKeys/Reservations re-derive the same
+guards, now including the round-3 route-identity guard); rebuild
+`useBulkActionPreview`/`useListExport` pagination loops on
+`walkCursorPages`.
 
 ### 2026-07-04 — v0.1.25.67: admin pin bump (.48)
 

@@ -104,6 +104,7 @@ function apiKey(status: string): ApiKey {
   return {
     key_id: `key_${status.toLowerCase()}`,
     tenant_id: 'acme',
+    key_prefix: `cyc_test_${status.toLowerCase()}`,
     status,
     permissions: [],
     created_at: '2026-01-01T00:00:00Z',
@@ -335,6 +336,35 @@ describe('TenantDetailView — cascade-recovery banner (v0.1.25.44)', () => {
       expect(listBudgetsMock).toHaveBeenCalledWith({ tenant_id: 'acme' })
       expect(listWebhooksMock).toHaveBeenCalledWith({ tenant_id: 'acme' })
       expect(listApiKeysMock).toHaveBeenCalledWith({ tenant_id: 'acme' })
+    })
+
+    it('keeps the successful CLOSED state when a post-close refresh fails', async () => {
+      getTenantMock.mockResolvedValueOnce(tenant('ACTIVE'))
+      listBudgetsMock.mockResolvedValueOnce({ ledgers: [budget('ACTIVE')], has_more: false })
+      listWebhooksMock.mockResolvedValueOnce({ subscriptions: [webhook('ACTIVE')], has_more: false })
+      listApiKeysMock.mockResolvedValueOnce({ keys: [apiKey('ACTIVE')], has_more: false })
+
+      const w = await mountView()
+
+      updateTenantStatusMock.mockResolvedValue(tenant('CLOSED'))
+      getTenantMock.mockRejectedValue(new Error('refresh unavailable'))
+      listBudgetsMock.mockResolvedValue({ ledgers: [budget('CLOSED')], has_more: false })
+      listWebhooksMock.mockResolvedValue({ subscriptions: [webhook('DISABLED')], has_more: false })
+      listApiKeysMock.mockResolvedValue({ keys: [apiKey('REVOKED')], has_more: false })
+
+      const closeBtn = w.findAll('button').find(b => b.text() === 'Close')
+      await closeBtn!.trigger('click')
+      await w.find<HTMLInputElement>('input[type="text"]').setValue('Acme Corp')
+      const confirmBtn = w.findAll('button').find(b => b.text() === 'Close Permanently')
+      await confirmBtn!.trigger('click')
+      await flushPromises()
+
+      // The PATCH response is committed before refresh. A failed GET must not
+      // leave an ACTIVE tenant on screen or describe the mutation as failed.
+      expect(w.text()).toContain('CLOSED')
+      expect(w.findAll('button').some(b => b.text() === 'Close')).toBe(false)
+      expect(w.text()).toContain('Tenant status changed, but refresh failed: refresh unavailable')
+      expect(w.text()).not.toContain('Tenant status change failed')
     })
 
     it('poll tick that fires mid-rerun does not clobber fresh post-PATCH state', async () => {

@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRouter, useRoute } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
+import { POLLING_STALE } from '../composables/pollingResult'
 import { POLL_SLOW_MS } from '../composables/pollingConstants'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
@@ -16,7 +17,7 @@ import { generateIdempotencyKey } from '../utils/idempotencyKey'
 import type { WebhookBulkAction, WebhookBulkFilter } from '../types'
 import { useAuthStore } from '../stores/auth'
 import type { WebhookSubscription, WebhookCreateRequest, WebhookCreateResponse, Tenant, WebhookSecurityConfig } from '../types'
-import { EVENT_TYPES } from '../types'
+import { EVENT_TYPES, TENANT_ALLOWED_EVENT_TYPES } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import TenantLink from '../components/TenantLink.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -72,6 +73,7 @@ const error = ref('')
 const hasMore = ref(false)
 const nextCursor = ref('')
 const loadingMore = ref(false)
+const filterLoading = ref(false)
 
 // v0.1.25.21 (#5): filter by tenant + bulk pause/enable. The existing
 // view was system-wide with no way to scope to "webhooks for tenant X"
@@ -103,14 +105,29 @@ const statusFromQuery = computed<string | null>(() => {
   if (typeof s !== 'string') return null
   return s === 'ACTIVE' || s === 'PAUSED' || s === 'DISABLED' ? s : null
 })
+// Route-identity guards: these watchers also fire while navigating AWAY
+// (before unmount), and a destination route can carry same-named params
+// (e.g. /tenants?status=ACTIVE) — ignore query changes that belong to
+// another route. (The immediate run happens at setup, where route.name
+// is already 'webhooks'.)
+//
+// URL-AUTHORITATIVE FILTER (deliberate — do not flip back): the URL is
+// the single source of truth for the synced ?status filter, per the
+// GitHub/Linear list-view convention. Param present → adopt it; param
+// ABSENT (or unrecognized) → reset to the unfiltered default, so Back
+// to a bare /webhooks entry clears a deep-linked status instead of
+// keeping stale filtered data on a bare URL.
 watch(statusFromQuery, s => {
-  if (s && statusFilter.value !== s) statusFilter.value = s
+  if (route.name !== 'webhooks') return
+  const next = s ?? ''
+  if (statusFilter.value !== next) statusFilter.value = next
 }, { immediate: true })
 const failingFromQuery = computed<boolean>(() => {
   const f = route.query.failing
   return f === '1' || f === 'true'
 })
 watch(failingFromQuery, f => {
+  if (route.name !== 'webhooks') return
   if (failingFilter.value !== f) failingFilter.value = f
 }, { immediate: true })
 
@@ -158,7 +175,7 @@ const { sortKey, sortDir, toggle, sorted: columnSortedWebhooks } = useSort(
   undefined,
   'asc',
   undefined,
-  { serverSide: true, onChange: () => { refresh() } },
+  { serverSide: true, onChange: () => { void loadWebhooksPageOne(true) } },
 )
 
 // v0.1.25.46: hide DISABLED webhooks by default — they're terminal and
@@ -170,9 +187,11 @@ const { sortKey, sortDir, toggle, sorted: columnSortedWebhooks } = useSort(
 // state:closed gives). See useTerminalAwareList for the contract.
 const {
   includeTerminal,
+  showTerminal,
   visibleRows: sortedWebhooks,
   terminalCount: hiddenTerminalCount,
   terminalVerb,
+  isTerminal: isTerminalWebhook,
 } = useTerminalAwareList<WebhookSubscription>({
   kind: 'webhook',
   source: columnSortedWebhooks,
@@ -477,6 +496,23 @@ function openCreate() {
   showCreate.value = true
 }
 
+// TENANT-OWNED CATEGORY BOUNDARY (spec revisions 0.1.25.38/.40/.41,
+// createWebhookSubscription lines 6281-6318): when the create form
+// targets a concrete tenant, servers at .40+ reject admin-only event
+// types (api_key.* / policy.* / webhook.* / system.*) with 400
+// INVALID_REQUEST — the tenant owns the delivery URL + signing secret,
+// so admin telemetry on such a row would leak to a tenant-controlled
+// endpoint. Filter the picker to the tenant-allowed set and drop any
+// already-checked now-disallowed types when the operator picks a tenant.
+const createEventTypes = computed<readonly string[]>(() =>
+  createForm.value.tenant_id ? TENANT_ALLOWED_EVENT_TYPES : EVENT_TYPES,
+)
+watch(() => createForm.value.tenant_id, (tenantId) => {
+  if (!tenantId) return
+  const allowed = new Set<string>(TENANT_ALLOWED_EVENT_TYPES)
+  createForm.value.event_types = createForm.value.event_types.filter(et => allowed.has(et))
+})
+
 async function onSecretClose() {
   const subId = createdWebhook.value?.subscription?.subscription_id
   createdWebhook.value = null
@@ -566,17 +602,48 @@ async function submitSecurityConfig() {
   finally { securityLoading.value = false }
 }
 
-const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
+// Filter changes must not go through usePolling.refresh(): refresh is a
+// documented no-op while a poll is in flight, which allowed the old filter's
+// response to commit under the new URL/control state. Direct page-one loads
+// may overlap polling, so a generation guard makes latest intent authoritative.
+let listGeneration = 0
+// Tracks the result set actually committed to the table. Direct filter/sort
+// reloads bypass usePolling so they can overlap an in-flight tick safely; the
+// view therefore owns freshness for both paths.
+const lastSuccessAt = ref<Date | null>(null)
+async function loadWebhooksPageOne(operatorTriggered = false) {
+  const generation = ++listGeneration
+  if (operatorTriggered) filterLoading.value = true
+  loadingMore.value = false
+  nextCursor.value = ''
+  hasMore.value = false
   try {
     const [wRes, tRes] = await Promise.all([listWebhooks(withListParams()), listTenants()])
+    if (generation !== listGeneration) return POLLING_STALE
     webhooks.value = wRes.subscriptions
     hasMore.value = !!wRes.has_more
     nextCursor.value = wRes.next_cursor ?? ''
     tenants.value = tRes.tenants
     error.value = ''
     initialLoadDone.value = true
-  } catch (e) { error.value = toMessage(e) }
-}, POLL_SLOW_MS)
+    lastSuccessAt.value = new Date()
+    return true
+  } catch (e) {
+    if (generation === listGeneration) {
+      error.value = toMessage(e)
+      return false
+    }
+    return POLLING_STALE
+  } finally {
+    if (generation === listGeneration) filterLoading.value = false
+  }
+}
+
+const { refresh, isLoading } = usePolling(
+  () => loadWebhooksPageOne(false),
+  POLL_SLOW_MS,
+)
+const listLoading = computed(() => isLoading.value || filterLoading.value)
 
 // Refetch page 1 whenever the debounced URL/search filter changes so
 // the cursor stays aligned with the server's (sort_by, sort_dir,
@@ -585,25 +652,35 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
 // would 400. v0.1.25.53: statusFilter is now also server-side, so the
 // same refetch-page-1 contract applies when the operator flips the
 // dropdown or the URL mirror lands a new status value.
-watch([debouncedUrlFilter, statusFilter], () => { refresh() })
+watch([debouncedUrlFilter, statusFilter], () => { void loadWebhooksPageOne(true) })
 
 async function loadMore() {
   if (!nextCursor.value || loadingMore.value) return
+  const generation = listGeneration
+  const cursor = nextCursor.value
   loadingMore.value = true
   try {
-    const res = await listWebhooks(withListParams({ cursor: nextCursor.value }))
+    const res = await listWebhooks(withListParams({ cursor }))
+    if (generation !== listGeneration) return
     webhooks.value = [...webhooks.value, ...res.subscriptions]
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
-  } catch (e) { error.value = toMessage(e) }
-  finally { loadingMore.value = false }
+  } catch (e) {
+    if (generation === listGeneration) error.value = toMessage(e)
+  }
+  finally {
+    if (generation === listGeneration) loadingMore.value = false
+  }
 }
 
 // Export. filterFn mirrors the tenant+URL client filters so the
 // exported set matches what the operator sees on screen.
 function webhookMatchesFilter(w: WebhookSubscription): boolean {
   if (tenantFilter.value && w.tenant_id !== tenantFilter.value) return false
+  if (statusFilter.value && w.status !== statusFilter.value) return false
+  if (failingFilter.value && (w.consecutive_failures ?? 0) <= 0) return false
   if (debouncedUrlFilter.value && !urlMatches(w, debouncedUrlFilter.value)) return false
+  if (!showTerminal.value && isTerminalWebhook(w)) return false
   return true
 }
 const {
@@ -682,7 +759,7 @@ const gridTemplate = computed(() =>
       item-noun="webhook"
       :loaded="sortedWebhooks.length"
       :has-more="hasMore"
-      :loading="isLoading"
+      :loading="listLoading"
       :last-updated-at="lastSuccessAt"
       @refresh="refresh"
     >
@@ -760,7 +837,7 @@ const gridTemplate = computed(() =>
           aria-label="Apply action to all webhooks matching the current filter"
           class="inline-flex items-center gap-2 flex-wrap"
         >
-          <div class="w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
+          <div class="hidden sm:block w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
           <span class="muted-sm whitespace-nowrap">Apply to all matching filter:</span>
           <button
             @click="openFilterBulk('PAUSE')"
@@ -793,10 +870,10 @@ const gridTemplate = computed(() =>
           v-if="canManage && selectedVisibleCount > 0"
           role="toolbar"
           aria-label="Bulk webhook actions"
-          class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-gray-900 dark:border dark:border-gray-700 border-2 border-blue-400 shadow-2xl rounded-lg px-4 py-2.5 flex items-center gap-3 max-w-[90vw]"
+          class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-gray-900 dark:border dark:border-gray-700 border-2 border-blue-400 shadow-2xl rounded-lg px-4 py-2.5 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 max-w-[90vw]"
         >
           <span class="text-sm font-semibold text-blue-900 dark:text-blue-300 tabular-nums">{{ selectedVisibleCount }} selected</span>
-          <div class="w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
+          <div class="hidden sm:block w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
           <button @click="openBulk('PAUSED')" class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer">Pause</button>
           <button @click="openBulk('ACTIVE')" class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer">Enable</button>
           <button
@@ -858,7 +935,10 @@ const gridTemplate = computed(() =>
             <div v-if="canManage" role="cell" class="table-cell">
               <input type="checkbox" :checked="selected.has(sortedWebhooks[v.index].subscription_id)" @change="toggleSelect(sortedWebhooks[v.index].subscription_id)" :aria-label="`Select webhook ${sortedWebhooks[v.index].name || sortedWebhooks[v.index].url}`" />
             </div>
-            <div role="cell" class="table-cell"><span :class="healthColor(sortedWebhooks[v.index])" class="inline-block w-2.5 h-2.5 rounded-full" :title="healthLabel(sortedWebhooks[v.index])" /></div>
+            <!-- WCAG 1.4.1: the dot is color-only, so pair it with sr-only
+                 text carrying the health label — title alone is invisible
+                 to screen readers and keyboard users. -->
+            <div role="cell" class="table-cell"><span :class="healthColor(sortedWebhooks[v.index])" class="inline-block w-2.5 h-2.5 rounded-full" :title="healthLabel(sortedWebhooks[v.index])" aria-hidden="true" /><span class="sr-only">{{ healthLabel(sortedWebhooks[v.index]) }}</span></div>
             <div role="cell" class="table-cell min-w-0">
               <router-link :to="{ name: 'webhook-detail', params: { id: sortedWebhooks[v.index].subscription_id } }" class="text-blue-600 hover:underline truncate block" :title="sortedWebhooks[v.index].url">{{ sortedWebhooks[v.index].url }}</router-link>
               <span v-if="sortedWebhooks[v.index].name" class="muted-sm truncate block" :title="sortedWebhooks[v.index].name">{{ sortedWebhooks[v.index].name }}</span>
@@ -1011,11 +1091,12 @@ const gridTemplate = computed(() =>
       <div>
         <label class="form-label">Event types</label>
         <div class="grid grid-cols-2 gap-1 max-h-48 overflow-y-auto border border-gray-200 rounded p-2">
-          <label v-for="et in EVENT_TYPES" :key="et" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+          <label v-for="et in createEventTypes" :key="et" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
             <input type="checkbox" :value="et" v-model="createForm.event_types" class="rounded" />
             {{ et }}
           </label>
         </div>
+        <p v-if="createForm.tenant_id" class="muted-sm mt-1">Tenant-owned subscriptions can only receive tenant-scoped events (budget.*, reservation.*, tenant.*).</p>
       </div>
       <div>
         <label for="cw-scope" class="form-label">Scope filter (optional)</label>

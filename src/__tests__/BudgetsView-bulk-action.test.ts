@@ -424,6 +424,206 @@ describe('BudgetsView — bulk-action (Slice C, v0.1.25.26)', () => {
     expect(k1).not.toBe(k2)
   })
 
+  // Server Amount is @Min(0): zero is legal for RESET / RESET_SPENT
+  // (zero-allocation rollover — the single-op RESET_SPENT path already
+  // allows it) but meaningless for CREDIT / DEBIT / REPAY_DEBT.
+  describe('amount=0 validation per action', () => {
+    it('accepts amount=0 for bulk RESET_SPENT and sends it as an Amount object', async () => {
+      const rows = [ledger('a')]
+      listBudgetsMock.mockResolvedValue({ ledgers: rows, has_more: false })
+      bulkActionBudgetsMock.mockResolvedValue({
+        action: 'RESET_SPENT', total_matched: 1,
+        succeeded: [{ id: 'a' }], failed: [], skipped: [],
+        idempotency_key: 'kk',
+      })
+
+      const { default: BudgetsView } = await import('../views/BudgetsView.vue')
+      const w = mount(BudgetsView, { global: stdMounts() })
+      await flushPromises()
+
+      await selectTenant(w, 'acme')
+      await openBulkSetup(w)
+      await w.find<HTMLSelectElement>('select#bulk-op').setValue('RESET_SPENT')
+      await w.find<HTMLInputElement>('input#bulk-amount').setValue('0')
+      await clickPreview(w)
+
+      // Preview opened (no validation error) — confirm and check the body.
+      expect(w.text()).not.toContain('Amount must be')
+      await w.findAll('button').find(b => b.text().includes('Reset spent 1 budgets'))!.trigger('click')
+      await flushPromises()
+
+      const body = bulkActionBudgetsMock.mock.calls[0][0]
+      expect(body.amount).toEqual({ unit: 'USD_MICROCENTS', amount: 0 })
+    })
+
+    it('accepts amount=0 for bulk RESET', async () => {
+      const rows = [ledger('a')]
+      listBudgetsMock.mockResolvedValue({ ledgers: rows, has_more: false })
+      bulkActionBudgetsMock.mockResolvedValue({
+        action: 'RESET', total_matched: 1,
+        succeeded: [{ id: 'a' }], failed: [], skipped: [],
+        idempotency_key: 'kk',
+      })
+
+      const { default: BudgetsView } = await import('../views/BudgetsView.vue')
+      const w = mount(BudgetsView, { global: stdMounts() })
+      await flushPromises()
+
+      await selectTenant(w, 'acme')
+      await openBulkSetup(w)
+      await w.find<HTMLSelectElement>('select#bulk-op').setValue('RESET')
+      await w.find<HTMLInputElement>('input#bulk-amount').setValue('0')
+      await clickPreview(w)
+
+      await w.findAll('button').find(b => b.text().includes('Reset 1 budgets'))!.trigger('click')
+      await flushPromises()
+
+      expect(bulkActionBudgetsMock.mock.calls[0][0].amount).toEqual({ unit: 'USD_MICROCENTS', amount: 0 })
+    })
+
+    it('still rejects amount=0 for CREDIT (strictly positive)', async () => {
+      listBudgetsMock.mockResolvedValue({ ledgers: [ledger('a')], has_more: false })
+      const { default: BudgetsView } = await import('../views/BudgetsView.vue')
+      const w = mount(BudgetsView, { global: stdMounts() })
+      await flushPromises()
+
+      await selectTenant(w, 'acme')
+      await openBulkSetup(w)
+      await w.find<HTMLInputElement>('input#bulk-amount').setValue('0')
+      await clickPreview(w)
+
+      expect(w.text()).toContain('Amount must be a positive number')
+      expect(bulkActionBudgetsMock).not.toHaveBeenCalled()
+    })
+
+    it('rejects a negative amount for RESET_SPENT', async () => {
+      listBudgetsMock.mockResolvedValue({ ledgers: [ledger('a')], has_more: false })
+      const { default: BudgetsView } = await import('../views/BudgetsView.vue')
+      const w = mount(BudgetsView, { global: stdMounts() })
+      await flushPromises()
+
+      await selectTenant(w, 'acme')
+      await openBulkSetup(w)
+      await w.find<HTMLSelectElement>('select#bulk-op').setValue('RESET_SPENT')
+      await w.find<HTMLInputElement>('input#bulk-amount').setValue('-5')
+      await clickPreview(w)
+
+      expect(w.text()).toContain('Amount must be zero or a positive number')
+      expect(bulkActionBudgetsMock).not.toHaveBeenCalled()
+    })
+  })
+
+  // FUND_LUA semantics (admin BudgetRepository): RESET_SPENT executes
+  // `allocated = amount` BEFORE resetting spent, so the single bulk
+  // amount clobbers every matched budget's allocation; and any FROZEN
+  // row is rejected before dispatch (per-row failure). The hints and the
+  // preview must tell the operator both truths.
+  describe('bulk RESET_SPENT truth-in-copy + frozen-row warning', () => {
+    it('RESET_SPENT hint states the allocation clobber — no "preserved" claim', async () => {
+      listBudgetsMock.mockResolvedValue({ ledgers: [ledger('a')], has_more: false })
+      const { default: BudgetsView } = await import('../views/BudgetsView.vue')
+      const w = mount(BudgetsView, { global: stdMounts() })
+      await flushPromises()
+
+      await selectTenant(w, 'acme')
+      await openBulkSetup(w)
+      await w.find<HTMLSelectElement>('select#bulk-op').setValue('RESET_SPENT')
+
+      const text = w.text()
+      expect(text).not.toContain('Allocated and reserved are preserved')
+      expect(text).toContain('sets EVERY matching budget\'s allocated to this one amount')
+      expect(text).toContain('overwritten to the same value')
+      expect(text).toContain('FROZEN budgets matched by the filter fail per-row')
+    })
+
+    it('preview surfaces how many matched FROZEN rows will fail, without excluding them from the count', async () => {
+      const rows = [ledger('a'), ledger('b', { status: 'FROZEN' }), ledger('c', { status: 'FROZEN' })]
+      listBudgetsMock.mockResolvedValue({ ledgers: rows, has_more: false })
+      bulkActionBudgetsMock.mockResolvedValue({
+        action: 'RESET_SPENT', total_matched: 3,
+        succeeded: [{ id: 'a' }],
+        failed: [
+          { id: 'b', error_code: 'BUDGET_FROZEN', message: 'frozen' },
+          { id: 'c', error_code: 'BUDGET_FROZEN', message: 'frozen' },
+        ],
+        skipped: [],
+        idempotency_key: 'kk',
+      })
+
+      const { default: BudgetsView } = await import('../views/BudgetsView.vue')
+      const w = mount(BudgetsView, { global: stdMounts() })
+      await flushPromises()
+
+      await selectTenant(w, 'acme')
+      await openBulkSetup(w)
+      await w.find<HTMLSelectElement>('select#bulk-op').setValue('RESET_SPENT')
+      await w.find<HTMLInputElement>('input#bulk-amount').setValue('1000')
+      await clickPreview(w)
+
+      // Count still includes the frozen rows (server matches by filter
+      // regardless of status — excluding them would COUNT_MISMATCH)…
+      expect(w.text()).toContain('3 budgets will be affected')
+      // …but the preview warns they'll fail per-row.
+      expect(w.text()).toContain('2 FROZEN budgets in this selection will fail per-row')
+
+      // expected_count stays at the full matched total.
+      await w.findAll('button').find(b => b.text().includes('Reset spent 3 budgets'))!.trigger('click')
+      await flushPromises()
+      expect(bulkActionBudgetsMock.mock.calls[0][0].expected_count).toBe(3)
+    })
+
+    it('shows no frozen warning when nothing matched is FROZEN', async () => {
+      listBudgetsMock.mockResolvedValue({ ledgers: [ledger('a')], has_more: false })
+      const { default: BudgetsView } = await import('../views/BudgetsView.vue')
+      const w = mount(BudgetsView, { global: stdMounts() })
+      await flushPromises()
+
+      await selectTenant(w, 'acme')
+      await openBulkSetup(w)
+      await w.find<HTMLSelectElement>('select#bulk-op').setValue('RESET_SPENT')
+      await w.find<HTMLInputElement>('input#bulk-amount').setValue('1000')
+      await clickPreview(w)
+
+      expect(w.text()).not.toContain('will fail per-row — unfreeze')
+    })
+  })
+
+  // The single-op fund path built `dashboard-{op}-{scope}-{ts}-{rand}`
+  // keys; scope segments run to 128 chars each so deep scopes overflowed
+  // the server's 256-char idempotency-key cap → 400. Now a UUID v4.
+  describe('single-op fund idempotency key is bounded', () => {
+    it('sends a UUID idempotency key even for very deep scopes', async () => {
+      const deepScope = `tenant:acme/workspace:${'w'.repeat(120)}/agent:${'a'.repeat(120)}`
+      listBudgetsMock.mockResolvedValue({
+        ledgers: [ledger('deep', { scope: deepScope })],
+        has_more: false,
+      })
+      fundBudgetMock.mockResolvedValue({})
+
+      const { default: BudgetsView } = await import('../views/BudgetsView.vue')
+      const w = mount(BudgetsView, { global: stdMounts() })
+      await flushPromises()
+
+      // Open the row kebab → Fund.
+      const kebab = w.findAll('button').find(b => (b.attributes('aria-label') || '').startsWith('Actions for budget'))!
+      expect(kebab).toBeDefined()
+      await kebab.trigger('click')
+      const fund = w.findAll('button').find(b => b.text() === 'Fund')!
+      expect(fund).toBeDefined()
+      await fund.trigger('click')
+      await flushPromises()
+
+      await w.find<HTMLInputElement>('input#fund-amount').setValue('100')
+      await w.find('form').trigger('submit')
+      await flushPromises()
+
+      expect(fundBudgetMock).toHaveBeenCalledTimes(1)
+      const idemKey = fundBudgetMock.mock.calls[0][5] as string
+      expect(idemKey.length).toBeLessThanOrEqual(256)
+      expect(idemKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
+    })
+  })
+
   it('omits expected_count when the preview walk hits maxPages (partial count)', async () => {
     // Return has_more=true forever so the walker hits maxPages (20) without
     // ever hitting maxMatches (501) or exhausting. listBudgets mock returns

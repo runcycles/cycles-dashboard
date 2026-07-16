@@ -178,6 +178,11 @@ describe('AuditView export — pagination', () => {
     await wrapper.find('form').trigger('submit.prevent')
     await flushPromises()
 
+    // Draft edits after Run Query do not own the visible rows/cursor. Export
+    // must continue the applied t_42 tuple, not combine this live value with
+    // the applied cursor.
+    await wrapper.find('#audit-tenant').setValue('unsubmitted-tenant')
+
     const vm = wrapper.vm as unknown as {
       confirmExport: (f: 'csv' | 'json') => void
       executeExport: () => Promise<void>

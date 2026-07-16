@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, computed, onUnmounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { usePolling } from '../composables/usePolling'
+import { POLLING_STALE } from '../composables/pollingResult'
 import { POLL_SLOW_MS } from '../composables/pollingConstants'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useTerminalAwareList } from '../composables/useTerminalAwareList'
 import { useListExport } from '../composables/useListExport'
+import { useFocusTrap } from '../composables/useFocusTrap'
 import { listTenants, listApiKeys, revokeApiKey, createApiKey, updateApiKey } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { Tenant, ApiKey, ApiKeyCreateResponse } from '../types'
@@ -19,13 +21,16 @@ import PageHeader from '../components/PageHeader.vue'
 import TenantLink from '../components/TenantLink.vue'
 import SortHeader from '../components/SortHeader.vue'
 import EmptyState from '../components/EmptyState.vue'
+import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import InlineErrorBanner from '../components/InlineErrorBanner.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
-import { writeClipboardJson } from '../utils/clipboard'
+import { writeClipboardJson, writeClipboardText } from '../utils/clipboard'
+import { stringParam } from '../utils/dateParam'
 import { filterExpiringKeys } from '../utils/expiringKeys'
+import { walkCursorPages, CURSOR_WALK_MAX_PAGES, LIST_PAGE_LIMIT } from '../utils/cursorWalk'
 import ExportDialog from '../components/ExportDialog.vue'
 import ExportProgressOverlay from '../components/ExportProgressOverlay.vue'
 import DownloadIcon from '../components/icons/DownloadIcon.vue'
@@ -44,30 +49,118 @@ interface KeyWithTenant extends ApiKey {
 
 const auth = useAuthStore()
 const route = useRoute()
+const router = useRouter()
 const canManage = computed(() => auth.capabilities?.manage_api_keys !== false)
 const keys = ref<KeyWithTenant[]>([])
+// P1-H3: gates the cold-load skeleton. Set true after the first
+// successful poll so EmptyState doesn't flash "No API keys found" on
+// a pending fetch. Same pattern as TenantsView / EventsView.
+const initialLoadDone = ref(false)
 const error = ref('')
 const filterStatus = ref('')
 const filterTenant = ref('')
 // v0.1.25.53: client-side URL filter for the Overview "Expiring keys"
 // drill-down. The admin spec has no server-side `expires_before` param
 // on listApiKeys (only `status=ACTIVE|REVOKED|EXPIRED`), so the
-// filter runs client-side on top of the loaded page. Same 7-day window
-// used by OverviewView's expiring-keys card — clicking "View all" on
-// that card should land on this view showing *those* keys, not the
-// whole fleet.
+// filter runs client-side. Same 7-day window used by OverviewView's
+// expiring-keys card — clicking "View all" on that card should land on
+// this view showing *those* keys, not the whole fleet.
+//
+// v0.1.25.68: while this filter is active, page 1 is fetched via a
+// cursor walk (walkCursorPages, ACTIVE-only, same 10-page cap as
+// Overview's walkApiKeysPages) instead of a single page. The server
+// sorts by created_at desc — old keys, which expire soonest, sort LAST
+// — so one 100-row page could contain zero of the keys the Overview
+// badge promised. The walk replaces pagination in this mode (load-more
+// is disabled; hasMore stays false) and truncation surfaces via the
+// partial hint next to the filter chip.
 const expiringWithin7d = ref(route.query.expiring_within_7d === '1')
-// Keep URL ↔ ref in sync across back/forward nav so the badge state
-// stays authoritative.
-watch(() => route.query.expiring_within_7d, (v) => { expiringWithin7d.value = v === '1' })
+const expiringWalkPartial = ref(false)
+// URL → ref sync. URL-AUTHORITATIVE (deliberate — do not flip back):
+// the URL is the single source of truth for this synced filter, per the
+// GitHub/Linear list-view convention — param present → filter on, param
+// ABSENT → filter off, so Back to a bare /api-keys entry clears it (the
+// filtered URL stays one Forward-press away in history).
+watch(() => route.query.expiring_within_7d, (v) => {
+  // Route-identity guard: this watcher also fires while navigating AWAY
+  // (before unmount) — ignore query changes that belong to another route.
+  if (route.name !== 'api-keys') return
+  expiringWithin7d.value = v === '1'
+})
+// Ref → URL write-back. Dismissing the pill (or clearFilters) must also
+// REMOVE the param — pre-fix only the ref was reset, so the stale param
+// survived in the URL, reload/share re-applied the dismissed filter, and
+// the ?search write-back below (which spreads ...route.query) kept
+// re-propagating it. Loop-safe against the URL → ref watcher above:
+// acts only when the URL isn't already the canonical representation of
+// the ref state ('1' when on, param absent when off).
+//
+// `immediate` + presence-normalization: a deep link carrying any OTHER
+// value (?expiring_within_7d=true, =0, valueless) hydrates the ref
+// false, and the old `ref === (param === '1')` comparison read that as
+// "already in sync" — the junk param was never stripped and the ?search
+// write-back's route.query spread re-propagated it forever. Now any
+// non-'1' value is replaced away on landing (list stays unfiltered).
+watch(expiringWithin7d, (v) => {
+  const raw = route.query.expiring_within_7d
+  if (v ? raw === '1' : raw === undefined) return
+  router.replace({
+    query: {
+      ...route.query,
+      expiring_within_7d: v ? '1' : undefined,
+    },
+  })
+}, { immediate: true })
 // cycles-governance-admin v0.1.25.21: free-text `search` query param
 // on listApiKeys (case-insensitive substring match on key_id + name).
 // Debounced 200ms so a 20-char fragment doesn't fire 20 fetches. The
 // client-side filter on filteredKeys is kept as graceful degradation
 // for pre-0.1.25.21 servers — older admin tiers MUST ignore the
 // unknown param, so we still do the substring match locally.
-const search = ref('')
+//
+// Hydrated from ?search= so deep-links land pre-filtered — the
+// Overview "Expiring API keys" card links each key here via
+// ?search=<key_id>, which the server matches exactly (substring over
+// key_id + name), so the landing state shows the single matching key.
+//
+// stringParam, not a bare `as string` cast: a duplicated param
+// (?search=a&search=b) hydrates as an ARRAY, and the downstream
+// `.toLowerCase()` / `.trim()` calls threw TypeError and blanked the
+// view. The normalizer takes the first string element instead.
+const search = ref(stringParam(route.query.search))
 const debouncedSearch = useDebouncedRef(search, 200)
+// URL → ref sync for ?search= (deep-links + back/forward when the
+// component stays mounted). The debouncedSearch watcher below then
+// refetches page 1 scoped to the new search term. Loop-safe against
+// the write-back watcher below: only acts when the param differs from
+// the current ref state.
+watch(() => route.query.search, (v) => {
+  // Route-identity guard: this watcher also fires while navigating AWAY
+  // (before unmount), and a destination route can carry its own ?search
+  // (e.g. /audit?search=…) — ignore query changes that belong to
+  // another route.
+  if (route.name !== 'api-keys') return
+  // Same stringParam normalization as the ref init — a duplicated
+  // param must not clear (or crash) the filter on later URL changes.
+  const next = stringParam(v)
+  if (next !== search.value) search.value = next
+})
+// Ref → URL write-back (piggybacks the existing 200ms search debounce)
+// so the URL never carries a stale ?search= — reloading or sharing a
+// URL after clearing the filter otherwise re-applied it. Mirrors the
+// TenantsView bidirectional pattern: set the param when non-empty,
+// remove it when empty, and skip when the URL already matches (which
+// also breaks the loop with the hydration watcher above).
+watch(debouncedSearch, (v) => {
+  const current = typeof route.query.search === 'string' ? route.query.search : ''
+  if (v === current) return
+  router.replace({
+    query: {
+      ...route.query,
+      search: v || undefined,
+    },
+  })
+})
 const tenants = ref<Tenant[]>([])
 const pendingRevoke = ref<KeyWithTenant | null>(null)
 
@@ -94,7 +187,7 @@ async function executeRevoke() {
   try {
     await revokeApiKey(pendingRevoke.value.key_id, 'Revoked via admin dashboard')
     toast.success('API key revoked')
-    await refresh()
+    requestRefresh()
   } catch (e) {
     const msg = toMessage(e)
     error.value = msg
@@ -131,29 +224,18 @@ function openCreate() {
   showCreate.value = true
 }
 
-// Edit API key
+// Edit API key. No expires_at field — the spec's PATCH body is
+// additionalProperties:false and expiry is immutable ("revoke and
+// recreate"); the server would silently drop the field (200 OK,
+// expiry unchanged). The edit dialog shows the expiry read-only.
 const editingKey = ref<KeyWithTenant | null>(null)
 const editLoading = ref(false)
 const editError = ref('')
-const editForm = ref({ name: '', permissions: [] as string[], scope_filter: '', expires_at: '' })
-
-// ISO 8601 → datetime-local input value (local time, minute precision).
-// Used to pre-fill the edit form's expiry picker from a stored key.
-function isoToLocalInput(iso: string | undefined): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return ''
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
+const editForm = ref({ name: '', permissions: [] as string[], scope_filter: '' })
 
 async function copyKeyId(id: string) {
-  try {
-    await navigator.clipboard.writeText(id)
-    toast.success('Key ID copied')
-  } catch {
-    toast.error('Copy failed — clipboard unavailable')
-  }
+  if (await writeClipboardText(id)) toast.success('Key ID copied')
+  else toast.error('Copy failed — clipboard unavailable')
 }
 
 async function copyApiKeyJson(k: KeyWithTenant) {
@@ -178,12 +260,13 @@ function openEdit(k: KeyWithTenant) {
     name: k.name || '',
     permissions: kept,
     scope_filter: k.scope_filter?.join(', ') || '',
-    expires_at: isoToLocalInput(k.expires_at),
   }
   editError.value = ''
   editingKey.value = k
   if (dropped.length) {
-    toast.error(`Unrecognized permissions will be removed on save: ${dropped.join(', ')}`)
+    // Advisory, not a failure — a persistent error toast here would
+    // outlive a successful save and read as an unresolved problem.
+    toast.warning(`Unrecognized permissions will be removed on save: ${dropped.join(', ')}`)
   }
 }
 
@@ -241,15 +324,7 @@ async function submitEdit() {
     if (!sameStringSet(scopes, original.scope_filter)) {
       body.scope_filter = scopes
     }
-    // expires_at: the picker is minute-precision, so compare the current
-    // input string against the prefilled one (also minute-precision) rather
-    // than regenerated-ISO vs the original full ISO — otherwise a rename-only
-    // save would silently truncate a key expiring at e.g. 12:34:56Z down to
-    // 12:34:00Z. Only PATCH when the operator actually changed the control;
-    // blank = no change (the form can't clear an existing expiry).
-    if (editForm.value.expires_at && editForm.value.expires_at !== isoToLocalInput(original.expires_at)) {
-      body.expires_at = new Date(editForm.value.expires_at).toISOString()
-    }
+    // expires_at is never sent — immutable per spec (revoke + recreate).
     if (Object.keys(body).length === 0) {
       // Nothing to submit — close the dialog quietly.
       editingKey.value = null
@@ -258,7 +333,7 @@ async function submitEdit() {
     await updateApiKey(original.key_id, body as any)
     toast.success('API key updated')
     editingKey.value = null
-    await refresh()
+    requestRefresh()
   } catch (e) { editError.value = toMessage(e) }
   finally { editLoading.value = false }
 }
@@ -296,7 +371,7 @@ const { sortKey, sortDir, toggle, sorted: columnSortedKeys } = useSort(
   'created_at',
   'desc',
   undefined,
-  { serverSide: true, onChange: () => { refresh() } },
+  { serverSide: true, onChange: () => { requestRefresh() } },
 )
 
 // v0.1.25.46: hide REVOKED + EXPIRED api keys by default. Both are
@@ -307,9 +382,11 @@ const { sortKey, sortDir, toggle, sorted: columnSortedKeys } = useSort(
 // in-dialog, so there's no drill-in-back state to preserve.
 const {
   includeTerminal,
+  showTerminal,
   visibleRows: sortedKeys,
   terminalCount: hiddenTerminalCount,
   terminalVerb,
+  isTerminal: isTerminalKey,
 } = useTerminalAwareList<KeyWithTenant>({
   kind: 'apiKey',
   source: columnSortedKeys,
@@ -332,13 +409,17 @@ function decorate(list: ApiKey[]): KeyWithTenant[] {
   return list.map((k) => ({ ...k, tenant_name: tenantsById.value.get(k.tenant_id)?.name }))
 }
 
-async function fetchKeysPage(cursor?: string): Promise<{
+async function fetchKeysPage(cursor?: string, extraParams: Record<string, string> = {}): Promise<{
   keys: KeyWithTenant[]
   hasMore: boolean
   nextCursor: string
 }> {
-  const params: Record<string, string> = { limit: String(PAGE_SIZE) }
+  const params: Record<string, string> = { limit: String(PAGE_SIZE), ...extraParams }
   if (filterTenant.value) params.tenant_id = filterTenant.value
+  // Push explicit status filters to the server so cursor walks do not
+  // consume the export/page cap on rows the operator cannot see. An
+  // explicit extra status (the ACTIVE-only expiring walk) takes priority.
+  if (filterStatus.value && !params.status) params.status = filterStatus.value
   if (cursor) params.cursor = cursor
   if (sortKey.value) {
     params.sort_by = sortKey.value
@@ -357,21 +438,113 @@ async function fetchKeysPage(cursor?: string): Promise<{
   }
 }
 
+// Walk gating (expiring-filter mode). The cursor walk spans up to 11
+// requests (tenants + 10 pages), so replaying it on EVERY 60s poll
+// tick — per open tab — hammered the admin API for data that changes
+// at human cadence (keys expire over days, not seconds). User-initiated
+// triggers (mode entry, manual refresh, sort/search/tenant change) arm
+// `forceWalk` via requestRefresh() and walk immediately; ambient
+// background ticks re-walk only every WALK_EVERY_N_TICKS-th tick
+// (~5 min at POLL_SLOW_MS) and otherwise skip the keys fetch entirely.
+const WALK_EVERY_N_TICKS = 5
+let forceWalk = false
+// Seeded at the threshold so the FIRST tick in walk mode (deep-link
+// mount with ?expiring_within_7d=1) always walks.
+let ticksSinceWalk = WALK_EVERY_N_TICKS
+
 const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
   try {
     const tRes = await listTenants()
     tenants.value = tRes.tenants
-    // Single cross-tenant listApiKeys — no per-tenant fan-out. Polling
-    // always refetches page 1 and drops any accumulated "Load more"
-    // pages; tenants' key sets change infrequently enough that this
-    // is the right trade-off (fresh data > accumulated scroll state).
-    const first = await fetchKeysPage()
-    keys.value = first.keys
-    hasMore.value = first.hasMore
-    nextCursor.value = first.nextCursor
+    // Capture the mode for this tick. Walk-mode ticks span up to 11
+    // requests — an operator can toggle the expiring chip (or press
+    // Back to a bare URL) mid-flight, and the settling fetch must NOT
+    // commit wrong-mode data (an ACTIVE-only walk presented as the
+    // full list, load-more gone — or a single page presented as the
+    // walked expiring set). The queued requestRefresh (see below)
+    // refetches under the new mode right after this tick settles;
+    // the commit-time check is the belt-and-suspenders half.
+    const tickMode = expiringWithin7d.value
+    if (tickMode) {
+      // Expiring-filter mode: cursor-walk the ACTIVE set (the only
+      // status filterExpiringKeys considers) so soon-expiring keys —
+      // which sort LAST under the server's created_at-desc order —
+      // aren't cut off by a single-page fetch. Server-side search /
+      // sort / tenant params still apply per page via fetchKeysPage;
+      // the walk replaces pagination, so load-more stays disabled.
+      ticksSinceWalk++
+      if (!forceWalk && ticksSinceWalk < WALK_EVERY_N_TICKS) {
+        // Ambient background tick between walk windows — keep the
+        // (cheap) tenants refresh above, skip the multi-page walk.
+        return
+      }
+      const walk = await walkCursorPages<KeyWithTenant>(async (cursor) => {
+        const page = await fetchKeysPage(cursor || undefined, { status: 'ACTIVE' })
+        return { items: page.keys, hasMore: page.hasMore, nextCursor: page.nextCursor }
+      })
+      if (expiringWithin7d.value !== tickMode) return POLLING_STALE // mode flipped mid-walk — discard
+      // Consume the gate state (forced flag AND cadence window) only on
+      // a successful, committed walk. A thrown walk lands in the catch
+      // below with both left armed, so the next 60s tick retries — the
+      // same self-heal cadence the pre-walk single-page fetch had. (One
+      // retried walk per minute; not the every-30s four-walk storm the
+      // Overview backoff exists to prevent.) Consuming forceWalk BEFORE
+      // the await meant a failed user-triggered walk mid-window sat out
+      // the remaining ~4 min behind the ambient-tick early-return.
+      forceWalk = false
+      ticksSinceWalk = 0
+      keys.value = walk.items
+      expiringWalkPartial.value = walk.partial
+      hasMore.value = false
+      nextCursor.value = ''
+    } else {
+      // Single cross-tenant listApiKeys — no per-tenant fan-out. Polling
+      // always refetches page 1 and drops any accumulated "Load more"
+      // pages; tenants' key sets change infrequently enough that this
+      // is the right trade-off (fresh data > accumulated scroll state).
+      const first = await fetchKeysPage()
+      if (expiringWithin7d.value !== tickMode) return POLLING_STALE // mode flipped mid-fetch — discard
+      expiringWalkPartial.value = false
+      keys.value = first.keys
+      hasMore.value = first.hasMore
+      nextCursor.value = first.nextCursor
+    }
     error.value = ''
-  } catch (e) { error.value = toMessage(e) }
+    initialLoadDone.value = true
+  } catch (e) {
+    error.value = toMessage(e)
+    return false
+  }
 }, POLL_SLOW_MS)
+
+// User-initiated refresh — every trigger below (manual header refresh,
+// expiring-mode toggle, tenant/search filter change, sort change,
+// post-mutation refetch) funnels through here so it (a) forces the
+// walk in expiring mode and (b) survives an in-flight tick.
+//
+// usePolling's refresh() is a documented no-op while a tick is in
+// flight (in-flight dedup — other views rely on it, so the composable
+// semantics stay untouched). Walk-mode ticks span up to 11 requests,
+// which turned a mid-walk toggle into a silent drop: wrong-mode data
+// stayed on screen for up to 60s (POLL_SLOW_MS). Same queued pattern
+// as OverviewView's pendingManualRefresh: set a pending flag while
+// loading; the isLoading true→false edge-watcher consumes it and
+// replays the refresh, with forceWalk still armed.
+const pendingRefresh = ref(false)
+function requestRefresh() {
+  forceWalk = true
+  if (isLoading.value) {
+    pendingRefresh.value = true
+    return
+  }
+  refresh()
+}
+watch(isLoading, (now, was) => {
+  if (was && !now && pendingRefresh.value) {
+    pendingRefresh.value = false
+    requestRefresh()
+  }
+})
 
 async function loadMore() {
   if (loadingMore.value || !nextCursor.value) return
@@ -386,18 +559,40 @@ async function loadMore() {
 }
 
 // Refresh on filter change so we restart page-1 scoped to the new tenant.
-watch(filterTenant, () => { refresh() })
+watch(filterTenant, () => { requestRefresh() })
+// Status is server-side too. Restart at page 1 so the live cursor belongs
+// to the selected status tuple; otherwise load-more/export would combine an
+// unfiltered page-1 cursor with a status-filtered page-2 request.
+watch(filterStatus, () => { requestRefresh() })
+// Toggling the expiring filter switches fetch mode (single page ↔
+// cursor walk), so a refetch is required — the client-side filter
+// alone can't surface keys that were never loaded. requestRefresh, not
+// refresh: a toggle during an in-flight walk tick would otherwise be
+// silently dropped by the in-flight dedup, leaving wrong-mode data on
+// screen until the next slow poll tick.
+watch(expiringWithin7d, () => { requestRefresh() })
 // Refetch page 1 whenever the debounced search changes so the cursor
 // stays aligned with the server's (sort_by, sort_dir, search) tuple.
 // Same rationale as useSort's onChange — the opaque cursor is
 // filter-scoped, so carrying it across a filter change would 400.
-watch(debouncedSearch, () => { refresh() })
+watch(debouncedSearch, () => { requestRefresh() })
 
 // Export. ApiKeysView is a cross-tenant aggregation (no cursor
 // endpoint) — since the server now exposes cursor-paginated cross-tenant
 // listApiKeys, the export can walk the full result set honestly. The
 // composable drives pages via fetchPage(cursor); each page is appended
 // up to the EXPORT_MAX_ROWS guardrail inside useListExport.
+function keyMatchesVisibleFilters(k: KeyWithTenant): boolean {
+  if (filterStatus.value && k.status !== filterStatus.value) return false
+  if (filterTenant.value && k.tenant_id !== filterTenant.value) return false
+  if (expiringWithin7d.value && filterExpiringKeys([k]).length === 0) return false
+  if (debouncedSearch.value) {
+    const q = debouncedSearch.value.toLowerCase()
+    if (!k.key_id.toLowerCase().includes(q) && !(k.name ?? '').toLowerCase().includes(q)) return false
+  }
+  if (!showTerminal.value && isTerminalKey(k)) return false
+  return true
+}
 const {
   showExportConfirm,
   exporting,
@@ -421,8 +616,10 @@ const {
     const r = await fetchKeysPage(cursor)
     return { items: r.keys, hasMore: r.hasMore, nextCursor: r.nextCursor }
   },
+  filterFn: keyMatchesVisibleFilters,
   columns: [
     { header: 'key_id',       value: k => k.key_id },
+    { header: 'key_prefix',   value: k => k.key_prefix ?? '' },
     { header: 'name',         value: k => k.name ?? '' },
     { header: 'tenant_id',    value: k => k.tenant_id },
     { header: 'tenant_name',  value: k => k.tenant_name ?? '' },
@@ -456,16 +653,17 @@ const virtualizer = useVirtualizer(computed(() => ({
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
 const totalHeight = computed(() => virtualizer.value.getTotalSize())
 
-// 9-column grid when canManage, 8 without. Total minimum is now
-// ~1220px (was 1380px pre-pill-only); the permissions column shrank
-// from `minmax(260px, 2.5fr)` to `minmax(140px, 1.2fr)` because the
-// pill rendering ("4 perms ↗") only needs ~90px versus the chip
-// preview's demand for 2 rows of 2 chips. Narrower grid = horizontal
-// scroll engages less often on typical operator viewports.
+// 10-column grid when canManage, 9 without. Total minimum is now
+// ~1340px; the permissions column shrank from `minmax(260px, 2.5fr)`
+// to `minmax(140px, 1.2fr)` because the pill rendering ("4 perms ↗")
+// only needs ~90px versus the chip preview's demand for 2 rows of 2
+// chips. Prefix column (120px) shows key_prefix — the visible secret
+// prefix operators use to correlate a stored key with a row; the
+// key_id column is masked, so this is the only correlation handle.
 const gridTemplate = computed(() =>
   canManage.value
-    ? '180px minmax(120px,1fr) minmax(120px,1fr) 100px minmax(140px,1.2fr) minmax(140px,1fr) 160px 140px 160px'
-    : '180px minmax(120px,1fr) minmax(120px,1fr) 100px minmax(140px,1.2fr) minmax(140px,1fr) 160px 140px',
+    ? '180px 120px minmax(120px,1fr) minmax(120px,1fr) 100px minmax(140px,1.2fr) minmax(140px,1fr) 160px 140px 160px'
+    : '180px 120px minmax(120px,1fr) minmax(120px,1fr) 100px minmax(140px,1.2fr) minmax(140px,1fr) 160px 140px',
 )
 
 // Permissions cell: single always-visible "N perms" pill. Clicking
@@ -476,6 +674,29 @@ const gridTemplate = computed(() =>
 const viewingPermsFor = ref<KeyWithTenant | null>(null)
 function openPermsViewer(k: KeyWithTenant) { viewingPermsFor.value = k }
 function closePermsViewer() { viewingPermsFor.value = null }
+
+// A11y for the hand-rolled perms-viewer modal — parity with what
+// FormDialog / ConfirmAction get from being dedicated components.
+// useFocusTrap (which activates on permsDialogRef populate, i.e. while
+// the v-if renders) owns the whole focus contract: Tab cycling, moving
+// focus into the dialog on open (its first-focusable target IS the
+// header Close button), and restoring focus to the triggering pill on
+// close. Only document-level Escape is added here — a second manual
+// save/restore alongside the trap ran a duplicate restore on every
+// close.
+const permsDialogRef = ref<HTMLElement | null>(null)
+useFocusTrap(permsDialogRef)
+function onPermsViewerKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') closePermsViewer()
+}
+watch(viewingPermsFor, (now, before) => {
+  if (now && !before) {
+    document.addEventListener('keydown', onPermsViewerKeydown)
+  } else if (!now && before) {
+    document.removeEventListener('keydown', onPermsViewerKeydown)
+  }
+})
+onUnmounted(() => document.removeEventListener('keydown', onPermsViewerKeydown))
 </script>
 
 <template>
@@ -491,7 +712,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
       :loaded="sortedKeys.length"
       :loading="isLoading"
       :last-updated-at="lastSuccessAt"
-      @refresh="refresh"
+      @refresh="requestRefresh"
     >
       <template #actions>
         <button @click="confirmExport('csv')" :disabled="sortedKeys.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
@@ -563,6 +784,14 @@ function closePermsViewer() { viewingPermsFor.value = null }
             @click="expiringWithin7d = false"
           >×</button>
         </span>
+        <!-- Walk-truncation hint — mirrors Overview's "counts may be
+             partial" convention. Rendered when the ACTIVE-set cursor
+             walk hit its page cap with the server reporting more rows. -->
+        <span
+          v-if="expiringWithin7d && expiringWalkPartial"
+          class="muted-sm"
+          data-testid="api-keys-expiring-partial-note"
+        >Scanned the first {{ (CURSOR_WALK_MAX_PAGES * LIST_PAGE_LIMIT).toLocaleString() }} ACTIVE keys — results may be partial</span>
         <button v-if="hasActiveFilters" @click="clearFilters" class="muted-sm hover:text-gray-700 cursor-pointer">Clear</button>
         <div v-if="isLoading" class="flex items-center">
           <Spinner class="w-4 h-4 muted" />
@@ -590,12 +819,13 @@ function closePermsViewer() { viewingPermsFor.value = null }
       class="bg-white rounded-lg shadow overflow-x-auto overflow-y-hidden text-sm flex-1 min-h-0 flex flex-col"
       role="table"
       :aria-rowcount="sortedKeys.length + 1"
-      :aria-colcount="canManage ? 9 : 8"
+      :aria-colcount="canManage ? 10 : 9"
     >
-     <div :style="{ minWidth: canManage ? '1280px' : '1120px' }" class="flex flex-col flex-1 min-h-0">
+     <div :style="{ minWidth: canManage ? '1400px' : '1240px' }" class="wide-table-canvas flex flex-col flex-1 min-h-0">
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
         <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
           <SortHeader as="div" label="Key ID" column="key_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
+          <div role="columnheader" class="table-cell text-left">Prefix</div>
           <SortHeader as="div" label="Name" column="name" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Tenant" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Status" column="status" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
@@ -628,6 +858,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
             :style="{ gridTemplateColumns: gridTemplate, transform: `translateY(${v.start}px)`, height: ROW_HEIGHT_ESTIMATE + 'px' }"
           >
             <div role="cell" class="table-cell"><MaskedValue :value="sortedKeys[v.index].key_id" /></div>
+            <div role="cell" class="table-cell muted-sm font-mono truncate" :title="sortedKeys[v.index].key_prefix">{{ sortedKeys[v.index].key_prefix || '—' }}</div>
             <div role="cell" class="table-cell text-gray-700 truncate">{{ sortedKeys[v.index].name || '-' }}</div>
             <div role="cell" class="table-cell min-w-0 overflow-hidden">
               <TenantLink :tenant-id="sortedKeys[v.index].tenant_id" />
@@ -682,15 +913,19 @@ function closePermsViewer() { viewingPermsFor.value = null }
           </div>
         </div>
       </div>
+     </div>
 
-      <div v-else>
+      <!-- P1-H3: cold-load skeleton. -->
+      <div v-if="sortedKeys.length === 0 && !initialLoadDone && !error" class="responsive-table-state px-4 py-6">
+        <LoadingSkeleton />
+      </div>
+      <div v-else-if="sortedKeys.length === 0" class="responsive-table-state">
         <EmptyState
           item-noun="API key"
           :has-active-filter="keys.length > 0"
           :hint="keys.length === 0 ? 'API keys will appear here once created' : undefined"
         />
       </div>
-     </div>
     </div>
 
     <!-- Load-more footer — mirrors BudgetsView / TenantsView pattern. -->
@@ -727,7 +962,7 @@ function closePermsViewer() { viewingPermsFor.value = null }
     </FormDialog>
 
     <!-- Secret reveal after creation -->
-    <SecretReveal v-if="createdSecret" title="API Key Created" :secret="createdSecret.key_secret" label="API Key Secret" @close="createdSecret = null; refresh()" />
+    <SecretReveal v-if="createdSecret" title="API Key Created" :secret="createdSecret.key_secret" label="API Key Secret" @close="createdSecret = null; requestRefresh()" />
 
     <!-- Edit API Key dialog -->
     <FormDialog v-if="editingKey" title="Edit API Key" submit-label="Save Changes" :loading="editLoading" :error="editError" @submit="submitEdit" @cancel="editingKey = null">
@@ -772,10 +1007,13 @@ function closePermsViewer() { viewingPermsFor.value = null }
         <label for="ek-scope" class="form-label">Scope filter (comma-separated)</label>
         <input id="ek-scope" v-model="editForm.scope_filter" class="form-input-mono" />
       </div>
+      <!-- Expiry is read-only here: the spec marks expires_at immutable
+           on PATCH (additionalProperties:false; the server silently
+           dropped the field pre-fix, making the old picker a no-op). -->
       <div>
-        <label for="ek-expires" class="form-label">Expires at</label>
-        <input id="ek-expires" v-model="editForm.expires_at" type="datetime-local" class="form-input" />
-        <p class="muted-sm mt-0.5">Leave unchanged to keep the current expiry. Clearing the field does not remove an existing expiry.</p>
+        <span class="form-label">Expires at</span>
+        <p class="text-sm text-gray-700 dark:text-gray-200">{{ editingKey.expires_at ? formatDateTime(editingKey.expires_at) : 'Never' }}</p>
+        <p class="muted-sm mt-0.5">Expiry is immutable — revoke and recreate the key to change it.</p>
       </div>
     </FormDialog>
 
@@ -798,9 +1036,14 @@ function closePermsViewer() { viewingPermsFor.value = null }
       v-if="viewingPermsFor"
       class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
       @click.self="closePermsViewer"
-      @keyup.esc="closePermsViewer"
     >
-      <div class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-5 max-w-md w-full mx-4 max-h-[80vh] flex flex-col">
+      <div
+        ref="permsDialogRef"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="`Permissions for ${viewingPermsFor.name || viewingPermsFor.key_id}`"
+        class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-5 max-w-md w-full mx-4 max-h-[80vh] flex flex-col"
+      >
         <div class="flex items-start justify-between mb-3">
           <div>
             <h3 class="text-sm font-semibold text-gray-900">Permissions</h3>

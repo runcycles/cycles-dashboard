@@ -36,7 +36,11 @@ vi.mock('../api/client', async () => {
   }
 })
 
-const routeRef: { query: Record<string, string>; params: Record<string, string> } = { query: {}, params: {} }
+// `name` is set per-describe to the mounted view's route — the views'
+// URL → ref watchers are route-identity-guarded (F3), and WebhooksView's
+// `immediate` hydration run checks it at setup.
+const routeRef: { query: Record<string, string>; params: Record<string, string>; name: string } =
+  { query: {}, params: {}, name: '' }
 const pushMock = vi.fn()
 const replaceMock = vi.fn((loc: { query: Record<string, string | undefined> }) => {
   const next: Record<string, string> = {}
@@ -57,12 +61,16 @@ vi.mock('vue-router', async (importOriginal) => {
   }
 })
 
-vi.mock('../composables/usePolling', () => ({
-  usePolling: (fn: () => Promise<void> | void) => {
-    void fn()
-    return { refresh: async () => { void fn() }, isLoading: { value: false } }
-  },
-}))
+vi.mock('../composables/usePolling', async () => {
+  const { ref } = await import('vue')
+  return {
+    usePolling: (fn: () => Promise<void> | void) => {
+      void fn()
+      // Real ref — ApiKeysView edge-watches isLoading (round-5 F2).
+      return { refresh: async () => { void fn() }, isLoading: ref(false) }
+    },
+  }
+})
 
 vi.mock('../composables/useDebouncedRef', () => ({
   useDebouncedRef: <T>(source: { value: T }) => source,
@@ -120,11 +128,63 @@ function findToggle(w: ReturnType<typeof mount>, ariaLabelContains: string): HTM
   )?.element
 }
 
+async function readBlob(blob: Blob): Promise<string> {
+  if (typeof blob.text === 'function') return blob.text()
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsText(blob)
+  })
+}
+
+async function exportJson(w: ReturnType<typeof mount>): Promise<unknown[]> {
+  const trigger = w.findAll('button').find(button => button.text().trim() === 'Export JSON')
+  expect(trigger).toBeDefined()
+  await trigger!.trigger('click')
+  await flushPromises()
+
+  const dialog = w.find('[role="dialog"]')
+  expect(dialog.exists()).toBe(true)
+  const confirm = dialog.findAll('button').find(button => button.text().trim() === 'Export JSON')
+  expect(confirm).toBeDefined()
+
+  const createDescriptor = Object.getOwnPropertyDescriptor(URL, 'createObjectURL')
+  const revokeDescriptor = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL')
+  let downloaded: Blob | undefined
+  Object.defineProperty(URL, 'createObjectURL', {
+    configurable: true,
+    value: vi.fn((blob: Blob) => {
+      downloaded = blob
+      return 'blob:terminal-aware-export-test'
+    }),
+  })
+  Object.defineProperty(URL, 'revokeObjectURL', {
+    configurable: true,
+    value: vi.fn(),
+  })
+  const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+  try {
+    await confirm!.trigger('click')
+    await flushPromises()
+    expect(downloaded).toBeDefined()
+    return JSON.parse(await readBlob(downloaded!)) as unknown[]
+  } finally {
+    clickSpy.mockRestore()
+    if (createDescriptor) Object.defineProperty(URL, 'createObjectURL', createDescriptor)
+    else delete (URL as Partial<typeof URL>).createObjectURL
+    if (revokeDescriptor) Object.defineProperty(URL, 'revokeObjectURL', revokeDescriptor)
+    else delete (URL as Partial<typeof URL>).revokeObjectURL
+  }
+}
+
 // ─────────────────────────── WebhooksView ──────────────────────────────
 
 describe('WebhooksView — hide DISABLED by default', () => {
   beforeEach(() => {
     resetAll()
+    routeRef.name = 'webhooks'
     listWebhooksMock.mockResolvedValue({
       subscriptions: [
         { id: 'w1', url: 'https://ex.com/a', status: 'ACTIVE', event_types: [], created_at: '2026-01-01T00:00:00Z', failure_count: 0 },
@@ -169,6 +229,33 @@ describe('WebhooksView — hide DISABLED by default', () => {
     const call = replaceMock.mock.calls.find(c => (c[0] as { query?: Record<string, unknown> }).query?.include_terminal === '1')
     expect(call).toBeDefined()
   })
+
+  it('keeps later export pages aligned with the visible status and terminal filters', async () => {
+    routeRef.query = { status: 'ACTIVE' }
+    listWebhooksMock.mockImplementation((params: Record<string, string> = {}) => Promise.resolve(
+      params.cursor
+        ? {
+            subscriptions: [
+              { subscription_id: 'w-paused', url: 'https://ex.com/paused', status: 'PAUSED', event_types: [], created_at: '2026-01-02T00:00:00Z', consecutive_failures: 0 },
+              { subscription_id: 'w-disabled', url: 'https://ex.com/disabled', status: 'DISABLED', event_types: [], created_at: '2026-01-03T00:00:00Z', consecutive_failures: 2 },
+            ],
+            has_more: false,
+          }
+        : {
+            subscriptions: [
+              { subscription_id: 'w-active', url: 'https://ex.com/active', status: 'ACTIVE', event_types: [], created_at: '2026-01-01T00:00:00Z', consecutive_failures: 0 },
+            ],
+            has_more: true,
+            next_cursor: 'page-2',
+          },
+    ))
+    const { default: WebhooksView } = await import('../views/WebhooksView.vue')
+    const w = mount(WebhooksView, stdMount())
+    await flushPromises()
+
+    const rows = await exportJson(w) as Array<{ subscription_id: string }>
+    expect(rows.map(row => row.subscription_id)).toEqual(['w-active'])
+  })
 })
 
 // ─────────────────────────── TenantsView ──────────────────────────────
@@ -176,6 +263,7 @@ describe('WebhooksView — hide DISABLED by default', () => {
 describe('TenantsView — hide CLOSED by default', () => {
   beforeEach(() => {
     resetAll()
+    routeRef.name = 'tenants'
     listTenantsMock.mockResolvedValue({
       tenants: [
         { tenant_id: 't1', name: 'Acme', status: 'ACTIVE', created_at: '2026-01-01T00:00:00Z' },
@@ -231,6 +319,31 @@ describe('TenantsView — hide CLOSED by default', () => {
     const table = w.find('[role="table"]')
     expect(table.attributes('aria-rowcount')).toBe('3') // 2 rows + header
   })
+
+  it('keeps later export pages aligned with the visible status and terminal filters', async () => {
+    routeRef.query = { status: 'ACTIVE' }
+    listTenantsMock.mockImplementation((params: Record<string, string> = {}) => Promise.resolve(
+      params.cursor
+        ? {
+            tenants: [
+              { tenant_id: 't-suspended', name: 'Suspended', status: 'SUSPENDED', created_at: '2026-01-02T00:00:00Z' },
+              { tenant_id: 't-closed', name: 'Closed', status: 'CLOSED', created_at: '2026-01-03T00:00:00Z' },
+            ],
+            has_more: false,
+          }
+        : {
+            tenants: [{ tenant_id: 't-active', name: 'Active', status: 'ACTIVE', created_at: '2026-01-01T00:00:00Z' }],
+            has_more: true,
+            next_cursor: 'page-2',
+          },
+    ))
+    const { default: TenantsView } = await import('../views/TenantsView.vue')
+    const w = mount(TenantsView, stdMount())
+    await flushPromises()
+
+    const rows = await exportJson(w) as Array<{ tenant_id: string }>
+    expect(rows.map(row => row.tenant_id)).toEqual(['t-active'])
+  })
 })
 
 // ─────────────────────────── BudgetsView ──────────────────────────────
@@ -238,6 +351,7 @@ describe('TenantsView — hide CLOSED by default', () => {
 describe('BudgetsView — hide CLOSED by default', () => {
   beforeEach(() => {
     resetAll()
+    routeRef.name = 'budgets'
     listBudgetsMock.mockResolvedValue({
       ledgers: [
         { ledger_id: 'b1', tenant_id: 'T', scope: 'scope-1', status: 'ACTIVE', unit: 'USD', commit_overage_policy: 'REJECT', allocated: { amount: 100, unit: 'USD' }, remaining: { amount: 50, unit: 'USD' }, reserved: { amount: 0, unit: 'USD' }, created_at: '2026-01-01T00:00:00Z' },
@@ -279,6 +393,27 @@ describe('BudgetsView — hide CLOSED by default', () => {
     const call = replaceMock.mock.calls.find(c => (c[0] as { query?: Record<string, unknown> }).query?.include_terminal === '1')
     expect(call).toBeDefined()
   })
+
+  it('keeps CLOSED budgets from later export pages when terminal rows are hidden', async () => {
+    listBudgetsMock.mockImplementation((params: Record<string, string> = {}) => Promise.resolve(
+      params.cursor
+        ? {
+            ledgers: [{ ledger_id: 'b-closed', tenant_id: 'T', scope: 'scope-closed', status: 'CLOSED', unit: 'USD', commit_overage_policy: 'REJECT', allocated: { amount: 100, unit: 'USD' }, remaining: { amount: 0, unit: 'USD' }, reserved: { amount: 0, unit: 'USD' }, created_at: '2026-01-02T00:00:00Z' }],
+            has_more: false,
+          }
+        : {
+            ledgers: [{ ledger_id: 'b-active', tenant_id: 'T', scope: 'scope-active', status: 'ACTIVE', unit: 'USD', commit_overage_policy: 'REJECT', allocated: { amount: 100, unit: 'USD' }, remaining: { amount: 50, unit: 'USD' }, reserved: { amount: 0, unit: 'USD' }, created_at: '2026-01-01T00:00:00Z' }],
+            has_more: true,
+            next_cursor: 'page-2',
+          },
+    ))
+    const { default: BudgetsView } = await import('../views/BudgetsView.vue')
+    const w = mount(BudgetsView, stdMount())
+    await flushPromises()
+
+    const rows = await exportJson(w) as Array<{ ledger_id: string }>
+    expect(rows.map(row => row.ledger_id)).toEqual(['b-active'])
+  })
 })
 
 // ─────────────────────────── ApiKeysView ──────────────────────────────
@@ -286,6 +421,7 @@ describe('BudgetsView — hide CLOSED by default', () => {
 describe('ApiKeysView — hide REVOKED/EXPIRED by default', () => {
   beforeEach(() => {
     resetAll()
+    routeRef.name = 'api-keys'
     listApiKeysMock.mockResolvedValue({
       keys: [
         { key_id: 'k1', name: 'key-active', status: 'ACTIVE', tenant_id: 'T', created_at: '2026-01-01T00:00:00Z', permissions: [] },
@@ -336,5 +472,39 @@ describe('ApiKeysView — hide REVOKED/EXPIRED by default', () => {
     const html = w.html()
     expect(html).toContain('key-revoked')
     expect(html).toContain('key-expired')
+  })
+
+  it('keeps later export pages aligned with the visible status and terminal filters', async () => {
+    listApiKeysMock.mockImplementation((params: Record<string, string> = {}) => Promise.resolve(
+      params.cursor
+        ? {
+            keys: [
+              { key_id: 'k-revoked', name: 'key-revoked', status: 'REVOKED', tenant_id: 'T', created_at: '2026-01-02T00:00:00Z', permissions: [] },
+              { key_id: 'k-expired', name: 'key-expired', status: 'EXPIRED', tenant_id: 'T', created_at: '2026-01-03T00:00:00Z', permissions: [] },
+            ],
+            has_more: false,
+          }
+        : {
+            keys: [{ key_id: 'k-active', name: 'key-active', status: 'ACTIVE', tenant_id: 'T', created_at: '2026-01-01T00:00:00Z', permissions: [] }],
+            has_more: true,
+            next_cursor: 'page-2',
+          },
+    ))
+    const { default: ApiKeysView } = await import('../views/ApiKeysView.vue')
+    const w = mount(ApiKeysView, stdMount())
+    await flushPromises()
+    const statusSelect = w.findAll<HTMLSelectElement>('select').find(select =>
+      Array.from(select.element.options).some(option => option.value === 'REVOKED'),
+    )
+    expect(statusSelect).toBeDefined()
+    await statusSelect!.setValue('ACTIVE')
+    await flushPromises()
+    const pageOneAfterStatusChange = listApiKeysMock.mock.calls.at(-1)?.[0]
+    expect(pageOneAfterStatusChange).toMatchObject({ status: 'ACTIVE' })
+    expect(pageOneAfterStatusChange?.cursor).toBeUndefined()
+
+    const rows = await exportJson(w) as Array<{ key_id: string }>
+    expect(rows.map(row => row.key_id)).toEqual(['k-active'])
+    expect(listApiKeysMock.mock.calls.some(([params]) => params?.status === 'ACTIVE')).toBe(true)
   })
 })

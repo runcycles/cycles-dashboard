@@ -1,4 +1,10 @@
 import { ref, onMounted, onUnmounted } from 'vue'
+import { POLLING_STALE } from './pollingResult'
+
+// The callback did not produce a fully fresh view, but it already owns its
+// retry cadence (for example Overview's multi-endpoint cursor-walk backoff).
+// Preserve both the prior timestamp and the current polling interval.
+export { POLLING_STALE } from './pollingResult'
 
 /**
  * Polling composable with cancellation, in-flight dedup, and jittered
@@ -43,7 +49,10 @@ import { ref, onMounted, onUnmounted } from 'vue'
  * not failures.
  */
 export function usePolling(
-  callback: (signal: AbortSignal) => Promise<void>,
+  // Callers that render an error locally can return false instead of
+  // rethrowing. POLLING_STALE is for partial refreshes whose callback owns
+  // its retry cadence; neither outcome advances the freshness timestamp.
+  callback: (signal: AbortSignal) => Promise<void | boolean | typeof POLLING_STALE>,
   intervalMs: number,
 ) {
   const isPolling = ref(true)
@@ -97,10 +106,14 @@ export function usePolling(
     activeController = controller
     isLoading.value = true
     try {
-      await callback(controller.signal)
+      const result = await callback(controller.signal)
       if (!mounted) return
-      currentInterval = intervalMs
-      lastSuccessAt.value = new Date()
+      if (result === false) {
+        currentInterval = Math.min(currentInterval * 2, maxInterval)
+      } else if (result !== POLLING_STALE) {
+        currentInterval = intervalMs
+        lastSuccessAt.value = new Date()
+      }
     } catch (e) {
       if (!mounted) return
       // Aborts are intentional (unmount, visibility change). Not a

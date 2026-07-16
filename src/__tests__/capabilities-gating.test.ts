@@ -43,17 +43,21 @@ vi.mock('vue-router', async () => ({
 }))
 
 // usePolling schedules intervals; we don't want them in unit tests.
-vi.mock('../composables/usePolling', () => ({
-  usePolling: (fn: () => Promise<void> | void) => {
-    // Kick once so the view's initial data load runs; return the shape
-    // the views destructure ({ refresh, isLoading }).
-    void fn()
-    return {
-      refresh: async () => { void fn() },
-      isLoading: { value: false },
-    }
-  },
-}))
+vi.mock('../composables/usePolling', async () => {
+  const { ref } = await import('vue')
+  return {
+    usePolling: (fn: () => Promise<void> | void) => {
+      // Kick once so the view's initial data load runs; return the shape
+      // the views destructure ({ refresh, isLoading }). isLoading is a
+      // real ref — ApiKeysView edge-watches it (round-5 F2).
+      void fn()
+      return {
+        refresh: async () => { void fn() },
+        isLoading: ref(false),
+      }
+    },
+  }
+})
 
 const FULL_CAPS: Capabilities = {
   view_overview: true,

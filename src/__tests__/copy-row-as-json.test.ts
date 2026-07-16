@@ -16,6 +16,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '../stores/auth'
+import { toasts } from '../composables/useToast'
 import type { Capabilities } from '../types'
 
 const listEventsMock = vi.fn()
@@ -233,7 +234,8 @@ describe('AuditView — Copy JSON copies full entry including metadata', () => {
     expect(w.find(`button[aria-label="Copy full JSON for audit log ${sampleEntry.log_id}"]`).text()).toBe('Copy JSON')
   })
 
-  it('silently swallows clipboard errors', async () => {
+  it('toasts "Copy failed" on clipboard errors instead of failing silently', async () => {
+    toasts.value = []
     writeTextMock.mockRejectedValueOnce(new Error('permission denied'))
     listAuditLogsMock.mockResolvedValue({ logs: [sampleEntry], has_more: false, next_cursor: undefined })
     const { default: AuditView } = await import('../views/AuditView.vue')
@@ -242,10 +244,14 @@ describe('AuditView — Copy JSON copies full entry including metadata', () => {
 
     await w.find('button[aria-label="Expand audit details"]').trigger('click')
     await flushPromises()
-    // Should not throw even though writeText rejects.
+    // Must not throw even though writeText rejects…
     await expect(
       w.find(`button[aria-label="Copy full JSON for audit log ${sampleEntry.log_id}"]`).trigger('click')
     ).resolves.not.toThrow()
+    await flushPromises()
+    // …and the failure is surfaced as an error toast (same copy as TenantsView).
+    expect(toasts.value.some(t => t.type === 'error' && t.message.includes('Copy failed'))).toBe(true)
+    toasts.value = []
   })
 })
 
@@ -387,6 +393,44 @@ describe('WebhookDetailView — Copy actions on delivery rows (kebab, v0.1.25.40
     await flushPromises()
     expect(writeTextMock).toHaveBeenCalledTimes(3)
     expect(writeTextMock.mock.calls[2][0]).toBe('evt_xyz')
+  })
+
+  // Round 5 (F6): the four hand-rolled copy handlers were rebuilt on
+  // the shared clipboard helpers with the app-wide failure copy —
+  // 'clipboard unavailable', not the old 'permission denied' (which
+  // misdiagnosed insecure contexts / missing API).
+  it('toasts the unified "Copy failed — clipboard unavailable" when the clipboard write rejects', async () => {
+    vi.doMock('../api/client', async () => {
+      const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
+      return {
+        ...actual,
+        listDeliveries: (...args: unknown[]) => listDeliveriesMock(...args),
+        getWebhook: (...args: unknown[]) => getWebhookMock(...args),
+      }
+    })
+    getWebhookMock.mockResolvedValue({
+      id: 'sub_xyz', tenant_id: 'acme', url: 'https://example.test/hook',
+      active: true, created_at: '2026-04-18T00:00:00Z', status: 'ACTIVE', event_types: ['*'],
+    })
+    listDeliveriesMock.mockResolvedValue({ deliveries: [sampleDelivery], has_more: false, next_cursor: undefined })
+    routeRef.params = { id: 'sub_xyz' }
+    toasts.value = []
+    writeTextMock.mockRejectedValue(new Error('permission denied'))
+
+    const { default: WebhookDetailView } = await import('../views/WebhookDetailView.vue')
+    const w = mount(WebhookDetailView, stdMount())
+    await flushPromises()
+    await flushPromises()
+
+    const kebab = w.find(`button[aria-label="Actions for delivery ${sampleDelivery.delivery_id}"]`)
+    await kebab.trigger('click')
+    await flushPromises()
+    const menuItems = w.findAll('button[role="menuitem"]')
+    await menuItems[1].trigger('click') // Copy delivery ID
+    await flushPromises()
+
+    expect(toasts.value.some(t => t.type === 'error' && t.message === 'Copy failed — clipboard unavailable')).toBe(true)
+    toasts.value = []
   })
 
   // v0.1.25.39 field-name fix: dashboard types had `http_status` +

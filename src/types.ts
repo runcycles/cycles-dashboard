@@ -113,6 +113,29 @@ export interface BudgetLedger {
   updated_at?: string
 }
 
+// v0.1.25.41 catch-up (spec §BudgetFundingResponse, lines 986-1016):
+// response body for POST /v1/admin/budgets/fund — a before/after delta
+// of the funding operation, NOT the full BudgetLedger the client
+// previously assumed. Required per spec: operation + the allocated and
+// remaining pairs. The remaining pair is SignedAmount on the wire (may
+// be negative under overdraft) — Amount's `amount: number` carries the
+// sign, so the same shape is reused. Debt/spent pairs and timestamp are
+// optional; previous_spent is present when the operation affects spent
+// (RESET_SPENT) and equals new_spent when both are emitted for
+// spent-preserving operations (CREDIT / DEBIT / RESET / REPAY_DEBT).
+export interface BudgetFundingResponse {
+  operation: string
+  previous_allocated: Amount
+  new_allocated: Amount
+  previous_remaining: Amount
+  new_remaining: Amount
+  previous_debt?: Amount
+  new_debt?: Amount
+  previous_spent?: Amount
+  new_spent?: Amount
+  timestamp?: string
+}
+
 export interface BudgetListResponse {
   ledgers: BudgetLedger[]
   has_more: boolean
@@ -338,15 +361,29 @@ export interface PolicyListResponse {
 }
 
 // API Key types
+//
+// Mirrors the spec §ApiKey schema (cycles-governance-admin-v0.1.25.yaml
+// lines 1310-1388, additionalProperties:false). The server uses
+// @JsonInclude(NON_NULL), so optional fields not set are absent from
+// the response (not `null`).
 export interface ApiKey {
   key_id: string
   tenant_id: string
+  // v0.1.25.41 catch-up: visible prefix for key identification (e.g.
+  // "cyc_live_abc123") — required per spec §ApiKey (line 1315). The
+  // full key is never returned after creation.
+  key_prefix: string
   name?: string
+  description?: string
   status: string
   permissions: string[]
   scope_filter?: string[]
   created_at: string
+  last_used_at?: string
   expires_at?: string
+  revoked_at?: string
+  revoked_reason?: string
+  metadata?: Record<string, unknown>
 }
 
 export interface ApiKeyListResponse {
@@ -367,12 +404,15 @@ export interface ApiKeyCreateRequest {
   metadata?: Record<string, unknown>
 }
 
+// NOTE: `name` is intentionally absent — the spec's ApiKeyCreateResponse
+// schema (lines 1425-1449) has no such property and the server never
+// emits it. The create flow already knows the name it submitted;
+// SecretReveal only consumes key_secret.
 export interface ApiKeyCreateResponse {
   key_id: string
   key_secret: string
   key_prefix: string
   tenant_id: string
-  name?: string
   permissions?: string[]
   created_at: string
   expires_at?: string
@@ -383,9 +423,11 @@ export interface ApiKeyUpdateRequest {
   description?: string
   permissions?: string[]
   scope_filter?: string[]
-  // ISO 8601. Spec allows rotating the expiry on an existing key; blank
-  // means "no change" (the form omits it when untouched).
-  expires_at?: string
+  // NOTE: expires_at is intentionally absent. The spec's PATCH body is
+  // additionalProperties:false and expires_at is immutable — "revoke and
+  // recreate" is the only way to change an existing key's expiry. The
+  // server's ApiKeyUpdateRequest has no such field and would silently
+  // drop it (200 OK, expiry unchanged).
   metadata?: Record<string, unknown>
 }
 
@@ -409,7 +451,10 @@ export interface TenantUpdateRequest {
   default_reservation_ttl_ms?: number
   max_reservation_ttl_ms?: number
   max_reservation_extensions?: number
-  reservation_expiry_policy?: string
+  // NOTE: reservation_expiry_policy is create-only (see TenantCreateRequest).
+  // The spec's PATCH body is additionalProperties:false and the server's
+  // TenantUpdateRequest has no such field — sending it would be silently
+  // dropped (200 OK, policy unchanged).
 }
 
 export interface WebhookCreateRequest {
@@ -450,6 +495,10 @@ export interface ReplayEventsRequest {
 export interface ReplayEventsResponse {
   replay_id: string
   events_queued: number
+  // v0.1.25.41 catch-up (spec replayWebhookEvents 202 schema, lines
+  // 7219-7220): server's estimate of how long the async replay will
+  // take. Optional — pre-catch-up servers omit it.
+  estimated_completion_seconds?: number
 }
 
 // Well-known enums
@@ -548,6 +597,23 @@ export const EVENT_TYPES = [
 // this as a new "webhook" option in the EventsView category dropdown.
 export const EVENT_CATEGORIES = ['budget', 'tenant', 'api_key', 'policy', 'reservation', 'webhook', 'system'] as const
 
+// Spec revisions 0.1.25.38/.40/.41 — TENANT-OWNED CATEGORY BOUNDARY
+// (createWebhookSubscription lines 6281-6318, updateWebhookSubscription
+// lines 6560-6574): a subscription owned by a CONCRETE tenant (tenant_id
+// present and != "__system__") may only select tenant-scoped selectors —
+// budget.* / reservation.* / tenant.* event types, and only the budget /
+// reservation / tenant categories. Admin-only selectors (api_key, policy,
+// webhook, system) on a tenant-owned row are rejected 400 INVALID_REQUEST
+// by servers at .40+, regardless of auth context: the owning tenant
+// controls the row's delivery URL + signing secret, so an admin-only
+// selector would leak admin governance/security telemetry to a
+// tenant-controlled endpoint. The webhook create/edit pickers filter to
+// these sets whenever the subscription is (or will be) tenant-owned.
+export const TENANT_ALLOWED_EVENT_CATEGORIES = ['budget', 'reservation', 'tenant'] as const
+export const TENANT_ALLOWED_EVENT_TYPES = EVENT_TYPES.filter(
+  et => (TENANT_ALLOWED_EVENT_CATEGORIES as readonly string[]).includes(et.split('.')[0]),
+)
+
 // cycles-governance-admin v0.1.25.yaml ErrorCode enum. Used as the suggestion
 // set for the AuditView error_code filter datalist (v0.1.25.24 listAuditLogs
 // filter DSL). Free-text entry still accepted — values are NOT validated
@@ -598,10 +664,13 @@ export interface PolicyCreateRequest {
 
 // Replacement semantics per spec: a present field overwrites; an absent
 // field leaves the server value unchanged; an empty array/object clears.
+// NOTE: scope_pattern is intentionally absent. The spec's PATCH body is
+// additionalProperties:false and has no scope_pattern — it is create-only
+// (a policy's scope is its identity); a conformant server 400s on it.
+// No dashboard code ever sent it.
 export interface PolicyUpdateRequest {
   name?: string
   description?: string
-  scope_pattern?: string
   priority?: number
   caps?: Caps
   commit_overage_policy?: string

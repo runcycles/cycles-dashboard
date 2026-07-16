@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref } from 'vue'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
+import { POLLING_STALE } from '../composables/pollingResult'
 import { POLL_FAST_MS } from '../composables/pollingConstants'
 import { getOverview, listApiKeys, listAuditLogs, listBudgets, listTenants, listWebhooks } from '../api/client'
 import type { AdminOverviewResponse, ApiKey, AuditLogEntry, BudgetLedger, WebhookSubscription } from '../types'
@@ -18,6 +19,7 @@ import { useChartTheme } from '../composables/useChartTheme'
 import { formatTime } from '../utils/format'
 import { toMessage } from '../utils/errors'
 import { filterExpiringKeys, type ExpiringKey } from '../utils/expiringKeys'
+import { walkCursorPages, LIST_PAGE_LIMIT } from '../utils/cursorWalk'
 
 // I1 (UI/UX P0): Overview is the operator's landing page and, for an
 // admin console, "landing page" means "what needs your attention right
@@ -82,69 +84,227 @@ const atCapBudgets = ref<BudgetLedger[]>([])
 const frozenBudgets = ref<BudgetLedger[]>([])
 const error = ref('')
 
-// All eight fetches parallelize; any individual failure degrades
-// gracefully (error banner, but other sections keep rendering so a
-// flaky audit endpoint doesn't blank out the whole landing page).
+// Partial-walk flags — true when the corresponding cursor walk hit its
+// page cap with the server still reporting more rows. The affected
+// cards surface a "counts may be partial" hint so a truncated aggregate
+// is never presented as the full fleet. Server clamps `limit` to 100 on
+// every list endpoint, so single-request "big limit" fetches silently
+// truncated pre-fix; the walks below are the honest replacement.
+const atCapPartial = ref(false)
+const closedTenantsPartial = ref(false)
+const keysPartial = ref(false)
+const webhooksPartial = ref(false)
+
+// Cursor-walk wrappers — one page shape per endpoint, LIST_PAGE_LIMIT
+// (100, the server clamp) per page, CURSOR_WALK_MAX_PAGES (10) pages
+// max = 1,000 rows per walk. Walks run in parallel with each other
+// (Promise.allSettled below); each adds at most 9 extra sequential
+// round-trips over the old single fetch, and only on fleets that
+// actually have that many matching rows.
+function walkBudgetsPages(base: Record<string, string>) {
+  return walkCursorPages<BudgetLedger>(async (cursor) => {
+    const res = await listBudgets({ ...base, limit: String(LIST_PAGE_LIMIT), ...(cursor ? { cursor } : {}) })
+    return { items: res.ledgers, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
+  })
+}
+function walkTenantsPages(base: Record<string, string>) {
+  return walkCursorPages<{ tenant_id: string }>(async (cursor) => {
+    const res = await listTenants({ ...base, limit: String(LIST_PAGE_LIMIT), ...(cursor ? { cursor } : {}) })
+    return { items: res.tenants, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
+  })
+}
+function walkWebhooksPages(base: Record<string, string>) {
+  return walkCursorPages<WebhookSubscription>(async (cursor) => {
+    const res = await listWebhooks({ ...base, limit: String(LIST_PAGE_LIMIT), ...(cursor ? { cursor } : {}) })
+    return { items: res.subscriptions, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
+  })
+}
+function walkApiKeysPages(base: Record<string, string>) {
+  return walkCursorPages<ApiKey>(async (cursor) => {
+    const res = await listApiKeys({ ...base, limit: String(LIST_PAGE_LIMIT), ...(cursor ? { cursor } : {}) })
+    return { items: res.keys, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
+  })
+}
+
+// Walk gating — the four cursor walks are up to 40 sequential list
+// requests per run, far too heavy to replay on every 30s poll tick.
+// They run unconditionally on initial load and manual refresh; on poll
+// ticks they only re-run when the cheap getOverview() aggregate signals
+// change (walkSignature below covers the counter fields backing the
+// walk-fed cards), with a slow-cadence fallback (every 10th fast tick)
+// so drift can't persist indefinitely when counters don't move — e.g.
+// a new ACTIVE api key, which no overview counter reflects. A walk round
+// with any rejection is never committed as done — it retries under the
+// cursor-walk backoff below (see the post-settle commit).
+const WALK_FALLBACK_TICKS = 10
+let forceWalks = true // initial load always walks
+let ticksSinceWalk = 0 // ticks since the last walk ATTEMPT (success or failure)
+let lastWalkSignature: string | null = null
+// POLLING_STALE prevents the shared poller from advancing freshness or
+// changing cadence while this tick counter owns the cursor-walk retry.
+let walkRetryBackoffTicks = 1
+let walkFailStreak = false
+// First failure message from the last attempted walk round. Folded into
+// the error banner (see the post-settle block) so the failure stays
+// visible across the whole backoff window — the opposite defect of the
+// prior round was a banner that cleared as soon as a later tick's
+// phase-1 fetches succeeded while the walks were still broken.
+const walkError = ref('')
+
+// Counter fields relevant to the walk-backed cards: tenant counts
+// (closed-tenant exclusion walk), budget counts (at/near-cap walk),
+// webhook counts (failing-webhooks walk). The overview payload has no
+// api-key aggregate, so key drift is covered by the fallback re-walk.
+function walkSignature(ov: AdminOverviewResponse): string {
+  return JSON.stringify([ov.tenant_counts, ov.budget_counts, ov.webhook_counts])
+}
+
+// All fetches within a phase parallelize; any individual failure
+// degrades gracefully (error banner, but other sections keep rendering
+// so a flaky audit endpoint doesn't blank out the whole landing page).
 const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
-  const [ov, apiKeys, audit, atCap, frozen, closed, debt, webhooks] = await Promise.allSettled([
+  // Phase 1 — cheap single-request fetches, every tick.
+  const [ov, audit, frozen, debt] = await Promise.allSettled([
     getOverview(),
-    // Pull one page; client-side filter for 7d window. Fine even for
-    // tenants with thousands of keys — we don't need the full set,
-    // we need the upcoming expiries, and server returns keys ordered.
-    listApiKeys(),
     // Last 10 audit entries, newest first. Server default sort is
     // timestamp desc per governance-admin spec, so no sort params needed.
     listAuditLogs({ limit: '10' }),
-    // Budgets at or near cap (utilization ≥ 0.9). Catches
-    // exhausted-without-debt (our blind spot), over-limit-via-debt,
-    // AND the 90–99% range so operators can intervene before a
-    // budget actually blows rather than after. Limit 2000 is the
-    // fleet-histogram cap — the at-cap card slices to 5 for display,
-    // but the utilization donut computes its Near-cap / Over-cap
-    // buckets from this same set so it needs a representative sample
-    // of the fleet, not just the top 10. Bumped from 500 in
-    // v0.1.25.53 because large fleets (> 500 budgets ≥ 90%) were
-    // under-counting the donut; the spec has no server-side max on
-    // `limit`, so sampling at 2000 buys an order of magnitude more
-    // headroom at negligible cost. Deployments exceeding 2000 would
-    // still need a cursor-walk follow-up, but those are rare enough
-    // today that a sampling bump is the right scope-conscious fix.
-    listBudgets({ utilization_min: '0.9', limit: '2000' }),
     // Frozen budgets — scopes, not just a count. Lets the Frozen
     // Budgets card list the top 5 inline instead of a center link.
     listBudgets({ status: 'FROZEN', limit: '10' }),
-    // Closed tenants — exclusion set for all client-side-fetched
-    // attention cards (see closedTenantIds declaration). Typical admin
-    // deployments have << 1000 closed tenants; if a deployment exceeds
-    // that, the unfiltered items are over-counted on Overview (server
-    // aggregates stay correct), and the follow-up is spec work to add
-    // `exclude_closed_tenants` to the list endpoints.
-    listTenants({ status: 'CLOSED', limit: '1000' }),
     // Budgets with debt — replaces overview.debt_scopes so the list
     // carries tenant_id and can be filtered against the closed set.
     listBudgets({ has_debt: 'true', limit: '10' }),
-    // Webhooks — for the Failing Webhooks card. Full list + client
-    // filter for (consecutive_failures ?? 0) > 0 (WebhooksView does
-    // the same thing; the admin API has no server-side `failing`
-    // filter). Limit sized generously so the typical deployment has
-    // all failing subs in this page.
-    listWebhooks({ limit: '200' }),
   ])
   if (ov.status === 'fulfilled') overview.value = ov.value
-  if (apiKeys.status === 'fulfilled') keys.value = apiKeys.value.keys
   if (audit.status === 'fulfilled') recentAudit.value = audit.value.logs
-  if (atCap.status === 'fulfilled') atCapBudgets.value = atCap.value.ledgers
   if (frozen.status === 'fulfilled') frozenBudgets.value = frozen.value.ledgers
-  if (closed.status === 'fulfilled') {
-    closedTenantIds.value = new Set(closed.value.tenants.map(t => t.tenant_id))
-  }
   if (debt.status === 'fulfilled') debtBudgets.value = debt.value.ledgers
-  if (webhooks.status === 'fulfilled') failingWebhooksRaw.value = webhooks.value.subscriptions
+
+  // Phase 2 — the cursor walks, gated. A failed getOverview() yields no
+  // signature; walk only if forced or fallback-due (can't detect change).
+  // During a failure streak every backed-off polling tick retries. The
+  // counter-change trigger is suspended because the uncommitted signature
+  // reads as "changed" throughout an outage.
+  ticksSinceWalk++
+  const sig = ov.status === 'fulfilled' ? walkSignature(ov.value) : null
+  const countersChanged = sig !== null && sig !== lastWalkSignature
+  const walkDue = ticksSinceWalk >= (walkFailStreak ? walkRetryBackoffTicks : WALK_FALLBACK_TICKS)
+  if (forceWalks || walkDue || (countersChanged && !walkFailStreak)) {
+    const [apiKeys, atCap, closed, webhooks] = await Promise.allSettled([
+      // Expiring-keys card. The server sorts by created_at desc — NOT by
+      // expiry — and has no `expires_before` filter, so one default page
+      // (50 rows) could miss soon-expiring keys entirely on large fleets.
+      // Walk the ACTIVE set (filterExpiringKeys only considers ACTIVE
+      // keys) and filter the 7d window client-side.
+      walkApiKeysPages({ status: 'ACTIVE' }),
+      // Budgets at or near cap (utilization ≥ 0.9). Catches
+      // exhausted-without-debt (our blind spot), over-limit-via-debt,
+      // AND the 90–99% range so operators can intervene before a
+      // budget actually blows rather than after. The at-cap card slices
+      // to 5 for display, but the utilization donut computes its
+      // Near-cap / Over-cap buckets from this same set so it needs the
+      // fleet, not just the top 10. The old single limit='2000' request
+      // was silently truncated to 100 by the server-side clamp — the
+      // cursor walk is the honest fix (partial flag when > 1,000 rows).
+      walkBudgetsPages({ utilization_min: '0.9' }),
+      // Closed tenants — exclusion set for all client-side-fetched
+      // attention cards (see closedTenantIds declaration). Cursor-walked
+      // because the old limit='1000' was clamped to 100 server-side; a
+      // partial walk means the exclusion set may be incomplete, so the
+      // walk-backed cards fold closedTenantsPartial into their hint.
+      walkTenantsPages({ status: 'CLOSED' }),
+      // Webhooks — for the Failing Webhooks card. Full list + client
+      // filter for (consecutive_failures ?? 0) > 0 (WebhooksView does
+      // the same thing; the admin API has no server-side `failing`
+      // filter). Cursor-walked — the old limit='200' was clamped to 100.
+      walkWebhooksPages({}),
+    ])
+    if (apiKeys.status === 'fulfilled') {
+      keys.value = apiKeys.value.items
+      keysPartial.value = apiKeys.value.partial
+    }
+    if (atCap.status === 'fulfilled') {
+      atCapBudgets.value = atCap.value.items
+      atCapPartial.value = atCap.value.partial
+    }
+    if (closed.status === 'fulfilled') {
+      closedTenantIds.value = new Set(closed.value.items.map(t => t.tenant_id))
+      closedTenantsPartial.value = closed.value.partial
+    }
+    if (webhooks.status === 'fulfilled') {
+      failingWebhooksRaw.value = webhooks.value.items
+      webhooksPartial.value = webhooks.value.partial
+    }
+    // Commit the walk as "done" only when ALL four fulfilled. Committing
+    // up-front (pre-fix) meant a rejected walk left its card stale for up
+    // to WALK_FALLBACK_TICKS (~5 min) — the next ticks saw an unchanged
+    // signature and skipped the walks. On any rejection, keep the
+    // signature uncommitted (the next attempt replays the full round),
+    // remember the failure for the banner, and back off exponentially
+    // instead of hammering the degraded endpoint every tick.
+    forceWalks = false
+    ticksSinceWalk = 0
+    const firstWalkFail = [apiKeys, atCap, closed, webhooks].find(r => r.status === 'rejected')
+    if (firstWalkFail && firstWalkFail.status === 'rejected') {
+      walkFailStreak = true
+      walkRetryBackoffTicks = Math.min(walkRetryBackoffTicks * 2, WALK_FALLBACK_TICKS)
+      walkError.value = toMessage(firstWalkFail.reason)
+    } else {
+      walkFailStreak = false
+      walkRetryBackoffTicks = 1
+      walkError.value = ''
+      if (sig !== null) lastWalkSignature = sig
+    }
+  }
   // Surface the first failure so the operator sees *something* wrong —
   // but only error-banner; cards for the successful fetches still render.
-  const firstFail = [ov, apiKeys, audit, atCap, frozen, closed, debt, webhooks].find(r => r.status === 'rejected')
-  error.value = firstFail && firstFail.status === 'rejected' ? toMessage(firstFail.reason) : ''
+  // Phase-1 failures win (they're fresher — re-checked every tick);
+  // otherwise the last walk round's failure persists across the backoff
+  // window instead of clearing between retries.
+  const phase1Fail = [ov, audit, frozen, debt].find(r => r.status === 'rejected')
+  error.value = phase1Fail && phase1Fail.status === 'rejected'
+    ? toMessage(phase1Fail.reason)
+    : walkError.value
+  // Phase-1 failures use the shared network backoff. Walk failures preserve
+  // freshness while their existing tick-based backoff owns retry cadence.
+  if (phase1Fail) return false
+  return walkError.value ? POLLING_STALE : true
 }, POLL_FAST_MS)
+
+// Manual refresh (PageHeader button) always re-runs the walks — the
+// operator is explicitly asking for fresh data, so the counter gate
+// must not skip the walk-backed cards.
+//
+// usePolling's refresh() is a deliberate no-op while a tick is in
+// flight (in-flight dedup — other views rely on it, so the composable
+// semantics stay untouched). Walk rounds make Overview ticks span
+// seconds, which turned a mid-round click into a silent drop until the
+// next 30s tick. Queue the click instead: the isLoading watcher below
+// consumes the flag on the true→false edge and re-invokes refreshAll,
+// so forceWalks is armed for the replayed run.
+const pendingManualRefresh = ref(false)
+function refreshAll() {
+  if (isLoading.value) {
+    pendingManualRefresh.value = true
+    return
+  }
+  forceWalks = true
+  refresh()
+}
+watch(isLoading, (now, was) => {
+  if (was && !now && pendingManualRefresh.value) {
+    pendingManualRefresh.value = false
+    refreshAll()
+  }
+})
+
+// Per-card partial hints. Each walk-backed card is partial if its own
+// walk truncated OR the closed-tenant exclusion walk did (an incomplete
+// exclusion set can leave closed-tenant rows over-counted on the card).
+const atCapCountsPartial = computed(() => atCapPartial.value || closedTenantsPartial.value)
+const expiringKeysCountsPartial = computed(() => keysPartial.value || closedTenantsPartial.value)
+const failingWebhooksCountsPartial = computed(() => webhooksPartial.value || closedTenantsPartial.value)
 
 // A row belongs on an "attention" card only if its owning tenant is
 // not CLOSED. Rows without a tenant_id (pre-v0.1.25.19 servers) are
@@ -351,8 +511,8 @@ function onEventsCategoryClick(p: ChartClickParams) {
 // (v0.1.25.52) — Overview is the glance layer; the list view
 // was the wrong home because it squeezed the table and
 // duplicated the role of this page's at-a-glance strip.
-// Client-side reduce over `failingWebhooksRaw`, which already
-// holds the full webhook page (limit 200). The "Failing" slice
+// Client-side reduce over `failingWebhooksRaw`, which holds the
+// cursor-walked webhook set. The "Failing" slice
 // counts any webhook with `consecutive_failures ≥ 1` regardless
 // of status, so a PAUSED webhook with latent failures still
 // surfaces — matches the `?failing=1` URL filter semantics.
@@ -462,8 +622,8 @@ const budgetStatusOption = computed(() => {
 // budget at 113% spent/allocated with overdraft_limit covering the
 // overage has debt = 0 and counted as "Healthy" in the old chart
 // even though operators would call it critically over cap. The new
-// chart reads the same `listBudgets({utilization_min:0.9, limit:500})`
-// fetch the attention cards use and buckets by real utilization:
+// chart reads the same `utilization_min=0.9` cursor walk the attention
+// cards use and buckets by real utilization:
 //   • Near cap (90–99%) — warning, "about to blow"
 //   • Over cap (≥100%)  — danger, "spent exceeds allocated"
 //   • Healthy (<90%)    — success, everything else
@@ -766,10 +926,10 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
       subtitle="What needs attention"
       :loading="isLoading"
       :last-updated-at="lastSuccessAt"
-      @refresh="refresh"
+      @refresh="refreshAll"
     />
 
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-2 mb-4 dark:bg-red-950 dark:border-red-800 dark:text-red-300">
+    <p v-if="error" role="alert" aria-atomic="true" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-2 mb-4 dark:bg-red-950 dark:border-red-800 dark:text-red-300">
       {{ error }}
     </p>
 
@@ -1008,6 +1168,9 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
           <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
             Budget fleet utilization
             <span class="muted text-xs font-normal">· click a slice</span>
+            <!-- Buckets are computed from the same at-cap walk as the
+                 attention card; a capped walk under-counts Near/Over. -->
+            <span v-if="atCapCountsPartial" class="muted text-xs font-normal" data-testid="utilization-donut-partial-note">· counts may be partial</span>
           </div>
           <BaseChart
             :option="budgetUtilizationOption"
@@ -1108,6 +1271,10 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
                 class="ml-1"
                 :class="axisById['budgets-at-cap']?.severity === 'danger' ? 'badge-danger' : 'badge-warning'"
               >{{ atCapBudgetsFiltered.length }}</span>
+              <!-- Cursor walk hit its page cap — the fleet is larger
+                   than the walked sample, so the badge/donut counts
+                   are a lower bound. -->
+              <span v-if="atCapCountsPartial" class="muted-sm font-normal" data-testid="at-cap-partial-note">· counts may be partial</span>
             </h2>
             <router-link :to="{ name: 'budgets', query: { utilization_min: '90' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
@@ -1215,6 +1382,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
               <WarningIcon v-if="axisById['failing-webhooks']" class="w-4 h-4 text-red-500 dark:text-red-400 shrink-0" />
               Failing webhooks
               <span v-if="failingWebhooksFiltered.length > 0" class="ml-1 badge-danger">{{ failingWebhooksFiltered.length }}</span>
+              <span v-if="failingWebhooksCountsPartial" class="muted-sm font-normal" data-testid="failing-webhooks-partial-note">· counts may be partial</span>
             </h2>
             <router-link to="/webhooks" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
@@ -1245,6 +1413,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
               <WarningIcon v-if="axisById['expiring-keys']" class="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" />
               Expiring API keys <span class="muted font-normal">(7d)</span>
               <span v-if="expiringTotal > 0" class="ml-1 badge-warning">{{ expiringTotal }}</span>
+              <span v-if="expiringKeysCountsPartial" class="muted-sm font-normal" data-testid="expiring-keys-partial-note">· counts may be partial</span>
             </h2>
             <router-link :to="{ name: 'api-keys', query: { expiring_within_7d: '1' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
@@ -1254,8 +1423,13 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
             :key="e.key.key_id"
             class="flex justify-between items-center py-1.5 border-b border-gray-100 last:border-0 dark:border-gray-700"
           >
+            <!-- Deep-link via ?search= — listApiKeys supports server-side
+                 substring search on key_id + name, and ApiKeysView hydrates
+                 the param into its search filter on mount, so the landing
+                 state shows exactly this key. (The old ?key_id= param was
+                 never read by ApiKeysView — dead deep-link.) -->
             <router-link
-              :to="{ name: 'api-keys', query: { key_id: e.key.key_id } }"
+              :to="{ name: 'api-keys', query: { search: e.key.key_id } }"
               class="text-sm text-blue-600 hover:underline truncate mr-2 dark:text-blue-400"
               :title="e.key.key_id"
             >{{ e.key.name || e.key.key_id }}</router-link>

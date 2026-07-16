@@ -8,8 +8,11 @@ services:
   dashboard:
     logging: *default-logging
     build: .
+    # All dev-stack ports bind to loopback: this stack runs with a blank
+    # REDIS_PASSWORD and a default admin key, so nothing here may be
+    # reachable from other hosts (0.0.0.0 was a remote-exposure footgun).
     ports:
-      - "8080:80"
+      - "127.0.0.1:8080:80"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]
       interval: 30s
@@ -28,15 +31,13 @@ services:
     logging: *default-logging
     # Runtime-plane server. Independent release cadence from dashboard +
     # cycles-server-admin — keep in sync with docker-compose.prod.yml.
-    # .37 surfaces reservation committed/finalized/metadata, the include=
-    # projection (incl. include=evidence — the reservation->evidence link,
-    # dashboard .63) and serves /v1/evidence + JWKS. .38: with evidence NOT
-    # configured (this bundled stack's default) the producer no longer
-    # queues evidence source records — keeps evidence:pending quiet.
-    image: ghcr.io/runcycles/cycles-server:0.1.25.46
+    # .58 is the latest published runtime release: it includes the complete
+    # reservation/evidence surface plus replay, pagination, Redis recovery,
+    # scheduled-maintenance, and observability hardening from .47-.58.
+    image: ghcr.io/runcycles/cycles-server:0.1.25.58
     restart: unless-stopped
     ports:
-      - "7878:7878"
+      - "127.0.0.1:7878:7878"  # loopback-only — see dashboard service note
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -63,18 +64,14 @@ services:
     # Event-dispatch / webhook delivery worker. Consumes events emitted
     # by cycles-admin and cycles-server from Redis and fans them out
     # to registered webhook endpoints. Independent release cadence.
-    # `.14` ("CyclesEvidence signing tier") signs + stores evidence
-    # envelopes off the evidence:pending queue when evidence emission is
-    # configured — needed for the Evidence viewer to resolve a real
-    # envelope. It also carries the trace_id / trace_flags /
-    # traceparent_inbound_valid WebhookDelivery fields the dashboard's
-    # cross-surface correlation reads. `.15`: gates the signer on evidence
-    # config (no dead-lettering / evidence:failed noise when unconfigured,
-    # this stack's default) and fixes a retention-scan WRONGTYPE error.
-    image: ghcr.io/runcycles/cycles-server-events:0.1.25.22
+    # .24 is the latest published worker release: owner-fenced dispatch,
+    # durable terminal transitions/outboxes, and hardened evidence signing.
+    # Existing evidence-enabled fleets must follow OPERATIONS.md's .24
+    # processing-list migration sequence before upgrading.
+    image: ghcr.io/runcycles/cycles-server-events:0.1.25.24
     restart: unless-stopped
     ports:
-      - "7980:7980"
+      - "127.0.0.1:7980:7980"  # loopback-only — see dashboard service note
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -96,10 +93,10 @@ services:
 
   cycles-admin:
     logging: *default-logging
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.48
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.52
     restart: unless-stopped
     ports:
-      - "7979:7979"
+      - "127.0.0.1:7979:7979"  # loopback-only — see dashboard service note
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -125,9 +122,13 @@ services:
 
   redis:
     logging: *default-logging
-    image: redis:7-alpine
+    # Pinned to the 7.4 minor (matches docker-compose.prod.yml) to prevent
+    # silent major/minor drift under the floating 7-alpine tag.
+    image: redis:7.4-alpine
     ports:
-      - "6379:6379"
+      # Loopback-only: this dev redis has NO password ("" above) — binding
+      # 0.0.0.0 would expose an open redis to the local network.
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis-data:/data
     command: redis-server --appendonly yes

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useToast } from '../composables/useToast'
+import { writeClipboardText } from '../utils/clipboard'
 import CopyIcon from './icons/CopyIcon.vue'
 
 // Cross-surface correlation-id chip. Renders one of three identifiers
@@ -28,6 +30,7 @@ const props = defineProps<{
 }>()
 
 const router = useRouter()
+const toast = useToast()
 
 // Truncation: first 8 + last 4 chars for 32-hex trace_ids (keeps the
 // prefix/suffix disambiguation without the full 32 chars hogging the
@@ -58,15 +61,12 @@ let copyResetTimer: ReturnType<typeof setTimeout> | null = null
 
 async function copy(e: Event) {
   e.stopPropagation()
-  if (!navigator.clipboard) return
-  try {
-    await navigator.clipboard.writeText(props.value)
+  if (await writeClipboardText(props.value)) {
     copied.value = true
     if (copyResetTimer) clearTimeout(copyResetTimer)
     copyResetTimer = setTimeout(() => { copied.value = false }, 1500)
-  } catch {
-    // Clipboard permission denied or insecure context — silent fallback.
-    // The tooltip still shows the full value for select-and-copy.
+  } else {
+    toast.error('Copy failed — clipboard unavailable')
   }
 }
 

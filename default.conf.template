@@ -1,3 +1,24 @@
+# X-Forwarded-Proto must PASS THROUGH the value set by the TLS terminator
+# in front of this container (nginx-ssl.conf.example / Caddyfile). This
+# nginx listens on plain :80, so $scheme here is always "http" — setting
+# the header from $scheme would clobber the edge's "https" and make the
+# backends see every request as insecure. Only fall back to $scheme when
+# no terminator set the header (direct-to-container deployments).
+#
+# TRUST BOUNDARY: the pass-through is only trustworthy behind a TLS
+# terminator that overwrites forwarded headers from untrusted clients.
+# The shipped prod topology does — Caddy replaces incoming X-Forwarded-*
+# from untrusted clients by default, and nginx-ssl.conf.example sets the
+# header explicitly. If this container is exposed directly instead, the
+# header is client-controlled: a plain-HTTP caller can claim "https" and
+# the backends will believe it. Direct-to-container exposure is dev-only
+# (the dev compose binds every port to loopback); production must sit
+# behind a terminator that owns this header.
+map $http_x_forwarded_proto $forwarded_proto {
+    default $http_x_forwarded_proto;
+    ""      $scheme;
+}
+
 server {
     listen 80;
     server_name _;
@@ -5,17 +26,52 @@ server {
     index index.html;
     server_tokens off;
 
-    # Security headers
-    add_header X-Frame-Options "DENY" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'" always;
-    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
-    # Note: HSTS header belongs in the TLS config (nginx-ssl.conf.example), not here on port 80
+    # Security headers. Shared include (security-headers.conf) because
+    # add_header in a location block cancels ALL inherited add_header
+    # directives — every location below that sets its own header must
+    # re-include the snippet or the security headers vanish there.
+    include /etc/nginx/snippets/security-headers.conf;
+    # Note: HSTS header belongs in the TLS config (nginx-ssl.conf.example /
+    # Caddyfile.example), not here on port 80
+
+    # Compress text assets. text/html is always included by nginx.
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types application/javascript text/javascript text/css application/json image/svg+xml application/wasm application/manifest+json;
+
+    # Proxy failures (upstream plane down / unreachable) return a JSON
+    # ErrorResponse-shaped body instead of nginx's default HTML error page,
+    # so /v1/* API callers can always parse the error. Served as a static
+    # file so the original 502/503/504 status code is preserved.
+    # proxy_intercept_errors stays off — error bodies produced by the
+    # upstreams themselves pass through untouched.
+    error_page 502 503 504 /50x.json;
+    location = /50x.json {
+        internal;
+    }
 
     # SPA routing — serve index.html for all non-file routes
     location / {
         try_files $uri $uri/ /index.html;
+    }
+
+    # index.html must never be served stale: the build embeds hashed asset
+    # URLs and SRI integrity hashes (vite-plugin-sri-gen), so a heuristically
+    # cached index.html from before a deploy both 404s (old hashed assets are
+    # purged) and hard-fails integrity checks. no-cache forces revalidation
+    # on every load while still allowing conditional (304) requests.
+    # try_files' internal redirect for SPA routes re-runs location matching
+    # and lands here too, so the fallback gets the same header.
+    location = /index.html {
+        include /etc/nginx/snippets/security-headers.conf;
+        add_header Cache-Control "no-cache" always;
+    }
+
+    # Hashed build assets are content-addressed — safe to cache forever.
+    location /assets/ {
+        include /etc/nginx/snippets/security-headers.conf;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
     }
 
     # Reverse proxy API calls.
@@ -39,6 +95,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $forwarded_proto;
     }
 
     # Evidence envelope retrieval + signer JWKS are runtime-plane
@@ -52,6 +109,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $forwarded_proto;
     }
 
     location /v1/ {
@@ -68,5 +126,6 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $forwarded_proto;
     }
 }

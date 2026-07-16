@@ -104,6 +104,44 @@ describe('CommandPalette', () => {
     w.unmount()
   })
 
+  it('traps focus inside the modal and restores the opening control on close', async () => {
+    const trigger = document.createElement('button')
+    trigger.textContent = 'Open command palette'
+    document.body.appendChild(trigger)
+    trigger.focus()
+
+    const w = await mountPaletteOpen()
+    const input = document.body.querySelector<HTMLInputElement>('#command-palette-input')!
+    expect(document.activeElement).toBe(input)
+
+    // Input is the first focusable element. Shift+Tab must wrap to the
+    // final result instead of reaching controls behind the backdrop.
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Tab', shiftKey: true, bubbles: true, cancelable: true,
+    }))
+    expect((document.activeElement as HTMLElement).getAttribute('role')).toBe('option')
+
+    useCommandPalette().close()
+    await nextTick()
+    expect(document.activeElement).toBe(trigger)
+    w.unmount()
+  })
+
+  it('keeps the dialog reachable in short viewports', async () => {
+    const w = await mountPaletteOpen()
+    const overlay = document.body.querySelector<HTMLElement>('[role="dialog"]')!
+    const panel = overlay.querySelector<HTMLElement>('[class*="max-w-xl"]')!
+    const listbox = overlay.querySelector<HTMLElement>('[role="listbox"]')!
+
+    expect(overlay.className).toContain('overflow-y-auto')
+    expect(overlay.className).toContain('p-4')
+    expect(panel.className).toContain('max-h-[calc(100dvh-2rem)]')
+    expect(panel.className).toContain('flex-col')
+    expect(listbox.className).toContain('min-h-0')
+    expect(listbox.className).toContain('flex-1')
+    w.unmount()
+  })
+
   it('shows an empty-state message when no tenant matches the query', async () => {
     const w = await mountPaletteOpen()
     const input = document.body.querySelector<HTMLInputElement>('#command-palette-input')!
@@ -153,13 +191,19 @@ describe('CommandPalette', () => {
     input.dispatchEvent(new Event('input', { bubbles: true }))
     await new Promise((r) => setTimeout(r, 200))
     const options = document.body.querySelectorAll('[role="option"]')
-    expect(options.length).toBeGreaterThanOrEqual(5)
+    expect(options.length).toBeGreaterThanOrEqual(7)
     const text = document.body.textContent || ''
     expect(text).toContain('/wh')
     expect(text).toContain('/key')
     expect(text).toContain('/audit')
     expect(text).toContain('/event')
+    // /event must advertise what the server's search actually matches
+    // (correlation_id + scope) — NOT event_id, which listEvents' search
+    // never covers (an event_id arg returns a guaranteed-empty list).
+    expect(text).not.toContain('event_id substring')
     expect(text).toContain('/tenant')
+    expect(text).toContain('/budget')
+    expect(text).toContain('/res')
     w.unmount()
   })
 
@@ -241,6 +285,57 @@ describe('CommandPalette', () => {
     expect(routerPushMock).toHaveBeenCalledWith({
       name: 'tenant-detail',
       params: { id: 'some-id-not-in-cache' },
+    })
+    w.unmount()
+  })
+
+  it('/budget <query> routes to budgets pre-filtered by search', async () => {
+    const w = await mountPaletteOpen()
+    const input = document.body.querySelector<HTMLInputElement>('#command-palette-input')!
+    input.value = '/budget tenant:acme'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise((r) => setTimeout(r, 200))
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')!
+    const inner = dialog.querySelector<HTMLElement>('[class*="max-w-xl"]')!
+    inner.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await flushPromises()
+    expect(routerPushMock).toHaveBeenCalledWith({
+      name: 'budgets',
+      query: { search: 'tenant:acme' },
+    })
+    w.unmount()
+  })
+
+  it('/res <tenant> routes to reservations pre-filtered by tenant_id', async () => {
+    const w = await mountPaletteOpen()
+    const input = document.body.querySelector<HTMLInputElement>('#command-palette-input')!
+    input.value = '/res acme-corp'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise((r) => setTimeout(r, 200))
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')!
+    const inner = dialog.querySelector<HTMLElement>('[class*="max-w-xl"]')!
+    inner.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await flushPromises()
+    expect(routerPushMock).toHaveBeenCalledWith({
+      name: 'reservations',
+      query: { tenant_id: 'acme-corp' },
+    })
+    w.unmount()
+  })
+
+  it('/reservation alias also routes to reservations', async () => {
+    const w = await mountPaletteOpen()
+    const input = document.body.querySelector<HTMLInputElement>('#command-palette-input')!
+    input.value = '/reservation acme-corp'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise((r) => setTimeout(r, 200))
+    const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]')!
+    const inner = dialog.querySelector<HTMLElement>('[class*="max-w-xl"]')!
+    inner.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await flushPromises()
+    expect(routerPushMock).toHaveBeenCalledWith({
+      name: 'reservations',
+      query: { tenant_id: 'acme-corp' },
     })
     w.unmount()
   })

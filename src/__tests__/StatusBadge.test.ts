@@ -23,11 +23,30 @@ describe('StatusBadge', () => {
     expect(wrapper.find('span').classes()).toContain('bg-yellow-100')
   })
 
-  it('applies red for CLOSED', () => {
+  // Terminal-but-not-error states are neutral gray — CLOSED / REVOKED /
+  // EXPIRED mean "done", not "broken". Red is reserved for failures.
+  it('applies neutral gray for CLOSED', () => {
     const wrapper = mount(StatusBadge, { props: { status: 'CLOSED' } })
+    expect(wrapper.find('span').classes()).toContain('bg-gray-100')
+  })
+
+  it('applies neutral gray for REVOKED', () => {
+    const wrapper = mount(StatusBadge, { props: { status: 'REVOKED' } })
+    expect(wrapper.find('span').classes()).toContain('bg-gray-100')
+  })
+
+  it('applies neutral gray for EXPIRED', () => {
+    const wrapper = mount(StatusBadge, { props: { status: 'EXPIRED' } })
+    expect(wrapper.find('span').classes()).toContain('bg-gray-100')
+  })
+
+  it('applies red for FAILED', () => {
+    const wrapper = mount(StatusBadge, { props: { status: 'FAILED' } })
     expect(wrapper.find('span').classes()).toContain('bg-red-100')
   })
 
+  // DISABLED stays red: the server auto-disables webhooks after
+  // repeated delivery failures, so DISABLED signals a broken endpoint.
   it('applies red for DISABLED', () => {
     const wrapper = mount(StatusBadge, { props: { status: 'DISABLED' } })
     expect(wrapper.find('span').classes()).toContain('bg-red-100')

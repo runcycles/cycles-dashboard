@@ -76,6 +76,11 @@ jobs:
             ghcr.io/runcycles/cycles-dashboard:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Supply-chain attestations on the published image (SBOM +
+          # SLSA provenance). Only on the push step — provenance/sbom are
+          # incompatible with load: true in the scan build above.
+          sbom: true
+          provenance: mode=max
 
   # Smoke-test the *published* image, not a rebuild. Catches failure
   # modes we otherwise wouldn't see until someone pulled the tag in

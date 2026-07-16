@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { listAuditLogs } from '../api/client'
 import { useSort } from '../composables/useSort'
 import { useListExport } from '../composables/useListExport'
@@ -23,9 +23,14 @@ import TimeRangePicker from '../components/TimeRangePicker.vue'
 import BulkActionAuditDetail from '../components/BulkActionAuditDetail.vue'
 import CorrelationIdChip from '../components/CorrelationIdChip.vue'
 import { formatDateTime } from '../utils/format'
+import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 import { safeJsonStringify } from '../utils/safe'
+import { writeClipboardJson } from '../utils/clipboard'
+import { dateParamOrEmpty, stringParam } from '../utils/dateParam'
 import { hasBulkAuditShape } from '../utils/auditMetadata'
+
+const toast = useToast()
 
 const entries = ref<AuditLogEntry[]>([])
 const error = ref('')
@@ -48,17 +53,17 @@ function toggleExpanded(id: string) {
 const copiedLogId = ref<string | null>(null)
 let copiedResetTimer: ReturnType<typeof setTimeout> | null = null
 async function copyLogJson(entry: AuditLogEntry) {
-  try {
-    await navigator.clipboard.writeText(safeJsonStringify(entry))
+  if (await writeClipboardJson(entry)) {
     copiedLogId.value = entry.log_id
     if (copiedResetTimer) clearTimeout(copiedResetTimer)
     copiedResetTimer = setTimeout(() => {
       if (copiedLogId.value === entry.log_id) copiedLogId.value = null
     }, 2000)
-  } catch {
-    // Clipboard permission denied or insecure context — silently
-    // fail rather than toast. The operator can still select-and-copy
-    // from the metadata pre element.
+  } else {
+    // Clipboard permission denied or insecure context. Toast so the
+    // failure isn't silent (same copy as TenantsView) — the operator
+    // can still select-and-copy from the metadata pre element.
+    toast.error('Copy failed — clipboard unavailable')
   }
 }
 // V4 stage 2: server-side sort. Columns (timestamp, operation,
@@ -66,10 +71,16 @@ async function copyLogJson(entry: AuditLogEntry) {
 // listAuditLogs sort_by enum. onChange re-runs query() which resets
 // the cursor — reusing the old cursor under a different sort would
 // return 400 CURSOR_SORT_MISMATCH.
+//
+// Seeded with timestamp desc — the server returns newest-first by
+// default, and an unseeded useSort left the Time column advertising
+// "unsorted" (aria-sort absent) while the rows were in fact sorted.
+// timestamp is in the sort_by enum (the Time SortHeader below already
+// sends it), so explicitly requesting the default order is wire-safe.
 const { sortKey, sortDir, toggle, sorted: sortedEntries } = useSort(
   entries,
-  undefined,
-  'asc',
+  'timestamp',
+  'desc',
   undefined,
   { serverSide: true, onChange: () => { query() } },
 )
@@ -79,6 +90,10 @@ const { sortKey, sortDir, toggle, sorted: sortedEntries } = useSort(
 // silently shipping incomplete compliance data (audit item R3).
 const hasMore = ref(false)
 const nextCursor = ref('')
+// The filter tuple that owns entries/nextCursor. Form fields are intentionally
+// explicit-submit, so pagination and export must never read live edits that the
+// operator has not applied yet.
+const appliedFilterParams = ref<Record<string, string>>({})
 
 const tenantId = ref('')
 const keyId = ref('')
@@ -147,6 +162,27 @@ const STATUS_BANDS: { value: typeof statusBand.value; label: string }[] = [
   { value: '4xx',     label: '4xx' },
   { value: '5xx',     label: '5xx' },
 ]
+
+// ARIA radio keyboard contract: one Tab stop, arrow keys move and select,
+// Home/End jump to the bounds. Native buttons still handle Space/Enter.
+function onStatusBandKeydown(e: KeyboardEvent) {
+  const supported = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End']
+  if (!supported.includes(e.key)) return
+  const current = e.currentTarget as HTMLElement
+  const group = current.closest('[role="radiogroup"]')
+  if (!group) return
+  const radios = Array.from(group.querySelectorAll<HTMLElement>('[role="radio"]'))
+  const currentIndex = radios.indexOf(current)
+  if (currentIndex < 0 || radios.length === 0) return
+  e.preventDefault()
+  let nextIndex = currentIndex
+  if (e.key === 'Home') nextIndex = 0
+  else if (e.key === 'End') nextIndex = radios.length - 1
+  else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') nextIndex = (currentIndex + 1) % radios.length
+  else nextIndex = (currentIndex - 1 + radios.length) % radios.length
+  radios[nextIndex].focus()
+  radios[nextIndex].click()
+}
 const fromDate = ref('')
 const toDate = ref('')
 // TimeRangePicker wants a { from, to } object as v-model. Use a
@@ -195,8 +231,12 @@ function buildFilterParams(): Record<string, string> {
   // requires empty → absent.
   const q = search.value.trim()
   if (q) params.search = q
-  if (fromDate.value) params.from = new Date(fromDate.value).toISOString()
-  if (toDate.value) params.to = new Date(toDate.value).toISOString()
+  // Belt-and-suspenders parse guard: applyQueryParams already drops
+  // junk URL dates, but an unparseable value reaching this point would
+  // make toISOString() throw RangeError ("Invalid time value") and
+  // hard-fail the whole query — skip it instead.
+  if (fromDate.value && !Number.isNaN(Date.parse(fromDate.value))) params.from = new Date(fromDate.value).toISOString()
+  if (toDate.value && !Number.isNaN(Date.parse(toDate.value))) params.to = new Date(toDate.value).toISOString()
   if (sortKey.value) {
     params.sort_by = sortKey.value
     params.sort_dir = sortDir.value
@@ -224,7 +264,7 @@ const {
   hasMore,
   nextCursor,
   fetchPage: async (cursor) => {
-    const res = await listAuditLogs({ ...buildFilterParams(), cursor })
+    const res = await listAuditLogs({ ...appliedFilterParams.value, cursor })
     return { items: res.logs, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
   },
   columns: [
@@ -247,16 +287,33 @@ const {
 // Surface export-composable errors through the view's existing error banner.
 watch(exportError, (v) => { if (v) error.value = v })
 
+// Each page-1 query starts a new result generation. A slower request from an
+// older filter/sort state must never overwrite the newest response, and any
+// load-more request tied to that older generation must not append into it.
+let resultGeneration = 0
+
 async function query() {
+  const generation = ++resultGeneration
+  const params = buildFilterParams()
   loading.value = true
+  // Hide pagination for the previous result set while its replacement is in
+  // flight. Existing rows stay visible until the newest response arrives.
+  hasMore.value = false
+  nextCursor.value = ''
   try {
-    const res = await listAuditLogs(buildFilterParams())
+    const res = await listAuditLogs(params)
+    if (generation !== resultGeneration) return
     entries.value = res.logs
+    appliedFilterParams.value = params
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
     error.value = ''
-  } catch (e) { error.value = toMessage(e) }
-  finally { loading.value = false }
+  } catch (e) {
+    if (generation === resultGeneration) error.value = toMessage(e)
+  }
+  finally {
+    if (generation === resultGeneration) loading.value = false
+  }
 }
 
 // Load-more: append the next cursor page to the visible list. Separate
@@ -266,15 +323,20 @@ async function query() {
 const loadingMore = ref(false)
 async function loadMore() {
   if (!nextCursor.value || loadingMore.value) return
+  const generation = resultGeneration
+  const cursor = nextCursor.value
   loadingMore.value = true
   try {
-    const params = { ...buildFilterParams(), cursor: nextCursor.value }
+    const params = { ...appliedFilterParams.value, cursor }
     const res = await listAuditLogs(params)
+    if (generation !== resultGeneration) return
     entries.value = [...entries.value, ...res.logs]
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
     error.value = ''
-  } catch (e) { error.value = toMessage(e) }
+  } catch (e) {
+    if (generation === resultGeneration) error.value = toMessage(e)
+  }
   finally { loadingMore.value = false }
 }
 
@@ -289,36 +351,145 @@ function hasDetail(_e: AuditLogEntry): boolean {
 // "View activity" links from API key / tenant rows pre-fill the
 // filters and auto-run the query, so ops doesn't have to copy-paste
 // the key_id / tenant_id into the form.
+//
+// Reset-style hydration (value or '') so browser back/forward restores
+// the exact filter state of each history entry — with the write-back
+// below, a param absent from the URL means the filter was cleared.
 const route = useRoute()
+const router = useRouter()
 function applyQueryParams() {
-  if (route.query.tenant_id) tenantId.value = String(route.query.tenant_id)
-  if (route.query.key_id) keyId.value = String(route.query.key_id)
-  if (route.query.operation) operation.value = String(route.query.operation)
-  if (route.query.resource_type) resourceType.value = String(route.query.resource_type)
-  if (route.query.resource_id) resourceId.value = String(route.query.resource_id)
-  if (route.query.search) search.value = String(route.query.search)
+  // stringParam, not String(v): a duplicated param arrives as an ARRAY
+  // and String() would join it ('a,b') — diverging from
+  // serializeRouteQuery below, which takes the first element for the
+  // self-write comparison. Normalize both the same way.
+  tenantId.value = stringParam(route.query.tenant_id)
+  keyId.value = stringParam(route.query.key_id)
+  operation.value = stringParam(route.query.operation)
+  resourceType.value = stringParam(route.query.resource_type)
+  resourceId.value = stringParam(route.query.resource_id)
+  search.value = stringParam(route.query.search)
   // v0.1.25.24: deep-links can pre-fill error_code / error_code_exclude
   // (both comma-lists) and status band. Used by OverviewView's Recent
   // Denials pill → /audit?error_code=X.
-  if (route.query.error_code) errorCode.value = String(route.query.error_code)
-  if (route.query.error_code_exclude) errorCodeExclude.value = String(route.query.error_code_exclude)
+  errorCode.value = stringParam(route.query.error_code)
+  errorCodeExclude.value = stringParam(route.query.error_code_exclude)
   // v0.1.25.39: trace_id + request_id deep-link. CorrelationIdChip pivots
   // from EventsView / WebhookDetailView land here via these params.
-  traceId.value = route.query.trace_id ? String(route.query.trace_id) : ''
-  requestId.value = route.query.request_id ? String(route.query.request_id) : ''
+  traceId.value = stringParam(route.query.trace_id)
+  requestId.value = stringParam(route.query.request_id)
+  // from/to round-trip as raw datetime-local strings (same format
+  // EventsView writes) — buildFilterParams normalizes to ISO at send.
+  // Junk values (?from=lastweek) are dropped on hydration rather than
+  // crashing the query at conversion time (see dateParamOrEmpty).
+  fromDate.value = dateParamOrEmpty(route.query.from)
+  toDate.value = dateParamOrEmpty(route.query.to)
   const sb = route.query.status_band
-  if (sb === 'success' || sb === 'errors' || sb === '4xx' || sb === '5xx') statusBand.value = sb
+  statusBand.value = (sb === 'success' || sb === 'errors' || sb === '4xx' || sb === '5xx') ? sb : ''
 }
+
+// Form state → URL query record. Written back on every Run Query so
+// the current filter set is shareable / bookmarkable (mirrors
+// EventsView.applyFilters). Empty filters are omitted per spec.
+function buildUrlQuery(): Record<string, string> {
+  return {
+    ...(tenantId.value && { tenant_id: tenantId.value }),
+    ...(keyId.value && { key_id: keyId.value }),
+    ...(operation.value && { operation: operation.value }),
+    ...(resourceType.value && { resource_type: resourceType.value }),
+    ...(resourceId.value && { resource_id: resourceId.value }),
+    ...(search.value.trim() && { search: search.value.trim() }),
+    ...(errorCode.value && { error_code: errorCode.value }),
+    ...(errorCodeExclude.value && { error_code_exclude: errorCodeExclude.value }),
+    ...(traceId.value && { trace_id: traceId.value }),
+    ...(requestId.value && { request_id: requestId.value }),
+    ...(statusBand.value && { status_band: statusBand.value }),
+    ...(fromDate.value && { from: fromDate.value }),
+    ...(toDate.value && { to: toDate.value }),
+  }
+}
+
+// Canonical serialization of a query record — sorted keys, empties
+// dropped — so a self-written query can be compared to what the
+// route.query watcher later receives, independent of key order.
+function serializeQuery(q: Record<string, string>): string {
+  return Object.keys(q)
+    .filter(k => q[k] !== '')
+    .sort()
+    .map(k => `${k}=${q[k]}`)
+    .join('&')
+}
+function serializeRouteQuery(): string {
+  const current: Record<string, string> = {}
+  for (const [k, v] of Object.entries(route.query)) {
+    const normalized = stringParam(v)
+    if (!normalized) continue
+    current[k] = normalized
+  }
+  return serializeQuery(current)
+}
+
+// The exact query string this view last wrote via router.replace. The
+// route.query watcher uses it to tell a self-inflicted change (skip —
+// query() already ran in applyFilters) from a real navigation.
+// Comparing against the CURRENT form state instead (the old
+// routeMatchesForm approach) was wrong twice over: browser Back to a
+// URL that happens to match unsubmitted form edits skipped the refetch
+// (stale results), and it couldn't distinguish "operator cleared the
+// URL" from "sidebar nav to bare /audit".
+let lastSelfWrittenQuery: string | null = null
+
+// Explicit-submit apply: persist the filter set to the URL (replace,
+// not push — filter fiddling shouldn't clutter history) and run the
+// query. Wired to the form's @submit.
+function applyFilters() {
+  const q = buildUrlQuery()
+  // Arm the one-shot marker only when the replace will actually change
+  // the URL. vue-router dedupes an identical-query replace — the
+  // watcher never fires, the marker is never consumed, and a stale
+  // marker would wrongly skip a LATER real navigation to this same
+  // query (e.g. Run Query on bare /audit, then a bare sidebar re-click
+  // kept stale results on screen).
+  const serialized = serializeQuery(q)
+  lastSelfWrittenQuery = serialized !== serializeRouteQuery() ? serialized : null
+  router.replace({ query: q })
+  query()
+}
+
 onMounted(() => {
   applyQueryParams()
   query()
 })
 // Watch in-place query changes too — same-route navigation (e.g. clicking
 // an Activity link from a sidebar that's already on AuditView) won't
-// remount the component, so the onMounted hook wouldn't fire. Without
-// this watch, the URL would update but the form would stay on the
-// previous filter values.
+// remount the component, so the onMounted hook wouldn't fire.
+//
+// URL-AUTHORITATIVE FILTERS (deliberate — do not flip back): the URL is
+// the single source of truth for the synced filter state. A navigation
+// to a bare /audit (sidebar re-click, Back to a pre-filter history
+// entry) resets EVERY filter field to defaults and refetches unfiltered —
+// params removed means filters cleared, per the GitHub/Linear list-view
+// convention. The trade-off is accepted: a sidebar re-click discards a
+// working (unsubmitted) filter set, but every SUBMITTED filter set was
+// written to the URL by applyFilters and stays one Back-press away in
+// browser history. Guard order:
+//   1. Self-inflicted (the applyFilters write-back) → skip; re-hydrating
+//      would double-fetch. Consumed one-shot so a later back/forward
+//      return to the same URL still refetches.
+//   2. Anything else is a real navigation (deep-link, back/forward, bare
+//      sidebar click) → reset-hydrate from the URL and refetch, even if
+//      the form already matches — the results on screen may be for
+//      different filters. applyQueryParams is reset-style, so an empty
+//      query clears every field (from/to and status band included).
 watch(() => route.query, () => {
+  // Route-identity guard: this watcher also fires while navigating AWAY
+  // (before unmount), and a destination route can carry same-named
+  // params (e.g. /events?search=…) — ignore query changes that belong
+  // to another route.
+  if (route.name !== 'audit') return
+  const incoming = serializeRouteQuery()
+  const self = lastSelfWrittenQuery
+  lastSelfWrittenQuery = null
+  if (self !== null && incoming === self) return
   applyQueryParams()
   query()
 })
@@ -370,6 +541,8 @@ function measureRow(el: Element | { $el?: Element } | null) {
       item-noun-plural="log entries"
       :loaded="entries.length"
       :has-more="hasMore"
+      :loading="loading"
+      @refresh="query"
     >
       <template #actions>
         <button @click="confirmExport('csv')" :disabled="loading || entries.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 dark:hover:text-gray-200 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed">
@@ -398,7 +571,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
              Resource ID | Operation | Error Code | Exclude codes | Trace ID | Request ID
            Row 3 (xl, 6 cols): outcome + submit
              Status [span 4] | Run Query [span 2, ml-auto] -->
-    <form @submit.prevent="query" class="card p-4 mb-4 space-y-3">
+    <form @submit.prevent="applyFilters" class="card p-4 mb-4 space-y-3">
       <!-- Row 1: broad filters + when / who -->
       <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-3 items-end">
         <div class="xl:col-span-2">
@@ -531,7 +704,9 @@ function measureRow(el: Element | { $el?: Element } | null) {
               role="radio"
               :data-band="b.value"
               :aria-checked="statusBand === b.value"
+              :tabindex="statusBand === b.value ? 0 : -1"
               @click="statusBand = b.value"
+              @keydown="onStatusBandKeydown"
               class="px-2.5 py-1 text-xs rounded cursor-pointer transition-colors"
               :class="statusBand === b.value
                 ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
@@ -573,7 +748,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
           from 1000px to 900px so iPad portrait (768px) reaches the
           visually-lossless case with a single-finger scroll, not a
           double-finger reflow. -->
-     <div style="min-width: 900px" class="flex flex-col flex-1 min-h-0">
+     <div style="min-width: 900px" class="wide-table-canvas flex flex-col flex-1 min-h-0">
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
         <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
           <div role="columnheader" class="table-cell"></div>
@@ -722,18 +897,18 @@ function measureRow(el: Element | { $el?: Element } | null) {
           </div>
         </div>
       </div>
+     </div>
 
-      <div v-else-if="!loading">
+      <div v-if="sortedEntries.length === 0 && !loading" class="responsive-table-state">
         <EmptyState message="No audit logs found" hint="Try a broader time range (e.g. Last 24h) or clear your filters" />
       </div>
 
       <!-- P1-H3: LoadingSkeleton replaces raw "Loading..." text so
            AuditView matches the cold-load pattern used in the detail
            views — consistent density, consistent motion. -->
-      <div v-else-if="loading" class="px-4 py-6">
+      <div v-else-if="sortedEntries.length === 0 && loading" class="responsive-table-state px-4 py-6">
         <LoadingSkeleton />
       </div>
-     </div>
     </div>
 
     <!-- Load more — outside the virtualized scroll region, mirrors
