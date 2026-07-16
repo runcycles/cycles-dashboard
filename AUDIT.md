@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.68 (2026-07-15)
+**Current release:** v0.1.25.69 (2026-07-16)
 
 ## Baseline requirements
 
@@ -16,6 +16,45 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-07-16 — v0.1.25.69: live-test CSP/SRI and auth-session corrections
+
+Live Chromium testing of the published `.68` image found that
+`vite-plugin-sri-gen`'s inline import map was blocked by the bundled
+`script-src 'self'` CSP. Entry/preload assets still carried their direct
+integrity attributes, but lazy/transitive integrity metadata in the import map
+was never accepted, and every load logged a CSP violation. The Docker build now
+extracts the one generated import map, hashes its exact text with SHA-256, and
+renders a build-bound security-header snippet. Missing/duplicate maps or CSP
+placeholders fail the build. A unit contract covers exact hashing and all
+fail-closed branches; container/Chromium validation confirms the candidate
+image shape without adding `'unsafe-inline'`.
+
+The same live session exposed an older auth-store failure-classification bug:
+all failed introspection attempts cleared the stored API key. That conflated an
+explicit credential rejection with fetch rejection and nginx's intentional
+JSON `502/503/504` outage responses. The store now clears credentials only for
+`401`/`403` or `authenticated: false`; transient/malformed/5xx failures retain
+the key, expose a typed `service_unavailable` state, and do not increment the
+login lockout. Restore retains the original absolute-session timestamp while
+refreshing activity, and stale concurrent responses are prevented from writing
+capabilities for a superseded key.
+
+Validation: `1,231/1,231` tests across 105 files; 96.24% line coverage;
+typecheck and production build pass. A clean Docker build generated the
+build-specific source, `nginx -t` passed, and Chromium independently recomputed
+the served import-map hash, found it in CSP, rendered Login, and logged zero CSP
+violations (18 direct integrity attributes also present).
+
+**PR CodeQL follow-ups.** The initial import-map extractor required the closing
+tag to be spelled exactly `</script>`, while HTML also permits alternate closing
+tag tokenization. Widening the expression for whitespace still left malformed
+end tags such as `</script data-invalid>` recognizable by browsers but invisible
+to the build check. The extractor now uses a bounded tag scanner instead of an
+HTML-filtering regular expression, handles quoted delimiters and end-tag
+attributes, rejects unterminated elements, and remains constrained to exactly
+one inline `type="importmap"` script. Regression tests cover both CodeQL cases,
+unquoted/case-insensitive attributes, and longer non-script element names.
 
 ### 2026-07-15 — v0.1.25.68: four-plane audit (spec ↔ server ↔ UI/UX ↔ ops) + fixes
 

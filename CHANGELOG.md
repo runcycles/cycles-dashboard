@@ -15,6 +15,26 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.69] — 2026-07-16
+
+### Fixed
+
+- **Lazy-chunk SRI is enforced under the production CSP.**
+  `vite-plugin-sri-gen` emits an inline import map containing integrity hashes
+  for lazy/transitive chunks, but the shipped `script-src 'self'` policy
+  blocked that map on every Chromium page load. The Docker build now hashes
+  the exact generated import-map content and binds that SHA-256 source into
+  the served CSP. Generation fails closed if the map or placeholder drifts;
+  no `'unsafe-inline'` relaxation is used.
+- **Transient admin-plane outages no longer erase the operator's key.** Only
+  explicit `401`/`403` responses or `authenticated: false` invalidate a key.
+  Network failures, malformed/unavailable responses, and proxy/upstream 5xx
+  responses retain it for retry and display a connectivity error without
+  advancing the invalid-key lockout. Successful session restore also preserves
+  the original absolute-session start instead of renewing the eight-hour cap
+  on every refresh. Superseded login responses cannot attach stale
+  capabilities to a newer key.
+
 ## [0.1.25.68] — 2026-07-15
 
 ### Fixed

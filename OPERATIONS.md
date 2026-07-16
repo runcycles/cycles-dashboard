@@ -145,7 +145,12 @@ plain-HTTP caller can spoof `https` — so direct exposure is dev-only (the
 dev compose binds to loopback).
 
 **Security headers** live in `/etc/nginx/snippets/security-headers.conf`
-inside the image (shipped from `security-headers.conf` in this repo). They
+inside the image. `security-headers.conf` in this repo is a build template:
+after Vite emits `dist/index.html`, the Docker build computes the SHA-256 of
+the exact inline SRI import map and replaces `__CSP_IMPORTMAP_HASH__` in the
+served snippet. This permits only that generated inline script; it does not
+enable `'unsafe-inline'`. The build fails closed if either the import map or
+placeholder is missing or duplicated. The generated headers
 are re-`include`d in every location that sets its own header because
 nginx's `add_header` does not merge across levels — a location-level
 `add_header` silently drops all inherited headers. Keep that invariant
@@ -208,7 +213,7 @@ dashboard image does not need to change for an admin-only version bump.
 
 ## Upgrades and rollback
 
-**Pinned server fleet (dashboard v0.1.25.68):** runtime `0.1.25.58`, admin
+**Pinned server fleet (dashboard v0.1.25.69):** runtime `0.1.25.58`, admin
 `0.1.25.52`, events `0.1.25.24`. These are exact tags, not floating aliases.
 
 **Upgrading an existing fleet to the pinned versions.** Upgrade events before
@@ -313,14 +318,19 @@ server-side session.
 
 - Key is stored in **`sessionStorage`** — survives page refresh, cleared on
   tab close. Not `localStorage`.
-- **Idle timeout**: 30 minutes of no `mousedown` / `keydown` / `scroll` /
-  `touchstart`. Check runs every 60s.
+- **Idle timeout**: 30 minutes of no `mousedown` / `keydown` / `touchstart`.
+  Check runs every 15s. Passive scrolling intentionally does not extend a
+  session.
 - **Absolute timeout**: 8 hours from login. Enforced regardless of activity.
 - On 401 from the admin plane, the dashboard redirects to `/login` with
   `?redirect=<current-path>` so the operator lands back where they were.
 - The `/v1/auth/introspect` endpoint on the admin plane returns the
   capability set for the supplied key. The dashboard uses this to drive
   capability gating (see next section).
+- Introspection clears a stored key only on explicit credential rejection
+  (`401`/`403` or `authenticated: false`). A fetch failure, malformed response,
+  or proxy/upstream 5xx keeps the key for retry and shows a service-unavailable
+  message. Those failures do not advance the invalid-key login lockout.
 
 The login screen displays a "session expired" banner when redirected from an
 expired idle/absolute timeout. Manual logout clears `sessionStorage` and
@@ -328,7 +338,7 @@ redirects to `/login` without the banner.
 
 ## Capability gating
 
-`/v1/auth/introspect` returns a `capabilities: string[]` array. The dashboard
+`/v1/auth/introspect` returns a `capabilities` object of boolean flags. The dashboard
 hides / disables operator actions that the current key cannot perform:
 
 | Capability | What it gates |
@@ -387,6 +397,11 @@ cannot help you diagnose this.
 **"Session expired" banner on every login.** `sessionStorage` is being
 cleared between page loads. Usually an incognito/private-window artifact, or
 a browser extension clearing storage. Use a normal window.
+
+**"Unable to reach the admin server" on login or restore.** The dashboard
+retains the submitted/saved key because a network or 5xx failure does not prove
+the credential is invalid. Restore admin-plane connectivity, then retry; an
+explicit authentication rejection will still clear the key.
 
 **Read-only operator sees blank pages.** Some views require a specific
 capability to even render the table (AuditView, ReservationsView). This is

@@ -8,6 +8,12 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
 RUN npm run build
+# vite-plugin-sri-gen emits an inline import map containing integrity metadata
+# for lazy/transitive chunks. Bind that exact inline script to the CSP so the
+# browser accepts the map and can enforce those hashes. The generator fails the
+# image build if the import map or CSP placeholder ever drifts.
+RUN node scripts/generate-security-headers.mjs \
+    dist/index.html security-headers.conf /tmp/security-headers.conf
 
 # Serve stage — pinned to Alpine 3.23 explicitly because nginx:1.29-alpine
 # (unpinned) was tracking an older Alpine where xz-libs and nghttp2-libs
@@ -29,7 +35,7 @@ COPY default.conf.template /etc/nginx/templates/default.conf.template
 # Shared security-header include referenced by the rendered config. Placed
 # outside /etc/nginx/templates on purpose — it contains no substitutable
 # variables and must not go through envsubst.
-COPY security-headers.conf /etc/nginx/snippets/security-headers.conf
+COPY --from=build /tmp/security-headers.conf /etc/nginx/snippets/security-headers.conf
 # JSON body served for proxy 502/503/504 errors (error_page in the template)
 # so API callers never get nginx's HTML error page.
 COPY 50x.json /usr/share/nginx/html/50x.json

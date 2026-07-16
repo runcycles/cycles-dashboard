@@ -7,8 +7,14 @@ import { stringParam } from '../utils/dateParam'
 
 const auth = useAuthStore()
 const route = useRoute()
-const key = ref('')
-const error = ref('')
+// A transient restore failure keeps the saved key. Rehydrate the masked input
+// so the operator can retry immediately when the admin plane returns instead
+// of having to paste the same credential again.
+const key = ref(auth.apiKey)
+const restoreUnavailable = stringParam(route.query.auth_error) === 'unavailable'
+const error = ref(restoreUnavailable
+  ? 'Unable to reach the admin server. Your saved key was kept; try again when service is restored.'
+  : '')
 const loading = ref(false)
 // `showLoading` is the *visual* loading state, delayed by 200ms so fast
 // responses (local dev, warm cache) don't flash "Connecting..." + dim before
@@ -67,6 +73,12 @@ async function submit() {
       // Use full page navigation to guarantee clean state — avoids stale
       // router query params (expired=1) and session checker race conditions
       window.location.href = target
+      return
+    }
+    if (auth.authFailure === 'service_unavailable') {
+      // Connectivity and upstream 5xx responses are not credential failures:
+      // preserve the key and do not advance the invalid-key lockout counter.
+      error.value = 'Unable to reach the admin server. Your key was kept; please try again.'
       return
     }
     failedAttempts.value++

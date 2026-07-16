@@ -49,7 +49,9 @@ router.beforeEach(async (to) => {
     const ok = await auth.restore()
     if (ok) return
   }
-  return { name: 'login', query: { redirect: to.fullPath } }
+  const query: Record<string, string> = { redirect: to.fullPath }
+  if (auth.authFailure === 'service_unavailable') query.auth_error = 'unavailable'
+  return { name: 'login', query }
 })
 
 export default router

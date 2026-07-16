@@ -83,7 +83,7 @@ src/
 - **Styling:** Tailwind CSS v4 with dark mode support
 - **Testing:** Vitest + @vue/test-utils (unit); Playwright (E2E against live compose stack)
 - **Router:** Vue Router 4 with auth guard
-- **Security:** SRI hashes (`vite-plugin-sri-gen`), CSP + HSTS headers, login rate limiting
+- **Security:** SRI hashes (`vite-plugin-sri-gen`) with a build-bound CSP import-map hash, CSP + HSTS headers, login rate limiting
 
 ## Quick Start
 
@@ -141,10 +141,10 @@ The dashboard uses `AdminKeyAuth` exclusively (`X-Admin-API-Key` header). No ten
 1. User enters admin API key on the login page
 2. Dashboard calls `GET /v1/auth/introspect` to validate and retrieve capabilities
 3. Sidebar navigation is gated by capability booleans (`view_overview`, `view_budgets`, etc.)
-4. On 401/403 from any API call, the session is cleared and user is redirected to login
+4. On a genuine 401 from an API call, the session is cleared and the user is redirected to login; operation-scoped 403 responses keep the session
 5. API key is stored in `sessionStorage` — survives page refresh, cleared on tab/browser close
 6. Session idle timeout (30 min) and absolute timeout (8 h) enforced client-side (checked every 15s)
-7. Login rate limiting — exponential backoff after 3 failed attempts (5s → 60s cap)
+7. Login rate limiting — exponential backoff after 3 rejected-key attempts (5s → 60s cap); network/upstream failures retain the key and do not count
 
 ## API Endpoints Used
 
@@ -369,7 +369,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.68
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.69
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]
@@ -579,7 +579,7 @@ The default `default.conf.template` already includes these security headers:
 add_header X-Frame-Options "DENY" always;
 add_header X-Content-Type-Options "nosniff" always;
 add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'" always;
+add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'sha256-<build-specific-import-map-hash>'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'" always;
 add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
 server_tokens off;
 ```
@@ -590,7 +590,12 @@ The TLS config (`nginx-ssl.conf.example`) additionally includes HSTS:
 add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
 ```
 
-All production assets include Subresource Integrity (SRI) hashes via `vite-plugin-sri-gen`.
+All production assets include Subresource Integrity (SRI) hashes via
+`vite-plugin-sri-gen`. The plugin's inline import map carries integrity
+metadata for lazy/transitive chunks, so the Docker build hashes that exact
+script and injects its build-specific SHA-256 source into the bundled CSP.
+The image build fails if the import map or CSP placeholder is missing or
+duplicated; do not replace the generated hash with `'unsafe-inline'`.
 
 ### Redis
 
