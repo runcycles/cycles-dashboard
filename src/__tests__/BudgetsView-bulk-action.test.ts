@@ -14,6 +14,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '../stores/auth'
 import type { Capabilities } from '../types'
+import { toasts } from '../composables/useToast'
 
 const listBudgetsMock = vi.fn()
 const listTenantsMock = vi.fn()
@@ -150,6 +151,7 @@ describe('BudgetsView — bulk-action (Slice C, v0.1.25.26)', () => {
     unfreezeBudgetMock.mockReset()
     lookupBudgetMock.mockReset()
     updateBudgetConfigMock.mockReset()
+    toasts.value = []
     routeRef.query = {}
     document.body.innerHTML = ''
     // Sensible defaults so initial mount doesn't explode.
@@ -621,6 +623,37 @@ describe('BudgetsView — bulk-action (Slice C, v0.1.25.26)', () => {
       const idemKey = fundBudgetMock.mock.calls[0][5] as string
       expect(idemKey.length).toBeLessThanOrEqual(256)
       expect(idemKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
+    })
+
+    it('closes with a stale-data warning when the committed mutation cannot refresh', async () => {
+      listBudgetsMock
+        .mockResolvedValueOnce({ ledgers: [ledger('refresh-failure')], has_more: false })
+        .mockRejectedValueOnce(new Error('refresh unavailable'))
+      fundBudgetMock.mockResolvedValue({})
+
+      const { default: BudgetsView } = await import('../views/BudgetsView.vue')
+      const w = mount(BudgetsView, { global: stdMounts() })
+      await flushPromises()
+
+      const kebab = w.findAll('button').find(
+        b => (b.attributes('aria-label') || '').startsWith('Actions for budget'),
+      )!
+      await kebab.trigger('click')
+      await w.findAll('button').find(b => b.text() === 'Fund')!.trigger('click')
+      await flushPromises()
+
+      await w.find<HTMLInputElement>('input#fund-amount').setValue('100')
+      await w.find('form').trigger('submit')
+      await flushPromises()
+
+      expect(fundBudgetMock).toHaveBeenCalledOnce()
+      expect(w.find('input#fund-amount').exists()).toBe(false)
+      expect(w.text()).toContain('refresh unavailable')
+      expect(toasts.value).toContainEqual(expect.objectContaining({
+        type: 'warning',
+        message: 'Budget updated, but the latest data could not be loaded. Refresh to verify.',
+      }))
+      expect(toasts.value.some(toast => toast.type === 'success')).toBe(false)
     })
   })
 

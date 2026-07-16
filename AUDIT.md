@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.71 (2026-07-16)
+**Current release:** v0.1.25.72 (2026-07-16)
 
 ## Baseline requirements
 
@@ -16,6 +16,42 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-07-16 — v0.1.25.72: terminal funding commit boundary
+
+The `.71` extraction deliberately preserved the prior refresh-before-close
+contract: one `try` block covered both the funding POST and the following
+list/detail refresh. That made a refresh exception look like a failed mutation
+even though the server had already committed it. The dialog stayed open with
+Execute re-enabled, and a retry would generate a new UUID idempotency key and
+perform a second real CREDIT, DEBIT, RESET, RESET_SPENT, or REPAY_DEBT. Current
+`BudgetsView` loaders catch their own errors and return `false`, so the exact
+throwing path was latent, but the composable's public contract made future
+callers unsafe and did not recognize the existing handled-failure result.
+
+`useBudgetFunding` now separates the mutation and presentation phases. A POST
+failure remains retryable: the dialog stays open, preserves the server error,
+and sends no refresh or notification. Once the POST resolves, the mutation is
+terminal: the dialog closes and clears its target before refresh begins, while
+the loading guard prevents another target from opening during settlement.
+Direct calls also require an open dialog, so neither an in-flight call nor a
+call after close can replay the operation. The mode-aware parent refresh now
+returns `loadList`/`loadDetail` outcomes instead of discarding them. `false`
+means an owned refresh failure; a thrown refresh is treated the same way. A
+superseded `POLLING_STALE` result remains successful because the newer request
+owns the view and will commit newer server state.
+
+Refresh failure does not overwrite the funding form error or change the
+successful submit result. Instead the parent shows a transient warning:
+"Budget updated, but the latest data could not be loaded. Refresh to verify."
+The detailed loader error remains in the page's persistent error banner.
+Successful or superseded refreshes retain the operation-specific success
+toast. Focused tests cover handled and thrown refresh failures, immediate close
+while refresh is pending, target clearing, blocked reopen/re-submit, stable
+operator copy, and the real `BudgetsView` warning/error wiring. Final
+validation: `1,268/1,268` tests across 109 files; 96.46% line coverage; strict
+typecheck, production build, and both Compose configurations pass. No API wire,
+server requirement, route, polling, list ownership, or visual-layout changes.
 
 ### 2026-07-16 — v0.1.25.71: budget detail and funding decomposition
 

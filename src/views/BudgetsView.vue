@@ -45,7 +45,11 @@ import { synthesizeRowSelectBulkResult } from '../utils/rowSelectBulkResult'
 import type { RowSelectBulkResponse } from '../utils/rowSelectBulkResult'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
-import { BUDGET_FUNDING_SUCCESS, useBudgetFunding } from '../composables/useBudgetFunding'
+import {
+  BUDGET_FUNDING_REFRESH_WARNING,
+  BUDGET_FUNDING_SUCCESS,
+  useBudgetFunding,
+} from '../composables/useBudgetFunding'
 
 const toast = useToast()
 
@@ -432,10 +436,11 @@ const {
 } = useBudgetFunding({
   selectedTenant,
   refresh: async () => {
-    if (isDetail.value) await loadDetail()
-    else await loadList()
+    if (isDetail.value) return loadDetail()
+    return loadList()
   },
   onSuccess: operation => toast.success(BUDGET_FUNDING_SUCCESS[operation]),
+  onRefreshFailure: () => toast.warning(BUDGET_FUNDING_REFRESH_WARNING),
 })
 
 // Edit budget config (overdraft_limit, commit_overage_policy)
