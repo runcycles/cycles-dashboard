@@ -15,6 +15,26 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.71] — 2026-07-16
+
+### Changed
+
+- `BudgetsView` now delegates the detail surface to `BudgetDetailPanel`, the
+  funding form to `BudgetFundingDialog`, and funding-domain state to
+  `useBudgetFunding`. List filters, URL ownership, polling, pagination,
+  virtualization, bulk actions, visual layout, and API wire shapes are
+  unchanged.
+- Funding validation and request construction now have a focused typed boundary
+  covering CREDIT, DEBIT, RESET, RESET_SPENT, and REPAY_DEBT. Tenant resolution,
+  UUID idempotency keys, refresh-before-close behavior, and operation-specific
+  success copy remain identical to the prior inline implementation.
+
+### Fixed
+
+- The defense-in-depth duplicate-submit guard now runs before validation or
+  mutation state changes, so direct/re-entrant calls while a funding request is
+  in flight cannot alter the visible error state or create another request.
+
 ## [0.1.25.70] — 2026-07-16
 
 ### Changed

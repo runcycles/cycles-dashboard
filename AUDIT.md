@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.70 (2026-07-16)
+**Current release:** v0.1.25.71 (2026-07-16)
 
 ## Baseline requirements
 
@@ -16,6 +16,45 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-07-16 — v0.1.25.71: budget detail and funding decomposition
+
+`BudgetsView.vue` was the dashboard's largest view (~1,797 lines) and mixed six
+separate responsibilities: list/filter ownership, polling and cursor
+pagination, detail loading, detail presentation, single-budget funding, and
+bulk mutations. This review-sized slice extracts only the two low-coupling
+presentation boundaries plus the single-funding domain protocol. The parent
+remains the owner of routes, filters, list/detail refresh selection, polling,
+virtualization, freeze/config flows, and both bulk-action paths.
+
+`useBudgetFunding` owns the complete single-budget mutation state machine:
+typed operation/form state; RESET_SPENT allocation prefill and rollover-only
+field clearing; positive/zero-aware validation; optional spent validation;
+selected-tenant precedence with scope-derived fallback; bounded UUID
+idempotency; default audit reasons; refresh-before-close truthfulness;
+operation-specific success notification; retained dialog errors; and an early
+duplicate-submit guard. Dependencies for the fund call and idempotency key are
+injectable only as deterministic test seams; production defaults remain the
+existing API client and shared UUID helper. `BudgetFundingDialog` is a
+presentation-only FormDialog wrapper that emits immutable form replacements.
+`BudgetDetailPanel` renders the unchanged metrics, utilization bars, action
+gating, event timeline, and historical-event pagination through explicit
+events.
+
+Nineteen composable tests exercise every funding operation and wire argument,
+tenant precedence/default reason, RESET_SPENT prefill/clear and zero handling,
+ordinary/rollover invalid values, missing-tenant errors, duplicate submission,
+mutation failure, refresh failure, and lazy dependency access. Six component tests lock dialog options,
+form emissions, target metrics, capability/status action gates, and event-page
+forwarding. All existing budget bulk, row-select, URL, cross-tenant, load-race,
+and bounded-idempotency tests remain green. `BudgetsView.vue` drops to ~1,620
+lines. The first full-suite run caught an eager `fundBudget` binding read during
+view setup: capability-only tests intentionally provide partial API mocks and
+should not need an unused writer. The production default is now resolved lazily
+only on submit; a regression test proves opening the dialog touches no funding
+dependency. Final validation: `1,263/1,263` tests across 109 files; 96.43% line
+coverage; typecheck, production build, and both Compose configurations pass. No
+spec/server requirement, API payload, URL behavior, or visual design changes.
 
 ### 2026-07-16 — v0.1.25.70: shared applied-query ownership
 
