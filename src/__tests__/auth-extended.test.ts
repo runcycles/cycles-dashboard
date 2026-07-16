@@ -97,7 +97,7 @@ describe('auth store — restore()', () => {
     expect(auth.isAuthenticated).toBe(true)
   })
 
-  it('returns false on network failure during re-introspect', async () => {
+  it('returns false but preserves the session on network failure during re-introspect', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
@@ -114,7 +114,22 @@ describe('auth store — restore()', () => {
     // the re-introspect is what fails.
     const result = await auth.restore()
     expect(result).toBe(false)
-    expect(auth.isAuthenticated).toBe(false)
+    expect(auth.isAuthenticated).toBe(true)
+    expect(auth.apiKey).toBe('test-key')
+    expect(auth.authFailure).toBe('service_unavailable')
+    expect(sessionStorage.getItem('cycles_admin_key')).toBe('test-key')
+  })
+
+  it('does not renew the absolute session start after a successful restore', async () => {
+    vi.stubGlobal('fetch', mockSuccessfulIntrospect())
+    const auth = useAuthStore()
+    await auth.login('test-key')
+
+    const originalStart = String(Date.now() - (2 * 60 * 60 * 1000))
+    sessionStorage.setItem('cycles_session_start', originalStart)
+
+    expect(await auth.restore()).toBe(true)
+    expect(sessionStorage.getItem('cycles_session_start')).toBe(originalStart)
   })
 })
 
@@ -314,7 +329,7 @@ describe('auth store — concurrent login behavior', () => {
     expect(resolveCount).toBe(2)
   })
 
-  it('concurrent login() calls where one fails: state reflects the winner', async () => {
+  it('a superseded successful login cannot attach capabilities to the newer key', async () => {
     // First call succeeds slowly, second call fails instantly.
     let callCount = 0
     const fetchMock = vi.fn(() => {
@@ -332,7 +347,7 @@ describe('auth store — concurrent login behavior', () => {
         } as Response), 50))
       }
       // Instant failure
-      return Promise.resolve({ ok: false } as Response)
+      return Promise.resolve({ ok: false, status: 401 } as Response)
     })
     vi.stubGlobal('fetch', fetchMock)
 
@@ -342,23 +357,14 @@ describe('auth store — concurrent login behavior', () => {
       auth.login('key-b'),
     ])
 
-    // This test documents the CURRENT behavior so future refactors don't
-    // silently change it. With the current non-single-flight implementation,
-    // the second (failing) call resolves first and zeros out apiKey. Then
-    // the first (succeeding) call completes and writes capabilities — but
-    // apiKey is still empty, so isAuthenticated is false.
-    //
-    // This is the "concurrent login state corruption" theoretical race from
-    // the code review. In practice it cannot happen because LoginView has
-    // a re-entrancy guard (loading.value check), but the auth store itself
-    // is not thread-safe. If we ever allow concurrent login calls from
-    // multiple entry points, this test will start to matter.
-    expect(a).toBe(true)
+    // The newer attempt owns the store. When it rejects key-b, key-a's late
+    // success is stale and must not attach key-a capabilities to any other key.
+    expect(a).toBe(false)
     expect(b).toBe(false)
-    // Assert the current (documented, imperfect) end-state:
-    expect(auth.capabilities).not.toBeNull()
+    expect(auth.capabilities).toBeNull()
     expect(auth.apiKey).toBe('')
     expect(auth.isAuthenticated).toBe(false)
+    expect(auth.authFailure).toBe('invalid_credentials')
   })
 
   it('login() is idempotent for sequential same-key calls', async () => {
