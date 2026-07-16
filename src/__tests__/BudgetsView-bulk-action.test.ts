@@ -653,7 +653,52 @@ describe('BudgetsView — bulk-action (Slice C, v0.1.25.26)', () => {
         type: 'warning',
         message: 'Budget updated, but the latest data could not be loaded. Refresh to verify.',
       }))
-      expect(toasts.value.some(toast => toast.type === 'success')).toBe(false)
+      expect(toasts.value).toContainEqual(expect.objectContaining({
+        type: 'success',
+        message: 'Budget credited',
+      }))
+    })
+
+    it('shows committed feedback and disables Fund while refresh is pending', async () => {
+      let resolveRefresh!: (value: { ledgers: ReturnType<typeof ledger>[]; has_more: boolean }) => void
+      listBudgetsMock
+        .mockResolvedValueOnce({ ledgers: [ledger('refresh-pending')], has_more: false })
+        .mockReturnValueOnce(new Promise<{ ledgers: ReturnType<typeof ledger>[]; has_more: boolean }>(
+          resolve => { resolveRefresh = resolve },
+        ))
+      fundBudgetMock.mockResolvedValue({})
+
+      const { default: BudgetsView } = await import('../views/BudgetsView.vue')
+      const w = mount(BudgetsView, { global: stdMounts() })
+      await flushPromises()
+
+      const kebab = w.findAll('button').find(
+        b => (b.attributes('aria-label') || '').startsWith('Actions for budget'),
+      )!
+      await kebab.trigger('click')
+      await w.findAll('button').find(b => b.text() === 'Fund')!.trigger('click')
+      await flushPromises()
+
+      await w.find<HTMLInputElement>('input#fund-amount').setValue('100')
+      await w.find('form').trigger('submit')
+      await vi.waitFor(() => expect(listBudgetsMock).toHaveBeenCalledTimes(2))
+
+      expect(w.find('input#fund-amount').exists()).toBe(false)
+      expect(toasts.value).toContainEqual(expect.objectContaining({
+        type: 'success',
+        message: 'Budget credited',
+      }))
+
+      await kebab.trigger('click')
+      const refreshingFund = w.findAll('button').find(
+        button => button.text() === 'Funding updated — refreshing…',
+      )!
+      expect(refreshingFund).toBeDefined()
+      expect(refreshingFund.attributes('disabled')).toBeDefined()
+      expect(refreshingFund.attributes('title')).toContain('Budget updated')
+
+      resolveRefresh({ ledgers: [ledger('refresh-pending')], has_more: false })
+      await flushPromises()
     })
   })
 

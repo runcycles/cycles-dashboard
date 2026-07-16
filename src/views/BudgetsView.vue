@@ -429,6 +429,7 @@ const {
   target: fundTarget,
   form: fundForm,
   loading: fundLoading,
+  refreshing: fundRefreshing,
   error: fundError,
   open: openFund,
   close: closeFund,
@@ -439,7 +440,7 @@ const {
     if (isDetail.value) return loadDetail()
     return loadList()
   },
-  onSuccess: operation => toast.success(BUDGET_FUNDING_SUCCESS[operation]),
+  onCommitted: operation => toast.success(BUDGET_FUNDING_SUCCESS[operation]),
   onRefreshFailure: () => toast.warning(BUDGET_FUNDING_REFRESH_WARNING),
 })
 
@@ -1152,6 +1153,7 @@ function rowTenantId(b: BudgetLedger): string {
         :budget="detail"
         :events="detailEvents"
         :can-manage="canManage"
+        :funding-refreshing="fundRefreshing"
         :events-has-more="detailEventsHasMore"
         :events-loading-more="detailEventsLoadingMore"
         :events-cursor="detailEventsCursor"
@@ -1378,7 +1380,13 @@ function rowTenantId(b: BudgetLedger): string {
                     { label: 'Activity', to: { name: 'audit', query: { resource_type: 'budget', resource_id: sortedBudgets[v.index].scope } } },
                     { label: 'Copy scope', onClick: () => copyScope(sortedBudgets[v.index].scope) },
                     { label: 'Copy as JSON', onClick: () => copyBudgetJson(sortedBudgets[v.index]) },
-                    { label: 'Fund', onClick: () => openFund(sortedBudgets[v.index]), hidden: sortedBudgets[v.index].status !== 'ACTIVE' },
+                    {
+                      label: fundRefreshing ? 'Funding updated — refreshing…' : 'Fund',
+                      onClick: () => openFund(sortedBudgets[v.index]),
+                      disabled: fundRefreshing,
+                      disabledReason: fundRefreshing ? 'Budget updated; loading the latest data before another funding action.' : undefined,
+                      hidden: sortedBudgets[v.index].status !== 'ACTIVE',
+                    },
                     { label: 'Unfreeze', onClick: () => requestFreeze(sortedBudgets[v.index].scope, sortedBudgets[v.index].unit, 'unfreeze'), hidden: sortedBudgets[v.index].status !== 'FROZEN' },
                     { separator: true },
                     { label: 'Freeze', onClick: () => requestFreeze(sortedBudgets[v.index].scope, sortedBudgets[v.index].unit, 'freeze'), danger: true, hidden: sortedBudgets[v.index].status !== 'ACTIVE' },

@@ -33,25 +33,31 @@ callers unsafe and did not recognize the existing handled-failure result.
 failure remains retryable: the dialog stays open, preserves the server error,
 and sends no refresh or notification. Once the POST resolves, the mutation is
 terminal: the dialog closes and clears its target before refresh begins, while
-the loading guard prevents another target from opening during settlement.
-Direct calls also require an open dialog, so neither an in-flight call nor a
-call after close can replay the operation. The mode-aware parent refresh now
-returns `loadList`/`loadDetail` outcomes instead of discarding them. `false`
-means an owned refresh failure; a thrown refresh is treated the same way. A
-superseded `POLLING_STALE` result remains successful because the newer request
-owns the view and will commit newer server state.
+an explicit post-commit `refreshing` guard prevents another target from opening
+during settlement. Mutation `loading` ends at commit so it is not overloaded
+with invisible presentation work. Direct calls also require an open dialog, so
+neither an in-flight call nor a call after close can replay the operation. The
+mode-aware parent refresh now returns `loadList`/`loadDetail` outcomes instead
+of discarding them. `false` means an owned refresh failure; a thrown refresh is
+treated the same way. A superseded `POLLING_STALE` result remains successful
+because the newer request owns the view and will commit newer server state.
 
 Refresh failure does not overwrite the funding form error or change the
-successful submit result. Instead the parent shows a transient warning:
-"Budget updated, but the latest data could not be loaded. Refresh to verify."
-The detailed loader error remains in the page's persistent error banner.
-Successful or superseded refreshes retain the operation-specific success
-toast. Focused tests cover handled and thrown refresh failures, immediate close
-while refresh is pending, target clearing, blocked reopen/re-submit, stable
-operator copy, and the real `BudgetsView` warning/error wiring. Final
-validation: `1,268/1,268` tests across 109 files; 96.46% line coverage; strict
-typecheck, production build, and both Compose configurations pass. No API wire,
-server requirement, route, polling, list ownership, or visual-layout changes.
+successful submit result. The operation-specific success toast fires at the
+commit boundary, so the operator gets immediate confirmation even if the
+refresh takes the full request timeout. During that window, the detail button
+and every row-menu Fund action are visibly disabled and labeled "Funding
+updated — refreshing…" with an explanatory reason. An owned refresh failure
+then adds a transient warning: "Budget updated, but the latest data could not
+be loaded. Refresh to verify." The detailed loader error remains in the page's
+persistent error banner. Focused tests cover handled, thrown, pending, and
+superseded refreshes; immediate committed feedback; detail and row-action
+disabled states; target clearing; blocked reopen/re-submit; stable operator
+copy; and the real `BudgetsView` warning/error wiring. Final validation:
+`1,271/1,271` tests across 109 files; 96.47% line coverage; strict typecheck,
+production build, and both Compose configurations pass. No API wire, server
+requirement, route, polling, or list-ownership changes; the only visual change
+is the explicit pending-refresh action state.
 
 ### 2026-07-16 — v0.1.25.71: budget detail and funding decomposition
 

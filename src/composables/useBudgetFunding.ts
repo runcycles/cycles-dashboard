@@ -56,7 +56,7 @@ export interface UseBudgetFundingOptions {
   selectedTenant: Ref<string>
   /** `false` means the owning view handled an authoritative refresh failure. */
   refresh: () => Promise<unknown>
-  onSuccess?: (operation: BudgetFundingOperation) => void
+  onCommitted?: (operation: BudgetFundingOperation) => void
   onRefreshFailure?: (operation: BudgetFundingOperation) => void
   /** Dependency seams keep domain tests focused and deterministic. */
   fund?: FundBudgetFn
@@ -81,11 +81,12 @@ export function useBudgetFunding(options: UseBudgetFundingOptions) {
   const target = ref<BudgetLedger | null>(null)
   const form = ref<BudgetFundingForm>(emptyForm())
   const loading = ref(false)
+  const refreshing = ref(false)
   const error = ref('')
   const createKey = options.createIdempotencyKey ?? generateIdempotencyKey
 
   function open(nextTarget: BudgetLedger | null | undefined): void {
-    if (loading.value || !nextTarget) return
+    if (loading.value || refreshing.value || !nextTarget) return
     target.value = nextTarget
     form.value = emptyForm()
     error.value = ''
@@ -113,7 +114,7 @@ export function useBudgetFunding(options: UseBudgetFundingOptions) {
   async function submit(): Promise<boolean> {
     // Defense in depth: FormDialog disables submit while loading, but callers
     // and tests can invoke submit directly. Guard before any state mutation.
-    if (loading.value || !isOpen.value || !target.value) return false
+    if (loading.value || refreshing.value || !isOpen.value || !target.value) return false
 
     const budget = target.value
     const operation = form.value.operation
@@ -176,9 +177,14 @@ export function useBudgetFunding(options: UseBudgetFundingOptions) {
 
     // The POST has committed. A refresh failure cannot make that mutation
     // retryable: close and clear the target before refreshing so a fresh
-    // idempotency key can never replay the real operation.
+    // idempotency key can never replay the real operation. Loading now means
+    // only "mutation in flight"; refreshing remains explicit so entry points
+    // can explain why another funding action is temporarily unavailable.
     isOpen.value = false
     target.value = null
+    loading.value = false
+    refreshing.value = true
+    options.onCommitted?.(operation)
 
     let refreshSucceeded = false
     try {
@@ -187,9 +193,8 @@ export function useBudgetFunding(options: UseBudgetFundingOptions) {
       refreshSucceeded = false
     }
 
-    loading.value = false
-    if (refreshSucceeded) options.onSuccess?.(operation)
-    else options.onRefreshFailure?.(operation)
+    refreshing.value = false
+    if (!refreshSucceeded) options.onRefreshFailure?.(operation)
     return true
   }
 
@@ -198,6 +203,7 @@ export function useBudgetFunding(options: UseBudgetFundingOptions) {
     target,
     form,
     loading,
+    refreshing,
     error,
     open,
     close,

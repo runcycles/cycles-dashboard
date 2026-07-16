@@ -69,4 +69,21 @@ describe('BudgetDetailPanel', () => {
     })
     expect(wrapper.findAll('button')).toHaveLength(0)
   })
+
+  it('explains and disables funding while committed data refreshes', async () => {
+    const wrapper = mount(BudgetDetailPanel, {
+      props: {
+        budget: budget(), events: [], canManage: true, fundingRefreshing: true,
+        eventsHasMore: false, eventsLoadingMore: false, eventsCursor: '',
+      },
+      global: { stubs: { EventTimeline: true, StatusBadge: true, UtilizationBar: true } },
+    })
+
+    const fund = wrapper.get('button.btn-pill-primary')
+    expect(fund.attributes('disabled')).toBeDefined()
+    expect(fund.attributes('title')).toContain('Budget updated')
+    expect(fund.text()).toBe('Funding updated — refreshing…')
+    await fund.trigger('click')
+    expect(wrapper.emitted('fund')).toBeUndefined()
+  })
 })
