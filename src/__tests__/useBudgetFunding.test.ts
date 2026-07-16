@@ -1,7 +1,9 @@
 import { nextTick, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BudgetFundingResponse, BudgetLedger } from '../types'
+import { POLLING_STALE } from '../composables/pollingResult'
 import {
+  BUDGET_FUNDING_REFRESH_WARNING,
   BUDGET_FUNDING_SUCCESS,
   useBudgetFunding,
   type BudgetFundingOperation,
@@ -25,18 +27,27 @@ const response = {} as BudgetFundingResponse
 describe('useBudgetFunding', () => {
   const fund = vi.fn().mockResolvedValue(response)
   const refresh = vi.fn().mockResolvedValue(undefined)
-  const onSuccess = vi.fn()
+  const onCommitted = vi.fn()
+  const onRefreshFailure = vi.fn()
   const createIdempotencyKey = vi.fn(() => '00000000-0000-4000-8000-000000000001')
   const selectedTenant = ref('')
 
   function create() {
-    return useBudgetFunding({ selectedTenant, fund, refresh, onSuccess, createIdempotencyKey })
+    return useBudgetFunding({
+      selectedTenant,
+      fund,
+      refresh,
+      onCommitted,
+      onRefreshFailure,
+      createIdempotencyKey,
+    })
   }
 
   beforeEach(() => {
     fund.mockReset().mockResolvedValue(response)
     refresh.mockReset().mockResolvedValue(undefined)
-    onSuccess.mockReset()
+    onCommitted.mockReset()
+    onRefreshFailure.mockReset()
     createIdempotencyKey.mockClear()
     selectedTenant.value = ''
   })
@@ -73,7 +84,8 @@ describe('useBudgetFunding', () => {
       expectedSpent,
     )
     expect(refresh).toHaveBeenCalledOnce()
-    expect(onSuccess).toHaveBeenCalledWith(operation)
+    expect(onCommitted).toHaveBeenCalledWith(operation)
+    expect(onRefreshFailure).not.toHaveBeenCalled()
     expect(BUDGET_FUNDING_SUCCESS[operation]).toBeTruthy()
     expect(funding.isOpen.value).toBe(false)
   })
@@ -190,7 +202,7 @@ describe('useBudgetFunding', () => {
     expect(funding.error.value).toBe('funding unavailable')
     expect(funding.isOpen.value).toBe(true)
     expect(refresh).not.toHaveBeenCalled()
-    expect(onSuccess).not.toHaveBeenCalled()
+    expect(onCommitted).not.toHaveBeenCalled()
     expect(funding.loading.value).toBe(false)
   })
 
@@ -200,16 +212,86 @@ describe('useBudgetFunding', () => {
     expect(fund).not.toHaveBeenCalled()
   })
 
-  it('does not close or announce when the owning view cannot refresh', async () => {
-    refresh.mockRejectedValue(new Error('refresh failed'))
+  it.each([
+    ['returns false', () => refresh.mockResolvedValue(false)],
+    ['throws', () => refresh.mockRejectedValue(new Error('refresh failed'))],
+  ])('treats the mutation as committed when refresh %s', async (_, failRefresh) => {
+    failRefresh()
     const funding = create()
     funding.open(ledger())
     funding.form.value.amount = 10
 
+    await expect(funding.submit()).resolves.toBe(true)
+
+    expect(fund).toHaveBeenCalledOnce()
+    expect(funding.error.value).toBe('')
+    expect(funding.isOpen.value).toBe(false)
+    expect(funding.loading.value).toBe(false)
+    expect(funding.refreshing.value).toBe(false)
+    expect(onCommitted).toHaveBeenCalledWith('CREDIT')
+    expect(onRefreshFailure).toHaveBeenCalledWith('CREDIT')
+
+    // The committed operation is terminal even though the refresh did not
+    // succeed. A direct caller cannot replay it under a fresh key.
+    await expect(funding.submit()).resolves.toBe(false)
+    expect(fund).toHaveBeenCalledOnce()
+    expect(createIdempotencyKey).toHaveBeenCalledOnce()
+  })
+
+  it('exports concise operator copy for post-commit refresh failures', () => {
+    expect(BUDGET_FUNDING_REFRESH_WARNING).toBe(
+      'Budget updated, but the latest data could not be loaded. Refresh to verify.',
+    )
+  })
+
+  it('keeps the dialog non-repeatable after a successful refresh', async () => {
+    const funding = create()
+    funding.open(ledger())
+    funding.form.value.amount = 10
+
+    await expect(funding.submit()).resolves.toBe(true)
     await expect(funding.submit()).resolves.toBe(false)
 
-    expect(funding.error.value).toBe('refresh failed')
-    expect(funding.isOpen.value).toBe(true)
-    expect(onSuccess).not.toHaveBeenCalled()
+    expect(fund).toHaveBeenCalledOnce()
+    expect(createIdempotencyKey).toHaveBeenCalledOnce()
+  })
+
+  it('closes at the commit boundary while the owning view is still refreshing', async () => {
+    let resolveRefresh!: () => void
+    refresh.mockReturnValue(new Promise<void>((resolve) => { resolveRefresh = resolve }))
+    const funding = create()
+    funding.open(ledger())
+    funding.form.value.amount = 10
+
+    const pending = funding.submit()
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce())
+
+    expect(funding.isOpen.value).toBe(false)
+    expect(funding.target.value).toBeNull()
+    expect(funding.loading.value).toBe(false)
+    expect(funding.refreshing.value).toBe(true)
+    expect(onCommitted).toHaveBeenCalledWith('CREDIT')
+    await expect(funding.submit()).resolves.toBe(false)
+    funding.open(ledger({ ledger_id: 'ledger-2' }))
+    expect(funding.isOpen.value).toBe(false)
+    expect(fund).toHaveBeenCalledOnce()
+
+    resolveRefresh()
+    await expect(pending).resolves.toBe(true)
+    expect(funding.loading.value).toBe(false)
+    expect(funding.refreshing.value).toBe(false)
+  })
+
+  it('treats a superseded refresh as successful presentation ownership', async () => {
+    refresh.mockResolvedValue(POLLING_STALE)
+    const funding = create()
+    funding.open(ledger())
+    funding.form.value.amount = 10
+
+    await expect(funding.submit()).resolves.toBe(true)
+
+    expect(onCommitted).toHaveBeenCalledWith('CREDIT')
+    expect(onRefreshFailure).not.toHaveBeenCalled()
+    expect(funding.refreshing.value).toBe(false)
   })
 })

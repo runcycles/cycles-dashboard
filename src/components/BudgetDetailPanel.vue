@@ -11,6 +11,7 @@ defineProps<{
   eventsHasMore: boolean
   eventsLoadingMore: boolean
   eventsCursor: string
+  fundingRefreshing?: boolean
 }>()
 
 defineEmits<{
@@ -36,7 +37,13 @@ defineEmits<{
       </span>
       <span v-if="budget.is_over_limit" class="bg-red-100 text-red-700 px-2 py-0.5 rounded text-xs font-medium">OVER LIMIT</span>
       <span class="flex-1" />
-      <button v-if="canManage && budget.status === 'ACTIVE'" @click="$emit('fund')" class="btn-pill-primary">Fund Budget</button>
+      <button
+        v-if="canManage && budget.status === 'ACTIVE'"
+        :disabled="fundingRefreshing"
+        :title="fundingRefreshing ? 'Budget updated; loading the latest data before another funding action.' : undefined"
+        @click="$emit('fund')"
+        class="btn-pill-primary"
+      >{{ fundingRefreshing ? 'Funding updated — refreshing…' : 'Fund Budget' }}</button>
       <button v-if="canManage" @click="$emit('edit')" class="btn-pill-secondary">Edit</button>
       <button v-if="canManage && budget.status === 'ACTIVE'" @click="$emit('freeze')" class="btn-pill-danger">Freeze</button>
       <button v-if="canManage && budget.status === 'FROZEN'" @click="$emit('unfreeze')" class="btn-pill-success">Unfreeze</button>

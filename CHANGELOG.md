@@ -15,6 +15,23 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.72] — 2026-07-16
+
+### Fixed
+
+- A successful single-budget funding request is now terminal even when the
+  following list/detail refresh fails. The dialog closes and clears its target
+  at the commit boundary, so neither the UI nor a direct/re-entrant caller can
+  repeat the real mutation under a fresh idempotency key.
+- Committed funding operations now announce success immediately. While the
+  owning view loads authoritative data, every Fund entry point is visibly
+  disabled and labeled "Funding updated — refreshing…" instead of accepting a
+  click that cannot open a dialog.
+- Post-commit refresh failures are reported separately as a transient warning
+  that the budget was updated but the displayed data may be stale. The owning
+  view still retains its detailed refresh error banner. A superseded refresh
+  remains successful because the newer request owns the displayed data.
+
 ## [0.1.25.71] — 2026-07-16
 
 ### Changed

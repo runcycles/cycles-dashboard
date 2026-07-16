@@ -38,6 +38,9 @@ export const BUDGET_FUNDING_SUCCESS: Record<BudgetFundingOperation, string> = {
   REPAY_DEBT: 'Debt repaid',
 }
 
+export const BUDGET_FUNDING_REFRESH_WARNING =
+  'Budget updated, but the latest data could not be loaded. Refresh to verify.'
+
 type FundBudgetFn = (
   tenantId: string,
   scope: string,
@@ -51,8 +54,10 @@ type FundBudgetFn = (
 
 export interface UseBudgetFundingOptions {
   selectedTenant: Ref<string>
+  /** `false` means the owning view handled an authoritative refresh failure. */
   refresh: () => Promise<unknown>
-  onSuccess?: (operation: BudgetFundingOperation) => void
+  onCommitted?: (operation: BudgetFundingOperation) => void
+  onRefreshFailure?: (operation: BudgetFundingOperation) => void
   /** Dependency seams keep domain tests focused and deterministic. */
   fund?: FundBudgetFn
   createIdempotencyKey?: () => string
@@ -66,21 +71,22 @@ function emptyForm(): BudgetFundingForm {
  * Funding-domain state shared by Budgets list and detail entry points.
  *
  * The composable owns validation, tenant resolution, idempotency, mutation
- * state, and refresh-before-close behavior. The parent owns only how its
- * current list/detail mode refreshes and how a successful operation is
- * announced. This keeps polling, cursor, URL, and presentation concerns out of
- * the mutation protocol.
+ * state, and the post-commit refresh boundary. The parent owns only how its
+ * current list/detail mode refreshes and how success or stale-data outcomes
+ * are announced. This keeps polling, cursor, URL, and presentation concerns
+ * out of the mutation protocol.
  */
 export function useBudgetFunding(options: UseBudgetFundingOptions) {
   const isOpen = ref(false)
   const target = ref<BudgetLedger | null>(null)
   const form = ref<BudgetFundingForm>(emptyForm())
   const loading = ref(false)
+  const refreshing = ref(false)
   const error = ref('')
   const createKey = options.createIdempotencyKey ?? generateIdempotencyKey
 
   function open(nextTarget: BudgetLedger | null | undefined): void {
-    if (!nextTarget) return
+    if (loading.value || refreshing.value || !nextTarget) return
     target.value = nextTarget
     form.value = emptyForm()
     error.value = ''
@@ -108,7 +114,7 @@ export function useBudgetFunding(options: UseBudgetFundingOptions) {
   async function submit(): Promise<boolean> {
     // Defense in depth: FormDialog disables submit while loading, but callers
     // and tests can invoke submit directly. Guard before any state mutation.
-    if (loading.value || !target.value) return false
+    if (loading.value || refreshing.value || !isOpen.value || !target.value) return false
 
     const budget = target.value
     const operation = form.value.operation
@@ -163,18 +169,33 @@ export function useBudgetFunding(options: UseBudgetFundingOptions) {
         form.value.reason || `${operation} via admin dashboard`,
         spent,
       )
-      // Keep the existing truthfulness rule: close and announce only after the
-      // owning list/detail view has refreshed its server state.
-      await options.refresh()
-      isOpen.value = false
-      options.onSuccess?.(operation)
-      return true
     } catch (cause) {
       error.value = toMessage(cause)
-      return false
-    } finally {
       loading.value = false
+      return false
     }
+
+    // The POST has committed. A refresh failure cannot make that mutation
+    // retryable: close and clear the target before refreshing so a fresh
+    // idempotency key can never replay the real operation. Loading now means
+    // only "mutation in flight"; refreshing remains explicit so entry points
+    // can explain why another funding action is temporarily unavailable.
+    isOpen.value = false
+    target.value = null
+    loading.value = false
+    refreshing.value = true
+    options.onCommitted?.(operation)
+
+    let refreshSucceeded = false
+    try {
+      refreshSucceeded = await options.refresh() !== false
+    } catch {
+      refreshSucceeded = false
+    }
+
+    refreshing.value = false
+    if (!refreshSucceeded) options.onRefreshFailure?.(operation)
+    return true
   }
 
   return {
@@ -182,6 +203,7 @@ export function useBudgetFunding(options: UseBudgetFundingOptions) {
     target,
     form,
     loading,
+    refreshing,
     error,
     open,
     close,
