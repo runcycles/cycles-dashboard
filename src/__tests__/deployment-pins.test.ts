@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 const EXPECTED = {
   'cycles-server': '0.1.25.58',
-  'cycles-server-admin': '0.1.25.52',
+  'cycles-server-admin': '0.1.25.53',
   'cycles-server-events': '0.1.25.24',
 } as const
 

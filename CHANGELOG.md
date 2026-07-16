@@ -35,6 +35,14 @@ UX work that does not advance spec alignment.
   on every refresh. Superseded login responses cannot attach stale
   capabilities to a newer key.
 
+### Changed
+
+- The development and production stacks, deployment-pin contract, and README
+  example now pin `cycles-server-admin` `0.1.25.53`. This latest published
+  admin patch reports unsupported HTTP methods as `405 Method Not Allowed`
+  with the standard error shape instead of misreporting them as 500; it makes
+  no dashboard wire requirement change.
+
 ## [0.1.25.68] — 2026-07-15
 
 ### Fixed
@@ -92,7 +100,7 @@ UX work that does not advance spec alignment.
 
 - Docker deployments now pin the latest published server fleet as of
   2026-07-16: `cycles-server` `0.1.25.46 → 0.1.25.58`,
-  `cycles-server-admin` `0.1.25.48 → 0.1.25.52`, and
+  `cycles-server-admin` `0.1.25.48 → 0.1.25.53`, and
   `cycles-server-events` `0.1.25.22 → 0.1.25.24` in both development and
   production Compose plus the README example. Existing evidence-enabled
   fleets must drain/recover `evidence:processing` with their older workers

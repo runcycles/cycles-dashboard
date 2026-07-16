@@ -7,7 +7,7 @@
 | Component | Minimum | Shipped (compose) | Notes |
 |---|---|---|---|
 | cycles-server (runtime plane) | v0.1.25.8+ | v0.1.25.58 | `.37+` supplies the complete reservation/evidence surface used by the dashboard. `.47`–`.58` add tenant-close guards, replay/idempotency integrity, scalable sorted reservation queries, typed query boundaries, leased Redis maintenance/recovery, rolling-upgrade guidance, and replay metrics. The `.58` release is metrics-only relative to `.57`; no public wire break. Older runtimes remain tolerated with graceful omission/404 behavior, but the shipped stack uses the latest published release. |
-| cycles-admin (governance plane) | v0.1.25.17+ | v0.1.25.52 | `.49`–`.51` align webhook matcher/ownership boundaries; `.52` hardens truthful cursor pagination, equal-score continuation, sorted-query limits, API-key collision handling, durable tenant-close cascades, bulk idempotency, CORS trace headers, and strict request DTO parsing. Public response compatibility is preserved; `.51+` should deploy after events `.23+`. |
+| cycles-admin (governance plane) | v0.1.25.17+ | v0.1.25.53 | `.49`–`.51` align webhook matcher/ownership boundaries; `.52` hardens truthful cursor pagination, equal-score continuation, sorted-query limits, API-key collision handling, durable tenant-close cascades, bulk idempotency, CORS trace headers, and strict request DTO parsing; `.53` correctly maps unsupported methods to the standard 405 response and audit shape. Public response compatibility is preserved; `.51+` should deploy after events `.23+`. |
 | cycles-events (dispatch worker) | v0.1.25.6+ | v0.1.25.24 | `.23` enforces the webhook ownership boundary expected by admin `.51+`. `.24` adds owner-fenced dispatch, atomic terminal transitions, durable outboxes, bounded quarantine/DLQs, and authoritative evidence canonicalization. Its `evidence:processing` member format changes internally; existing evidence-enabled fleets must drain/recover that list with older workers before starting `.24` (OPERATIONS.md). |
 | Spec alignment | — | v0.1.25.41 | Pin moves on end-to-end support. `.36` adds `admin_on_behalf_of` actor type, `.37` adds `TENANT_CLOSED` reason code (both tolerated — open string types). `.38`/`.40`/`.41` define the tenant-owned category boundary (admin-only `api_key.*`/`policy.*`/`webhook.*`/`system.*` types are 400'd on tenant-owned subscriptions; dashboard `.68` gates the pickers). `.39` allows category-only subscriptions on update (dashboard `.68` permits clearing `event_types` when categories remain). Earlier: (prior `.32`–`.35` notes preserved in release history.) `.32` formalized per-row event emission for `bulkActionBudgets` / `bulkActionTenants` (docs-only, no wire change). `.33` added six `webhook.*` EventType values + `EventDataWebhookLifecycle` payload schema. `.34` expanded `EventCategory` enum to include `webhook` so the `.33` events pass server-side validation. `.35` added the four `*_via_tenant_cascade` EventType values (+ `EventDataTenantCascade` payload schema) the admin server has emitted since implementing the tenant-close cascade; dashboard `.65` adds them to `EVENT_TYPES` so they are pickable in webhook subscriptions and suggested in the Events type filter. All additive — pre-`.31` servers tolerate unknown enum values per the spec's forward-compat rule, so the dashboard is backwards-compatible with every deployed admin version. |
 
@@ -55,6 +55,15 @@ HTML-filtering regular expression, handles quoted delimiters and end-tag
 attributes, rejects unterminated elements, and remains constrained to exactly
 one inline `type="importmap"` script. Regression tests cover both CodeQL cases,
 unquoted/case-insensitive attributes, and longer non-script element names.
+
+**Release-prep fleet refresh.** Admin `v0.1.25.53` was published after the
+main `.69` dashboard PR merged. Its vulnerability gate and published-image
+smoke test passed, and immutable `0.1.25.53` plus `latest` resolve to the same
+digest (`sha256:55ce3d6aa80ca60c75b92369042455a7e7b54f5a340a137c170642e2662650b9`).
+The development Compose, production Compose, README example, operations
+baseline, and deployment-pin contract therefore advance `.52 → .53` before
+the dashboard tag is cut. This is an admin error-classification hardening
+patch; it does not raise the dashboard's minimum compatible admin version.
 
 ### 2026-07-15 — v0.1.25.68: four-plane audit (spec ↔ server ↔ UI/UX ↔ ops) + fixes
 

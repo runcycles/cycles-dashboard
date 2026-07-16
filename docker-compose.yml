@@ -93,7 +93,7 @@ services:
 
   cycles-admin:
     logging: *default-logging
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.52
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.53
     restart: unless-stopped
     ports:
       - "127.0.0.1:7979:7979"  # loopback-only — see dashboard service note
