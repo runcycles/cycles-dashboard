@@ -104,6 +104,44 @@ describe('CommandPalette', () => {
     w.unmount()
   })
 
+  it('traps focus inside the modal and restores the opening control on close', async () => {
+    const trigger = document.createElement('button')
+    trigger.textContent = 'Open command palette'
+    document.body.appendChild(trigger)
+    trigger.focus()
+
+    const w = await mountPaletteOpen()
+    const input = document.body.querySelector<HTMLInputElement>('#command-palette-input')!
+    expect(document.activeElement).toBe(input)
+
+    // Input is the first focusable element. Shift+Tab must wrap to the
+    // final result instead of reaching controls behind the backdrop.
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Tab', shiftKey: true, bubbles: true, cancelable: true,
+    }))
+    expect((document.activeElement as HTMLElement).getAttribute('role')).toBe('option')
+
+    useCommandPalette().close()
+    await nextTick()
+    expect(document.activeElement).toBe(trigger)
+    w.unmount()
+  })
+
+  it('keeps the dialog reachable in short viewports', async () => {
+    const w = await mountPaletteOpen()
+    const overlay = document.body.querySelector<HTMLElement>('[role="dialog"]')!
+    const panel = overlay.querySelector<HTMLElement>('[class*="max-w-xl"]')!
+    const listbox = overlay.querySelector<HTMLElement>('[role="listbox"]')!
+
+    expect(overlay.className).toContain('overflow-y-auto')
+    expect(overlay.className).toContain('p-4')
+    expect(panel.className).toContain('max-h-[calc(100dvh-2rem)]')
+    expect(panel.className).toContain('flex-col')
+    expect(listbox.className).toContain('min-h-0')
+    expect(listbox.className).toContain('flex-1')
+    w.unmount()
+  })
+
   it('shows an empty-state message when no tenant matches the query', async () => {
     const w = await mountPaletteOpen()
     const input = document.body.querySelector<HTMLInputElement>('#command-palette-input')!

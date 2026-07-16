@@ -51,6 +51,7 @@ vi.mock('vue-router', () => ({
 // Kick the callback once on mount (simulating the real composable's initial
 // tick), then expose refresh() for tests to re-trigger.
 vi.mock('../composables/usePolling', () => ({
+  POLLING_STALE: Symbol('polling-stale'),
   usePolling: (fn: (signal: AbortSignal) => Promise<void>) => {
     const ctrl = new AbortController()
     // Fire once immediately to mimic start() → tick() in the real composable.
@@ -183,5 +184,151 @@ describe('EventsView — poll preserves paginated tail', () => {
     await flushPromises()
     expect(vm.events.map(e => e.event_id)).toEqual(['new1', 'new2'])
     wrapper.unmount()
+  })
+
+  it('keeps a successful load-more response when a same-filter poll fails concurrently', async () => {
+    scriptedPages.push({ events: [ev('head')], has_more: true, next_cursor: '1' })
+    const wrapper = mount(EventsView, {
+      global: {
+        stubs: {
+          PageHeader: true, TenantLink: true, SortHeader: true,
+          EmptyState: true, RouterLink: true,
+        },
+      },
+    })
+    await flushPromises()
+
+    let resolveMore!: (page: Page) => void
+    const pendingMore = new Promise<Page>((resolve) => { resolveMore = resolve })
+    listEventsMock.mockImplementation((params) => {
+      if (params.cursor === '1') return pendingMore
+      return Promise.reject(new Error('background poll failed'))
+    })
+
+    const vm = wrapper.vm as unknown as {
+      loadMore: () => Promise<void>
+      refresh: () => Promise<void>
+      events: Event[]
+    }
+    const loadMorePromise = vm.loadMore()
+    await vi.waitFor(() => {
+      expect(listEventsMock.mock.calls.some(([params]) => params.cursor === '1')).toBe(true)
+    })
+    await vm.refresh()
+
+    resolveMore({ events: [ev('tail')], has_more: false })
+    await loadMorePromise
+    await flushPromises()
+
+    expect(vm.events.map(e => e.event_id)).toEqual(['head', 'tail'])
+    wrapper.unmount()
+  })
+
+  it('does not mix a pending debounced filter with the current cursor', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      scriptedPages.push({ events: [ev('a'), ev('b')], has_more: true, next_cursor: '1' })
+      scriptedPages.push({ events: [ev('c')], has_more: false })
+
+      const wrapper = mount(EventsView, {
+        global: {
+          renderStubDefaultSlot: true,
+          stubs: {
+            PageHeader: { template: '<header><slot name="actions" /></header>' },
+            TenantLink: true, SortHeader: true,
+            EmptyState: true, RouterLink: true,
+          },
+        },
+      })
+      await flushPromises()
+      listEventsMock.mockClear()
+
+      const vm = wrapper.vm as unknown as {
+        loadMore: () => Promise<void>
+        refresh: () => Promise<void>
+      }
+      await wrapper.get('#ev-search').setValue('new-scope')
+
+      // A poll inside the debounce window keeps using the already-applied
+      // tuple that produced page 1; it must not leak the live text value.
+      await vm.refresh()
+      await flushPromises()
+      expect(listEventsMock).toHaveBeenCalledTimes(1)
+      expect(listEventsMock.mock.calls[0][0]).not.toHaveProperty('search')
+      expect(listEventsMock.mock.calls[0][0]).not.toHaveProperty('cursor')
+
+      // Load more is disabled/guarded until the new filter is committed,
+      // so the old cursor can never be paired with `search=new-scope`.
+      const callsAfterPoll = listEventsMock.mock.calls.length
+      await vm.loadMore()
+      expect(listEventsMock).toHaveBeenCalledTimes(callsAfterPoll)
+      const loadMore = wrapper.findAll('button').find(b => b.text() === 'Applying filters…')
+      expect(loadMore?.attributes('disabled')).toBeDefined()
+
+      vi.advanceTimersByTime(300)
+      await flushPromises()
+      const applied = listEventsMock.mock.calls.at(-1)![0]
+      expect(applied.search).toBe('new-scope')
+      expect(applied.cursor).toBeUndefined()
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('invalidates the old cursor and export while applied page one is in flight', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      scriptedPages.push({ events: [ev('old-a'), ev('old-b')], has_more: true, next_cursor: '1' })
+      const wrapper = mount(EventsView, {
+        global: {
+          renderStubDefaultSlot: true,
+          stubs: {
+            PageHeader: { template: '<header><slot name="actions" /></header>' },
+            TenantLink: true, SortHeader: true,
+            EmptyState: true, RouterLink: true,
+          },
+        },
+      })
+      await flushPromises()
+
+      let resolveFiltered!: (page: Page) => void
+      const filteredPage = new Promise<Page>((resolve) => { resolveFiltered = resolve })
+      listEventsMock.mockReset()
+      listEventsMock.mockImplementation((params) =>
+        params.search === 'new-filter'
+          ? filteredPage
+          : Promise.resolve({ events: [], has_more: false }),
+      )
+
+      await wrapper.get('#ev-search').setValue('new-filter')
+      vi.advanceTimersByTime(300)
+      await wrapper.vm.$nextTick()
+
+      // The new tuple is applied, but its page one is unresolved. The old
+      // page cursor and export seed must already be unavailable.
+      expect(listEventsMock).toHaveBeenCalledTimes(1)
+      expect(listEventsMock.mock.calls[0][0]).toMatchObject({ search: 'new-filter' })
+      expect(listEventsMock.mock.calls[0][0].cursor).toBeUndefined()
+      expect((wrapper.vm as unknown as { events: Event[] }).events).toEqual([])
+      expect(wrapper.get('[role="table"]').attributes('aria-busy')).toBe('true')
+      expect(wrapper.text()).not.toContain('Load more')
+      const exportButtons = wrapper.findAll('button').filter(b => b.text().startsWith('Export '))
+      expect(exportButtons).toHaveLength(2)
+      expect(exportButtons.every(b => b.attributes('disabled') !== undefined)).toBe(true)
+
+      const vm = wrapper.vm as unknown as { loadMore: () => Promise<void> }
+      await vm.loadMore()
+      expect(listEventsMock).toHaveBeenCalledTimes(1)
+
+      resolveFiltered({ events: [ev('new-a')], has_more: true, next_cursor: 'new-cursor' })
+      await flushPromises()
+      expect(wrapper.get('[role="table"]').attributes('aria-busy')).toBeUndefined()
+      expect(wrapper.text()).toContain('Load more')
+      expect(exportButtons.every(b => b.attributes('disabled') === undefined)).toBe(true)
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

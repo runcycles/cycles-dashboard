@@ -4,26 +4,19 @@ import CloseIcon from './icons/CloseIcon.vue'
 </script>
 
 <template>
-  <!-- aria-live="polite" + role="status" on the container announces
-       incoming toasts to screen readers without interrupting current
-       speech. Error toasts additionally carry role="alert" (assertive)
-       — a failed mutation must not be missed. Warning toasts are
-       advisories, not failures: role="status" (polite), amber, and
-       they auto-dismiss like success. -->
-  <div
-    class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"
-    aria-live="polite"
-    role="status"
-  >
+  <!-- One live region per toast. Nesting an assertive error alert inside a
+       polite container status caused duplicate/conflicting announcements. -->
+  <div class="fixed bottom-4 left-4 right-4 sm:left-auto z-50 flex flex-col items-stretch sm:items-end gap-2 pointer-events-none">
     <transition-group name="toast">
       <div
         v-for="t in toasts"
         :key="t.id"
-        :role="t.type === 'error' ? 'alert' : t.type === 'warning' ? 'status' : undefined"
+        :role="t.type === 'error' ? 'alert' : 'status'"
+        aria-atomic="true"
         :class="t.type === 'success' ? 'bg-green-700 text-white' : t.type === 'warning' ? 'bg-amber-600 text-white' : 'bg-red-700 text-white'"
-        class="pl-4 pr-2 py-2.5 rounded-lg shadow-lg text-sm pointer-events-auto max-w-sm flex items-start gap-2"
+        class="w-full sm:w-auto max-w-[calc(100vw-2rem)] sm:max-w-sm pl-4 pr-2 py-2.5 rounded-lg shadow-lg text-sm pointer-events-auto flex items-start gap-2"
       >
-        <span class="flex-1">{{ t.message }}</span>
+        <span class="flex-1 min-w-0 break-words [overflow-wrap:anywhere]">{{ t.message }}</span>
         <button
           type="button"
           aria-label="Dismiss"

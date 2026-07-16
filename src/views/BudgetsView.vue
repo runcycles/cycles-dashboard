@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute, useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
+import { POLLING_STALE } from '../composables/pollingResult'
 import { POLL_SLOW_MS } from '../composables/pollingConstants'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
@@ -119,9 +120,11 @@ const filterScope = ref('')
 // auto-shows closed budgets even with the toggle off.
 const {
   includeTerminal,
+  showTerminal,
   visibleRows: sortedBudgets,
   terminalCount: hiddenTerminalCount,
   terminalVerb,
+  isTerminal: isTerminalBudget,
 } = useTerminalAwareList<BudgetLedger>({
   kind: 'budget',
   source: columnSortedBudgets,
@@ -194,8 +197,10 @@ async function loadTenants() {
     const res = await listTenants()
     tenants.value = res.tenants
     tenantsError.value = ''
+    return true
   } catch (e) {
     tenantsError.value = `Could not load tenant list: ${toMessage(e)}`
+    return false
   }
 }
 
@@ -263,26 +268,41 @@ async function loadList() {
   hasMore.value = false
   try {
     const res = await listBudgets(buildListParams())
-    if (seq !== listLoadSeq) return // superseded by a newer load — discard
+    if (seq !== listLoadSeq) return POLLING_STALE // superseded by a newer load — discard
     budgets.value = res.ledgers
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
     error.value = ''
     initialLoadDone.value = true
+    return true
   } catch (e) {
-    if (seq !== listLoadSeq) return
+    if (seq !== listLoadSeq) return POLLING_STALE
     error.value = toMessage(e)
+    return false
   }
 }
 
+let detailLoadSeq = 0
 async function loadDetail() {
+  const seq = ++detailLoadSeq
   const scope = stringParam(route.query.scope)
   const unit = stringParam(route.query.unit)
+  const changedLedger = !detail.value || detail.value.scope !== scope || detail.value.unit !== unit
+  if (changedLedger) {
+    detail.value = null
+    detailEvents.value = []
+    detailEventsCursor.value = ''
+    detailEventsHasMore.value = false
+  }
+  detailEventsLoadingMore.value = false
   try {
-    detail.value = await lookupBudget(scope, unit)
+    const ledger = await lookupBudget(scope, unit)
+    if (seq !== detailLoadSeq) return POLLING_STALE
+    detail.value = ledger
     detailEventsCursor.value = ''
     detailEventsHasMore.value = false
     const evRes = await listEvents({ scope, limit: String(DETAIL_EVENTS_PAGE_SIZE) })
+    if (seq !== detailLoadSeq) return POLLING_STALE
     // Server already filters by scope via the query param but we also
     // filter client-side because listEvents' scope param is a prefix
     // match on some server versions; the precise-match belt-and-suspenders
@@ -291,25 +311,39 @@ async function loadDetail() {
     detailEventsHasMore.value = !!evRes.has_more
     detailEventsCursor.value = evRes.next_cursor ?? ''
     error.value = ''
-  } catch (e) { error.value = toMessage(e) }
+    return true
+  } catch (e) {
+    if (seq === detailLoadSeq) {
+      error.value = toMessage(e)
+      return false
+    }
+    return POLLING_STALE
+  }
 }
 
 async function loadMoreDetailEvents() {
   if (!detailEventsCursor.value || detailEventsLoadingMore.value) return
+  const seq = detailLoadSeq
   const scope = stringParam(route.query.scope)
+  const cursor = detailEventsCursor.value
   detailEventsLoadingMore.value = true
   try {
     const evRes = await listEvents({
       scope,
       limit: String(DETAIL_EVENTS_PAGE_SIZE),
-      cursor: detailEventsCursor.value,
+      cursor,
     })
+    if (seq !== detailLoadSeq) return
     const filtered = evRes.events.filter(e => e.scope === scope)
     detailEvents.value = [...detailEvents.value, ...filtered]
     detailEventsHasMore.value = !!evRes.has_more
     detailEventsCursor.value = evRes.next_cursor ?? ''
-  } catch (e) { error.value = toMessage(e) }
-  finally { detailEventsLoadingMore.value = false }
+  } catch (e) {
+    if (seq === detailLoadSeq) error.value = toMessage(e)
+  }
+  finally {
+    if (seq === detailLoadSeq) detailEventsLoadingMore.value = false
+  }
 }
 
 async function loadMore() {
@@ -329,8 +363,12 @@ function clearFilter() {
 }
 
 async function tick() {
-  if (isDetail.value) await loadDetail()
-  else { await loadTenants(); await loadList() }
+  if (isDetail.value) return loadDetail()
+  const tenantsLoaded = await loadTenants()
+  const budgetsLoaded = await loadList()
+  if (tenantsLoaded === false || budgetsLoaded === false) return false
+  if (budgetsLoaded === POLLING_STALE) return POLLING_STALE
+  return true
 }
 
 const { refresh, isLoading, lastSuccessAt } = usePolling(tick, POLL_SLOW_MS)
@@ -1051,8 +1089,16 @@ watch(() => route.query, (q) => {
   if (nextUtilMin !== filterUtilMin.value) filterUtilMin.value = nextUtilMin
   const nextUtilMax = parseUtilPct(q.utilization_max)
   if (nextUtilMax !== filterUtilMax.value) filterUtilMax.value = nextUtilMax
-  if (isDetail.value) loadDetail()
-  else loadList()
+  if (isDetail.value) {
+    loadDetail()
+  } else {
+    // A detail request may still be resolving while Back removes scope/unit.
+    // Invalidate it before loading the list so its late error/result cannot
+    // leak into the list shell after navigation.
+    detailLoadSeq++
+    detailEventsLoadingMore.value = false
+    loadList()
+  }
 })
 
 // V5 debounce auto-apply on text/numeric filter changes. All three
@@ -1089,6 +1135,9 @@ const {
     const res = await listBudgets(buildListParams({ cursor }))
     return { items: res.ledgers, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
   },
+  // Server-side params cover the explicit filters; terminal visibility is
+  // a local presentation rule and must be applied to every cursor page.
+  filterFn: b => showTerminal.value || !isTerminalBudget(b),
   columns: [
     { header: 'tenant_id',             value: b => b.tenant_id ?? '' },
     { header: 'scope',                 value: b => b.scope },
@@ -1270,6 +1319,16 @@ function rowTenantId(b: BudgetLedger): string {
       data-testid="budget-detail-loading"
     />
 
+    <!-- Keep detail failures in the detail shell. Falling through to the
+         list made the Budget Detail header sit above unrelated filters and
+         rows, which looked like a successful navigation to the wrong page. -->
+    <div v-else-if="isDetail" class="card p-6" data-testid="budget-detail-error-state">
+      <EmptyState
+        message="Budget details unavailable"
+        hint="Use Back to budgets to choose another ledger, or retry with the page refresh control."
+      />
+    </div>
+
     <!-- List mode. Wrap the list-mode subtree in its own flex-col so
          the virtualized table below can flex-fill without polluting
          the detail-mode (natural block flow) layout. -->
@@ -1386,11 +1445,15 @@ function rowTenantId(b: BudgetLedger): string {
            fall back to the document default 16px, break their grid
            column width, and overflow into neighbors. -->
       <div
-        class="bg-white rounded-lg shadow overflow-hidden text-sm flex-1 min-h-0 flex flex-col"
+        class="bg-white rounded-lg shadow overflow-x-auto overflow-y-hidden text-sm flex-1 min-h-0 flex flex-col"
         role="table"
         :aria-rowcount="sortedBudgets.length + 1"
         :aria-colcount="canManage ? 9 : 7"
       >
+        <div
+          :style="{ minWidth: canManage ? '1210px' : '1070px' }"
+          class="wide-table-canvas flex flex-col flex-1 min-h-0"
+        >
         <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
           <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
             <div v-if="canManage" role="columnheader" class="table-cell">
@@ -1411,7 +1474,7 @@ function rowTenantId(b: BudgetLedger): string {
           v-if="sortedBudgets.length > 0"
           ref="scrollEl"
           role="rowgroup"
-          class="flex-1 overflow-auto min-h-[240px]"
+          class="flex-1 overflow-y-auto overflow-x-hidden min-h-[240px]"
         >
           <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
             <div
@@ -1471,12 +1534,13 @@ function rowTenantId(b: BudgetLedger): string {
             </div>
           </div>
         </div>
+        </div>
 
         <!-- P1-H3: cold-load skeleton. -->
-        <div v-else-if="!initialLoadDone && !error" class="px-4 py-6">
+        <div v-if="sortedBudgets.length === 0 && !initialLoadDone && !error" class="responsive-table-state px-4 py-6">
           <LoadingSkeleton />
         </div>
-        <div v-else>
+        <div v-else-if="sortedBudgets.length === 0" class="responsive-table-state">
           <EmptyState message="No budgets found" :hint="!selectedTenant ? 'Select a tenant to view budgets' : undefined" />
         </div>
       </div>
@@ -1510,10 +1574,10 @@ function rowTenantId(b: BudgetLedger): string {
           v-if="canManage && selectedVisibleCount > 0"
           role="toolbar"
           aria-label="Bulk budget actions"
-          class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-gray-900 dark:border dark:border-gray-700 border-2 border-blue-400 shadow-2xl rounded-lg px-4 py-2.5 flex items-center gap-3 max-w-[90vw]"
+          class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-gray-900 dark:border dark:border-gray-700 border-2 border-blue-400 shadow-2xl rounded-lg px-4 py-2.5 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 max-w-[90vw]"
         >
           <span class="text-sm font-semibold text-blue-900 dark:text-blue-300 tabular-nums">{{ selectedVisibleCount }} selected</span>
-          <div class="w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
+          <div class="hidden sm:block w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
           <button @click="openBulkStatus('freeze')" class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer">Freeze</button>
           <button @click="openBulkStatus('unfreeze')" class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer">Unfreeze</button>
           <button

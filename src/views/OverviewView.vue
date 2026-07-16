@@ -2,6 +2,7 @@
 import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
+import { POLLING_STALE } from '../composables/pollingResult'
 import { POLL_FAST_MS } from '../composables/pollingConstants'
 import { getOverview, listApiKeys, listAuditLogs, listBudgets, listTenants, listWebhooks } from '../api/client'
 import type { AdminOverviewResponse, ApiKey, AuditLogEntry, BudgetLedger, WebhookSubscription } from '../types'
@@ -134,20 +135,13 @@ function walkApiKeysPages(base: Record<string, string>) {
 // so drift can't persist indefinitely when counters don't move — e.g.
 // a new ACTIVE api key, which no overview counter reflects. A walk round
 // with any rejection is never committed as done — it retries under the
-// exponential backoff below (see the post-settle commit).
+// cursor-walk backoff below (see the post-settle commit).
 const WALK_FALLBACK_TICKS = 10
 let forceWalks = true // initial load always walks
 let ticksSinceWalk = 0 // ticks since the last walk ATTEMPT (success or failure)
 let lastWalkSignature: string | null = null
-// Failed-round retry backoff. The previous fix (forceWalks = true on any
-// rejection) re-fired all four multi-page walks on EVERY 30s tick for as
-// long as an endpoint stayed down — request amplification against an
-// already-degraded API. Instead, retry after walkRetryBackoffTicks ticks,
-// doubling per failed round (2 → 4 → 8 → capped at WALK_FALLBACK_TICKS)
-// and resetting to 1 on a fully-successful round. While a failure streak
-// is active the counter-change trigger also respects the backoff — a
-// counter change mid-outage must not re-open the floodgates. Manual
-// refresh (refreshAll) still forces an immediate attempt.
+// POLLING_STALE prevents the shared poller from advancing freshness or
+// changing cadence while this tick counter owns the cursor-walk retry.
 let walkRetryBackoffTicks = 1
 let walkFailStreak = false
 // First failure message from the last attempted walk round. Folded into
@@ -189,9 +183,9 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
 
   // Phase 2 — the cursor walks, gated. A failed getOverview() yields no
   // signature; walk only if forced or fallback-due (can't detect change).
-  // During a failure streak the cadence is the retry backoff, not the
-  // slow fallback, and the counter-change trigger is suspended (an
-  // uncommitted signature reads as "changed" every tick of an outage).
+  // During a failure streak every backed-off polling tick retries. The
+  // counter-change trigger is suspended because the uncommitted signature
+  // reads as "changed" throughout an outage.
   ticksSinceWalk++
   const sig = ov.status === 'fulfilled' ? walkSignature(ov.value) : null
   const countersChanged = sig !== null && sig !== lastWalkSignature
@@ -272,6 +266,10 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
   error.value = phase1Fail && phase1Fail.status === 'rejected'
     ? toMessage(phase1Fail.reason)
     : walkError.value
+  // Phase-1 failures use the shared network backoff. Walk failures preserve
+  // freshness while their existing tick-based backoff owns retry cadence.
+  if (phase1Fail) return false
+  return walkError.value ? POLLING_STALE : true
 }, POLL_FAST_MS)
 
 // Manual refresh (PageHeader button) always re-runs the walks — the
@@ -931,7 +929,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
       @refresh="refreshAll"
     />
 
-    <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-2 mb-4 dark:bg-red-950 dark:border-red-800 dark:text-red-300">
+    <p v-if="error" role="alert" aria-atomic="true" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-2 mb-4 dark:bg-red-950 dark:border-red-800 dark:text-red-300">
       {{ error }}
     </p>
 

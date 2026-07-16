@@ -16,6 +16,7 @@ import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { usePolling } from '../composables/usePolling'
+import { POLLING_STALE } from '../composables/pollingResult'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { POLL_FAST_MS } from '../composables/pollingConstants'
 import { useSort } from '../composables/useSort'
@@ -42,6 +43,7 @@ import { formatDateTime, formatRelative } from '../utils/format'
 import { safeJsonStringify } from '../utils/safe'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
+import { stringParam } from '../utils/dateParam'
 
 const toast = useToast()
 const route = useRoute()
@@ -66,8 +68,7 @@ const tenants = ref<Tenant[]>([])
 // through to the first-ACTIVE-tenant default below when the URL has
 // no tenant_id.
 const tenantFromQuery = (): string => {
-  const q = route.query.tenant_id
-  return typeof q === 'string' ? q : ''
+  return stringParam(route.query.tenant_id)
 }
 const tenantFilter = ref(tenantFromQuery())
 // Accept ?status= from the URL so Overview-style drill-downs and shared
@@ -75,8 +76,8 @@ const tenantFilter = ref(tenantFromQuery())
 // invalid (the operationally-interesting default — active reservations
 // past grace are the "stuck" ones that ops force-releases).
 const statusFromQuery = computed<string | null>(() => {
-  const s = route.query.status
-  if (typeof s !== 'string') return null
+  const s = stringParam(route.query.status)
+  if (!s) return null
   return (RESERVATION_STATUSES as readonly string[]).includes(s) ? s : null
 })
 const statusFilter = ref<string>(statusFromQuery.value ?? 'ACTIVE')
@@ -269,15 +270,28 @@ async function loadTenants() {
     if (!tenantFilter.value) {
       tenantFilter.value = defaultTenantId()
     }
-  } catch (e) { error.value = toMessage(e) }
+    return true
+  } catch (e) {
+    error.value = toMessage(e)
+    return false
+  }
 }
 
+// One generation owns the complete visible reservation result set. Polls,
+// URL-driven tenant changes, filters, sort changes, and load-more requests
+// can overlap; only work started under the latest generation may commit.
+let listGeneration = 0
 async function loadReservations() {
-  if (!tenantFilter.value) {
+  const generation = ++listGeneration
+  const tenantId = tenantFilter.value
+  // A page-one refresh invalidates any in-flight load-more immediately.
+  loadingMore.value = false
+  if (!tenantId) {
     reservations.value = []
     hasMore.value = false
     nextCursor.value = ''
-    return
+    loadingList.value = false
+    return true
   }
   loadingList.value = true
   // Reset pagination state up-front — same rationale as BudgetsView:
@@ -293,17 +307,28 @@ async function loadReservations() {
       sort_by: sortKey.value || undefined,
       sort_dir: sortKey.value ? sortDir.value : undefined,
     }
-    const res = await listReservations(tenantFilter.value, params)
+    const res = await listReservations(tenantId, params)
+    if (generation !== listGeneration) return POLLING_STALE
     reservations.value = res.reservations
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
     error.value = ''
-  } catch (e) { error.value = toMessage(e) }
-  finally { loadingList.value = false }
+    return true
+  } catch (e) {
+    if (generation !== listGeneration) return POLLING_STALE
+    error.value = toMessage(e)
+    return false
+  }
+  finally {
+    if (generation === listGeneration) loadingList.value = false
+  }
 }
 
 async function loadMore() {
   if (!nextCursor.value || loadingMore.value || !tenantFilter.value) return
+  const generation = listGeneration
+  const tenantId = tenantFilter.value
+  const cursor = nextCursor.value
   loadingMore.value = true
   try {
     // Pass the same filter + sort tuple the server validates against the
@@ -314,17 +339,22 @@ async function loadMore() {
     const params: ListReservationsParams = {
       ...buildFilterParams(),
       limit: PAGE_SIZE,
-      cursor: nextCursor.value,
+      cursor,
       sort_by: sortKey.value || undefined,
       sort_dir: sortKey.value ? sortDir.value : undefined,
     }
-    const res = await listReservations(tenantFilter.value, params)
+    const res = await listReservations(tenantId, params)
+    if (generation !== listGeneration) return
     reservations.value = [...reservations.value, ...res.reservations]
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
     error.value = ''
-  } catch (e) { error.value = toMessage(e) }
-  finally { loadingMore.value = false }
+  } catch (e) {
+    if (generation === listGeneration) error.value = toMessage(e)
+  }
+  finally {
+    if (generation === listGeneration) loadingMore.value = false
+  }
 }
 
 // Export. Server-side filter (tenant + status) — the fetchPage passes
@@ -415,7 +445,8 @@ watch(() => route.query.tenant_id, (v) => {
   // ?tenant_id (e.g. /budgets?tenant_id=beta) — ignore query changes
   // that belong to another route.
   if (route.name !== 'reservations') return
-  if (typeof v === 'string' && v) {
+  const nextTenantId = stringParam(v)
+  if (nextTenantId) {
     // Validate against the loaded tenant list — mirrors loadTenants'
     // mount-path validation. A palette typo ('/res acme-typo') or an
     // outdated link otherwise blanks the dropdown, 404s the fetch, and
@@ -424,8 +455,8 @@ watch(() => route.query.tenant_id, (v) => {
     // write-back below can't fire because the ref doesn't change), and
     // tell the operator why nothing happened. If tenants haven't loaded
     // yet, adopt provisionally — loadTenants validates once they land.
-    if (tenants.value.length > 0 && !tenants.value.some(t => t.tenant_id === v)) {
-      toast.warning(`Unknown tenant id: ${v}`)
+    if (tenants.value.length > 0 && !tenants.value.some(t => t.tenant_id === nextTenantId)) {
+      toast.warning(`Unknown tenant id: ${nextTenantId}`)
       router.replace({
         query: {
           ...route.query,
@@ -434,7 +465,7 @@ watch(() => route.query.tenant_id, (v) => {
       })
       return
     }
-    if (v !== tenantFilter.value) tenantFilter.value = v
+    if (nextTenantId !== tenantFilter.value) tenantFilter.value = nextTenantId
   } else {
     const next = defaultTenantId()
     if (tenantFilter.value !== next) tenantFilter.value = next
@@ -448,7 +479,7 @@ watch(() => route.query.tenant_id, (v) => {
 // the filter when the URL is already bare is a no-op — keeps the
 // URL → ref watcher above from ping-ponging with this write-back.
 watch(tenantFilter, (tenantId) => {
-  const current = typeof route.query.tenant_id === 'string' ? route.query.tenant_id : ''
+  const current = stringParam(route.query.tenant_id)
   if (current === (tenantId || '')) return
   router.replace({
     query: {
@@ -459,11 +490,11 @@ watch(tenantFilter, (tenantId) => {
 })
 
 const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
-  try {
-    if (tenants.value.length === 0) await loadTenants()
-    await loadReservations()
-    error.value = ''
-  } catch (e) { error.value = toMessage(e) }
+  if (tenants.value.length === 0) {
+    const tenantsLoaded = await loadTenants()
+    if (!tenantsLoaded) return false
+  }
+  return loadReservations()
 }, POLL_FAST_MS)
 
 // ─── Force-release flow ─────────────────────────────────────────────
@@ -778,11 +809,15 @@ const gridTemplate = computed(() =>
          flex-1 min-h-0 flex-col so the scroll body below expands to
          fill remaining viewport. -->
     <div
-      class="bg-white rounded-lg shadow overflow-hidden text-sm flex-1 min-h-0 flex flex-col"
+      class="bg-white rounded-lg shadow overflow-x-auto overflow-y-hidden text-sm flex-1 min-h-0 flex flex-col"
       role="table"
       :aria-rowcount="reservations.length + 1"
       :aria-colcount="canManage ? 9 : 8"
     >
+      <div
+        :style="{ minWidth: canManage ? '1240px' : '1120px' }"
+        class="wide-table-canvas flex flex-col flex-1 min-h-0"
+      >
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
         <div
           role="row"
@@ -813,7 +848,7 @@ const gridTemplate = computed(() =>
         v-if="sortedReservations.length > 0"
         ref="scrollEl"
         role="rowgroup"
-        class="flex-1 overflow-auto min-h-[200px]"
+        class="flex-1 overflow-y-auto overflow-x-hidden min-h-[200px]"
       >
         <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
           <div
@@ -878,16 +913,17 @@ const gridTemplate = computed(() =>
           </div>
         </div>
       </div>
+      </div>
 
       <!-- Empty state lives outside the virtualized body — the virtualizer
            only understands row-indexed content. -->
       <!-- P1-H3: wire the existing loadingList flag to a LoadingSkeleton
            so the initial fetch no longer shows a blank panel below the
            filter bar. EmptyState only renders once loading finishes. -->
-      <div v-else-if="loadingList" class="px-4 py-6">
+      <div v-if="sortedReservations.length === 0 && loadingList" class="responsive-table-state px-4 py-6">
         <LoadingSkeleton />
       </div>
-      <div v-else>
+      <div v-else-if="sortedReservations.length === 0" class="responsive-table-state">
         <EmptyState
           :message="tenantFilter
             ? (statusFilter ? `No ${statusFilter} reservations for this tenant` : 'No reservations for this tenant')

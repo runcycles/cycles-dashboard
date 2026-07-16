@@ -246,15 +246,27 @@ policies, API keys, webhooks, events, audit; both planes share the one Redis.
 Dashboard and caddy containers are stateless. The compose volumes are the
 only persistence on the host.
 
-Back up while the stack runs — `SAVE` forces a point-in-time dump, then a
-throwaway container tars the volume:
+Take a short maintenance window for backups. Redis is configured with AOF
+enabled, and Redis 7 stores AOF data as a manifest plus multiple files. Tarring
+the volume while Redis is running can race an AOF rewrite and capture a file set
+that does not match the manifest. Stop the writers first, force an RDB snapshot,
+then stop Redis before a throwaway container reads the volume:
 
 ```bash
+docker compose -f docker-compose.prod.yml stop \
+  cycles-admin cycles-server cycles-events
 docker compose -f docker-compose.prod.yml exec redis \
-  redis-cli -a "$REDIS_PASSWORD" SAVE
+  sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli SAVE'
+docker compose -f docker-compose.prod.yml stop redis
 docker run --rm -v <project>_redis-data:/data -v "$PWD":/backup alpine \
   tar czf /backup/redis-data-$(date +%F).tar.gz -C /data .
+docker compose -f docker-compose.prod.yml up -d
 ```
+
+`REDISCLI_AUTH` is set inside the Redis container, so the command uses the
+password Compose supplied from `.env` even when the host shell did not export
+`REDIS_PASSWORD`. If any backup step fails after services are stopped, run the
+final `up -d` command to restore the stack before investigating.
 
 Restore into a stopped stack:
 

@@ -2,14 +2,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { defineComponent, h, nextTick } from 'vue'
 import type { Ref } from 'vue'
 import { mount } from '@vue/test-utils'
-import { usePolling } from '../composables/usePolling'
+import { POLLING_STALE, usePolling } from '../composables/usePolling'
 
 // Mount the composable inside a throwaway component so we get the real
 // onMounted / onUnmounted lifecycle wired up. This is needed to exercise
 // the unmount-safety guards (the bug was: tick() awaits in-flight, resolves
 // after unmount, then reschedule() leaks a new setInterval).
 function mountPolling(
-  cb: (signal: AbortSignal) => Promise<void>,
+  cb: (signal: AbortSignal) => Promise<void | boolean | typeof POLLING_STALE>,
   intervalMs = 1000,
 ) {
   let refreshFn: (() => void) | null = null
@@ -238,6 +238,24 @@ describe('usePolling — cancellation & dedup', () => {
     await new Promise(r => setTimeout(r, 10))
     const last = harness.lastSuccess()
     expect(last?.value).toBeNull()
+    harness.wrapper.unmount()
+  })
+
+  it('lastSuccessAt stays null when a view reports a handled failure', async () => {
+    const cb = vi.fn().mockResolvedValue(false)
+    const harness = mountPolling(cb, 10_000)
+    await nextTick()
+    await new Promise(r => setTimeout(r, 10))
+    expect(harness.lastSuccess()?.value).toBeNull()
+    harness.wrapper.unmount()
+  })
+
+  it('lastSuccessAt stays null for a callback-managed stale result', async () => {
+    const cb = vi.fn().mockResolvedValue(POLLING_STALE)
+    const harness = mountPolling(cb, 10_000)
+    await nextTick()
+    await new Promise(r => setTimeout(r, 10))
+    expect(harness.lastSuccess()?.value).toBeNull()
     harness.wrapper.unmount()
   })
 

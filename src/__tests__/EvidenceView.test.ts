@@ -11,6 +11,12 @@ import { ApiError } from '../api/client'
 const getEvidenceMock = vi.fn()
 const getEvidenceJwksMock = vi.fn()
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(res => { resolve = res })
+  return { promise, resolve }
+}
+
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
   return {
@@ -176,6 +182,28 @@ describe('EvidenceView', () => {
     await flushPromises()
     expect(getEvidenceMock).toHaveBeenLastCalledWith(idB)
     expect(w.text()).toContain('commit envelope')
+  })
+
+  it('does not let an older evidence request overwrite the current URL result', async () => {
+    const idA = 'a'.repeat(64)
+    const idB = 'b'.repeat(64)
+    const requestA = deferred<any>()
+    const requestB = deferred<any>()
+    getEvidenceMock.mockImplementation((id: string) => id === idA ? requestA.promise : requestB.promise)
+    routeRef.query = { id: idA }
+    const w = await mountView()
+    expect(getEvidenceMock).toHaveBeenCalledWith(idA)
+
+    routeRef.query = { id: idB }
+    await vi.waitFor(() => expect(getEvidenceMock).toHaveBeenCalledWith(idB))
+    requestB.resolve({ ...ENVELOPE, evidence_id: idB, artifact_type: 'commit' })
+    await flushPromises()
+    expect(w.text()).toContain('commit envelope')
+
+    requestA.resolve({ ...ENVELOPE, evidence_id: idA, artifact_type: 'release' })
+    await flushPromises()
+    expect(w.text()).toContain('commit envelope')
+    expect(w.text()).not.toContain('release envelope')
   })
 
   it('clears the envelope when navigating back to bare /evidence', async () => {

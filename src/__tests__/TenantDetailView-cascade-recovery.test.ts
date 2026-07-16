@@ -338,6 +338,35 @@ describe('TenantDetailView — cascade-recovery banner (v0.1.25.44)', () => {
       expect(listApiKeysMock).toHaveBeenCalledWith({ tenant_id: 'acme' })
     })
 
+    it('keeps the successful CLOSED state when a post-close refresh fails', async () => {
+      getTenantMock.mockResolvedValueOnce(tenant('ACTIVE'))
+      listBudgetsMock.mockResolvedValueOnce({ ledgers: [budget('ACTIVE')], has_more: false })
+      listWebhooksMock.mockResolvedValueOnce({ subscriptions: [webhook('ACTIVE')], has_more: false })
+      listApiKeysMock.mockResolvedValueOnce({ keys: [apiKey('ACTIVE')], has_more: false })
+
+      const w = await mountView()
+
+      updateTenantStatusMock.mockResolvedValue(tenant('CLOSED'))
+      getTenantMock.mockRejectedValue(new Error('refresh unavailable'))
+      listBudgetsMock.mockResolvedValue({ ledgers: [budget('CLOSED')], has_more: false })
+      listWebhooksMock.mockResolvedValue({ subscriptions: [webhook('DISABLED')], has_more: false })
+      listApiKeysMock.mockResolvedValue({ keys: [apiKey('REVOKED')], has_more: false })
+
+      const closeBtn = w.findAll('button').find(b => b.text() === 'Close')
+      await closeBtn!.trigger('click')
+      await w.find<HTMLInputElement>('input[type="text"]').setValue('Acme Corp')
+      const confirmBtn = w.findAll('button').find(b => b.text() === 'Close Permanently')
+      await confirmBtn!.trigger('click')
+      await flushPromises()
+
+      // The PATCH response is committed before refresh. A failed GET must not
+      // leave an ACTIVE tenant on screen or describe the mutation as failed.
+      expect(w.text()).toContain('CLOSED')
+      expect(w.findAll('button').some(b => b.text() === 'Close')).toBe(false)
+      expect(w.text()).toContain('Tenant status changed, but refresh failed: refresh unavailable')
+      expect(w.text()).not.toContain('Tenant status change failed')
+    })
+
     it('poll tick that fires mid-rerun does not clobber fresh post-PATCH state', async () => {
       // Rerun-cascade runs: PATCH + refetch of 4 resources. If a poll
       // tick interleaves, its fetches (which see pre-PATCH state) can

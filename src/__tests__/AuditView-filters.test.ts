@@ -156,6 +156,30 @@ describe('AuditView — v0.1.25.24 status_min/status_max range filter', () => {
     expect(wrapper.find('[data-band=""]').attributes('aria-checked')).toBe('false')
     expect(wrapper.find('[data-band="success"]').attributes('aria-checked')).toBe('false')
   })
+
+  it('uses roving tabindex and arrow/Home/End keyboard navigation', async () => {
+    const wrapper = mount(AuditView, { attachTo: document.body })
+    const all = wrapper.get('[data-band=""]')
+    const success = wrapper.get('[data-band="success"]')
+    const last = wrapper.get('[data-band="5xx"]')
+
+    expect(all.attributes('tabindex')).toBe('0')
+    expect(success.attributes('tabindex')).toBe('-1')
+    ;(all.element as HTMLElement).focus()
+    await all.trigger('keydown', { key: 'ArrowRight' })
+    expect(success.attributes('aria-checked')).toBe('true')
+    expect(success.attributes('tabindex')).toBe('0')
+    expect(document.activeElement).toBe(success.element)
+
+    await success.trigger('keydown', { key: 'End' })
+    expect(last.attributes('aria-checked')).toBe('true')
+    expect(document.activeElement).toBe(last.element)
+
+    await last.trigger('keydown', { key: 'ArrowRight' })
+    expect(all.attributes('aria-checked')).toBe('true')
+    expect(document.activeElement).toBe(all.element)
+    wrapper.unmount()
+  })
 })
 
 describe('AuditView — search field advertises the v0.1.25.24 widened match set', () => {

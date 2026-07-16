@@ -207,9 +207,11 @@ const { sortKey, sortDir, toggle, sorted: columnSortedTenants } = useSort(
 // status=CLOSED explicitly auto-shows them.
 const {
   includeTerminal,
+  showTerminal,
   visibleRows: sortedTenants,
   terminalCount: hiddenTerminalCount,
   terminalVerb,
+  isTerminal: isTerminalTenant,
 } = useTerminalAwareList<Tenant>({
   kind: 'tenant',
   source: columnSortedTenants,
@@ -630,7 +632,10 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
     nextCursor.value = res.next_cursor ?? ''
     error.value = ''
     initialLoadDone.value = true
-  } catch (e) { error.value = toMessage(e) }
+  } catch (e) {
+    error.value = toMessage(e)
+    return false
+  }
 }, POLL_SLOW_MS)
 
 // Refetch page 1 whenever the debounced search changes so the cursor
@@ -657,6 +662,8 @@ function tenantMatchesFilter(t: Tenant): boolean {
       return false
     }
   }
+  if (statusFilter.value && t.status !== statusFilter.value) return false
+  if (!showTerminal.value && isTerminalTenant(t)) return false
   return true
 }
 const {
@@ -822,7 +829,7 @@ const gridTemplate = computed(() =>
           aria-label="Apply action to all tenants matching the current filter"
           class="inline-flex items-center gap-2 flex-wrap"
         >
-          <div class="w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
+          <div class="hidden sm:block w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
           <span class="muted-sm whitespace-nowrap">Apply to all matching filter:</span>
           <button
             @click="openFilterBulk('SUSPEND')"
@@ -861,10 +868,10 @@ const gridTemplate = computed(() =>
           v-if="canManage && selectedVisibleCount > 0"
           role="toolbar"
           aria-label="Bulk tenant actions"
-          class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-gray-900 dark:border dark:border-gray-700 border-2 border-blue-400 shadow-2xl rounded-lg px-4 py-2.5 flex items-center gap-3 max-w-[90vw]"
+          class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-gray-900 dark:border dark:border-gray-700 border-2 border-blue-400 shadow-2xl rounded-lg px-4 py-2.5 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 max-w-[90vw]"
         >
           <span class="text-sm font-semibold text-blue-900 dark:text-blue-300 tabular-nums">{{ selectedVisibleCount }} selected</span>
-          <div class="w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
+          <div class="hidden sm:block w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
           <button @click="openBulk('SUSPENDED')" class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer">Suspend</button>
           <button @click="openBulk('ACTIVE')" class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer">Reactivate</button>
           <button
@@ -884,11 +891,15 @@ const gridTemplate = computed(() =>
          flex-1 min-h-0 flex-col so the scroll body below expands to
          fill remaining viewport (phase 5 table-layout unification). -->
     <div
-      class="bg-white rounded-lg shadow overflow-hidden text-sm flex-1 min-h-0 flex flex-col"
+      class="bg-white rounded-lg shadow overflow-x-auto overflow-y-hidden text-sm flex-1 min-h-0 flex flex-col"
       role="table"
       :aria-rowcount="sortedTenants.length + 1"
       :aria-colcount="canManage ? 8 : 6"
     >
+      <div
+        :style="{ minWidth: canManage ? '980px' : '820px' }"
+        class="wide-table-canvas flex flex-col flex-1 min-h-0"
+      >
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
         <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
           <div v-if="canManage" role="columnheader" class="table-cell">
@@ -914,7 +925,7 @@ const gridTemplate = computed(() =>
         v-if="sortedTenants.length > 0"
         ref="scrollEl"
         role="rowgroup"
-        class="flex-1 overflow-auto min-h-[200px]"
+        class="flex-1 overflow-y-auto overflow-x-hidden min-h-[200px]"
       >
         <div role="presentation" :style="{ height: totalHeight + 'px', position: 'relative' }">
           <div
@@ -968,12 +979,13 @@ const gridTemplate = computed(() =>
           </div>
         </div>
       </div>
+      </div>
 
       <!-- P1-H3: cold-load skeleton. -->
-      <div v-else-if="!initialLoadDone && !error" class="px-4 py-6">
+      <div v-if="sortedTenants.length === 0 && !initialLoadDone && !error" class="responsive-table-state px-4 py-6">
         <LoadingSkeleton />
       </div>
-      <div v-else>
+      <div v-else-if="sortedTenants.length === 0" class="responsive-table-state">
         <EmptyState
           item-noun="tenant"
           :has-active-filter="!!(search || parentFilter || statusFilter)"

@@ -28,6 +28,12 @@ import type { Capabilities } from '../types'
 const listWebhooksMock = vi.fn()
 const listTenantsMock = vi.fn()
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(res => { resolve = res })
+  return { promise, resolve }
+}
+
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
   return {
@@ -185,6 +191,46 @@ describe('WebhooksView — URL deep-link smoke', () => {
     // The reset refetched without the status param.
     const params = listWebhooksMock.mock.calls.at(-1)?.[0] as Record<string, string> | undefined
     expect(params?.status).toBeUndefined()
+  })
+
+  it('keeps the bare-URL result when the prior status request resolves last', async () => {
+    const paused = deferred<any>()
+    const unfiltered = deferred<any>()
+    listWebhooksMock.mockImplementation((params?: Record<string, string>) =>
+      params?.status === 'PAUSED' ? paused.promise : unfiltered.promise,
+    )
+    routeRef.query = { status: 'PAUSED' }
+    const { default: WebhooksView } = await import('../views/WebhooksView.vue')
+    const w = mount(WebhooksView, stdMount())
+    await vi.waitFor(() => {
+      expect(listWebhooksMock.mock.calls.some(args => args[0]?.status === 'PAUSED')).toBe(true)
+    })
+
+    routeRef.query = {}
+    await vi.waitFor(() => {
+      expect(listWebhooksMock.mock.calls.some(args => args[0]?.status === undefined)).toBe(true)
+    })
+    unfiltered.resolve({
+      subscriptions: [{
+        subscription_id: 'sub-current', url: 'https://current.example/hook', status: 'ACTIVE',
+        event_types: ['budget.updated'], created_at: '2026-01-01T00:00:00Z', tenant_id: 'acme',
+      }],
+      has_more: false,
+    })
+    await flushPromises()
+    expect(w.text()).toContain('current.example')
+
+    paused.resolve({
+      subscriptions: [{
+        subscription_id: 'sub-stale', url: 'https://stale.example/hook', status: 'PAUSED',
+        event_types: ['budget.updated'], created_at: '2026-01-01T00:00:00Z', tenant_id: 'acme',
+      }],
+      has_more: false,
+    })
+    await flushPromises()
+    expect((w.find('select[aria-label="Filter webhooks by status"]').element as HTMLSelectElement).value).toBe('')
+    expect(w.text()).toContain('current.example')
+    expect(w.text()).not.toContain('stale.example')
   })
 
   // Route-identity guard still holds: navigating AWAY to a route that

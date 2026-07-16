@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter, type Router } from 'vue-router'
 import { useCommandPalette } from '../composables/useCommandPalette'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
+import { useFocusTrap } from '../composables/useFocusTrap'
 import type { Tenant } from '../types'
 import SearchIcon from './icons/SearchIcon.vue'
 
@@ -26,6 +27,8 @@ const router = useRouter()
 const { isOpen, close, loadInitial, loadMore } = useCommandPalette()
 
 const input = ref<HTMLInputElement | null>(null)
+const dialogRef = ref<HTMLElement | null>(null)
+useFocusTrap(dialogRef)
 const query = ref('')
 const debouncedQuery = useDebouncedRef(query, 150)
 const tenants = ref<Tenant[]>([])
@@ -366,14 +369,15 @@ const placeholder = computed(() => {
         role="dialog"
         aria-modal="true"
         aria-labelledby="command-palette-title"
-        class="fixed inset-0 z-50 flex items-start justify-center pt-[15vh] px-4 bg-black/40"
+        class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:px-4 sm:pb-4 sm:pt-[15vh] bg-black/40"
         @click.self="close"
       >
         <div
-          class="w-full max-w-xl bg-white dark:bg-gray-900 rounded-lg shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
+          ref="dialogRef"
+          class="w-full max-w-xl max-h-[calc(100dvh-2rem)] sm:max-h-[calc(85dvh-1rem)] flex flex-col bg-white dark:bg-gray-900 rounded-lg shadow-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
           @keydown="onKeydown"
         >
-          <div class="flex items-center gap-2 border-b border-gray-200 dark:border-gray-700 px-3">
+          <div class="flex items-center gap-2 shrink-0 border-b border-gray-200 dark:border-gray-700 px-3">
             <SearchIcon class="w-4 h-4 text-gray-400 shrink-0" />
             <label id="command-palette-title" class="sr-only" for="command-palette-input">Search tenants or run a command</label>
             <input
@@ -399,7 +403,7 @@ const placeholder = computed(() => {
             ref="listEl"
             role="listbox"
             aria-label="Command palette results"
-            class="max-h-80 overflow-y-auto overflow-x-hidden"
+            class="max-h-80 flex-1 min-h-0 overflow-y-auto overflow-x-hidden"
           >
             <!-- Tenant search mode (default) -->
             <template v-if="parsed.mode === 'search'">

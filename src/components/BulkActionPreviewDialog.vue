@@ -85,12 +85,12 @@ const SERVER_MAX = props.serverMaxPerRequest ?? 500
 
 <template>
   <div
-    class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
+    class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 overflow-y-auto p-4 sm:p-8"
     @click.self="!submitting && $emit('cancel')"
   >
     <div
       ref="dialogRef"
-      class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 w-full max-w-md mx-4"
+      class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto"
       role="dialog"
       aria-modal="true"
       :aria-label="`${actionVerb} ${itemNounPlural} matching filter`"

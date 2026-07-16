@@ -1,9 +1,8 @@
 // ToastContainer a11y + dismiss affordance.
 //
 // Every toast renders a keyboard-focusable dismiss (×) button; the
-// container is a polite live region so incoming toasts are announced,
-// and error toasts individually carry role="alert" so failures are
-// announced assertively.
+// each toast owns exactly one live-region role: polite status for
+// success/warning and assertive alert for errors.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -14,11 +13,10 @@ describe('ToastContainer', () => {
   beforeEach(() => { toasts.value = [] })
   afterEach(() => { toasts.value = [] })
 
-  it('container is a polite live region', () => {
+  it('container is not a nested live region', () => {
     const w = mount(ToastContainer)
-    const container = w.find('[aria-live="polite"]')
-    expect(container.exists()).toBe(true)
-    expect(container.attributes('role')).toBe('status')
+    expect(w.find('[aria-live="polite"]').exists()).toBe(false)
+    expect(w.element.getAttribute('role')).toBeNull()
   })
 
   it('error toasts carry role="alert"; success toasts do not', async () => {
@@ -32,16 +30,18 @@ describe('ToastContainer', () => {
     expect(alerts[0].text()).toContain('it broke')
   })
 
-  it('warning toasts carry role="status" (polite advisory), not role="alert"', async () => {
+  it('success and warning toasts each carry one polite status role', async () => {
     const t = useToast()
     const w = mount(ToastContainer)
+    t.success('saved')
     t.warning('permissions will be removed on save')
     await w.vm.$nextTick()
     expect(w.findAll('[role="alert"]')).toHaveLength(0)
-    // Container itself is role="status"; the warning toast adds its own.
     const statuses = w.findAll('[role="status"]')
     expect(statuses.length).toBe(2)
+    expect(statuses[0].text()).toContain('saved')
     expect(statuses[1].text()).toContain('permissions will be removed on save')
+    expect(statuses.every(s => s.attributes('aria-atomic') === 'true')).toBe(true)
   })
 
   it('warning toasts use amber styling, distinct from success green and error red', async () => {
@@ -78,5 +78,21 @@ describe('ToastContainer', () => {
     for (const b of buttons) {
       expect((b.element as HTMLButtonElement).tagName).toBe('BUTTON')
     }
+  })
+
+  it('bounds and wraps long messages on narrow viewports', async () => {
+    const t = useToast()
+    const w = mount(ToastContainer)
+    t.error(`https://example.test/${'unbroken'.repeat(80)}`)
+    await w.vm.$nextTick()
+
+    const container = w.get('div.fixed')
+    expect(container.attributes('class')).toContain('left-4')
+    expect(container.attributes('class')).toContain('right-4')
+    const toast = w.get('[role="alert"]')
+    expect(toast.attributes('class')).toContain('max-w-[calc(100vw-2rem)]')
+    const message = toast.get('span')
+    expect(message.attributes('class')).toContain('min-w-0')
+    expect(message.attributes('class')).toContain('[overflow-wrap:anywhere]')
   })
 })

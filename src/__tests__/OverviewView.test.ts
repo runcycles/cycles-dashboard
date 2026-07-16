@@ -52,6 +52,7 @@ vi.mock('../composables/usePolling', async () => {
   // refresh), and a plain {value} object is not a valid watch source.
   const { ref } = await import('vue')
   return {
+    POLLING_STALE: Symbol('polling-stale-test'),
     usePolling: (fn: () => Promise<void> | void) => {
       pollState.callback = fn
       void fn()

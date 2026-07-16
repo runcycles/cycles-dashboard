@@ -60,6 +60,7 @@ const pollState = vi.hoisted(() => ({
 vi.mock('../composables/usePolling', async () => {
   const { ref: vueRef } = await import('vue')
   return {
+    POLLING_STALE: Symbol('polling-stale-test'),
     usePolling: (fn: () => Promise<void> | void) => {
       pollState.callback = fn
       const isLoading = vueRef(false)

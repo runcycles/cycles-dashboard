@@ -45,14 +45,21 @@ const error = ref('')
 const notYetAvailable = ref(false)
 
 const ID_RE = /^[0-9a-f]{64}$/
+let evidenceLoadSeq = 0
+let signerLoadSeq = 0
 
 async function fetchEvidence() {
+  const seq = ++evidenceLoadSeq
+  // A new envelope invalidates signer resolution for the previous one.
+  signerLoadSeq++
   const id = evidenceId.value.trim().toLowerCase()
   error.value = ''
   notYetAvailable.value = false
   envelope.value = null
   signerResult.value = null
+  signerLoading.value = false
   if (!ID_RE.test(id)) {
+    loading.value = false
     error.value = 'Evidence ID must be 64 lowercase hex characters.'
     return
   }
@@ -60,8 +67,11 @@ async function fetchEvidence() {
   if (route.query.id !== id) router.replace({ query: { ...route.query, id } })
   loading.value = true
   try {
-    envelope.value = await getEvidence(id)
+    const result = await getEvidence(id)
+    if (seq !== evidenceLoadSeq) return
+    envelope.value = result
   } catch (e) {
+    if (seq !== evidenceLoadSeq) return
     if (e instanceof ApiError && e.status === 404) {
       // A 404 is ambiguous: either the id is wrong/old, or the envelope
       // is still being signed (stored asynchronously after the decision).
@@ -72,7 +82,7 @@ async function fetchEvidence() {
       error.value = toMessage(e)
     }
   } finally {
-    loading.value = false
+    if (seq === evidenceLoadSeq) loading.value = false
   }
 }
 
@@ -128,18 +138,21 @@ function withinValidity(jwk: CyclesEvidenceJwk, nowMs: number): boolean {
 
 async function resolveSigner() {
   if (!envelope.value) return
+  const target = envelope.value
+  const seq = ++signerLoadSeq
   signerLoading.value = true
   signerResult.value = null
   try {
     const jwks = await getEvidenceJwks()
+    if (seq !== signerLoadSeq || envelope.value !== target) return
     // Audit semantics: validate the key against the envelope's ISSUANCE
     // time, not "now". A key that was valid when it signed this envelope
     // but has since been retired must still resolve as valid for the
     // historical artifact — judging against Date.now() would wrongly flag
     // legitimate old evidence as out-of-window.
-    const at = envelope.value.issued_at_ms
+    const at = target.issued_at_ms
     // Handles both signer_did forms: did:cycles#kid and raw 64-hex.
-    const match = findSignerJwk(envelope.value.signer_did, jwks.keys)
+    const match = findSignerJwk(target.signer_did, jwks.keys)
     if (!match) {
       signerResult.value = {
         found: false, withinWindow: false,
@@ -155,9 +168,11 @@ async function resolveSigner() {
         : `Signer key "${match.kid}" is published but was NOT valid at the envelope's issuance time.`,
     }
   } catch (e) {
-    signerResult.value = { found: false, withinWindow: false, message: toMessage(e) }
+    if (seq === signerLoadSeq && envelope.value === target) {
+      signerResult.value = { found: false, withinWindow: false, message: toMessage(e) }
+    }
   } finally {
-    signerLoading.value = false
+    if (seq === signerLoadSeq) signerLoading.value = false
   }
 }
 
@@ -179,11 +194,16 @@ onMounted(() => { if (evidenceId.value) fetchEvidence() })
 watch(() => route.query.id, (raw) => {
   const next = typeof raw === 'string' ? raw : ''
   if (next === evidenceId.value) return
+  // Invalidate both async pipelines before clearing the old result.
+  evidenceLoadSeq++
+  signerLoadSeq++
   evidenceId.value = next
   envelope.value = null
   error.value = ''
   notYetAvailable.value = false
   signerResult.value = null
+  loading.value = false
+  signerLoading.value = false
   if (next) fetchEvidence()
 })
 </script>

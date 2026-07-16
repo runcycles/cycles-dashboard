@@ -38,7 +38,13 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
   <div class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 overflow-y-auto py-8" @click.self="!loading && $emit('cancel')">
     <div ref="dialogRef" :class="wide ? 'max-w-xl' : 'max-w-lg'" class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 mx-4 w-full" role="dialog" aria-modal="true" :aria-label="title" :aria-busy="loading || undefined">
       <h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-4">{{ title }}</h3>
-      <p v-if="error" class="bg-red-50 border border-red-200 text-red-700 text-sm rounded px-3 py-2 mb-4">{{ error }}</p>
+      <p
+        v-if="error"
+        role="alert"
+        aria-live="assertive"
+        aria-atomic="true"
+        class="bg-red-50 border border-red-200 text-red-700 text-sm rounded px-3 py-2 mb-4 dark:bg-red-950 dark:border-red-800 dark:text-red-300"
+      >{{ error }}</p>
       <form @submit.prevent="$emit('submit')">
         <div class="space-y-3">
           <slot />

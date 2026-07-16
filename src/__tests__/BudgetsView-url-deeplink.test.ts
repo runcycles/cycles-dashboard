@@ -184,4 +184,17 @@ describe('BudgetsView — URL deep-link smoke', () => {
     const params = listBudgetsMock.mock.calls[0][0] as Record<string, string>
     expect(params.utilization_min).toBeUndefined()
   })
+
+  it('keeps a failed detail lookup in the detail error shell instead of rendering the list', async () => {
+    routeRef.query = { scope: 'tenant:missing/*', unit: 'TOKENS' }
+    lookupBudgetMock.mockRejectedValue(new Error('ledger not found'))
+    const { default: BudgetsView } = await import('../views/BudgetsView.vue')
+    const w = mount(BudgetsView, stdMount())
+    await flushPromises()
+
+    expect(w.find('[data-testid="budget-detail-error-state"]').exists()).toBe(true)
+    expect(w.text()).toContain('Budget details unavailable')
+    expect(w.find('#budget-tenant').exists()).toBe(false)
+    expect(w.text()).not.toContain('Viewing budgets across all tenants')
+  })
 })

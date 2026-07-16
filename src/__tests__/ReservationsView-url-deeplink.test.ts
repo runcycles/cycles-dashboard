@@ -28,6 +28,13 @@ import type { Capabilities } from '../types'
 const listReservationsMock = vi.fn()
 const listTenantsMock = vi.fn()
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej })
+  return { promise, resolve, reject }
+}
+
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
   return {
@@ -42,7 +49,7 @@ vi.mock('../api/client', async () => {
 // palette command) without a remount. Carries `name` because the view's
 // query watchers are route-identity-guarded (F3) — tests flip it to
 // simulate navigating away to a route with same-named params.
-const routeRef: { query: Record<string, string>; params: Record<string, string>; name: string } =
+const routeRef: { query: Record<string, string | (string | null)[] | null>; params: Record<string, string>; name: string } =
   reactive({ query: {}, params: {}, name: 'reservations' })
 
 // Shared replace spy so tests can assert the URL write-back / correction
@@ -60,10 +67,11 @@ vi.mock('vue-router', async (importOriginal) => {
 })
 
 vi.mock('../composables/usePolling', () => ({
+  POLLING_STALE: Symbol('polling-stale'),
   usePolling: (fn: () => Promise<void> | void) => {
     void fn()
     return {
-      refresh: async () => { void fn() },
+      refresh: () => fn(),
       isLoading: { value: false },
     }
   },
@@ -153,6 +161,36 @@ describe('ReservationsView — URL deep-link smoke', () => {
     expect(call).toBeDefined()
   })
 
+  it('uses the first duplicated ?tenant_id value instead of resetting to the default tenant', async () => {
+    routeRef.query = { tenant_id: ['beta', 'alpha'] }
+    listTenantsMock.mockResolvedValue({
+      tenants: [
+        { tenant_id: 'alpha', status: 'ACTIVE' },
+        { tenant_id: 'beta', status: 'ACTIVE' },
+      ],
+      has_more: false,
+    })
+    const { default: ReservationsView } = await import('../views/ReservationsView.vue')
+    const w = mount(ReservationsView, stdMount())
+    await flushPromises()
+
+    expect((w.find('#res-tenant').element as HTMLSelectElement).value).toBe('beta')
+    expect(listReservationsMock.mock.calls.some(args => args[0] === 'beta')).toBe(true)
+    expect(listReservationsMock.mock.calls.some(args => args[0] === 'alpha')).toBe(false)
+  })
+
+  it('reports a tenant-catalog failure to the poller instead of clearing it as success', async () => {
+    listTenantsMock.mockRejectedValue(new Error('tenant catalog unavailable'))
+    const { default: ReservationsView } = await import('../views/ReservationsView.vue')
+    const w = mount(ReservationsView, stdMount())
+    await flushPromises()
+
+    const result = await (w.vm as unknown as { refresh: () => Promise<unknown> }).refresh()
+    expect(result).toBe(false)
+    expect(w.text()).toContain('tenant catalog unavailable')
+    expect(listReservationsMock).not.toHaveBeenCalled()
+  })
+
   it('M14: drops a stale ?tenant_id= that no longer exists and falls back to default', async () => {
     routeRef.query = { tenant_id: 'deleted-tenant' }
     listTenantsMock.mockResolvedValue({
@@ -194,6 +232,55 @@ describe('ReservationsView — URL deep-link smoke', () => {
     routeRef.query = { tenant_id: 'beta' }
     await flushPromises()
     expect(listReservationsMock.mock.calls.some(args => args[0] === 'beta')).toBe(true)
+  })
+
+  it('keeps the newest tenant result when an older request resolves last', async () => {
+    routeRef.query = { tenant_id: 'alpha' }
+    listTenantsMock.mockResolvedValue({
+      tenants: [
+        { tenant_id: 'alpha', status: 'ACTIVE' },
+        { tenant_id: 'beta', status: 'ACTIVE' },
+      ],
+      has_more: false,
+    })
+    const alpha = deferred<any>()
+    const beta = deferred<any>()
+    listReservationsMock.mockImplementation((tenantId: string) =>
+      tenantId === 'alpha' ? alpha.promise : beta.promise,
+    )
+
+    const { default: ReservationsView } = await import('../views/ReservationsView.vue')
+    const w = mount(ReservationsView, stdMount())
+    await vi.waitFor(() => {
+      expect(listReservationsMock.mock.calls.some(args => args[0] === 'alpha')).toBe(true)
+    })
+
+    routeRef.query = { tenant_id: 'beta' }
+    await vi.waitFor(() => {
+      expect(listReservationsMock.mock.calls.some(args => args[0] === 'beta')).toBe(true)
+    })
+
+    beta.resolve({
+      reservations: [{
+        reservation_id: 'res-beta', status: 'ACTIVE', scope_path: 'tenant:beta',
+        reserved: { unit: 'TOKENS', amount: 2 }, created_at_ms: 2, expires_at_ms: 3,
+      }],
+      has_more: false,
+    })
+    await flushPromises()
+    expect(w.text()).toContain('res-beta')
+
+    alpha.resolve({
+      reservations: [{
+        reservation_id: 'res-alpha-stale', status: 'ACTIVE', scope_path: 'tenant:alpha',
+        reserved: { unit: 'TOKENS', amount: 1 }, created_at_ms: 1, expires_at_ms: 2,
+      }],
+      has_more: false,
+    })
+    await flushPromises()
+    expect((w.find('#res-tenant').element as HTMLSelectElement).value).toBe('beta')
+    expect(w.text()).toContain('res-beta')
+    expect(w.text()).not.toContain('res-alpha-stale')
   })
 
   // F2 (bare-URL consistency): a bare /reservations must mean the SAME

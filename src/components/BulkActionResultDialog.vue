@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useFocusTrap } from '../composables/useFocusTrap'
+import { useToast } from '../composables/useToast'
+import { writeClipboardText } from '../utils/clipboard'
 import { formatErrorCode } from '../utils/errorCodeMessages'
 import type { BulkActionRowOutcome } from '../types'
 import CheckIcon from './icons/CheckIcon.vue'
@@ -113,6 +115,7 @@ function downloadJson() {
 }
 
 const emit = defineEmits<{ close: [] }>()
+const toast = useToast()
 
 const dialogRef = ref<HTMLElement | null>(null)
 useFocusTrap(dialogRef)
@@ -131,15 +134,14 @@ const succeededOpen = ref(false)
 const copiedId = ref<string | null>(null)
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
 
-function copyId(id: string) {
-  navigator.clipboard.writeText(id).then(() => {
+async function copyId(id: string) {
+  if (await writeClipboardText(id)) {
     copiedId.value = id
     if (copiedTimer) clearTimeout(copiedTimer)
     copiedTimer = setTimeout(() => { copiedId.value = null }, 2000)
-  }).catch(() => {
-    // Clipboard permission denied — leave state untouched. The dialog's
-    // plain row ID is still visible and selectable.
-  })
+  } else {
+    toast.error('Copy failed — clipboard unavailable')
+  }
 }
 
 const totalRows = computed(() =>
@@ -159,12 +161,12 @@ onUnmounted(() => {
 
 <template>
   <div
-    class="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
+    class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 overflow-y-auto p-4 sm:p-8"
     @click.self="$emit('close')"
   >
     <div
       ref="dialogRef"
-      class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 w-full max-w-lg mx-4"
+      class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto"
       role="dialog"
       aria-modal="true"
       :aria-label="`${actionVerb} ${itemNounPlural} — results`"

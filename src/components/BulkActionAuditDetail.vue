@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useToast } from '../composables/useToast'
+import { writeClipboardText } from '../utils/clipboard'
 import { formatErrorCode } from '../utils/errorCodeMessages'
 import { hasBulkAuditShape } from '../utils/auditMetadata'
 import TenantLink from './TenantLink.vue'
@@ -18,6 +20,7 @@ const props = defineProps<{
   operation: string
   metadata: Record<string, unknown>
 }>()
+const toast = useToast()
 
 function nounFor(op: string): string {
   if (op === 'bulkActionTenants') return 'tenants'
@@ -105,18 +108,14 @@ function flash(key: string) {
     if (copiedId.value === key) copiedId.value = null
   }, 2000)
 }
-function copyId(id: string) {
-  // Guard explicitly — `navigator.clipboard?.writeText(id).then(...)` would
-  // throw synchronously if clipboard is undefined (optional chain returns
-  // undefined, then .then() crashes). Insecure contexts / older browsers
-  // fall through; the row id is still selectable from the rendered text.
-  if (!navigator.clipboard) return
-  navigator.clipboard.writeText(id).then(() => flash(id)).catch(() => {})
+async function copyId(id: string) {
+  if (await writeClipboardText(id)) flash(id)
+  else toast.error('Copy failed — clipboard unavailable')
 }
-function copyAllSucceeded() {
+async function copyAllSucceeded() {
   if (!succeededIds.value.length) return
-  if (!navigator.clipboard) return
-  navigator.clipboard.writeText(succeededIds.value.join(',')).then(() => flash('__all__')).catch(() => {})
+  if (await writeClipboardText(succeededIds.value.join(','))) flash('__all__')
+  else toast.error('Copy failed — clipboard unavailable')
 }
 </script>
 

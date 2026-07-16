@@ -683,6 +683,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async (signal) => {
     } else {
       error.value = toMessage(e)
     }
+    return false
   }
 }, POLL_FAST_MS)
 
@@ -1061,7 +1062,7 @@ watch(exportError, (v) => { if (v) error.value = v })
            view — "CSV" / "JSON" was a lone abbreviation. Status filter
            applied server-side so pagination stays consistent;
            Load-more appends. -->
-      <div class="bg-white rounded-lg shadow overflow-hidden text-sm" role="table" :aria-rowcount="filteredDeliveries.length + 1" :aria-colcount="5">
+      <div class="bg-white rounded-lg shadow overflow-hidden text-sm" role="table" :aria-rowcount="filteredDeliveries.length + 1" :aria-colcount="7">
         <div class="table-cell border-b border-gray-100 space-y-2">
           <h3 class="text-sm font-medium text-gray-700">Delivery History</h3>
           <div class="flex items-center gap-x-3 gap-y-2 flex-wrap">
@@ -1088,6 +1089,8 @@ watch(exportError, (v) => { if (v) error.value = v })
           </div>
         </div>
 
+        <div class="overflow-x-auto overflow-y-hidden">
+        <div style="min-width: 882px" class="wide-table-canvas">
         <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
           <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: deliveryGridTemplate }">
             <SortHeader as="div" label="Status" column="status" :active-column="deliverySortKey" :direction="deliverySortDir" @sort="deliveryToggle" />
@@ -1104,7 +1107,7 @@ watch(exportError, (v) => { if (v) error.value = v })
           v-if="sortedDeliveries.length > 0"
           ref="deliveryScrollEl"
           role="rowgroup"
-          class="overflow-y-auto max-h-[60vh] min-h-[200px]"
+          class="overflow-y-auto overflow-x-hidden max-h-[60vh] min-h-[200px]"
         >
           <div role="presentation" :style="{ height: deliveryTotalHeight + 'px', position: 'relative' }">
             <div
@@ -1141,8 +1144,10 @@ watch(exportError, (v) => { if (v) error.value = v })
             </div>
           </div>
         </div>
+        </div>
+        </div>
 
-        <div v-else>
+        <div v-if="sortedDeliveries.length === 0" class="responsive-table-state">
           <EmptyState
             item-noun="delivery"
             :has-active-filter="!!deliveryStatusFilter"

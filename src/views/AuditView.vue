@@ -158,6 +158,27 @@ const STATUS_BANDS: { value: typeof statusBand.value; label: string }[] = [
   { value: '4xx',     label: '4xx' },
   { value: '5xx',     label: '5xx' },
 ]
+
+// ARIA radio keyboard contract: one Tab stop, arrow keys move and select,
+// Home/End jump to the bounds. Native buttons still handle Space/Enter.
+function onStatusBandKeydown(e: KeyboardEvent) {
+  const supported = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End']
+  if (!supported.includes(e.key)) return
+  const current = e.currentTarget as HTMLElement
+  const group = current.closest('[role="radiogroup"]')
+  if (!group) return
+  const radios = Array.from(group.querySelectorAll<HTMLElement>('[role="radio"]'))
+  const currentIndex = radios.indexOf(current)
+  if (currentIndex < 0 || radios.length === 0) return
+  e.preventDefault()
+  let nextIndex = currentIndex
+  if (e.key === 'Home') nextIndex = 0
+  else if (e.key === 'End') nextIndex = radios.length - 1
+  else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') nextIndex = (currentIndex + 1) % radios.length
+  else nextIndex = (currentIndex - 1 + radios.length) % radios.length
+  radios[nextIndex].focus()
+  radios[nextIndex].click()
+}
 const fromDate = ref('')
 const toDate = ref('')
 // TimeRangePicker wants a { from, to } object as v-model. Use a
@@ -262,16 +283,32 @@ const {
 // Surface export-composable errors through the view's existing error banner.
 watch(exportError, (v) => { if (v) error.value = v })
 
+// Each page-1 query starts a new result generation. A slower request from an
+// older filter/sort state must never overwrite the newest response, and any
+// load-more request tied to that older generation must not append into it.
+let resultGeneration = 0
+
 async function query() {
+  const generation = ++resultGeneration
+  const params = buildFilterParams()
   loading.value = true
+  // Hide pagination for the previous result set while its replacement is in
+  // flight. Existing rows stay visible until the newest response arrives.
+  hasMore.value = false
+  nextCursor.value = ''
   try {
-    const res = await listAuditLogs(buildFilterParams())
+    const res = await listAuditLogs(params)
+    if (generation !== resultGeneration) return
     entries.value = res.logs
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
     error.value = ''
-  } catch (e) { error.value = toMessage(e) }
-  finally { loading.value = false }
+  } catch (e) {
+    if (generation === resultGeneration) error.value = toMessage(e)
+  }
+  finally {
+    if (generation === resultGeneration) loading.value = false
+  }
 }
 
 // Load-more: append the next cursor page to the visible list. Separate
@@ -281,15 +318,20 @@ async function query() {
 const loadingMore = ref(false)
 async function loadMore() {
   if (!nextCursor.value || loadingMore.value) return
+  const generation = resultGeneration
+  const cursor = nextCursor.value
   loadingMore.value = true
   try {
-    const params = { ...buildFilterParams(), cursor: nextCursor.value }
+    const params = { ...buildFilterParams(), cursor }
     const res = await listAuditLogs(params)
+    if (generation !== resultGeneration) return
     entries.value = [...entries.value, ...res.logs]
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
     error.value = ''
-  } catch (e) { error.value = toMessage(e) }
+  } catch (e) {
+    if (generation === resultGeneration) error.value = toMessage(e)
+  }
   finally { loadingMore.value = false }
 }
 
@@ -374,8 +416,9 @@ function serializeQuery(q: Record<string, string>): string {
 function serializeRouteQuery(): string {
   const current: Record<string, string> = {}
   for (const [k, v] of Object.entries(route.query)) {
-    if (v == null || v === '') continue
-    current[k] = Array.isArray(v) ? String(v[0]) : String(v)
+    const normalized = stringParam(v)
+    if (!normalized) continue
+    current[k] = normalized
   }
   return serializeQuery(current)
 }
@@ -656,7 +699,9 @@ function measureRow(el: Element | { $el?: Element } | null) {
               role="radio"
               :data-band="b.value"
               :aria-checked="statusBand === b.value"
+              :tabindex="statusBand === b.value ? 0 : -1"
               @click="statusBand = b.value"
+              @keydown="onStatusBandKeydown"
               class="px-2.5 py-1 text-xs rounded cursor-pointer transition-colors"
               :class="statusBand === b.value
                 ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
@@ -698,7 +743,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
           from 1000px to 900px so iPad portrait (768px) reaches the
           visually-lossless case with a single-finger scroll, not a
           double-finger reflow. -->
-     <div style="min-width: 900px" class="flex flex-col flex-1 min-h-0">
+     <div style="min-width: 900px" class="wide-table-canvas flex flex-col flex-1 min-h-0">
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
         <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
           <div role="columnheader" class="table-cell"></div>
@@ -847,18 +892,18 @@ function measureRow(el: Element | { $el?: Element } | null) {
           </div>
         </div>
       </div>
+     </div>
 
-      <div v-else-if="!loading">
+      <div v-if="sortedEntries.length === 0 && !loading" class="responsive-table-state">
         <EmptyState message="No audit logs found" hint="Try a broader time range (e.g. Last 24h) or clear your filters" />
       </div>
 
       <!-- P1-H3: LoadingSkeleton replaces raw "Loading..." text so
            AuditView matches the cold-load pattern used in the detail
            views — consistent density, consistent motion. -->
-      <div v-else-if="loading" class="px-4 py-6">
+      <div v-else-if="sortedEntries.length === 0 && loading" class="responsive-table-state px-4 py-6">
         <LoadingSkeleton />
       </div>
-     </div>
     </div>
 
     <!-- Load more — outside the virtualized scroll region, mirrors

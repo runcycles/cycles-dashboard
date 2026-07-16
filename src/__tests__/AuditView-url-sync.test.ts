@@ -38,7 +38,26 @@ const replaceMock = vi.fn()
 // tests reassign `routeRef.query` (simulating back/forward + same-route
 // navigation without a remount). Carries `name` because the watcher is
 // route-identity-guarded (F3).
-const routeRef = reactive({ query: {} as Record<string, string>, name: 'audit' })
+const routeRef = reactive({ query: {} as Record<string, string | (string | null)[] | null>, name: 'audit' })
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
+function auditLog(logId: string) {
+  return {
+    log_id: logId,
+    timestamp: '2026-07-15T12:00:00Z',
+    operation: `operation-${logId}`,
+    status: 200,
+  }
+}
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: vi.fn(), replace: replaceMock }),
@@ -62,6 +81,18 @@ async function mountView() {
 }
 
 describe('AuditView — URL ↔ form sync guard (F2)', () => {
+  it('normalizes a valueless-first duplicated param the same way as form hydration', async () => {
+    routeRef.query = { tenant_id: [null, 'acme'] }
+    const w = await mountView()
+    expect((w.find('#audit-tenant').element as HTMLInputElement).value).toBe('acme')
+    expect(listAuditLogsMock.mock.calls.at(-1)![0].tenant_id).toBe('acme')
+
+    listAuditLogsMock.mockClear()
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(listAuditLogsMock).toHaveBeenCalledTimes(1)
+  })
+
   it('back/forward to a parameterized URL refetches even when the form already matches', async () => {
     const w = await mountView()
     // Operator typed a tenant into the form but did NOT submit — the
@@ -216,5 +247,51 @@ describe('AuditView — URL ↔ form sync guard (F2)', () => {
     await flushPromises()
     expect(listAuditLogsMock).not.toHaveBeenCalled()
     expect((w.find('#audit-tenant').element as HTMLInputElement).value).toBe('acme')
+  })
+
+  it('ignores an older page-one response that resolves after a newer navigation', async () => {
+    const older = deferred<unknown>()
+    const newer = deferred<unknown>()
+    listAuditLogsMock
+      .mockReset()
+      .mockReturnValueOnce(older.promise)
+      .mockReturnValueOnce(newer.promise)
+
+    const w = await mountView()
+    routeRef.query = { tenant_id: 'newest' }
+    await flushPromises()
+
+    newer.resolve({ logs: [auditLog('new-1'), auditLog('new-2')], has_more: false })
+    await flushPromises()
+    expect(w.find('[role="table"]').attributes('aria-rowcount')).toBe('3')
+
+    older.resolve({ logs: [auditLog('old')], has_more: false })
+    await flushPromises()
+    expect(w.find('[role="table"]').attributes('aria-rowcount')).toBe('3')
+  })
+
+  it('discards an in-flight load-more page after the filters change', async () => {
+    const oldPage = deferred<unknown>()
+    const newQuery = deferred<unknown>()
+    listAuditLogsMock
+      .mockReset()
+      .mockResolvedValueOnce({ logs: [auditLog('initial')], has_more: true, next_cursor: 'old-cursor' })
+      .mockReturnValueOnce(oldPage.promise)
+      .mockReturnValueOnce(newQuery.promise)
+
+    const w = await mountView()
+    const loadMore = w.findAll('button').find(b => b.text() === 'Load more')
+    await loadMore!.trigger('click')
+    routeRef.query = { tenant_id: 'newest' }
+    await flushPromises()
+
+    newQuery.resolve({ logs: [auditLog('new-1'), auditLog('new-2')], has_more: false })
+    await flushPromises()
+    oldPage.resolve({ logs: [auditLog('stale-page')], has_more: false })
+    await flushPromises()
+
+    expect(w.find('[role="table"]').attributes('aria-rowcount')).toBe('3')
+    expect(listAuditLogsMock.mock.calls[1][0].cursor).toBe('old-cursor')
+    expect(listAuditLogsMock.mock.calls[2][0].tenant_id).toBe('newest')
   })
 })

@@ -128,7 +128,7 @@ onUnmounted(() => {
           class="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
           autofocus
         />
-        <p v-if="error" class="text-red-600 text-sm mt-2">{{ error }}</p>
+        <p v-if="error" role="alert" aria-atomic="true" class="text-red-600 text-sm mt-2">{{ error }}</p>
         <button
           type="submit"
           :disabled="!key || loading || isLocked"

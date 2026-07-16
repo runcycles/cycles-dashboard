@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRouter, useRoute } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
+import { POLLING_STALE } from '../composables/pollingResult'
 import { POLL_SLOW_MS } from '../composables/pollingConstants'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
@@ -72,6 +73,7 @@ const error = ref('')
 const hasMore = ref(false)
 const nextCursor = ref('')
 const loadingMore = ref(false)
+const filterLoading = ref(false)
 
 // v0.1.25.21 (#5): filter by tenant + bulk pause/enable. The existing
 // view was system-wide with no way to scope to "webhooks for tenant X"
@@ -173,7 +175,7 @@ const { sortKey, sortDir, toggle, sorted: columnSortedWebhooks } = useSort(
   undefined,
   'asc',
   undefined,
-  { serverSide: true, onChange: () => { refresh() } },
+  { serverSide: true, onChange: () => { void loadWebhooksPageOne(true) } },
 )
 
 // v0.1.25.46: hide DISABLED webhooks by default — they're terminal and
@@ -185,9 +187,11 @@ const { sortKey, sortDir, toggle, sorted: columnSortedWebhooks } = useSort(
 // state:closed gives). See useTerminalAwareList for the contract.
 const {
   includeTerminal,
+  showTerminal,
   visibleRows: sortedWebhooks,
   terminalCount: hiddenTerminalCount,
   terminalVerb,
+  isTerminal: isTerminalWebhook,
 } = useTerminalAwareList<WebhookSubscription>({
   kind: 'webhook',
   source: columnSortedWebhooks,
@@ -598,17 +602,43 @@ async function submitSecurityConfig() {
   finally { securityLoading.value = false }
 }
 
-const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
+// Filter changes must not go through usePolling.refresh(): refresh is a
+// documented no-op while a poll is in flight, which allowed the old filter's
+// response to commit under the new URL/control state. Direct page-one loads
+// may overlap polling, so a generation guard makes latest intent authoritative.
+let listGeneration = 0
+async function loadWebhooksPageOne(operatorTriggered = false) {
+  const generation = ++listGeneration
+  if (operatorTriggered) filterLoading.value = true
+  loadingMore.value = false
+  nextCursor.value = ''
+  hasMore.value = false
   try {
     const [wRes, tRes] = await Promise.all([listWebhooks(withListParams()), listTenants()])
+    if (generation !== listGeneration) return POLLING_STALE
     webhooks.value = wRes.subscriptions
     hasMore.value = !!wRes.has_more
     nextCursor.value = wRes.next_cursor ?? ''
     tenants.value = tRes.tenants
     error.value = ''
     initialLoadDone.value = true
-  } catch (e) { error.value = toMessage(e) }
-}, POLL_SLOW_MS)
+    return true
+  } catch (e) {
+    if (generation === listGeneration) {
+      error.value = toMessage(e)
+      return false
+    }
+    return POLLING_STALE
+  } finally {
+    if (generation === listGeneration) filterLoading.value = false
+  }
+}
+
+const { refresh, isLoading, lastSuccessAt } = usePolling(
+  () => loadWebhooksPageOne(false),
+  POLL_SLOW_MS,
+)
+const listLoading = computed(() => isLoading.value || filterLoading.value)
 
 // Refetch page 1 whenever the debounced URL/search filter changes so
 // the cursor stays aligned with the server's (sort_by, sort_dir,
@@ -617,25 +647,35 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
 // would 400. v0.1.25.53: statusFilter is now also server-side, so the
 // same refetch-page-1 contract applies when the operator flips the
 // dropdown or the URL mirror lands a new status value.
-watch([debouncedUrlFilter, statusFilter], () => { refresh() })
+watch([debouncedUrlFilter, statusFilter], () => { void loadWebhooksPageOne(true) })
 
 async function loadMore() {
   if (!nextCursor.value || loadingMore.value) return
+  const generation = listGeneration
+  const cursor = nextCursor.value
   loadingMore.value = true
   try {
-    const res = await listWebhooks(withListParams({ cursor: nextCursor.value }))
+    const res = await listWebhooks(withListParams({ cursor }))
+    if (generation !== listGeneration) return
     webhooks.value = [...webhooks.value, ...res.subscriptions]
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
-  } catch (e) { error.value = toMessage(e) }
-  finally { loadingMore.value = false }
+  } catch (e) {
+    if (generation === listGeneration) error.value = toMessage(e)
+  }
+  finally {
+    if (generation === listGeneration) loadingMore.value = false
+  }
 }
 
 // Export. filterFn mirrors the tenant+URL client filters so the
 // exported set matches what the operator sees on screen.
 function webhookMatchesFilter(w: WebhookSubscription): boolean {
   if (tenantFilter.value && w.tenant_id !== tenantFilter.value) return false
+  if (statusFilter.value && w.status !== statusFilter.value) return false
+  if (failingFilter.value && (w.consecutive_failures ?? 0) <= 0) return false
   if (debouncedUrlFilter.value && !urlMatches(w, debouncedUrlFilter.value)) return false
+  if (!showTerminal.value && isTerminalWebhook(w)) return false
   return true
 }
 const {
@@ -714,7 +754,7 @@ const gridTemplate = computed(() =>
       item-noun="webhook"
       :loaded="sortedWebhooks.length"
       :has-more="hasMore"
-      :loading="isLoading"
+      :loading="listLoading"
       :last-updated-at="lastSuccessAt"
       @refresh="refresh"
     >
@@ -792,7 +832,7 @@ const gridTemplate = computed(() =>
           aria-label="Apply action to all webhooks matching the current filter"
           class="inline-flex items-center gap-2 flex-wrap"
         >
-          <div class="w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
+          <div class="hidden sm:block w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
           <span class="muted-sm whitespace-nowrap">Apply to all matching filter:</span>
           <button
             @click="openFilterBulk('PAUSE')"
@@ -825,10 +865,10 @@ const gridTemplate = computed(() =>
           v-if="canManage && selectedVisibleCount > 0"
           role="toolbar"
           aria-label="Bulk webhook actions"
-          class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-gray-900 dark:border dark:border-gray-700 border-2 border-blue-400 shadow-2xl rounded-lg px-4 py-2.5 flex items-center gap-3 max-w-[90vw]"
+          class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-gray-900 dark:border dark:border-gray-700 border-2 border-blue-400 shadow-2xl rounded-lg px-4 py-2.5 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 max-w-[90vw]"
         >
           <span class="text-sm font-semibold text-blue-900 dark:text-blue-300 tabular-nums">{{ selectedVisibleCount }} selected</span>
-          <div class="w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
+          <div class="hidden sm:block w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
           <button @click="openBulk('PAUSED')" class="text-xs text-red-700 hover:text-red-900 border border-red-300 bg-white rounded px-2.5 py-1 cursor-pointer">Pause</button>
           <button @click="openBulk('ACTIVE')" class="text-xs text-green-700 hover:text-green-900 border border-green-300 bg-white rounded px-2.5 py-1 cursor-pointer">Enable</button>
           <button

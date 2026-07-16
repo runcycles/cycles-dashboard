@@ -223,7 +223,20 @@ async function executeTenantAction() {
     closeTenantLoading.value = true
   }
   try {
-    await updateTenantStatus(id, action)
+    // Keep mutation failures separate from the best-effort refresh below.
+    // The PATCH response is the authoritative new tenant state, so commit it
+    // immediately: if a follow-up GET fails, the UI must not keep offering
+    // actions that are no longer legal for the now-closed tenant.
+    try {
+      tenant.value = await updateTenantStatus(id, action)
+    } catch (e) {
+      const msg = toMessage(e)
+      error.value = msg
+      toast.error(`Tenant status change failed: ${msg}`)
+      return
+    }
+
+    error.value = ''
     const labels: Record<string, string> = { SUSPENDED: 'Tenant suspended', ACTIVE: 'Tenant reactivated', CLOSED: 'Tenant permanently closed' }
     toast.success(labels[action])
     // On CLOSE, refetch the cascade children alongside the tenant so
@@ -233,24 +246,32 @@ async function executeTenantAction() {
     // even when the cascade completed cleanly, since the stale refs
     // still showed ACTIVE/FROZEN children. Other actions (suspend/
     // reactivate) don't trigger cascade — tenant-only refetch suffices.
-    if (action === 'CLOSED') {
-      const [tRes, bRes, wRes, kRes] = await Promise.all([
-        getTenant(id),
-        listBudgets({ tenant_id: id }),
-        listWebhooks({ tenant_id: id }),
-        listApiKeys({ tenant_id: id }),
-      ])
-      tenant.value = tRes
-      budgets.value = bRes.ledgers
-      webhooks.value = wRes.subscriptions
-      apiKeys.value = kRes.keys
-    } else {
-      tenant.value = await getTenant(id)
+    try {
+      if (action === 'CLOSED') {
+        const results = await Promise.allSettled([
+          getTenant(id),
+          listBudgets({ tenant_id: id }),
+          listWebhooks({ tenant_id: id }),
+          listApiKeys({ tenant_id: id }),
+        ] as const)
+        const [tRes, bRes, wRes, kRes] = results
+        if (tRes.status === 'fulfilled') tenant.value = tRes.value
+        if (bRes.status === 'fulfilled') budgets.value = bRes.value.ledgers
+        if (wRes.status === 'fulfilled') webhooks.value = wRes.value.subscriptions
+        if (kRes.status === 'fulfilled') apiKeys.value = kRes.value.keys
+
+        // Preserve every successful sibling refresh, but still tell the
+        // operator that one of the post-mutation reads needs a retry.
+        const failed = results.find(result => result.status === 'rejected')
+        if (failed?.status === 'rejected') throw failed.reason
+      } else {
+        tenant.value = await getTenant(id)
+      }
+    } catch (e) {
+      const msg = toMessage(e)
+      error.value = `Tenant status changed, but refresh failed: ${msg}`
+      toast.warning(error.value)
     }
-  } catch (e) {
-    const msg = toMessage(e)
-    error.value = msg
-    toast.error(`Tenant status change failed: ${msg}`)
   }
   finally {
     closeTenantLoading.value = false
@@ -920,6 +941,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
     } else {
       error.value = toMessage(e)
     }
+    return false
   }
 }, POLL_SLOW_MS)
 </script>
@@ -1183,8 +1205,8 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
     />
 
     <!-- Close tenant — requires typing tenant name -->
-    <div v-if="pendingTenantAction === 'CLOSED'" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50" @click.self="!closeTenantLoading && cancelCloseTenant()">
-      <div ref="closeDialogRef" class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 max-w-md mx-4" role="dialog" aria-modal="true" aria-label="Close tenant permanently" :aria-busy="closeTenantLoading || undefined">
+    <div v-if="pendingTenantAction === 'CLOSED'" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 overflow-y-auto p-4 sm:p-8" @click.self="!closeTenantLoading && cancelCloseTenant()">
+      <div ref="closeDialogRef" class="bg-white dark:bg-gray-900 dark:border dark:border-gray-700 rounded-lg shadow-lg p-6 w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto" role="dialog" aria-modal="true" aria-label="Close tenant permanently" :aria-busy="closeTenantLoading || undefined">
         <h3 class="text-sm font-semibold text-red-600 mb-2">Permanently close this tenant?</h3>
         <p class="text-sm text-gray-600 mb-3">This action is <strong>irreversible</strong>. Closing <strong>{{ tenant?.name || id }}</strong> cascades every owned object into its terminal state (spec v0.1.25.29 Rule 1):</p>
         <ul class="text-sm text-gray-600 list-disc pl-5 mb-3 space-y-0.5">

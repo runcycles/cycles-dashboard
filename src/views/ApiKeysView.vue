@@ -3,6 +3,7 @@ import { ref, computed, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { usePolling } from '../composables/usePolling'
+import { POLLING_STALE } from '../composables/pollingResult'
 import { POLL_SLOW_MS } from '../composables/pollingConstants'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
@@ -381,9 +382,11 @@ const { sortKey, sortDir, toggle, sorted: columnSortedKeys } = useSort(
 // in-dialog, so there's no drill-in-back state to preserve.
 const {
   includeTerminal,
+  showTerminal,
   visibleRows: sortedKeys,
   terminalCount: hiddenTerminalCount,
   terminalVerb,
+  isTerminal: isTerminalKey,
 } = useTerminalAwareList<KeyWithTenant>({
   kind: 'apiKey',
   source: columnSortedKeys,
@@ -413,6 +416,10 @@ async function fetchKeysPage(cursor?: string, extraParams: Record<string, string
 }> {
   const params: Record<string, string> = { limit: String(PAGE_SIZE), ...extraParams }
   if (filterTenant.value) params.tenant_id = filterTenant.value
+  // Push explicit status filters to the server so cursor walks do not
+  // consume the export/page cap on rows the operator cannot see. An
+  // explicit extra status (the ACTIVE-only expiring walk) takes priority.
+  if (filterStatus.value && !params.status) params.status = filterStatus.value
   if (cursor) params.cursor = cursor
   if (sortKey.value) {
     params.sort_by = sortKey.value
@@ -475,7 +482,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
         const page = await fetchKeysPage(cursor || undefined, { status: 'ACTIVE' })
         return { items: page.keys, hasMore: page.hasMore, nextCursor: page.nextCursor }
       })
-      if (expiringWithin7d.value !== tickMode) return // mode flipped mid-walk — discard
+      if (expiringWithin7d.value !== tickMode) return POLLING_STALE // mode flipped mid-walk — discard
       // Consume the gate state (forced flag AND cadence window) only on
       // a successful, committed walk. A thrown walk lands in the catch
       // below with both left armed, so the next 60s tick retries — the
@@ -496,7 +503,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
       // pages; tenants' key sets change infrequently enough that this
       // is the right trade-off (fresh data > accumulated scroll state).
       const first = await fetchKeysPage()
-      if (expiringWithin7d.value !== tickMode) return // mode flipped mid-fetch — discard
+      if (expiringWithin7d.value !== tickMode) return POLLING_STALE // mode flipped mid-fetch — discard
       expiringWalkPartial.value = false
       keys.value = first.keys
       hasMore.value = first.hasMore
@@ -504,7 +511,10 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
     }
     error.value = ''
     initialLoadDone.value = true
-  } catch (e) { error.value = toMessage(e) }
+  } catch (e) {
+    error.value = toMessage(e)
+    return false
+  }
 }, POLL_SLOW_MS)
 
 // User-initiated refresh — every trigger below (manual header refresh,
@@ -550,6 +560,10 @@ async function loadMore() {
 
 // Refresh on filter change so we restart page-1 scoped to the new tenant.
 watch(filterTenant, () => { requestRefresh() })
+// Status is server-side too. Restart at page 1 so the live cursor belongs
+// to the selected status tuple; otherwise load-more/export would combine an
+// unfiltered page-1 cursor with a status-filtered page-2 request.
+watch(filterStatus, () => { requestRefresh() })
 // Toggling the expiring filter switches fetch mode (single page ↔
 // cursor walk), so a refetch is required — the client-side filter
 // alone can't surface keys that were never loaded. requestRefresh, not
@@ -568,6 +582,17 @@ watch(debouncedSearch, () => { requestRefresh() })
 // listApiKeys, the export can walk the full result set honestly. The
 // composable drives pages via fetchPage(cursor); each page is appended
 // up to the EXPORT_MAX_ROWS guardrail inside useListExport.
+function keyMatchesVisibleFilters(k: KeyWithTenant): boolean {
+  if (filterStatus.value && k.status !== filterStatus.value) return false
+  if (filterTenant.value && k.tenant_id !== filterTenant.value) return false
+  if (expiringWithin7d.value && filterExpiringKeys([k]).length === 0) return false
+  if (debouncedSearch.value) {
+    const q = debouncedSearch.value.toLowerCase()
+    if (!k.key_id.toLowerCase().includes(q) && !(k.name ?? '').toLowerCase().includes(q)) return false
+  }
+  if (!showTerminal.value && isTerminalKey(k)) return false
+  return true
+}
 const {
   showExportConfirm,
   exporting,
@@ -591,6 +616,7 @@ const {
     const r = await fetchKeysPage(cursor)
     return { items: r.keys, hasMore: r.hasMore, nextCursor: r.nextCursor }
   },
+  filterFn: keyMatchesVisibleFilters,
   columns: [
     { header: 'key_id',       value: k => k.key_id },
     { header: 'key_prefix',   value: k => k.key_prefix ?? '' },
@@ -795,7 +821,7 @@ onUnmounted(() => document.removeEventListener('keydown', onPermsViewerKeydown))
       :aria-rowcount="sortedKeys.length + 1"
       :aria-colcount="canManage ? 10 : 9"
     >
-     <div :style="{ minWidth: canManage ? '1400px' : '1240px' }" class="flex flex-col flex-1 min-h-0">
+     <div :style="{ minWidth: canManage ? '1400px' : '1240px' }" class="wide-table-canvas flex flex-col flex-1 min-h-0">
       <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
         <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
           <SortHeader as="div" label="Key ID" column="key_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
@@ -887,19 +913,19 @@ onUnmounted(() => document.removeEventListener('keydown', onPermsViewerKeydown))
           </div>
         </div>
       </div>
+     </div>
 
       <!-- P1-H3: cold-load skeleton. -->
-      <div v-else-if="!initialLoadDone && !error" class="px-4 py-6">
+      <div v-if="sortedKeys.length === 0 && !initialLoadDone && !error" class="responsive-table-state px-4 py-6">
         <LoadingSkeleton />
       </div>
-      <div v-else>
+      <div v-else-if="sortedKeys.length === 0" class="responsive-table-state">
         <EmptyState
           item-noun="API key"
           :has-active-filter="keys.length > 0"
           :hint="keys.length === 0 ? 'API keys will appear here once created' : undefined"
         />
       </div>
-     </div>
     </div>
 
     <!-- Load-more footer — mirrors BudgetsView / TenantsView pattern. -->
