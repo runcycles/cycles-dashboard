@@ -162,6 +162,25 @@ describe('WebhooksView — URL deep-link smoke', () => {
     expect(params?.status).toBe('PAUSED')
   })
 
+  it('advances freshness when a direct filter reload commits successfully', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-07-16T12:00:00Z'))
+      const { default: WebhooksView } = await import('../views/WebhooksView.vue')
+      const w = mount(WebhooksView, stdMount())
+      await flushPromises()
+      expect((w.vm as unknown as { lastSuccessAt: Date }).lastSuccessAt.toISOString()).toBe('2026-07-16T12:00:00.000Z')
+
+      vi.setSystemTime(new Date('2026-07-16T12:05:00Z'))
+      routeRef.query = { status: 'PAUSED' }
+      await flushPromises()
+
+      expect((w.vm as unknown as { lastSuccessAt: Date }).lastSuccessAt.toISOString()).toBe('2026-07-16T12:05:00.000Z')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('does not send status param when no filter is set', async () => {
     routeRef.query = {}
     const { default: WebhooksView } = await import('../views/WebhooksView.vue')

@@ -294,4 +294,23 @@ describe('AuditView — URL ↔ form sync guard (F2)', () => {
     expect(listAuditLogsMock.mock.calls[1][0].cursor).toBe('old-cursor')
     expect(listAuditLogsMock.mock.calls[2][0].tenant_id).toBe('newest')
   })
+
+  it('uses the applied filter tuple when form edits are not submitted before Load more', async () => {
+    listAuditLogsMock
+      .mockReset()
+      .mockResolvedValueOnce({ logs: [auditLog('initial')], has_more: true, next_cursor: 'applied-cursor' })
+      .mockResolvedValueOnce({ logs: [auditLog('page-2')], has_more: false })
+
+    const w = await mountView()
+    await w.find('#audit-tenant').setValue('unsubmitted-tenant')
+
+    const loadMore = w.findAll('button').find(b => b.text() === 'Load more')
+    await loadMore!.trigger('click')
+    await flushPromises()
+
+    expect(listAuditLogsMock).toHaveBeenCalledTimes(2)
+    expect(listAuditLogsMock.mock.calls[1][0]).toMatchObject({ cursor: 'applied-cursor' })
+    expect(listAuditLogsMock.mock.calls[1][0].tenant_id).toBeUndefined()
+    expect(w.find('[role="table"]').attributes('aria-rowcount')).toBe('3')
+  })
 })

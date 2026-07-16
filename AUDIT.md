@@ -239,8 +239,37 @@ that the single-budget flow preserves allocation by passing the current
 value, and the bulk clobber warning. Round-9 validation: vue-tsc clean;
 1,163/1,163 tests (97 files); line coverage 96.16%.
 
-**Validation:** vue-tsc clean; 1,097/1,097 tests (92 files); line coverage
-96.1% (gate ≥95%); production `npm run build` + full `docker build` pass;
+**Review round 10** (whole-PR correctness + UI/UX pass): all confirmed
+findings fixed. Poll callbacks now distinguish a committed success, handled
+failure, and superseded/stale result so discarded requests cannot advance the
+freshness stamp or reset retry backoff; the affected Events, Budgets,
+Reservations, Webhooks, ApiKeys, and Overview paths return that protocol
+consistently. Audit/Events/Reservations/Webhooks page-one and load-more races
+now keep the newest result owner authoritative. Loading and empty states for
+wide virtualized tables render at viewport width on narrow screens while the
+column headers and row canvases retain one aligned horizontal scroller.
+Accessibility and usability fixes cover per-toast live-region roles, modal
+labels/focus, masked-value keyboard behavior, responsive bulk toolbars, and
+terminal-row visibility/count consistency. The Redis backup runbook now stops
+writers, forces an RDB snapshot, stops Redis before archiving its AOF-backed
+volume, and documents stack recovery after a failed backup step.
+
+**Review round 11** (review of the round-10 commit): 3 actionable findings,
+all fixed. AuditView pagination and multi-page export rebuilt params from live,
+unsubmitted form refs and could pair a new filter with the applied result's old
+cursor; page-one now commits an `appliedFilterParams` tuple that both paths
+reuse. Successful Webhooks filter/sort reloads bypassed `usePolling` and left
+the freshness timestamp describing the previous result set; freshness now
+advances whenever the generation-owning page-one result commits. This entry
+and the downstream CHANGELOG close the round-10 documentation omission under
+the repo's strict audit rule. A reviewer also noted that some assistive-
+technology combinations may not announce a newly inserted `role="status"`;
+the current markup is ARIA-conformant and avoids duplicate error announcements,
+so a persistent polite announcer remains deferred until screen-reader testing
+demonstrates a compatibility need.
+
+**Validation:** vue-tsc clean; 1,214/1,214 tests (102 files); line coverage
+96.28% (gate ≥95%); production `npm run build` + full `docker build` pass;
 built image live-smoke-tested (index no-cache + full security headers, SPA
 fallback headers, immutable assets, gzip, JSON 502 on dead upstream,
 container healthcheck healthy); nginx template re-rendered through the real

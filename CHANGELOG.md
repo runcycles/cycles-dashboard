@@ -41,6 +41,12 @@ UX work that does not advance spec alignment.
 - Stale `index.html` after deploys: the container now serves `index.html`
   with `Cache-Control: no-cache` and hashed assets as `immutable`, preventing
   the SRI-mismatch failure documented in OPERATIONS troubleshooting.
+- **List refresh and pagination ownership is race-safe.** Superseded page-one
+  requests no longer overwrite newer filter results or count as successful
+  polling ticks. Audit pagination and multi-page exports reuse the applied
+  filter tuple, so unsubmitted form edits cannot be paired with an old cursor.
+- Successful Webhooks filter and sort reloads now update the page freshness
+  timestamp immediately instead of waiting for the next background poll.
 
 ### Added
 
@@ -75,6 +81,11 @@ UX work that does not advance spec alignment.
   auto-disable after delivery failures) stay red.
 - Budgets/API-keys lists show loading skeletons instead of flashing
   "No … found" on cold load.
+- Wide virtualized tables keep loading and empty states visible at viewport
+  width on phones while preserving aligned, horizontally scrollable headers
+  and data rows. Bulk-action toolbars wrap instead of clipping narrow screens.
+- Toasts use one live-region role each (`alert` for errors, `status` for
+  success/warnings), avoiding nested-live-region double announcements.
 - `nginx-ssl.conf.example` rewritten as a pure TLS terminator in front of the
   container (the old example reproduced the documented `proxy_pass`
   path-stripping regression and skipped the runtime plane entirely).
@@ -82,6 +93,9 @@ UX work that does not advance spec alignment.
   reachable on all interfaces without a password); prod compose pins
   `redis:7.4-alpine` / `caddy:2.11-alpine`, adds per-service memory limits
   and `no-new-privileges`.
+- The Redis backup runbook now requires a short maintenance window: stop
+  writers, force a snapshot, stop Redis, then archive the AOF-backed volume.
+  This avoids capturing an AOF manifest during a concurrent rewrite.
 
 ### Security
 

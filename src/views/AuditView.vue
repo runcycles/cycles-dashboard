@@ -90,6 +90,10 @@ const { sortKey, sortDir, toggle, sorted: sortedEntries } = useSort(
 // silently shipping incomplete compliance data (audit item R3).
 const hasMore = ref(false)
 const nextCursor = ref('')
+// The filter tuple that owns entries/nextCursor. Form fields are intentionally
+// explicit-submit, so pagination and export must never read live edits that the
+// operator has not applied yet.
+const appliedFilterParams = ref<Record<string, string>>({})
 
 const tenantId = ref('')
 const keyId = ref('')
@@ -260,7 +264,7 @@ const {
   hasMore,
   nextCursor,
   fetchPage: async (cursor) => {
-    const res = await listAuditLogs({ ...buildFilterParams(), cursor })
+    const res = await listAuditLogs({ ...appliedFilterParams.value, cursor })
     return { items: res.logs, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
   },
   columns: [
@@ -300,6 +304,7 @@ async function query() {
     const res = await listAuditLogs(params)
     if (generation !== resultGeneration) return
     entries.value = res.logs
+    appliedFilterParams.value = params
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
     error.value = ''
@@ -322,7 +327,7 @@ async function loadMore() {
   const cursor = nextCursor.value
   loadingMore.value = true
   try {
-    const params = { ...buildFilterParams(), cursor }
+    const params = { ...appliedFilterParams.value, cursor }
     const res = await listAuditLogs(params)
     if (generation !== resultGeneration) return
     entries.value = [...entries.value, ...res.logs]

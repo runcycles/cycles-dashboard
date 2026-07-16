@@ -607,6 +607,10 @@ async function submitSecurityConfig() {
 // response to commit under the new URL/control state. Direct page-one loads
 // may overlap polling, so a generation guard makes latest intent authoritative.
 let listGeneration = 0
+// Tracks the result set actually committed to the table. Direct filter/sort
+// reloads bypass usePolling so they can overlap an in-flight tick safely; the
+// view therefore owns freshness for both paths.
+const lastSuccessAt = ref<Date | null>(null)
 async function loadWebhooksPageOne(operatorTriggered = false) {
   const generation = ++listGeneration
   if (operatorTriggered) filterLoading.value = true
@@ -622,6 +626,7 @@ async function loadWebhooksPageOne(operatorTriggered = false) {
     tenants.value = tRes.tenants
     error.value = ''
     initialLoadDone.value = true
+    lastSuccessAt.value = new Date()
     return true
   } catch (e) {
     if (generation === listGeneration) {
@@ -634,7 +639,7 @@ async function loadWebhooksPageOne(operatorTriggered = false) {
   }
 }
 
-const { refresh, isLoading, lastSuccessAt } = usePolling(
+const { refresh, isLoading } = usePolling(
   () => loadWebhooksPageOne(false),
   POLL_SLOW_MS,
 )
