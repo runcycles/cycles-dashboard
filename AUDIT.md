@@ -40,18 +40,21 @@ login lockout. Restore retains the original absolute-session timestamp while
 refreshing activity, and stale concurrent responses are prevented from writing
 capabilities for a superseded key.
 
-Validation: `1,228/1,228` tests across 105 files; 96.24% line coverage;
+Validation: `1,231/1,231` tests across 105 files; 96.24% line coverage;
 typecheck and production build pass. A clean Docker build generated the
 build-specific source, `nginx -t` passed, and Chromium independently recomputed
 the served import-map hash, found it in CSP, rendered Login, and logged zero CSP
 violations (18 direct integrity attributes also present).
 
-**PR CodeQL follow-up.** The initial import-map extractor required the closing
-tag to be spelled exactly `</script>`, while HTML also permits whitespace before
-the delimiter (`</script >`). CodeQL correctly flagged the incomplete parser.
-The expression now accepts that whitespace and a regression test exercises the
-valid alternate spelling; extraction remains constrained to one inline
-`type="importmap"` script and fails closed otherwise.
+**PR CodeQL follow-ups.** The initial import-map extractor required the closing
+tag to be spelled exactly `</script>`, while HTML also permits alternate closing
+tag tokenization. Widening the expression for whitespace still left malformed
+end tags such as `</script data-invalid>` recognizable by browsers but invisible
+to the build check. The extractor now uses a bounded tag scanner instead of an
+HTML-filtering regular expression, handles quoted delimiters and end-tag
+attributes, rejects unterminated elements, and remains constrained to exactly
+one inline `type="importmap"` script. Regression tests cover both CodeQL cases,
+unquoted/case-insensitive attributes, and longer non-script element names.
 
 ### 2026-07-15 — v0.1.25.68: four-plane audit (spec ↔ server ↔ UI/UX ↔ ops) + fixes
 
