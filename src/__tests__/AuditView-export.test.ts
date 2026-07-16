@@ -198,4 +198,48 @@ describe('AuditView export — pagination', () => {
     }
     wrapper.unmount()
   })
+
+  it('cancels a running cursor export when a new query is applied', async () => {
+    pages.push([entry(0)])
+    pages.push([entry(1)])
+    const wrapper = mount(AuditView, {
+      global: { stubs: { PageHeader: true, MaskedValue: true, TenantLink: true, SortHeader: true, EmptyState: true } },
+    })
+    await flushPromises()
+
+    let resolveOldPage!: (page: { logs: AuditLogEntry[]; has_more: boolean }) => void
+    const oldPage = new Promise<{ logs: AuditLogEntry[]; has_more: boolean }>((resolve) => {
+      resolveOldPage = resolve
+    })
+    listAuditLogsMock.mockReset()
+    listAuditLogsMock.mockImplementation((params) => {
+      if (params.cursor) return oldPage
+      return Promise.resolve({ logs: [entry(9)], has_more: false })
+    })
+
+    const vm = wrapper.vm as unknown as {
+      confirmExport: (f: 'csv' | 'json') => void
+      executeExport: () => Promise<void>
+    }
+    vm.confirmExport('json')
+    const runningExport = vm.executeExport()
+    await vi.waitFor(() => {
+      expect(listAuditLogsMock.mock.calls.some(([params]) => params.cursor === '1')).toBe(true)
+    })
+
+    await wrapper.find('#audit-tenant').setValue('new-tenant')
+    await wrapper.find('form').trigger('submit.prevent')
+    await flushPromises()
+    resolveOldPage({ logs: [entry(1)], has_more: false })
+    await runningExport
+    await flushPromises()
+
+    expect(lastBlob).toBeNull()
+    const oldCursorCall = listAuditLogsMock.mock.calls.find(([params]) => params.cursor === '1')!
+    expect(oldCursorCall[0].tenant_id).toBeUndefined()
+    expect(listAuditLogsMock.mock.calls.some(([params]) => (
+      params.tenant_id === 'new-tenant' && params.cursor === undefined
+    ))).toBe(true)
+    wrapper.unmount()
+  })
 })

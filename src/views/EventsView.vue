@@ -8,6 +8,8 @@ import { POLL_EVENTS_MS } from '../composables/pollingConstants'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useListExport } from '../composables/useListExport'
+import { useAppliedQuery } from '../composables/useAppliedQuery'
+import type { AppliedQuerySnapshot } from '../composables/useAppliedQuery'
 import { listEvents } from '../api/client'
 import type { Event } from '../types'
 import { EVENT_TYPES, EVENT_CATEGORIES } from '../types'
@@ -173,7 +175,16 @@ function buildFilterParams(): Record<string, string> {
 // that window polling, export pagination, and Load more must continue using
 // the tuple that produced the current rows/cursor; mixing a new text value
 // with the old cursor fails the server's cursor filter-hash validation.
-const appliedFilterParams = ref<Record<string, string>>(buildFilterParams())
+const queryOwnership = useAppliedQuery(buildFilterParams())
+const {
+  appliedParams: appliedFilterParams,
+  startFilterTransition,
+  snapshotApplied,
+  ownsFilterSnapshot,
+  beginPageOne,
+  ownsPageOne,
+  invalidateAppliedSignature,
+} = queryOwnership
 // False while page one for the applied tuple is unresolved (or its load
 // failed). Rows are cleared as soon as the tuple changes so operators can
 // never act on old-filter results under new filter controls.
@@ -186,21 +197,16 @@ const paginationUnavailable = computed(() =>
   hasPendingFilterChanges.value || filterTransitionPending.value || !resultsMatchAppliedFilters.value,
 )
 
-function getAppliedFilterParams(): Record<string, string> {
-  return { ...appliedFilterParams.value }
-}
-
 // Monotonic sequence guard — same rule as BudgetsView.loadList. The 15s
 // poll tick and operator filter changes both funnel through load(), so
 // a slow poll response can resolve AFTER a newer filtered load and
 // overwrite events/hasMore/nextCursor with old-filter rows (or paint a
 // superseded error over a fresh success). Only the newest load commits.
-let loadSeq = 0
 async function load() {
-  const seq = ++loadSeq
+  const request = beginPageOne()
   try {
-    const res = await listEvents(getAppliedFilterParams())
-    if (seq !== loadSeq) return POLLING_STALE // superseded by a newer load — discard
+    const res = await listEvents({ ...request.params })
+    if (!ownsPageOne(request)) return POLLING_STALE // superseded by a newer load — discard
     if (loadedMorePages.value && events.value.length > 0) {
       // Extended view: merge page-1 results from the head, preserving
       // the already-loaded tail. Dedup by event_id — events are
@@ -224,7 +230,7 @@ async function load() {
     resultsMatchAppliedFilters.value = true
     return true
   } catch (e) {
-    if (seq !== loadSeq) return POLLING_STALE // stale failure — a newer load owns the view
+    if (!ownsPageOne(request)) return POLLING_STALE // stale failure — a newer load owns the view
     error.value = toMessage(e)
     // A failed load must not leave its signature marked as applied —
     // the next applyFilters with identical filters (watcher echo or
@@ -232,7 +238,7 @@ async function load() {
     invalidateAppliedSignature()
     return false
   } finally {
-    if (seq === loadSeq) filterTransitionPending.value = false
+    if (ownsPageOne(request)) filterTransitionPending.value = false
   }
 }
 
@@ -249,16 +255,10 @@ async function load() {
 // signature is also invalidated when load() fails, so even a watcher
 // echo can retry after an error. Polling and loadMore call
 // load()/listEvents directly, unaffected.
-let lastAppliedSignature: string | null = null
-let appliedFilterGeneration = 0
-function invalidateAppliedSignature() { lastAppliedSignature = null }
 function applyFilters(force = false) {
   const params = buildFilterParams()
-  const sig = JSON.stringify(params)
-  if (!force && sig === lastAppliedSignature) return
-  lastAppliedSignature = sig
-  appliedFilterGeneration++
-  appliedFilterParams.value = params
+  const transition = startFilterTransition(params, { force, commit: 'start' })
+  if (!transition) return
   // Invalidate the cursor synchronously. Between this point and the page-one
   // response, the visible rows/cursor still belong to the previous tuple.
   // Keeping either cursor live permits Load more/export to mix filter hashes.
@@ -295,15 +295,16 @@ async function loadMore() {
   // with the old filter's cursor (the next Load more then 400s on the
   // server's filter-hash check), and flip loadedMorePages so the
   // merge-from-head poll preserves the stale rows indefinitely. The
-  // filter generation — not loadSeq — is the right invalidator here: a routine
+  // filter epoch — not page-one sequence — is the right invalidator here: a routine
   // 15s poll load() must NOT cancel a legitimate same-filter loadMore
   // (the merge-from-head logic exists to let them coexist), and polls
   // never touch the signature while filter changes always do.
-  const filterGenerationAtStart = appliedFilterGeneration
+  const filterSnapshot = snapshotApplied()
+  const cursor = nextCursor.value
   try {
-    const params = { ...getAppliedFilterParams(), cursor: nextCursor.value }
+    const params = { ...filterSnapshot.params, cursor }
     const res = await listEvents(params)
-    if (paginationUnavailable.value || appliedFilterGeneration !== filterGenerationAtStart) return // filters changed mid-flight — stale page
+    if (paginationUnavailable.value || !ownsFilterSnapshot(filterSnapshot)) return // filters changed mid-flight — stale page
     events.value = [...events.value, ...res.events]
     hasMore.value = res.has_more
     nextCursor.value = res.next_cursor ?? ''
@@ -311,7 +312,7 @@ async function loadMore() {
     // overwriting the tail we just loaded.
     loadedMorePages.value = true
   } catch (e) {
-    if (paginationUnavailable.value || appliedFilterGeneration !== filterGenerationAtStart) return
+    if (paginationUnavailable.value || !ownsFilterSnapshot(filterSnapshot)) return
     error.value = toMessage(e)
   }
   finally { loadingMore.value = false }
@@ -402,6 +403,7 @@ watch(() => route.query, (q) => {
 
 // Shared export (useListExport). CSV column spec + fetchPage adapter
 // + filename stem is all that's view-specific.
+let exportFilterSnapshot: AppliedQuerySnapshot | null = null
 const {
   showExportConfirm,
   exporting,
@@ -420,7 +422,14 @@ const {
   hasMore,
   nextCursor,
   fetchPage: async (cursor) => {
-    const res = await listEvents({ ...getAppliedFilterParams(), cursor })
+    const filterSnapshot = exportFilterSnapshot
+    if (!filterSnapshot || !ownsFilterSnapshot(filterSnapshot)) {
+      throw new Error('Export cancelled because the applied filters changed.')
+    }
+    const res = await listEvents({ ...filterSnapshot.params, cursor })
+    if (!ownsFilterSnapshot(filterSnapshot)) {
+      throw new Error('Export cancelled because the applied filters changed.')
+    }
     return { items: res.events, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
   },
   columns: [
@@ -441,15 +450,31 @@ const {
 })
 
 function confirmExport(format: 'csv' | 'json') {
-  if (!paginationUnavailable.value) openExportConfirm(format)
+  if (paginationUnavailable.value) return
+  exportFilterSnapshot = snapshotApplied()
+  openExportConfirm(format)
+}
+
+function cancelCapturedExport() {
+  cancelExport()
+  exportFilterSnapshot = null
 }
 
 async function executeExport() {
-  if (paginationUnavailable.value) {
-    cancelExport()
+  const filterSnapshot = exportFilterSnapshot
+  if (
+    paginationUnavailable.value
+    || !filterSnapshot
+    || !ownsFilterSnapshot(filterSnapshot)
+  ) {
+    cancelCapturedExport()
     return
   }
-  await runExport()
+  try {
+    await runExport()
+  } finally {
+    exportFilterSnapshot = null
+  }
 }
 
 // A same-route navigation can change filters while a confirmation dialog or
@@ -457,7 +482,7 @@ async function executeExport() {
 // cannot be combined with the newly-applied tuple behind the modal.
 watch(paginationUnavailable, (blocked) => {
   if (!blocked) return
-  cancelExport()
+  cancelCapturedExport()
   if (exporting.value) cancelRunningExport()
 })
 
@@ -795,7 +820,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
       item-noun-plural="events"
       warning="Exported files contain unmasked event data. Handle with care."
       @confirm="executeExport"
-      @cancel="cancelExport"
+      @cancel="cancelCapturedExport"
     />
     <ExportProgressOverlay
       :open="exporting"

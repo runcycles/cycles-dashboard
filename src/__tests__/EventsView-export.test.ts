@@ -176,4 +176,44 @@ describe('EventsView export — pagination', () => {
     expect(lastBlob).not.toBeNull()
     wrapper.unmount()
   })
+
+  it('cancels a running cursor export when instant-apply filters change', async () => {
+    scriptedPages.push({ events: [ev('old-head')], has_more: true, next_cursor: '1' })
+    const wrapper = mount(EventsView, {
+      global: { stubs: { PageHeader: true, TenantLink: true, SortHeader: true, EmptyState: true } },
+    })
+    await flushPromises()
+
+    let resolveOldPage!: (page: Page) => void
+    const oldPage = new Promise<Page>((resolve) => { resolveOldPage = resolve })
+    listEventsMock.mockReset()
+    listEventsMock.mockImplementation((params) => {
+      if (params.cursor) return oldPage
+      return Promise.resolve({ events: [ev('new-head')], has_more: false })
+    })
+
+    const vm = wrapper.vm as unknown as {
+      confirmExport: (f: 'csv' | 'json') => void
+      executeExport: () => Promise<void>
+    }
+    vm.confirmExport('json')
+    const runningExport = vm.executeExport()
+    await vi.waitFor(() => {
+      expect(listEventsMock.mock.calls.some(([params]) => params.cursor === '1')).toBe(true)
+    })
+
+    await wrapper.find('#ev-category').setValue('budget')
+    await flushPromises()
+    resolveOldPage({ events: [ev('old-tail')], has_more: false })
+    await runningExport
+    await flushPromises()
+
+    expect(lastBlob).toBeNull()
+    const oldCursorCall = listEventsMock.mock.calls.find(([params]) => params.cursor === '1')!
+    expect(oldCursorCall[0].category).toBeUndefined()
+    expect(listEventsMock.mock.calls.some(([params]) => (
+      params.category === 'budget' && params.cursor === undefined
+    ))).toBe(true)
+    wrapper.unmount()
+  })
 })
