@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.69 (2026-07-16)
+**Current release:** v0.1.25.70 (2026-07-16)
 
 ## Baseline requirements
 
@@ -16,6 +16,43 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-07-16 — v0.1.25.70: shared applied-query ownership
+
+AuditView and EventsView independently accumulated the same high-risk state
+machine: an applied filter tuple distinct from form drafts, a filter generation
+for cursor ownership, a page-one sequence for stale response rejection, and a
+signature for watcher deduplication with explicit retry. The duplication had
+already produced several fixed defects across `.68`: old filters paired with
+new cursors, valid Load-more pages discarded after same-filter poll failures,
+stale page-one commits, and explicit retries swallowed by deduplication.
+
+`useAppliedQuery` now owns only that shared correctness protocol. It exposes
+shallow-frozen `{ epoch, params }` snapshots (query values are strings), bumps
+the filter epoch only for deliberate filter/sort application, sequences every
+page-one request independently, and keeps signature invalidation separate from
+epoch invalidation. That separation is the key invariant: a failed background
+poll may enable a same-signature retry, but it cannot make an in-flight
+same-filter cursor page stale. Explicit-submit Audit commits its candidate
+tuple only after page-one success; instant-apply Events commits at transition
+start and retains its existing clear-while-loading behavior. View-specific URL
+sync, loading/error rendering, polling cadence, and Events' merge-from-head
+tail preservation remain local and unchanged.
+
+Audit and Events exports also capture one immutable applied snapshot when the
+confirmation opens and reuse it for every cursor page. Applying a new tuple
+cancels the confirmation or running export, and an ownership check after each
+await prevents a late page from crossing filter epochs. Audit draft edits
+continue to export the tuple that owns the visible rows. Five focused
+composable tests cover immutability, page-one newest-wins semantics, cursor
+survival across same-filter page-one requests, filter invalidation,
+success-time commit, watcher dedupe, explicit retry, and post-failure retry.
+The pre-existing Audit/Events race and export suites remain the view-level
+contract, with two new integration cases holding a cursor page in flight while
+the applied filters change and proving that no mixed export is downloaded.
+Validation: `1,238/1,238` tests across 106 files; 96.33% line coverage;
+typecheck, production build, and both Compose configurations pass. No
+API/spec/server requirement or visual behavior changes.
 
 ### 2026-07-16 — v0.1.25.69: live-test CSP/SRI and auth-session corrections
 

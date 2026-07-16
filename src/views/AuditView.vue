@@ -5,6 +5,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { listAuditLogs } from '../api/client'
 import { useSort } from '../composables/useSort'
 import { useListExport } from '../composables/useListExport'
+import { useAppliedQuery } from '../composables/useAppliedQuery'
+import type { AppliedQuerySnapshot } from '../composables/useAppliedQuery'
 import { ERROR_CODES } from '../types'
 import type { AuditLogEntry } from '../types'
 import PageHeader from '../components/PageHeader.vue'
@@ -90,11 +92,6 @@ const { sortKey, sortDir, toggle, sorted: sortedEntries } = useSort(
 // silently shipping incomplete compliance data (audit item R3).
 const hasMore = ref(false)
 const nextCursor = ref('')
-// The filter tuple that owns entries/nextCursor. Form fields are intentionally
-// explicit-submit, so pagination and export must never read live edits that the
-// operator has not applied yet.
-const appliedFilterParams = ref<Record<string, string>>({})
-
 const tenantId = ref('')
 const keyId = ref('')
 // cycles-governance-admin v0.1.25.24: `operation` and `resource_type`
@@ -244,6 +241,23 @@ function buildFilterParams(): Record<string, string> {
   return params
 }
 
+// Form fields are explicit-submit. Keep the tuple that owns the visible rows
+// separate from draft edits, and use filter/page-one generations shared with
+// EventsView so pagination, exports, and stale responses follow one protocol.
+const {
+  startFilterTransition,
+  commitFilterTransition,
+  snapshotApplied,
+  ownsFilterSnapshot,
+  beginPageOne,
+  ownsPageOne,
+} = useAppliedQuery()
+
+// One immutable tuple owns the entire export walk. Draft form edits do not
+// affect it, and applying a new query cancels it before another cursor page can
+// be appended under a different server filter hash.
+let exportFilterSnapshot: AppliedQuerySnapshot | null = null
+
 // Shared export machinery (useListExport). Column spec + fetchPage
 // adapter + item noun is all that's view-specific.
 const {
@@ -253,10 +267,10 @@ const {
   exportError,
   exportCancellable,
   maxRows: EXPORT_MAX_ROWS,
-  confirmExport,
+  confirmExport: openExportConfirm,
   cancelExport,
   cancelRunningExport,
-  executeExport,
+  executeExport: runExport,
 } = useListExport<AuditLogEntry>({
   itemNoun: 'log entry',
   filenameStem: 'audit-logs',
@@ -264,7 +278,14 @@ const {
   hasMore,
   nextCursor,
   fetchPage: async (cursor) => {
-    const res = await listAuditLogs({ ...appliedFilterParams.value, cursor })
+    const filterSnapshot = exportFilterSnapshot
+    if (!filterSnapshot || !ownsFilterSnapshot(filterSnapshot)) {
+      throw new Error('Export cancelled because the applied filters changed.')
+    }
+    const res = await listAuditLogs({ ...filterSnapshot.params, cursor })
+    if (!ownsFilterSnapshot(filterSnapshot)) {
+      throw new Error('Export cancelled because the applied filters changed.')
+    }
     return { items: res.logs, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
   },
   columns: [
@@ -284,35 +305,65 @@ const {
   ],
 })
 
+function confirmExport(format: 'csv' | 'json') {
+  exportFilterSnapshot = snapshotApplied()
+  openExportConfirm(format)
+}
+
+function cancelCapturedExport() {
+  cancelExport()
+  exportFilterSnapshot = null
+}
+
+async function executeExport() {
+  const filterSnapshot = exportFilterSnapshot
+  if (!filterSnapshot || !ownsFilterSnapshot(filterSnapshot)) {
+    cancelCapturedExport()
+    return
+  }
+  try {
+    await runExport()
+  } finally {
+    exportFilterSnapshot = null
+  }
+}
+
+function cancelExportForFilterChange() {
+  cancelExport()
+  if (exporting.value) cancelRunningExport()
+  exportFilterSnapshot = null
+}
+
 // Surface export-composable errors through the view's existing error banner.
 watch(exportError, (v) => { if (v) error.value = v })
 
-// Each page-1 query starts a new result generation. A slower request from an
-// older filter/sort state must never overwrite the newest response, and any
-// load-more request tied to that older generation must not append into it.
-let resultGeneration = 0
-
 async function query() {
-  const generation = ++resultGeneration
   const params = buildFilterParams()
+  // Explicit submission always creates a new epoch, even for an unchanged
+  // tuple: Run Query doubles as the operator's same-filter retry path. Audit
+  // commits the candidate tuple only after page one succeeds, preserving the
+  // prior visible result ownership while the replacement is unresolved.
+  const transition = startFilterTransition(params, { force: true, commit: 'success' })!
+  const request = beginPageOne(transition)
+  cancelExportForFilterChange()
   loading.value = true
   // Hide pagination for the previous result set while its replacement is in
   // flight. Existing rows stay visible until the newest response arrives.
   hasMore.value = false
   nextCursor.value = ''
   try {
-    const res = await listAuditLogs(params)
-    if (generation !== resultGeneration) return
+    const res = await listAuditLogs({ ...request.params })
+    if (!ownsPageOne(request)) return
     entries.value = res.logs
-    appliedFilterParams.value = params
+    commitFilterTransition(transition)
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
     error.value = ''
   } catch (e) {
-    if (generation === resultGeneration) error.value = toMessage(e)
+    if (ownsPageOne(request)) error.value = toMessage(e)
   }
   finally {
-    if (generation === resultGeneration) loading.value = false
+    if (ownsPageOne(request)) loading.value = false
   }
 }
 
@@ -323,19 +374,19 @@ async function query() {
 const loadingMore = ref(false)
 async function loadMore() {
   if (!nextCursor.value || loadingMore.value) return
-  const generation = resultGeneration
+  const filterSnapshot = snapshotApplied()
   const cursor = nextCursor.value
   loadingMore.value = true
   try {
-    const params = { ...appliedFilterParams.value, cursor }
+    const params = { ...filterSnapshot.params, cursor }
     const res = await listAuditLogs(params)
-    if (generation !== resultGeneration) return
+    if (!ownsFilterSnapshot(filterSnapshot)) return
     entries.value = [...entries.value, ...res.logs]
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
     error.value = ''
   } catch (e) {
-    if (generation === resultGeneration) error.value = toMessage(e)
+    if (ownsFilterSnapshot(filterSnapshot)) error.value = toMessage(e)
   }
   finally { loadingMore.value = false }
 }
@@ -929,7 +980,7 @@ function measureRow(el: Element | { $el?: Element } | null) {
       item-noun-plural="log entries"
       warning="Exported files contain unmasked sensitive data (key IDs, IP addresses, metadata). Handle with care."
       @confirm="executeExport"
-      @cancel="cancelExport"
+      @cancel="cancelCapturedExport"
     />
     <ExportProgressOverlay
       :open="exporting"

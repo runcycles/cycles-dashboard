@@ -15,6 +15,24 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.70] — 2026-07-16
+
+### Changed
+
+- Audit and Events now share one applied-query ownership primitive for
+  immutable filter snapshots, monotonic filter epochs, page-one request
+  sequencing, same-signature retry/deduplication, cursor pagination, and
+  exports. This is a behavior-preserving maintainability change: filters,
+  URLs, polling cadence, loading states, and API wire shapes are unchanged.
+
+### Fixed
+
+- Multi-page Audit and Events exports now capture one immutable applied-filter
+  tuple for the complete cursor walk. A filter change cancels the pending or
+  running export, so no later page can be fetched or appended under a different
+  server filter hash. Failed same-filter background polls still leave valid
+  Load-more and export work intact.
+
 ## [0.1.25.69] — 2026-07-16
 
 ### Fixed
