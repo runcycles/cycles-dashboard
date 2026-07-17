@@ -17,7 +17,6 @@ config.global.stubs = {
       return () => h('a', {
         ...attrs,
         href: typeof props.to === 'string' ? props.to : '#',
-        'data-to': JSON.stringify(props.to),
       }, slots.default?.())
     },
   }),
@@ -40,11 +39,15 @@ type TestDom = {
   virtualConsole: {
     removeAllListeners(event: string): void
     on(event: string, listener: (error: Error) => void): void
+    emit(event: string, error: Error): boolean
   }
 }
 const testDom = (globalThis as typeof globalThis & { jsdom?: TestDom }).jsdom
-testDom?.virtualConsole.removeAllListeners('jsdomError')
-testDom?.virtualConsole.on('jsdomError', (error) => { throw error })
+if (!testDom) {
+  throw new Error('The Vitest harness requires the jsdom environment handle.')
+}
+testDom.virtualConsole.removeAllListeners('jsdomError')
+testDom.virtualConsole.on('jsdomError', (error) => { throw error })
 
 // ResizeObserver is required by vue-echarts' autoresize behavior; jsdom
 // doesn't ship one. A no-op stub is sufficient — charts aren't expected

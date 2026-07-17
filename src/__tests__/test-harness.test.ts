@@ -24,4 +24,15 @@ describe('shared test harness', () => {
       props: { loading: {} as unknown as boolean },
     })).toThrow(/Invalid prop: type check failed for prop "loading"/)
   })
+
+  it('promotes JSDOM errors to test failures', () => {
+    const testDom = (globalThis as typeof globalThis & {
+      jsdom: { virtualConsole: { emit: (event: string, error: Error) => boolean } }
+    }).jsdom
+
+    expect(() => testDom.virtualConsole.emit(
+      'jsdomError',
+      new Error('synthetic JSDOM failure'),
+    )).toThrow('synthetic JSDOM failure')
+  })
 })

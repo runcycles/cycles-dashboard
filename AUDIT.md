@@ -29,23 +29,26 @@ Boolean child props as objects. The volume made CI output poor evidence: a new
 Vue contract regression could disappear inside familiar noise without failing
 the run.
 
-Twenty view suites now use one `createPollingMock` helper. It preserves the
-initial tick, refresh callback result, abort-signal argument, polling/loading
-state, and freshness timestamp while returning genuine Vue refs. Specialized
-in-flight/dedup test doubles remain local where their extra state is part of
-the assertion. The shared Vue Test Utils setup supplies a lightweight
-RouterLink anchor for tests that do not install a router; navigation-focused
-suites can override it. The bulk-results download test now owns and restores
-its URL/click doubles, eliminating the accidental JSDOM navigation, and the
+Twenty view suites now use one deliberately single-tick `createPollingMock`
+helper. It invokes the initial callback, passes an abort signal, preserves the
+callback result on refresh, and exposes type-correct `isPolling`, `isLoading`,
+and `lastSuccessAt` refs. Specialized in-flight/dedup test doubles remain local
+where their extra state is part of the assertion. The shared Vue Test Utils
+setup supplies a lightweight RouterLink anchor for tests that do not install a
+router. Suites with a purpose-built link double or real memory router opt out
+explicitly; the TenantLink integration test asserts the resolved href. The
+bulk-results download test now owns and restores its URL/click doubles,
+eliminating the accidental JSDOM navigation, and the
 intentional non-JSON API warning is locally captured by the tests that exercise
 it.
 
 Silence is now enforced rather than conventional. The shared Vue
 `warnHandler` throws on unresolved components, invalid props, invalid watch
 sources, and other Vue warnings. JSDOM's `jsdomError` channel likewise throws
-instead of printing unsupported browser operations to stderr. Focused harness
-tests prove both genuine-ref behavior (including the refresh result contract)
-and warning promotion. Final validation is clean and silent: 1,273/1,273 tests
+instead of printing unsupported browser operations to stderr; setup fails
+closed if Vitest does not expose that channel. Focused harness tests prove
+genuine-ref behavior (including the refresh result contract) and both warning
+gates. Final validation is clean and silent: 1,274/1,274 tests
 pass across 110 files with 96.47% line coverage; lint, strict typecheck,
 production build, and both development and production Compose configurations
 pass. This is test/tooling-only: package version, image pins, API wire surface,
