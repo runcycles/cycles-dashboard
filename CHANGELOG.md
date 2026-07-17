@@ -15,6 +15,30 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.75] — 2026-07-17
+
+### Changed
+
+- Budget tenant, list, detail, event-timeline, polling, stale-response, and
+  cursor state now run through a focused `useBudgetData` read boundary.
+  Filters, routing, export presentation, row selection, mutations, and all
+  markup remain owned by `BudgetsView`.
+
+### Fixed
+
+- Budget Load more and export now reuse the immutable filter/sort tuple that
+  produced the visible rows and cursor. Draft debounced edits, same-route
+  navigation, and in-flight filter changes can no longer mix cursor pages or
+  export data from different server filter hashes.
+- Repeated watcher echoes for the same budget tuple no longer issue duplicate
+  page-one requests; explicit refresh still retries an unchanged tuple.
+- Export and filter-wide mutation controls stay disabled with an explicit
+  "Updating filters…" state until the newly-applied page owns the visible
+  rows, preventing old first-page data from being paired with the new tuple.
+- Navigating between budget list and detail modes now invalidates the abandoned
+  mode's in-flight reads, preventing a late result or error from leaking into
+  the other shell.
+
 ## [0.1.25.74] — 2026-07-17
 
 ### Changed

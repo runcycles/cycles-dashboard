@@ -131,11 +131,16 @@ describe('BudgetsView — loadList sequencing guard (round 7)', () => {
     await searchInput.setValue('one')   // fires load R1 (in flight)
     await searchInput.setValue('two')   // fires newer load(s) (in flight)
     expect(loadCalls).toBeGreaterThanOrEqual(2)
+    expect(w.text()).toContain('Updating filters…')
+    const exportCsv = w.findAll('button').find(button => button.text() === 'Export CSV')!
+    expect(exportCsv.attributes('disabled')).toBeDefined()
 
     // Newest (R2) resolves first and commits.
     r2.resolve({ ledgers: [ledger('scope-newest')], has_more: true, next_cursor: 'cur-2' })
     await flushPromises()
     expect(w.text()).toContain('scope-newest')
+    expect(w.text()).not.toContain('Updating filters…')
+    expect(exportCsv.attributes('disabled')).toBeUndefined()
 
     // Stale R1 resolves late — must be DISCARDED, not committed.
     r1.resolve({ ledgers: [ledger('scope-stale')], has_more: false })

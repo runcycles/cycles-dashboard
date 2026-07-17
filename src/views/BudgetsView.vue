@@ -2,19 +2,16 @@
 import { ref, computed, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute, useRouter } from 'vue-router'
-import { usePolling } from '../composables/usePolling'
-import { POLLING_STALE } from '../composables/pollingResult'
-import { POLL_SLOW_MS } from '../composables/pollingConstants'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useTerminalAwareList } from '../composables/useTerminalAwareList'
 import { useListExport } from '../composables/useListExport'
-import { listBudgets, lookupBudget, listTenants, listEvents, freezeBudget, unfreezeBudget, updateBudgetConfig } from '../api/client'
+import { freezeBudget, unfreezeBudget, updateBudgetConfig } from '../api/client'
 import { COMMIT_OVERAGE_POLICIES } from '../types'
 import { tenantFromScope } from '../utils/safe'
 import { stringParam } from '../utils/dateParam'
 import { useAuthStore } from '../stores/auth'
-import type { BudgetLedger, Tenant, Event, BudgetBulkActionResponse } from '../types'
+import type { BudgetLedger, BudgetBulkActionResponse } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import UtilizationBar from '../components/UtilizationBar.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -48,6 +45,8 @@ import {
   useBudgetFunding,
 } from '../composables/useBudgetFunding'
 import { useBudgetFilterBulk } from '../composables/useBudgetFilterBulk'
+import { useBudgetData } from '../composables/useBudgetData'
+import type { AppliedQuerySnapshot } from '../composables/useAppliedQuery'
 
 const toast = useToast()
 
@@ -64,22 +63,54 @@ const isDetail = computed(() => !!route.query.scope && !!route.query.unit)
 const activeFilter = computed(() => stringParam(route.query.filter))
 const isCrossTenantFilter = computed(() => activeFilter.value === 'over_limit' || activeFilter.value === 'has_debt')
 
-const tenants = ref<Tenant[]>([])
 // Hydrate from ?tenant_id=<id> so deep-links from BulkActionResultDialog's
 // "View budget" link land on the right tenant's budget list (per-row
 // triage from a bulk-action result → specific ledger row). Query key
 // is `tenant_id` for consistency with AuditView's filter deep-links.
 const selectedTenant = ref(stringParam(route.query.tenant_id))
-const budgets = ref<BudgetLedger[]>([])
-// P1-H3: gates the cold-load skeleton. Set true after the first
-// successful list fetch so EmptyState doesn't flash "No budgets found"
-// while the initial request is still in flight. Same pattern as
-// TenantsView / EventsView.
-const initialLoadDone = ref(false)
-const hasMore = ref(false)
-const nextCursor = ref('')
-const loadingMore = ref(false)
-const error = ref('')
+
+// Read-side acquisition is isolated from the view's filter and presentation
+// ownership. The getters are intentionally evaluated only when a load starts;
+// by then every filter/sort ref declared below has completed setup.
+const {
+  tenants,
+  tenantsError,
+  budgets,
+  initialLoadDone,
+  hasMore,
+  nextCursor,
+  loadingMore,
+  listLoading,
+  resultsMatchAppliedFilters,
+  error,
+  detail,
+  detailEvents,
+  detailEventsCursor,
+  detailEventsHasMore,
+  detailEventsLoadingMore,
+  appliedListParams,
+  snapshotListQuery,
+  ownsListQuery,
+  fetchListPage,
+  refreshList,
+  applyListParams,
+  loadMore,
+  loadDetail,
+  loadMoreDetailEvents,
+  invalidateList,
+  invalidateDetail,
+  refresh,
+  isLoading,
+  lastSuccessAt,
+} = useBudgetData({
+  isDetail: () => isDetail.value,
+  getListParams: () => buildListParams(),
+  getDetailTarget: () => ({
+    scope: stringParam(route.query.scope),
+    unit: stringParam(route.query.unit),
+  }),
+})
+
 // Default sort: highest utilization first. Operators triaging budgets
 // care about "which scopes are closest to running dry", not when a
 // ledger was provisioned — the near-exhausted rows are the actionable
@@ -99,18 +130,8 @@ const { sortKey, sortDir, toggle, sorted: columnSortedBudgets } = useSort(
     debt: (b: BudgetLedger) => b.debt?.amount ?? 0,
     tenant_id: (b: BudgetLedger) => b.tenant_id || '',
   },
-  { serverSide: true, onChange: () => { loadList() } },
+  { serverSide: true, onChange: () => { void applyListParams() } },
 )
-
-const detail = ref<BudgetLedger | null>(null)
-const detailEvents = ref<Event[]>([])
-// R8 (scale-hardening): paginate the budget-detail event timeline.
-// Pre-fix hardcoded limit='20' with no Load-more — a budget with more
-// than 20 historical events showed only the latest 20, no signal.
-const DETAIL_EVENTS_PAGE_SIZE = 20
-const detailEventsCursor = ref('')
-const detailEventsHasMore = ref(false)
-const detailEventsLoadingMore = ref(false)
 
 const filterStatus = ref(stringParam(route.query.status))
 const filterUnit = ref('')
@@ -195,19 +216,6 @@ const pageTitle = computed(() => {
   return 'Budgets'
 })
 
-const tenantsError = ref('')
-async function loadTenants() {
-  try {
-    const res = await listTenants()
-    tenants.value = res.tenants
-    tenantsError.value = ''
-    return true
-  } catch (e) {
-    tenantsError.value = `Could not load tenant list: ${toMessage(e)}`
-    return false
-  }
-}
-
 // R2/W2 wire-up (cycles-server-admin v0.1.25.22+). /admin/budgets
 // now accepts admin-key auth without a tenant_id filter and exposes
 // server-side filter params: over_limit, has_debt, utilization_min,
@@ -219,8 +227,8 @@ async function loadTenants() {
 // but the server expects RATIOS (0.0-1.0). Coerce at the wire boundary.
 const PAGE_SIZE = 100
 
-function buildListParams(extra: Record<string, string> = {}): Record<string, string> {
-  const params: Record<string, string> = { limit: String(PAGE_SIZE), ...extra }
+function buildListParams(): Record<string, string> {
+  const params: Record<string, string> = { limit: String(PAGE_SIZE) }
   if (selectedTenant.value) params.tenant_id = selectedTenant.value
   if (filterStatus.value) params.status = filterStatus.value
   if (filterUnit.value) params.unit = filterUnit.value
@@ -252,130 +260,9 @@ function buildListParams(extra: Record<string, string> = {}): Record<string, str
   return params
 }
 
-// Monotonic sequence guard for loadList. A same-route ?search navigation
-// (the /budget palette command) fires TWO staggered requests: the route
-// watcher calls loadList() while debouncedSearch still holds the stale
-// value (unfiltered R1), then the debouncedSearch watcher fires the
-// filtered R2 ~300ms later. Without sequencing, a slow R1 resolving
-// after R2 commits the UNFILTERED fleet over the filtered view while
-// the URL and search box claim ?search=… . Only the newest request may
-// commit; stale responses (results AND errors) are discarded.
-let listLoadSeq = 0
-async function loadList() {
-  const seq = ++listLoadSeq
-  // Reset pagination state up-front. Without this, a filter change that
-  // refetches page-1 still leaves the OLD nextCursor live; if the user
-  // clicks "Load more" between the watcher firing and the fetch returning,
-  // we'd send a cursor scoped to the previous filter — server may return
-  // misaligned results or a stale-cursor error.
-  nextCursor.value = ''
-  hasMore.value = false
-  try {
-    const res = await listBudgets(buildListParams())
-    if (seq !== listLoadSeq) return POLLING_STALE // superseded by a newer load — discard
-    budgets.value = res.ledgers
-    hasMore.value = !!res.has_more
-    nextCursor.value = res.next_cursor ?? ''
-    error.value = ''
-    initialLoadDone.value = true
-    return true
-  } catch (e) {
-    if (seq !== listLoadSeq) return POLLING_STALE
-    error.value = toMessage(e)
-    return false
-  }
-}
-
-let detailLoadSeq = 0
-async function loadDetail() {
-  const seq = ++detailLoadSeq
-  const scope = stringParam(route.query.scope)
-  const unit = stringParam(route.query.unit)
-  const changedLedger = !detail.value || detail.value.scope !== scope || detail.value.unit !== unit
-  if (changedLedger) {
-    detail.value = null
-    detailEvents.value = []
-    detailEventsCursor.value = ''
-    detailEventsHasMore.value = false
-  }
-  detailEventsLoadingMore.value = false
-  try {
-    const ledger = await lookupBudget(scope, unit)
-    if (seq !== detailLoadSeq) return POLLING_STALE
-    detail.value = ledger
-    detailEventsCursor.value = ''
-    detailEventsHasMore.value = false
-    const evRes = await listEvents({ scope, limit: String(DETAIL_EVENTS_PAGE_SIZE) })
-    if (seq !== detailLoadSeq) return POLLING_STALE
-    // Server already filters by scope via the query param but we also
-    // filter client-side because listEvents' scope param is a prefix
-    // match on some server versions; the precise-match belt-and-suspenders
-    // keeps unrelated child-scope events out of the timeline.
-    detailEvents.value = evRes.events.filter(e => e.scope === scope)
-    detailEventsHasMore.value = !!evRes.has_more
-    detailEventsCursor.value = evRes.next_cursor ?? ''
-    error.value = ''
-    return true
-  } catch (e) {
-    if (seq === detailLoadSeq) {
-      error.value = toMessage(e)
-      return false
-    }
-    return POLLING_STALE
-  }
-}
-
-async function loadMoreDetailEvents() {
-  if (!detailEventsCursor.value || detailEventsLoadingMore.value) return
-  const seq = detailLoadSeq
-  const scope = stringParam(route.query.scope)
-  const cursor = detailEventsCursor.value
-  detailEventsLoadingMore.value = true
-  try {
-    const evRes = await listEvents({
-      scope,
-      limit: String(DETAIL_EVENTS_PAGE_SIZE),
-      cursor,
-    })
-    if (seq !== detailLoadSeq) return
-    const filtered = evRes.events.filter(e => e.scope === scope)
-    detailEvents.value = [...detailEvents.value, ...filtered]
-    detailEventsHasMore.value = !!evRes.has_more
-    detailEventsCursor.value = evRes.next_cursor ?? ''
-  } catch (e) {
-    if (seq === detailLoadSeq) error.value = toMessage(e)
-  }
-  finally {
-    if (seq === detailLoadSeq) detailEventsLoadingMore.value = false
-  }
-}
-
-async function loadMore() {
-  if (loadingMore.value || !nextCursor.value) return
-  loadingMore.value = true
-  try {
-    const res = await listBudgets(buildListParams({ cursor: nextCursor.value }))
-    budgets.value = [...budgets.value, ...res.ledgers]
-    hasMore.value = !!res.has_more
-    nextCursor.value = res.next_cursor ?? ''
-  } catch (e) { error.value = toMessage(e) }
-  finally { loadingMore.value = false }
-}
-
 function clearFilter() {
   router.push({ name: 'budgets' })
 }
-
-async function tick() {
-  if (isDetail.value) return loadDetail()
-  const tenantsLoaded = await loadTenants()
-  const budgetsLoaded = await loadList()
-  if (tenantsLoaded === false || budgetsLoaded === false) return false
-  if (budgetsLoaded === POLLING_STALE) return POLLING_STALE
-  return true
-}
-
-const { refresh, isLoading, lastSuccessAt } = usePolling(tick, POLL_SLOW_MS)
 
 // Budget freeze/unfreeze
 const pendingAction = ref<{ action: 'freeze' | 'unfreeze'; scope: string; unit: string } | null>(null)
@@ -408,7 +295,7 @@ async function executeBudgetAction() {
       await unfreezeBudget(scope, unit, 'Unfrozen via admin dashboard')
     }
     if (isDetail.value) await loadDetail()
-    else await loadList()
+    else await refreshList()
     toast.success(action === 'freeze' ? 'Budget frozen' : 'Budget unfrozen')
   } catch (e) {
     const msg = toMessage(e)
@@ -436,7 +323,7 @@ const {
   selectedTenant,
   refresh: async () => {
     if (isDetail.value) return loadDetail()
-    return loadList()
+    return refreshList()
   },
   onCommitted: operation => toast.success(BUDGET_FUNDING_SUCCESS[operation]),
   onRefreshFailure: () => toast.warning(BUDGET_FUNDING_REFRESH_WARNING),
@@ -505,20 +392,45 @@ const {
   frozenWarning: filterBulkFrozenWarning,
   summary: filterBulkSummary,
   preview: filterBulkPreview,
-  canOpen: canBulkAct,
-  openSetup: openBulkSetup,
+  canOpen: canBulkActAppliedTuple,
+  openSetup: openBulkSetupProtocol,
   cancelSetup: cancelBulkSetup,
   submitSetup: submitBulkSetup,
   cancelPreview: cancelFilterBulk,
   execute: executeFilterBulk,
   formatActionVerb: actionVerb,
 } = useBudgetFilterBulk({
-  getListParams: () => buildListParams(),
-  refresh: () => loadList(),
+  // Preview and submit must use the tuple that owns the visible rows, not a
+  // live input value still waiting for its debounce/apply boundary.
+  getListParams: () => ({ ...appliedListParams.value }),
+  refresh: () => refreshList(),
   onResult: (result) => { bulkResult.value = result },
   onSuccess: (message) => toast.success(message),
   onError: (message) => toast.error(message),
 })
+
+const canBulkAct = computed(() => (
+  resultsMatchAppliedFilters.value && canBulkActAppliedTuple()
+))
+const filterBulkButtonLabel = computed(() => {
+  if (!resultsMatchAppliedFilters.value) {
+    return listLoading.value ? 'Updating filters…' : 'Filters unavailable'
+  }
+  return canBulkAct.value ? 'Bulk action…' : 'Select a tenant to bulk-act'
+})
+const filterBulkButtonTitle = computed(() => {
+  if (!resultsMatchAppliedFilters.value) {
+    return listLoading.value
+      ? 'Wait for the current filters to finish loading'
+      : 'Refresh to retry the current filters'
+  }
+  return canBulkAct.value ? 'Apply an action to every budget matching the current filter' : ''
+})
+
+function openBulkSetup() {
+  if (!resultsMatchAppliedFilters.value) return
+  openBulkSetupProtocol()
+}
 
 // ─── Row-select bulk path (v0.1.25.36). Sibling of the filter-apply
 //     path above. Freeze / Unfreeze aren't in the server-side
@@ -542,14 +454,14 @@ watch(
 // the previous filter. A subsequent Load-more click would send the old
 // cursor against the new filter, which the server rejects with a
 // filter-hash mismatch (and on lenient servers appends rows from the
-// wrong filter). Re-running loadList resets nextCursor/hasMore
-// up-front and re-fetches page 1 under the new filter.
+// wrong filter). Advancing the applied tuple invalidates any in-flight
+// cursor operation and re-fetches page 1 under the new filter.
 watch(() => route.query.filter, () => {
   // Route-identity guard: fires while navigating AWAY too (before
   // unmount) — ignore query changes that belong to another route.
   if (route.name !== 'budgets') return
   selected.value = new Set()
-  if (!isDetail.value) void loadList()
+  if (!isDetail.value) void applyListParams()
 })
 
 function toggleSelect(ledgerId: string) {
@@ -660,7 +572,7 @@ async function executeBulkStatus() {
       tenantId: singleTenant,
     }
   }
-  await loadList()
+  await refreshList()
 }
 
 function cancelBulkStatus() {
@@ -671,8 +583,10 @@ function cancelBulkStatus() {
   }
 }
 
-watch(selectedTenant, () => { if (!isCrossTenantFilter.value && !isDetail.value) loadList() })
-watch(() => route.query, (q) => {
+watch(selectedTenant, () => {
+  if (!isCrossTenantFilter.value && !isDetail.value) void applyListParams()
+})
+watch(() => route.query, (q, previousQuery) => {
   // BulkActionResultDialog's View-budget link and the Overview
   // utilization donut's drill-down both navigate to the same /budgets
   // route with different query params — Vue Router keeps the component
@@ -683,6 +597,7 @@ watch(() => route.query, (q) => {
   // (e.g. /reservations?tenant_id=beta) — ignore query changes that
   // belong to another route.
   if (route.name !== 'budgets') return
+  const wasDetail = !!previousQuery?.scope && !!previousQuery?.unit
   const nextTenant = stringParam(q.tenant_id)
   if (nextTenant !== selectedTenant.value) selectedTenant.value = nextTenant
   const nextSearch = stringParam(q.search)
@@ -692,30 +607,34 @@ watch(() => route.query, (q) => {
   const nextUtilMax = parseUtilPct(q.utilization_max)
   if (nextUtilMax !== filterUtilMax.value) filterUtilMax.value = nextUtilMax
   if (isDetail.value) {
-    loadDetail()
+    invalidateList()
+    void loadDetail()
   } else {
     // A detail request may still be resolving while Back removes scope/unit.
     // Invalidate it before loading the list so its late error/result cannot
     // leak into the list shell after navigation.
-    detailLoadSeq++
-    detailEventsLoadingMore.value = false
-    loadList()
+    invalidateDetail()
+    const paramsChanged = JSON.stringify(buildListParams()) !== JSON.stringify(appliedListParams.value)
+    if (paramsChanged) void applyListParams()
+    else if (wasDetail) void refreshList()
   }
 })
 
 // V5 debounce auto-apply on text/numeric filter changes. All three
 // now push their values to the server (scope_prefix, utilization_min,
-// utilization_max) so the watcher just re-runs loadList() and the new
+// utilization_max) so the watcher advances the applied tuple and the new
 // server-filtered page-1 replaces the current list.
-watch(debouncedFilterScope, () => { if (!isDetail.value) loadList() })
-watch(debouncedFilterUtilMin, () => { if (!isDetail.value) loadList() })
-watch(debouncedFilterUtilMax, () => { if (!isDetail.value) loadList() })
-watch(debouncedSearch, () => { if (!isDetail.value) loadList() })
+watch(debouncedFilterScope, () => { if (!isDetail.value) void applyListParams() })
+watch(debouncedFilterUtilMin, () => { if (!isDetail.value) void applyListParams() })
+watch(debouncedFilterUtilMax, () => { if (!isDetail.value) void applyListParams() })
+watch(debouncedSearch, () => { if (!isDetail.value) void applyListParams() })
 
 // Export — list-mode only (detail mode is a single scope + event
 // timeline, no list to export). The server exposes cursor-paginated
 // cross-tenant list with the same filter set, so the composable can
 // walk the full result honestly in every mode.
+let exportFilterSnapshot: AppliedQuerySnapshot | null = null
+
 const {
   showExportConfirm,
   exporting,
@@ -723,10 +642,10 @@ const {
   exportError,
   exportCancellable,
   maxRows: EXPORT_MAX_ROWS,
-  confirmExport,
-  cancelExport,
+  confirmExport: openExportConfirm,
+  cancelExport: closeExportConfirm,
   cancelRunningExport,
-  executeExport,
+  executeExport: runExport,
 } = useListExport<BudgetLedger>({
   itemNoun: 'budget',
   filenameStem: 'budgets',
@@ -734,8 +653,11 @@ const {
   hasMore,
   nextCursor,
   fetchPage: async (cursor) => {
-    const res = await listBudgets(buildListParams({ cursor }))
-    return { items: res.ledgers, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
+    const snapshot = exportFilterSnapshot
+    if (!snapshot || !ownsListQuery(snapshot)) {
+      throw new Error('Export cancelled because the applied budget filters changed.')
+    }
+    return fetchListPage(snapshot, cursor)
   },
   // Server-side params cover the explicit filters; terminal visibility is
   // a local presentation rule and must be applied to every cursor page.
@@ -755,10 +677,39 @@ const {
   ],
 })
 
+function confirmExport(format: 'csv' | 'json') {
+  if (isDetail.value || !resultsMatchAppliedFilters.value) return
+  exportFilterSnapshot = snapshotListQuery()
+  openExportConfirm(format)
+}
+
+function cancelExport() {
+  closeExportConfirm()
+  exportFilterSnapshot = null
+}
+
+async function executeExport() {
+  const snapshot = exportFilterSnapshot
+  if (isDetail.value || !resultsMatchAppliedFilters.value || !snapshot || !ownsListQuery(snapshot)) {
+    cancelExport()
+    return
+  }
+  try {
+    await runExport()
+  } finally {
+    exportFilterSnapshot = null
+  }
+}
+
+function cancelBudgetExport() {
+  cancelRunningExport()
+  exportFilterSnapshot = null
+}
+
 watch(exportError, (v) => { if (v) error.value = v })
 
 // V1 virtualization — list mode only (not the detail card, which
-// embeds EventTimeline and is naturally bounded by DETAIL_EVENTS_PAGE_SIZE).
+// embeds EventTimeline and is naturally bounded by its 20-row page).
 const scrollEl = ref<HTMLElement | null>(null)
 // 56px — UtilizationBar is ~32px tall (label + bar + gap); with
 // table-cell py-3 padding a single row fits comfortably. Too much
@@ -812,9 +763,9 @@ function rowTenantId(b: BudgetLedger): string {
       :title="pageTitle"
       :subtitle="isDetail && detail ? `${detail.scope} · ${detail.unit}` : undefined"
       item-noun="budget"
-      :loaded="!isDetail ? sortedBudgets.length : undefined"
+      :loaded="!isDetail && resultsMatchAppliedFilters ? sortedBudgets.length : undefined"
       :has-more="!isDetail ? hasMore : undefined"
-      :loading="isLoading"
+      :loading="isLoading || listLoading"
       :last-updated-at="lastSuccessAt"
       @refresh="refresh"
     >
@@ -824,11 +775,11 @@ function rowTenantId(b: BudgetLedger): string {
         </button>
       </template>
       <template v-if="!isDetail" #actions>
-        <button @click="confirmExport('csv')" :disabled="sortedBudgets.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+        <button @click="confirmExport('csv')" :disabled="!resultsMatchAppliedFilters || sortedBudgets.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
           <DownloadIcon class="w-3.5 h-3.5" />
           Export CSV
         </button>
-        <button @click="confirmExport('json')" :disabled="sortedBudgets.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+        <button @click="confirmExport('json')" :disabled="!resultsMatchAppliedFilters || sortedBudgets.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
           <DownloadIcon class="w-3.5 h-3.5" />
           Export JSON
         </button>
@@ -912,7 +863,7 @@ function rowTenantId(b: BudgetLedger): string {
         <div class="flex gap-3 flex-wrap items-end">
           <div>
             <label for="budget-tenant" class="form-label">Tenant</label>
-            <select id="budget-tenant" v-model="selectedTenant" @change="loadList" class="form-select">
+            <select id="budget-tenant" v-model="selectedTenant" @change="applyListParams()" class="form-select">
               <option value="">All tenants</option>
               <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
             </select>
@@ -921,14 +872,14 @@ function rowTenantId(b: BudgetLedger): string {
           </div>
           <div>
             <label for="budget-status" class="form-label">Status</label>
-            <select id="budget-status" v-model="filterStatus" @change="loadList" class="form-select">
+            <select id="budget-status" v-model="filterStatus" @change="applyListParams()" class="form-select">
               <option value="">All</option>
               <option>ACTIVE</option><option>FROZEN</option><option>CLOSED</option>
             </select>
           </div>
           <div>
             <label for="budget-unit" class="form-label">Unit</label>
-            <select id="budget-unit" v-model="filterUnit" @change="loadList" class="form-select">
+            <select id="budget-unit" v-model="filterUnit" @change="applyListParams()" class="form-select">
               <option value="">All</option>
               <option>USD_MICROCENTS</option><option>TOKENS</option><option>CREDITS</option><option>RISK_POINTS</option>
             </select>
@@ -962,7 +913,7 @@ function rowTenantId(b: BudgetLedger): string {
               Show {{ terminalVerb }}<span v-if="hiddenTerminalCount > 0 && !includeTerminal" class="muted-sm">&nbsp;({{ hiddenTerminalCount }})</span>
             </label>
           </div>
-          <div v-if="isLoading" class="flex items-center">
+          <div v-if="isLoading || listLoading" class="flex items-center">
             <Spinner class="w-4 h-4 muted" />
           </div>
           <!-- Filter-apply bulk action. BudgetBulkFilter.tenant_id is
@@ -982,17 +933,17 @@ function rowTenantId(b: BudgetLedger): string {
             <div class="w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
             <button
               @click="openBulkSetup"
-              :disabled="!canBulkAct() || filterBulkRunning"
-              :title="canBulkAct() ? 'Apply an action to every budget matching the current filter' : ''"
+              :disabled="!canBulkAct || filterBulkRunning"
+              :title="filterBulkButtonTitle"
               class="text-xs text-gray-800 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded px-2.5 py-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-            >{{ canBulkAct() ? 'Bulk action…' : 'Select a tenant to bulk-act' }}</button>
+            >{{ filterBulkButtonLabel }}</button>
           </div>
         </div>
       </div>
 
       <!-- V1 virtualized list-mode grid. Detail mode is above inside
            the v-if="isDetail" branch and stays as-is (bounded by
-           DETAIL_EVENTS_PAGE_SIZE, no scale concern).
+           the 20-row detail-event page, no scale concern).
            text-sm on the container: the original <table class="text-sm">
            made every cell inherit 14px. Without that on the grid
            wrapper, cells with no explicit size class (e.g. Unit)
@@ -1227,7 +1178,7 @@ function rowTenantId(b: BudgetLedger): string {
       :fetched="exportFetched"
       :cancellable="exportCancellable"
       item-noun-plural="budgets"
-      @cancel="cancelRunningExport"
+      @cancel="cancelBudgetExport"
     />
 
     <!-- Bulk-action setup (step 1). Collects action + amount/spent/reason
