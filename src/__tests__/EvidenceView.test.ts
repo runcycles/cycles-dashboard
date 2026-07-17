@@ -7,6 +7,7 @@ import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '../stores/auth'
 import { toasts } from '../composables/useToast'
 import { ApiError } from '../api/client'
+import type { CyclesEvidenceEnvelope } from '../types'
 
 const getEvidenceMock = vi.fn()
 const getEvidenceJwksMock = vi.fn()
@@ -187,8 +188,8 @@ describe('EvidenceView', () => {
   it('does not let an older evidence request overwrite the current URL result', async () => {
     const idA = 'a'.repeat(64)
     const idB = 'b'.repeat(64)
-    const requestA = deferred<any>()
-    const requestB = deferred<any>()
+    const requestA = deferred<CyclesEvidenceEnvelope>()
+    const requestB = deferred<CyclesEvidenceEnvelope>()
     getEvidenceMock.mockImplementation((id: string) => id === idA ? requestA.promise : requestB.promise)
     routeRef.query = { id: idA }
     const w = await mountView()

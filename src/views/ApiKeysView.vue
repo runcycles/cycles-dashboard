@@ -12,7 +12,7 @@ import { useListExport } from '../composables/useListExport'
 import { useFocusTrap } from '../composables/useFocusTrap'
 import { listTenants, listApiKeys, revokeApiKey, createApiKey, updateApiKey } from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import type { Tenant, ApiKey, ApiKeyCreateResponse } from '../types'
+import type { Tenant, ApiKey, ApiKeyCreateRequest, ApiKeyCreateResponse, ApiKeyUpdateRequest } from '../types'
 import { PERMISSIONS } from '../types'
 import PermissionPicker from '../components/PermissionPicker.vue'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -207,11 +207,11 @@ async function submitCreate() {
   createError.value = ''
   createLoading.value = true
   try {
-    const body: Record<string, unknown> = { tenant_id: createForm.value.tenant_id, name: createForm.value.name }
+    const body: ApiKeyCreateRequest = { tenant_id: createForm.value.tenant_id, name: createForm.value.name }
     if (createForm.value.permissions.length) body.permissions = createForm.value.permissions
     if (createForm.value.scope_filter) body.scope_filter = createForm.value.scope_filter.split(',').map(s => s.trim()).filter(Boolean)
     if (createForm.value.expires_at) body.expires_at = new Date(createForm.value.expires_at).toISOString()
-    const res = await createApiKey(body as any)
+    const res = await createApiKey(body)
     createdSecret.value = res
     showCreate.value = false
   } catch (e) { createError.value = toMessage(e) }
@@ -310,7 +310,7 @@ async function submitEdit() {
     // (legacy records, schema drift). The server-side fix now returns a
     // descriptive error if validation fails; this change avoids triggering
     // it at all for the common "rename" case.
-    const body: Record<string, unknown> = {}
+    const body: ApiKeyUpdateRequest = {}
     const original = editingKey.value
     if (editForm.value.name !== (original.name || '')) {
       body.name = editForm.value.name
@@ -330,7 +330,7 @@ async function submitEdit() {
       editingKey.value = null
       return
     }
-    await updateApiKey(original.key_id, body as any)
+    await updateApiKey(original.key_id, body)
     toast.success('API key updated')
     editingKey.value = null
     requestRefresh()

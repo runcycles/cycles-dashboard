@@ -4,6 +4,7 @@
 
 import { describe, it, expect, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import type { EChartsOption } from 'echarts/types/dist/shared'
 
 // Stub vue-echarts BEFORE importing BaseChart so the real ECharts
 // registration + canvas lifecycle never fires under jsdom (which has
@@ -24,9 +25,8 @@ vi.mock('echarts/components', () => ({
 import RowActionsMenu from '../components/RowActionsMenu.vue'
 import BaseChart from '../components/BaseChart.vue'
 
-// Loose typing for fixture options — BaseChart's actual EChartsOption
-// is very strict; tests only need the series shape the component
-// inspects. Cast to `any` at the prop boundary.
+// Loose fixture shape; cast through unknown at the component boundary so
+// production code keeps ECharts' strict option type without test-only `any`.
 type EChartsOptionMockable = Record<string, unknown>
 
 // ─── M8 regression: RowActionsMenu keyboard nav ─────────────────────
@@ -99,8 +99,7 @@ describe('BaseChart — screen-reader data table (M9)', () => {
 
   it('auto-derives an sr-only data table from pie-shape option.series[0].data', () => {
     const w = mount(BaseChart, {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      props: { option: pieOption as any, label: 'Webhook fleet health' },
+      props: { option: pieOption as unknown as EChartsOption, label: 'Webhook fleet health' },
       global: {},
     })
     const table = w.find('[data-testid="chart-sr-table"]')
@@ -119,8 +118,7 @@ describe('BaseChart — screen-reader data table (M9)', () => {
   it('explicit srData prop takes precedence over auto-derive', () => {
     const w = mount(BaseChart, {
       props: {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        option: pieOption as any,
+        option: pieOption as unknown as EChartsOption,
         label: 'Custom',
         srData: [{ label: 'Overridden', value: 99 }],
       },
@@ -135,8 +133,7 @@ describe('BaseChart — screen-reader data table (M9)', () => {
   it('renders no table when option has no usable slice data', () => {
     const bareOption = { series: [{ type: 'bar', data: [1, 2, 3] }] } as EChartsOptionMockable
     const w = mount(BaseChart, {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      props: { option: bareOption as any, label: 'Bar chart' },
+      props: { option: bareOption as unknown as EChartsOption, label: 'Bar chart' },
       global: {},
     })
     expect(w.find('[data-testid="chart-sr-table"]').exists()).toBe(false)
@@ -144,8 +141,7 @@ describe('BaseChart — screen-reader data table (M9)', () => {
 
   it('preserves the chart-level aria-label and role="img"', () => {
     const w = mount(BaseChart, {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      props: { option: pieOption as any, label: 'Webhook fleet health' },
+      props: { option: pieOption as unknown as EChartsOption, label: 'Webhook fleet health' },
       global: {},
     })
     const imgRole = w.find('[role="img"]')

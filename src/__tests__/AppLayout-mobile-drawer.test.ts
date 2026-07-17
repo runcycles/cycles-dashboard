@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
+import type { AppConfig } from 'vue'
 import AppLayout from '../components/AppLayout.vue'
 import { useAuthStore } from '../stores/auth'
 import type { Capabilities } from '../types'
@@ -57,8 +58,7 @@ function mountLayout() {
         RouterView: { template: '<div data-testid="router-view" />' },
       },
       config: {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        globalProperties: { $route: { path: '/' } } as any,
+        globalProperties: { $route: { path: '/' } } as unknown as AppConfig['globalProperties'],
       },
     },
   })

@@ -10,6 +10,9 @@ class ResizeObserverStub {
 }
 
 if (typeof globalThis.ResizeObserver === 'undefined') {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (globalThis as any).ResizeObserver = ResizeObserverStub
+  Object.defineProperty(globalThis, 'ResizeObserver', {
+    configurable: true,
+    writable: true,
+    value: ResizeObserverStub,
+  })
 }

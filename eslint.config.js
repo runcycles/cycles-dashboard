@@ -2,6 +2,7 @@
 // stylistic Vue rules stay off while vue-tsc remains the type gate.
 import pluginVue from 'eslint-plugin-vue'
 import { defineConfigWithVueTs, vueTsConfigs } from '@vue/eslint-config-typescript'
+import js from '@eslint/js'
 import globals from 'globals'
 
 export default defineConfigWithVueTs(
@@ -16,18 +17,25 @@ export default defineConfigWithVueTs(
   },
   {
     linterOptions: {
-      reportUnusedDisableDirectives: false,
+      reportUnusedDisableDirectives: 'error',
     },
+  },
+  {
+    ...js.configs.recommended,
+    files: ['**/*.{js,mjs,cjs}'],
   },
   pluginVue.configs['flat/recommended'],
   vueTsConfigs.recommended,
   {
+    files: ['src/**/*.{ts,tsx,vue}'],
     languageOptions: {
       globals: {
         ...globals.browser,
         __APP_VERSION__: 'readonly',
       },
     },
+  },
+  {
     rules: {
       'vue/max-attributes-per-line': 'off',
       'vue/singleline-html-element-content-newline': 'off',
@@ -44,7 +52,6 @@ export default defineConfigWithVueTs(
       'vue/require-default-prop': 'off',
       'vue/require-prop-types': 'off',
       'vue/no-mutating-props': ['error', { shallowOnly: true }],
-      '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-unused-vars': ['error', {
         argsIgnorePattern: '^_',
         varsIgnorePattern: '^_',
@@ -63,7 +70,7 @@ export default defineConfigWithVueTs(
     },
   },
   {
-    files: ['*.config.ts', 'scripts/**'],
+    files: ['*.config.{js,mjs,cjs,ts,mts,cts}', 'scripts/**'],
     languageOptions: {
       globals: { ...globals.node },
     },
