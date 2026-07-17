@@ -196,6 +196,7 @@ const selectableCount = computed(() => {
     case 'unknown-command':
       return 0
   }
+  return 0
 })
 
 watch(parsed, () => {

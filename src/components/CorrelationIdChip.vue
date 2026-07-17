@@ -70,7 +70,7 @@ async function copy(e: Event) {
   }
 }
 
-async function pivot(e: Event) {
+async function handlePivot(e: Event) {
   e.stopPropagation()
   if (!props.pivot) return
   const path = props.pivot === 'audit' ? '/audit' : '/events'
@@ -83,7 +83,7 @@ async function pivot(e: Event) {
     <component
       :is="canPivot ? 'button' : 'span'"
       :type="canPivot ? 'button' : undefined"
-      @click="canPivot ? pivot($event) : undefined"
+      @click="canPivot ? handlePivot($event) : undefined"
       class="font-mono text-xs"
       :class="canPivot
         ? 'text-blue-600 hover:underline cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-400 rounded'
