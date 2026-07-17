@@ -910,6 +910,7 @@ describe('endpoint wrappers — smoke', () => {
   })
 
   it('propagates non-2xx as thrown ApiError with fallback message when body is not JSON', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 500,

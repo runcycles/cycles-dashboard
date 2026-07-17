@@ -10,12 +10,15 @@
 //   - Escape + overlay click + Close button all emit 'close'
 //   - unknown error_code forward-compat (renders `code: message`)
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import BulkActionResultDialog from '../components/BulkActionResultDialog.vue'
 import type { BulkActionRowOutcome } from '../types'
 import { toasts } from '../composables/useToast'
+
+const originalCreateObjectURL = URL.createObjectURL
+const originalRevokeObjectURL = URL.revokeObjectURL
 
 function outcome(id: string, extras: Partial<BulkActionRowOutcome> = {}): BulkActionRowOutcome {
   return { id, ...extras }
@@ -35,6 +38,12 @@ describe('BulkActionResultDialog', () => {
     Object.assign(navigator, {
       clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
     })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    URL.createObjectURL = originalCreateObjectURL
+    URL.revokeObjectURL = originalRevokeObjectURL
   })
 
   it('renders succeeded-count summary', () => {
@@ -414,6 +423,7 @@ describe('BulkActionResultDialog', () => {
     const revokeSpy = vi.fn()
     globalThis.URL.createObjectURL = createSpy
     globalThis.URL.revokeObjectURL = revokeSpy
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
 
     const response = {
       succeeded: [outcome('uuid-ok')],

@@ -29,17 +29,10 @@ vi.mock('vue-router', () => ({
 // Deterministic initial fetch — usePolling fires the callback once on
 // mount. Keeps tests parallel to the EventsView-poll-merge harness so
 // we can assert on the params shape without scheduling real timers.
-vi.mock('../composables/usePolling', () => ({
-  usePolling: (fn: (signal: AbortSignal) => Promise<void>) => {
-    const ctrl = new AbortController()
-    void fn(ctrl.signal)
-    return {
-      isPolling: { value: true },
-      isLoading: { value: false },
-      refresh: () => fn(ctrl.signal),
-    }
-  },
-}))
+vi.mock('../composables/usePolling', async () => {
+  const { createPollingMock } = await import('./helpers/createPollingMock')
+  return { usePolling: createPollingMock }
+})
 
 beforeEach(() => {
   setActivePinia(createPinia())

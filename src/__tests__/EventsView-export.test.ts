@@ -66,17 +66,10 @@ vi.mock('@tanstack/vue-virtual', async () => {
 })
 
 // Kick usePolling's callback once on mount, as the real composable does.
-vi.mock('../composables/usePolling', () => ({
-  usePolling: (fn: (signal: AbortSignal) => Promise<void>) => {
-    const ctrl = new AbortController()
-    void fn(ctrl.signal)
-    return {
-      isPolling: { value: true },
-      isLoading: { value: false },
-      refresh: () => fn(ctrl.signal),
-    }
-  },
-}))
+vi.mock('../composables/usePolling', async () => {
+  const { createPollingMock } = await import('./helpers/createPollingMock')
+  return { usePolling: createPollingMock }
+})
 
 let lastBlob: Blob | null = null
 const originalCreateObjectURL = URL.createObjectURL

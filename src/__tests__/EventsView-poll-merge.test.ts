@@ -50,19 +50,13 @@ vi.mock('vue-router', () => ({
 // calls usePolling(load, 15000) and expects {refresh, isLoading}.
 // Kick the callback once on mount (simulating the real composable's initial
 // tick), then expose refresh() for tests to re-trigger.
-vi.mock('../composables/usePolling', () => ({
-  POLLING_STALE: Symbol('polling-stale'),
-  usePolling: (fn: (signal: AbortSignal) => Promise<void>) => {
-    const ctrl = new AbortController()
-    // Fire once immediately to mimic start() → tick() in the real composable.
-    void fn(ctrl.signal)
-    return {
-      isPolling: { value: true },
-      isLoading: { value: false },
-      refresh: () => fn(ctrl.signal),
-    }
-  },
-}))
+vi.mock('../composables/usePolling', async () => {
+  const { createPollingMock } = await import('./helpers/createPollingMock')
+  return {
+    POLLING_STALE: Symbol('polling-stale'),
+    usePolling: createPollingMock,
+  }
+})
 
 beforeEach(() => {
   setActivePinia(createPinia())

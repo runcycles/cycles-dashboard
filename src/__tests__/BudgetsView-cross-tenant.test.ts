@@ -52,15 +52,10 @@ vi.mock('vue-router', async (importOriginal) => {
   }
 })
 
-vi.mock('../composables/usePolling', () => ({
-  usePolling: (fn: () => Promise<void> | void) => {
-    void fn()
-    return {
-      refresh: async () => { void fn() },
-      isLoading: { value: false },
-    }
-  },
-}))
+vi.mock('../composables/usePolling', async () => {
+  const { createPollingMock } = await import('./helpers/createPollingMock')
+  return { usePolling: createPollingMock }
+})
 
 // Bypass the 300ms debounce so tests drive filter changes synchronously.
 vi.mock('../composables/useDebouncedRef', () => ({
