@@ -31,7 +31,11 @@ export interface BudgetFilterBulkResult {
   tenantId: string
 }
 
-export const BUDGET_FILTER_BULK_HINTS: Record<BudgetBulkAction, string> = {
+// Bulk copy is intentionally stricter than the single-budget hints. Under
+// governance spec v0.1.25.26 and the admin server's FUND_LUA implementation,
+// RESET / RESET_SPENT assign `allocated = amount` for EVERY matched row; one
+// bulk value can therefore overwrite budgets that previously differed.
+const BUDGET_FILTER_BULK_HINTS: Record<BudgetBulkAction, string> = {
   CREDIT: 'Adds funds to each matching budget\'s allocated and remaining balance.',
   DEBIT: 'Removes funds from each matching budget. Rows whose remaining would go negative fail per-row with BUDGET_EXCEEDED.',
   RESET: 'Sets EVERY matching budget\'s allocated to this one amount — budgets with differing allocations are all overwritten to the same value. FROZEN budgets matched by the filter fail per-row; unfreeze first.',
@@ -168,6 +172,9 @@ export function useBudgetFilterBulk(options: UseBudgetFilterBulkOptions) {
       sublabel: budget.unit,
       status: budget.status,
     }),
+    // Ledger ids are opaque UUIDs; scope is the operator-recognizable label.
+    // Capture every match (not only the ten preview samples) so a partial-
+    // failure result can identify each succeeded/failed/skipped budget.
     labelFn: (budget) => ({ id: budget.ledger_id, label: budget.scope }),
   })
 
@@ -297,9 +304,14 @@ export function useBudgetFilterBulk(options: UseBudgetFilterBulkOptions) {
         action: submittedAction,
         idempotency_key: createKey(),
       }
+      // Governance spec v0.1.25.26 defines amount/spent as Amount objects.
+      // Sending either magnitude as a scalar produces 400 INVALID_REQUEST.
       if (amount.value !== undefined) body.amount = { unit: unit.value, amount: amount.value }
       if (spent.value !== undefined) body.spent = { unit: unit.value, amount: spent.value }
       if (reason.value) body.reason = reason.value
+      // Only an exhausted preview owns an exact total. A page/match-capped
+      // lower bound must omit expected_count or the server will necessarily
+      // reject it with COUNT_MISMATCH (same contract as Tenants/Webhooks).
       if (preview.reachedEnd.value) body.expected_count = preview.previewCount.value
 
       const response = await (options.submit ?? bulkActionBudgetsDefault)(body)

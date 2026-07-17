@@ -80,7 +80,7 @@ function createHarness(initialParams: Record<string, string> = { limit: '100', t
 }
 
 describe('useBudgetFilterBulk', () => {
-  it('does not resolve preview or mutation dependencies during setup', () => {
+  it('does not access preview or mutation callables during setup', () => {
     const options: UseBudgetFilterBulkOptions = {
       getListParams: () => ({ limit: '100', tenant_id: 'acme' }),
       refresh: async () => true,

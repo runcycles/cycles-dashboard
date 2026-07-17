@@ -31,8 +31,9 @@ humanization; result-label capture; notifications; and refresh settlement.
 `useBudgetFilterBulk` now owns that cohesive protocol. The parent supplies its
 current server list params and refresh callback, and retains every filter ref,
 route watcher, polling decision, row-select mutation, and dialog. The
-composable lazily resolves its list/writer dependencies so capability-only
-mounts do not need an unused mutation export. `BudgetsView.vue` drops from
+composable defers selecting the statically imported list/writer callables
+until preview/submit, so capability-only mounts do not need an unused mutation
+export. `BudgetsView.vue` drops from
 1,634 to 1,331 lines; the setup and shared Preview/Result markup is unchanged.
 
 The extraction deliberately closes one latent ownership race. Preview now
@@ -45,7 +46,7 @@ from the one submitted, or route result links to the wrong tenant. The server
 still owns final drift detection through `expected_count`.
 
 Eleven focused composable tests cover tenant/cross-tenant gating, unit seeding,
-lazy dependency access, zero and spent validation, exact request/filter wire
+deferred callable access, zero and spent validation, exact request/filter wire
 shape, complete-count gating, RESET_SPENT FROZEN truthfulness, result labels,
 the mid-walk filter race, revalidation at Preview, direct-call defense, count
 drift, and generic retryable failures. The existing 30 filter-bulk and
