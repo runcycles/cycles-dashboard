@@ -15,6 +15,18 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.73] — 2026-07-17
+
+### Changed
+
+- Overview now delegates its two-phase polling, bounded cursor walks,
+  signature gating, partial-result tracking, walk retry/backoff, and queued
+  manual refresh to a focused `useOverviewData` composable. Cards, charts,
+  filters, drill-down routes, polling cadence, and API requests are unchanged.
+- The acquisition protocol now has direct deterministic coverage in addition
+  to the existing Overview integration suite, making polling and pagination
+  regressions fail at their owning boundary.
+
 ## [0.1.25.72] — 2026-07-16
 
 ### Fixed

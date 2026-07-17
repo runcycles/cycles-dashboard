@@ -31,7 +31,7 @@ services:
 
   dashboard:
     logging: *default-logging
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.72
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.73
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
