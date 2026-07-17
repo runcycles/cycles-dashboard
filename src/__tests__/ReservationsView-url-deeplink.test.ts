@@ -66,16 +66,13 @@ vi.mock('vue-router', async (importOriginal) => {
   }
 })
 
-vi.mock('../composables/usePolling', () => ({
-  POLLING_STALE: Symbol('polling-stale'),
-  usePolling: (fn: () => Promise<void> | void) => {
-    void fn()
-    return {
-      refresh: () => fn(),
-      isLoading: { value: false },
-    }
-  },
-}))
+vi.mock('../composables/usePolling', async () => {
+  const { createPollingMock } = await import('./helpers/createPollingMock')
+  return {
+    POLLING_STALE: Symbol('polling-stale'),
+    usePolling: createPollingMock,
+  }
+})
 
 vi.mock('@tanstack/vue-virtual', async () => {
   const { computed, isRef } = await import('vue')

@@ -17,6 +17,43 @@
 
 Newest at the top. Older entries preserved verbatim.
 
+### 2026-07-17 — warning-free test harness (tooling-only)
+
+The unit suite was functionally green but emitted 693 warning lines: 645
+invalid `loading`-prop diagnostics, 31 unresolved `router-link` diagnostics,
+16 invalid watch-source diagnostics, and one unsupported JSDOM navigation.
+Most originated in repeated `usePolling` doubles that returned plain
+`{ value }` objects. Those objects resemble refs to a reader but are neither
+valid Vue watch sources nor eligible for template unwrapping, so they reached
+Boolean child props as objects. The volume made CI output poor evidence: a new
+Vue contract regression could disappear inside familiar noise without failing
+the run.
+
+Twenty view suites now use one deliberately single-tick `createPollingMock`
+helper. It invokes the initial callback, passes an abort signal, preserves the
+callback result on refresh, and exposes type-correct `isPolling`, `isLoading`,
+and `lastSuccessAt` refs. Specialized in-flight/dedup test doubles remain local
+where their extra state is part of the assertion. The shared Vue Test Utils
+setup supplies a lightweight RouterLink anchor for tests that do not install a
+router. Suites with a purpose-built link double or real memory router opt out
+explicitly; the TenantLink integration test asserts the resolved href. The
+bulk-results download test now owns and restores its URL/click doubles,
+eliminating the accidental JSDOM navigation, and the
+intentional non-JSON API warning is locally captured by the tests that exercise
+it.
+
+Silence is now enforced rather than conventional. The shared Vue
+`warnHandler` throws on unresolved components, invalid props, invalid watch
+sources, and other Vue warnings. JSDOM's `jsdomError` channel likewise throws
+instead of printing unsupported browser operations to stderr; setup fails
+closed if Vitest does not expose that channel. Focused harness tests prove
+genuine-ref behavior (including the refresh result contract) and both warning
+gates. Final validation is clean and silent: 1,274/1,274 tests
+pass across 110 files with 96.47% line coverage; lint, strict typecheck,
+production build, and both development and production Compose configurations
+pass. This is test/tooling-only: package version, image pins, API wire surface,
+routes, and operator-visible behavior remain at v0.1.25.72.
+
 ### 2026-07-17 — ESLint correctness gate (tooling-only)
 
 This tooling change addresses issue #225, the dashboard's remaining static-analysis gap. CI previously

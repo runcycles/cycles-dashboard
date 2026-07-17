@@ -21,6 +21,9 @@ function makeWrapper(items: RowActionItem[], extraProps: Record<string, unknown>
   return mount(RowActionsMenu, {
     props: { items, ...extraProps },
     attachTo: document.body,
+    // Exercise this suite's purpose-built RouterLink double rather than the
+    // generic no-router fallback installed by the shared harness.
+    global: { stubs: { RouterLink: false } },
   })
 }
 

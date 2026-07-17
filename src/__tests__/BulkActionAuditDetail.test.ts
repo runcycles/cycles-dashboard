@@ -21,7 +21,12 @@ const router = createRouter({
 })
 
 function mountWith(props: { operation: string; metadata: Record<string, unknown> }) {
-  return mount(BulkActionAuditDetail, { props, global: { plugins: [router] } })
+  return mount(BulkActionAuditDetail, {
+    props,
+    // Keep this an integration check of TenantLink + the memory router. The
+    // shared fallback is only for suites that intentionally install no router.
+    global: { plugins: [router], stubs: { RouterLink: false } },
+  })
 }
 
 describe('BulkActionAuditDetail', () => {
@@ -109,6 +114,7 @@ describe('BulkActionAuditDetail', () => {
     const link = w.find('a')
     expect(link.exists()).toBe(true)
     expect(link.text()).toBe('acme')
+    expect(link.attributes('href')).toBe('/tenants/acme')
     // Non-tenant filter entries render as plain mono text.
     expect(w.text()).toContain('over_limit')
     expect(w.text()).toContain('true')
