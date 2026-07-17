@@ -188,7 +188,8 @@ const filteredTenants = computed<Tenant[]>(() => {
 // row, because that row has no id and Enter is a no-op — counting it
 // would point aria-activedescendant at a missing element id.
 const selectableCount = computed(() => {
-  switch (parsed.value.mode) {
+  const current = parsed.value
+  switch (current.mode) {
     case 'search': return filteredTenants.value.length
     case 'commands-list': return visibleCommands.value.length
     case 'command-ready': return 1
@@ -196,6 +197,12 @@ const selectableCount = computed(() => {
     case 'unknown-command':
       return 0
   }
+
+  // Keep the runtime fallback while making additions to ParsedInput fail
+  // typecheck until this switch handles the new mode explicitly.
+  const unhandled: never = current
+  void unhandled
+  return 0
 })
 
 watch(parsed, () => {

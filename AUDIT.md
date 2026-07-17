@@ -17,6 +17,46 @@
 
 Newest at the top. Older entries preserved verbatim.
 
+### 2026-07-17 — ESLint correctness gate (tooling-only)
+
+This tooling change addresses issue #225, the dashboard's remaining static-analysis gap. CI previously
+passed `run-lint: false`, so strict `vue-tsc` checking was the only source-level
+gate outside the test suite. The repo now carries an ESLint 9 flat config built
+from the Vue and TypeScript recommended rule sets, exposes `npm run lint`, and
+enables the shared CI workflow's lint phase. Current `typescript-eslint` 8.64
+supports the repo's TypeScript 6.0.3 compiler directly, so the dependency graph
+installs cleanly without the issue's obsolete `--legacy-peer-deps` workaround.
+
+The configuration is deliberately correctness-focused. Generated build,
+coverage, Playwright, and dependency trees are globally ignored; browser,
+test, tooling-script, and root-config globals are scoped explicitly. Untyped
+JavaScript tooling receives ESLint's core recommended checks, so identifiers
+that neither `vue-tsc` project covers cannot silently drift undefined. Existing
+template formatting and component-order conventions are not converted into
+lint churn. Nested mutation of the shared form DTOs used by advanced-field
+components remains permitted, while direct prop replacement is still rejected
+through `vue/no-mutating-props` in `shallowOnly` mode. Explicit `any` is
+rejected across application and test code; test-only CommonJS access remains
+an explicitly scoped exception.
+
+The first clean-up pass resolved the actionable findings without changing API
+or UI behavior: `CommandPalette` now has a defensive, exhaustiveness-checked
+zero fallback if a future parsed mode reaches its selectable-count computed;
+`CorrelationIdChip` no longer exposes a prop and handler under the same
+`pivot` key; the Budgets,
+Tenants, and Webhooks selection toggles use explicit branches instead of bare
+conditional expressions; and one unused Events race-test counter was removed.
+Self-review then tightened the new gate before merge: the seven stale disable
+directives were removed and future unused suppressions are errors; request and
+response DTOs now type the formerly loose mutation and race-test boundaries;
+and `@eslint/js` plus Node-only globals protect the untyped build/security
+scripts without leaking browser globals into them.
+Final validation: `npm ci` succeeds from the updated lockfile; lint is clean
+with zero warnings; 1,271/1,271 tests pass across 109 files with 96.47% line
+coverage; strict typecheck, production build, and both Compose configurations
+pass. This is a tooling-only change: package version, image pins, wire surface,
+routes, and operator-visible behavior remain at v0.1.25.72.
+
 ### 2026-07-16 — v0.1.25.72: terminal funding commit boundary
 
 The `.71` extraction deliberately preserved the prior refresh-before-close

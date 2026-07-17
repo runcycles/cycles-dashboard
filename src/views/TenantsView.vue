@@ -13,7 +13,7 @@ import { rateLimitedBatch } from '../utils/rateLimitedBatch'
 import { synthesizeRowSelectBulkResult } from '../utils/rowSelectBulkResult'
 import type { RowSelectBulkResponse } from '../utils/rowSelectBulkResult'
 import { generateIdempotencyKey } from '../utils/idempotencyKey'
-import type { TenantBulkAction, TenantBulkFilter } from '../types'
+import type { TenantBulkAction, TenantBulkFilter, TenantCreateRequest } from '../types'
 import { useAuthStore } from '../stores/auth'
 import type { Tenant } from '../types'
 import { COMMIT_OVERAGE_POLICIES, RESERVATION_EXPIRY_POLICIES } from '../types'
@@ -239,7 +239,8 @@ const selected = ref<Set<string>>(new Set())
 watch([search, parentFilter, statusFilter], () => { selected.value = new Set() })
 function toggleSelect(id: string) {
   const next = new Set(selected.value)
-  next.has(id) ? next.delete(id) : next.add(id)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
   selected.value = next
 }
 function toggleSelectAll() {
@@ -553,7 +554,7 @@ async function submitCreate() {
   }
   createLoading.value = true
   try {
-    const body: Record<string, unknown> = { tenant_id: createForm.value.tenant_id, name: createForm.value.name }
+    const body: TenantCreateRequest = { tenant_id: createForm.value.tenant_id, name: createForm.value.name }
     if (createForm.value.parent_tenant_id) body.parent_tenant_id = createForm.value.parent_tenant_id
     if (createForm.value.default_commit_overage_policy) body.default_commit_overage_policy = createForm.value.default_commit_overage_policy
     if (createForm.value.default_reservation_ttl_ms) body.default_reservation_ttl_ms = Number(createForm.value.default_reservation_ttl_ms)
@@ -563,7 +564,7 @@ async function submitCreate() {
     // "disable extensions" value an operator must be able to set.
     if (String(createForm.value.max_reservation_extensions).trim() !== '') body.max_reservation_extensions = Number(createForm.value.max_reservation_extensions)
     if (createForm.value.reservation_expiry_policy) body.reservation_expiry_policy = createForm.value.reservation_expiry_policy
-    await createTenant(body as any)
+    await createTenant(body)
     showCreate.value = false
     toast.success(`Tenant '${createForm.value.name}' created`)
     router.push({ name: 'tenant-detail', params: { id: createForm.value.tenant_id } })

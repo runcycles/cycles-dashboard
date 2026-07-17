@@ -205,9 +205,8 @@ describe('EventsView — same-route URL sync (round 5 F3)', () => {
     // Load more under filter F1 — response held in flight.
     let resolveMore!: (v: unknown) => void
     const more = new Promise((r) => { resolveMore = r })
-    let calls = 0
     listEventsMock.mockImplementation((params: Record<string, string>) =>
-      params?.cursor ? more : (calls++, Promise.resolve({ events: [], has_more: false })))
+      params?.cursor ? more : Promise.resolve({ events: [], has_more: false }))
     await w.find('button:not([disabled])').element // ensure render settled
     const loadMoreBtn = w.findAll('button').find(b => b.text() === 'Load more')!
     await loadMoreBtn.trigger('click')

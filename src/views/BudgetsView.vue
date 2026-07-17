@@ -602,7 +602,8 @@ watch(() => route.query.filter, () => {
 
 function toggleSelect(ledgerId: string) {
   const next = new Set(selected.value)
-  next.has(ledgerId) ? next.delete(ledgerId) : next.add(ledgerId)
+  if (next.has(ledgerId)) next.delete(ledgerId)
+  else next.add(ledgerId)
   selected.value = next
 }
 function toggleSelectAll() {

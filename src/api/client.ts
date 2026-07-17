@@ -48,7 +48,6 @@ async function toApiError(res: Response): Promise<ApiError> {
     // "backend returned a well-formed error with no body." Pre-fix
     // both paths produced the same opaque "API error: 500" in the UI
     // with nothing for the operator to grep on.
-    // eslint-disable-next-line no-console
     console.warn(
       `[api] failed to parse ${res.status} response as JSON:`,
       parseErr instanceof Error ? parseErr.message : String(parseErr),

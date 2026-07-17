@@ -23,7 +23,7 @@ import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
 enableAutoUnmount(afterEach)
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '../stores/auth'
-import type { Capabilities } from '../types'
+import type { Capabilities, WebhookListResponse } from '../types'
 
 const listWebhooksMock = vi.fn()
 const listTenantsMock = vi.fn()
@@ -213,8 +213,8 @@ describe('WebhooksView — URL deep-link smoke', () => {
   })
 
   it('keeps the bare-URL result when the prior status request resolves last', async () => {
-    const paused = deferred<any>()
-    const unfiltered = deferred<any>()
+    const paused = deferred<WebhookListResponse>()
+    const unfiltered = deferred<WebhookListResponse>()
     listWebhooksMock.mockImplementation((params?: Record<string, string>) =>
       params?.status === 'PAUSED' ? paused.promise : unfiltered.promise,
     )

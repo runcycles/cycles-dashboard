@@ -7,7 +7,7 @@ import { POLL_SLOW_MS } from '../composables/pollingConstants'
 import { useTerminalAwareList } from '../composables/useTerminalAwareList'
 import { getTenant, listTenants, listBudgets, listApiKeys, listPolicies, listWebhooks, updateTenantStatus, updateTenant, revokeApiKey, createApiKey, updateApiKey, createBudget, createPolicy, updatePolicy, freezeBudget, ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import type { Tenant, BudgetLedger, ApiKey, Policy, WebhookSubscription, ApiKeyCreateResponse, BudgetCreateRequest, PolicyCreateRequest, PolicyUpdateRequest } from '../types'
+import type { Tenant, TenantUpdateRequest, BudgetLedger, ApiKey, ApiKeyCreateRequest, ApiKeyCreateResponse, ApiKeyUpdateRequest, Policy, WebhookSubscription, BudgetCreateRequest, PolicyCreateRequest, PolicyUpdateRequest } from '../types'
 import { COMMIT_OVERAGE_POLICIES, PERMISSIONS } from '../types'
 import PermissionPicker from '../components/PermissionPicker.vue'
 import PolicyAdvancedFields from '../components/PolicyAdvancedFields.vue'
@@ -343,7 +343,7 @@ async function submitEditTenant() {
   editTenantError.value = ''
   editTenantLoading.value = true
   try {
-    const body: Record<string, unknown> = { name: editTenantForm.value.name }
+    const body: TenantUpdateRequest = { name: editTenantForm.value.name }
     if (editTenantForm.value.default_commit_overage_policy) body.default_commit_overage_policy = editTenantForm.value.default_commit_overage_policy
     if (editTenantForm.value.default_reservation_ttl_ms) body.default_reservation_ttl_ms = Number(editTenantForm.value.default_reservation_ttl_ms)
     if (editTenantForm.value.max_reservation_ttl_ms) body.max_reservation_ttl_ms = Number(editTenantForm.value.max_reservation_ttl_ms)
@@ -352,7 +352,7 @@ async function submitEditTenant() {
     // "disable extensions" value an operator must be able to set.
     if (String(editTenantForm.value.max_reservation_extensions).trim() !== '') body.max_reservation_extensions = Number(editTenantForm.value.max_reservation_extensions)
     // reservation_expiry_policy is never sent — create-only per spec.
-    await updateTenant(id, body as any)
+    await updateTenant(id, body)
     toast.success('Tenant updated')
     tenant.value = await getTenant(id)
     showEditTenant.value = false
@@ -377,11 +377,11 @@ async function submitCreateKey() {
   createKeyError.value = ''
   createKeyLoading.value = true
   try {
-    const body: Record<string, unknown> = { tenant_id: id, name: createKeyForm.value.name }
+    const body: ApiKeyCreateRequest = { tenant_id: id, name: createKeyForm.value.name }
     if (createKeyForm.value.permissions.length) body.permissions = createKeyForm.value.permissions
     if (createKeyForm.value.scope_filter) body.scope_filter = createKeyForm.value.scope_filter.split(',').map(s => s.trim()).filter(Boolean)
     if (createKeyForm.value.expires_at) body.expires_at = new Date(createKeyForm.value.expires_at).toISOString()
-    const res = await createApiKey(body as any)
+    const res = await createApiKey(body)
     createdKeySecret.value = res
     showCreateKey.value = false
   } catch (e) { createKeyError.value = toMessage(e) }
@@ -445,7 +445,7 @@ async function submitEditKey() {
   editKeyError.value = ''
   editKeyLoading.value = true
   try {
-    const body: Record<string, unknown> = {}
+    const body: ApiKeyUpdateRequest = {}
     const original = editingKey.value
     if (editKeyForm.value.name !== (original.name || '')) {
       body.name = editKeyForm.value.name
@@ -464,7 +464,7 @@ async function submitEditKey() {
       editingKey.value = null
       return
     }
-    await updateApiKey(original.key_id, body as any)
+    await updateApiKey(original.key_id, body)
     toast.success('API key updated')
     editingKey.value = null
     const kRes = await listApiKeys({ tenant_id: id })

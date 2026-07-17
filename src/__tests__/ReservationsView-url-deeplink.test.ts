@@ -23,7 +23,7 @@ import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
 enableAutoUnmount(afterEach)
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '../stores/auth'
-import type { Capabilities } from '../types'
+import type { Capabilities, ReservationListResponse } from '../types'
 
 const listReservationsMock = vi.fn()
 const listTenantsMock = vi.fn()
@@ -243,8 +243,8 @@ describe('ReservationsView — URL deep-link smoke', () => {
       ],
       has_more: false,
     })
-    const alpha = deferred<any>()
-    const beta = deferred<any>()
+    const alpha = deferred<ReservationListResponse>()
+    const beta = deferred<ReservationListResponse>()
     listReservationsMock.mockImplementation((tenantId: string) =>
       tenantId === 'alpha' ? alpha.promise : beta.promise,
     )
