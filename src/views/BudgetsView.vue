@@ -9,12 +9,12 @@ import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useTerminalAwareList } from '../composables/useTerminalAwareList'
 import { useListExport } from '../composables/useListExport'
-import { listBudgets, lookupBudget, listTenants, listEvents, freezeBudget, unfreezeBudget, updateBudgetConfig, bulkActionBudgets, ApiError } from '../api/client'
+import { listBudgets, lookupBudget, listTenants, listEvents, freezeBudget, unfreezeBudget, updateBudgetConfig } from '../api/client'
 import { COMMIT_OVERAGE_POLICIES } from '../types'
 import { tenantFromScope } from '../utils/safe'
 import { stringParam } from '../utils/dateParam'
 import { useAuthStore } from '../stores/auth'
-import type { BudgetLedger, Tenant, Event, BudgetBulkAction, BudgetBulkFilter, BudgetBulkActionRequest, BudgetBulkActionResponse } from '../types'
+import type { BudgetLedger, Tenant, Event, BudgetBulkActionResponse } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import UtilizationBar from '../components/UtilizationBar.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -37,9 +37,6 @@ import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { writeClipboardJson } from '../utils/clipboard'
 import BulkActionPreviewDialog from '../components/BulkActionPreviewDialog.vue'
 import BulkActionResultDialog from '../components/BulkActionResultDialog.vue'
-import { useBulkActionPreview } from '../composables/useBulkActionPreview'
-import { formatBulkRequestError } from '../utils/errorCodeMessages'
-import { generateIdempotencyKey } from '../utils/idempotencyKey'
 import { rateLimitedBatch } from '../utils/rateLimitedBatch'
 import { synthesizeRowSelectBulkResult } from '../utils/rowSelectBulkResult'
 import type { RowSelectBulkResponse } from '../utils/rowSelectBulkResult'
@@ -50,6 +47,7 @@ import {
   BUDGET_FUNDING_SUCCESS,
   useBudgetFunding,
 } from '../composables/useBudgetFunding'
+import { useBudgetFilterBulk } from '../composables/useBudgetFilterBulk'
 
 const toast = useToast()
 
@@ -477,83 +475,6 @@ async function submitEditBudget() {
   finally { editBudgetLoading.value = false }
 }
 
-// ─── Filter-apply bulk action (cycles-governance-admin v0.1.25.26,
-//     admin-server v0.1.25.29). Sibling of TenantsView / WebhooksView
-//     filter-apply paths, with one structural twist: the budget endpoint
-//     requires BudgetBulkFilter.tenant_id, so the entry button is
-//     disabled whenever no tenant is selected — including the cross-
-//     tenant list modes (?filter=over_limit / ?filter=has_debt) where
-//     operators are scanning an incident fleet-wide. They still need to
-//     pick a tenant before arming a mutation.
-//
-// Flow: (1) openBulkSetup() renders a FormDialog to collect action +
-// amount/spent/reason; (2) submitBulkSetup() validates and opens the
-// shared BulkActionPreviewDialog with a count walk; (3) executeFilterBulk()
-// submits the request and, on any non-succeeded rows, opens
-// BulkActionResultDialog with the per-row codes + messages.
-const showBulkSetup = ref(false)
-const bulkSetupForm = ref<{ action: BudgetBulkAction; unit: string; amount: number | string; spent: number | string; reason: string }>({
-  action: 'CREDIT',
-  unit: 'USD_MICROCENTS',
-  amount: '',
-  spent: '',
-  reason: '',
-})
-const bulkSetupError = ref('')
-
-// Per-action copy for the bulk setup form. NOT a copy of the single-budget
-// dialog hints: bulk RESET / RESET_SPENT apply ONE amount to EVERY matched
-// budget (FUND_LUA runs `allocated = amount` before touching spent), so
-// budgets with differing allocations all get clobbered to the same value
-// — the hints must say so. Any FROZEN budget the filter matches is
-// rejected before dispatch and lands in failed[] per-row.
-const bulkActionHints: Record<BudgetBulkAction, string> = {
-  CREDIT: 'Adds funds to each matching budget\'s allocated and remaining balance.',
-  DEBIT: 'Removes funds from each matching budget. Rows whose remaining would go negative fail per-row with BUDGET_EXCEEDED.',
-  RESET: 'Sets EVERY matching budget\'s allocated to this one amount — budgets with differing allocations are all overwritten to the same value. FROZEN budgets matched by the filter fail per-row; unfreeze first.',
-  RESET_SPENT: 'Billing-period rollover — sets EVERY matching budget\'s allocated to this one amount AND resets its spent counter to the override (default 0). Budgets with differing allocations are all overwritten to the same value; reserved and debt carry over. FROZEN budgets matched by the filter fail per-row; unfreeze first.',
-  REPAY_DEBT: 'Reduces outstanding debt on each matching budget by this amount.',
-}
-
-// Per-action eligibility mirrors the single-row Fund action's server-side
-// behaviour: CREDIT / DEBIT / REPAY_DEBT require status==='ACTIVE', otherwise
-// the server would return INVALID_TRANSITION per-row. Client-side filtering
-// keeps the preview count honest. RESET / RESET_SPENT carry no status gate
-// because the server MATCHES them by filter regardless of status — but any
-// FROZEN row is still rejected per-row at dispatch (lands in failed[]).
-// Do NOT exclude FROZEN rows from the preview count here: the server's
-// total_matched includes them, so a filtered expected_count would trigger
-// COUNT_MISMATCH on every submit.
-function bulkActionEligibleStatus(action: BudgetBulkAction): string | null {
-  if (action === 'CREDIT' || action === 'DEBIT' || action === 'REPAY_DEBT') return 'ACTIVE'
-  return null
-}
-
-// Preview state — values captured from the setup form when the preview
-// opens. Kept on separate refs (not a single object) so the FormDialog
-// can close and release its props cleanly before the PreviewDialog renders.
-const filterBulkAction = ref<BudgetBulkAction | null>(null)
-// Scalar magnitudes captured from the setup form. Wrapped as
-// {unit, amount} Amount objects at send-time per spec v0.1.25.26.
-const filterBulkAmount = ref<number | undefined>(undefined)
-const filterBulkSpent = ref<number | undefined>(undefined)
-const filterBulkUnit = ref<string>('')
-const filterBulkReason = ref<string>('')
-const filterBulkRunning = ref(false)
-const filterBulkSubmitError = ref('')
-// FROZEN rows matched during the preview walk (only reachable for
-// RESET / RESET_SPENT — the other actions gate on ACTIVE in filterFn).
-// The server rejects each FROZEN row before dispatch, so these are
-// guaranteed per-row failures; surface the count in the preview dialog
-// so the operator isn't surprised by a partially-failed run. The rows
-// stay IN the preview count — excluding them would make expected_count
-// diverge from the server's total_matched and 409 COUNT_MISMATCH.
-const filterBulkFrozenCount = ref(0)
-const filterBulkFrozenWarning = computed<string>(() => {
-  const n = filterBulkFrozenCount.value
-  if (n === 0) return ''
-  return `${n} FROZEN budget${n === 1 ? '' : 's'} in this selection will fail per-row — unfreeze ${n === 1 ? 'it' : 'them'} first. ${n === 1 ? 'It is' : 'They are'} still included in the count above (the server matches by filter regardless of status).`
-})
 // Per-row result dialog — opens after submit iff failed[] or skipped[]
 // is non-empty.
 const bulkResult = ref<{
@@ -567,6 +488,37 @@ const bulkResult = ref<{
   // suppresses triage links when tenantId is falsy.
   tenantId: string
 } | null>(null)
+
+// Filter-apply balance mutations have a different protocol from row-select
+// Freeze/Unfreeze below. The composable owns setup validation, an immutable
+// preview/submit filter snapshot, bounded preview, exact-count gating,
+// request construction, and refresh-after-submit. This view retains the
+// filters themselves, dialogs, result overlay, routing, and polling.
+const {
+  isSetupOpen: showBulkSetup,
+  setupForm: bulkSetupForm,
+  setupError: bulkSetupError,
+  hints: bulkActionHints,
+  action: filterBulkAction,
+  running: filterBulkRunning,
+  submitError: filterBulkSubmitError,
+  frozenWarning: filterBulkFrozenWarning,
+  summary: filterBulkSummary,
+  preview: filterBulkPreview,
+  canOpen: canBulkAct,
+  openSetup: openBulkSetup,
+  cancelSetup: cancelBulkSetup,
+  submitSetup: submitBulkSetup,
+  cancelPreview: cancelFilterBulk,
+  execute: executeFilterBulk,
+  formatActionVerb: actionVerb,
+} = useBudgetFilterBulk({
+  getListParams: () => buildListParams(),
+  refresh: () => loadList(),
+  onResult: (result) => { bulkResult.value = result },
+  onSuccess: (message) => toast.success(message),
+  onError: (message) => toast.error(message),
+})
 
 // ─── Row-select bulk path (v0.1.25.36). Sibling of the filter-apply
 //     path above. Freeze / Unfreeze aren't in the server-side
@@ -716,261 +668,6 @@ function cancelBulkStatus() {
     bulkStatusAbort?.abort()
   } else {
     bulkStatusAction.value = null
-  }
-}
-
-// Spec v0.1.25.26: BudgetBulkFilter.tenant_id is REQUIRED. Cross-tenant
-// list modes (`?filter=over_limit`, `?filter=has_debt`) show budgets
-// across every tenant, so a bulk action from that mode would have no
-// valid tenant_id to send. Disable the entry point there; the operator
-// must first navigate to the specific tenant they want to act on.
-function canBulkAct(): boolean {
-  return !!selectedTenant.value && !isCrossTenantFilter.value
-}
-
-// Walk listBudgets with the SAME server-side filter the bulk submit will
-// use — tenant_id, scope_prefix, unit, status, search, utilization range
-// are all server-filterable, so the client-side filterFn below only has
-// to add the action-derived status gate for actions that require ACTIVE.
-const filterBulkPreview = useBulkActionPreview<BudgetLedger>({
-  fetchPage: async (cursor) => {
-    const params = buildListParams(cursor ? { cursor } : {})
-    const res = await listBudgets(params)
-    return { items: res.ledgers, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
-  },
-  filterFn: (b) => {
-    if (!filterBulkAction.value) return false
-    const required = bulkActionEligibleStatus(filterBulkAction.value)
-    if (required && b.status !== required) return false
-    // Matched row that will still fail at dispatch — see
-    // filterBulkFrozenCount. Counted here (not excluded) so the
-    // preview count stays aligned with the server's total_matched.
-    if (b.status === 'FROZEN') filterBulkFrozenCount.value++
-    return true
-  },
-  toSample: (b) => ({
-    id: b.ledger_id,
-    primary: b.scope,
-    sublabel: b.unit,
-    status: b.status,
-  }),
-  // Budget ledger_ids are opaque UUIDs — scope is what operators
-  // recognize. Collect a full id→scope map during the preview walk so
-  // BulkActionResultDialog can render scope alongside the UUID on every
-  // succeeded/failed/skipped row. Without this, a partial-failure result
-  // shows only UUIDs and the operator has to cross-reference back to
-  // the preview to identify which budget failed.
-  labelFn: (b) => ({ id: b.ledger_id, label: b.scope }),
-})
-
-function openBulkSetup() {
-  if (!canBulkAct()) return
-  // Seed unit from the list filter when set — the operator already
-  // scoped their filter to that unit, so we default to the same.
-  // Otherwise fall back to the most common admin unit.
-  bulkSetupForm.value = {
-    action: 'CREDIT',
-    unit: filterUnit.value || 'USD_MICROCENTS',
-    amount: '',
-    spent: '',
-    reason: '',
-  }
-  bulkSetupError.value = ''
-  showBulkSetup.value = true
-}
-
-function cancelBulkSetup() {
-  showBulkSetup.value = false
-  bulkSetupError.value = ''
-}
-
-function submitBulkSetup() {
-  bulkSetupError.value = ''
-  const action = bulkSetupForm.value.action
-  const unit = bulkSetupForm.value.unit
-  if (!unit) {
-    bulkSetupError.value = 'Unit is required'
-    return
-  }
-  // Spec v0.1.25.26: amount is required for ALL five actions including
-  // RESET_SPENT (that action sets allocated to `amount`; `spent` is the
-  // optional counter override that defaults to 0). Zero is legal for
-  // RESET / RESET_SPENT (server Amount is @Min(0); zero-allocation
-  // rollover mirrors the single-op RESET_SPENT path) but meaningless
-  // for CREDIT / DEBIT / REPAY_DEBT, which stay strictly positive.
-  const allowZero = action === 'RESET' || action === 'RESET_SPENT'
-  const n = Number(bulkSetupForm.value.amount)
-  if (!Number.isFinite(n) || (allowZero ? n < 0 : n <= 0)) {
-    bulkSetupError.value = allowZero
-      ? 'Amount must be zero or a positive number'
-      : 'Amount must be a positive number'
-    return
-  }
-  filterBulkAmount.value = n
-  if (action === 'RESET_SPENT') {
-    if (bulkSetupForm.value.spent === '' || bulkSetupForm.value.spent === null) {
-      filterBulkSpent.value = undefined
-    } else {
-      const s = Number(bulkSetupForm.value.spent)
-      if (!Number.isFinite(s) || s < 0) {
-        bulkSetupError.value = 'Spent override must be zero or a positive number'
-        return
-      }
-      filterBulkSpent.value = s
-    }
-  } else {
-    filterBulkSpent.value = undefined
-  }
-  filterBulkUnit.value = unit
-  filterBulkReason.value = bulkSetupForm.value.reason.trim()
-  filterBulkAction.value = action
-  filterBulkSubmitError.value = ''
-  // Fresh walk, fresh frozen tally — filterFn increments it per match.
-  filterBulkFrozenCount.value = 0
-  showBulkSetup.value = false
-  void filterBulkPreview.startPreview()
-}
-
-// Human-readable summary of the filter the preview+submit will send. Mirrors
-// the server-side fields that buildListParams forwards, but adds the action-
-// derived status gate when the operator hasn't set filterStatus themselves,
-// so the summary reflects what the server will actually match.
-const filterBulkSummary = computed<string>(() => {
-  const parts: string[] = []
-  if (selectedTenant.value) parts.push(`tenant_id=${selectedTenant.value}`)
-  if (filterStatus.value) parts.push(`status=${filterStatus.value}`)
-  else if (filterBulkAction.value) {
-    const s = bulkActionEligibleStatus(filterBulkAction.value)
-    if (s) parts.push(`status=${s}`)
-  }
-  if (filterUnit.value) parts.push(`unit=${filterUnit.value}`)
-  if (filterScope.value) parts.push(`scope_prefix=${filterScope.value}`)
-  const q = debouncedSearch.value.trim()
-  if (q) parts.push(`search="${q}"`)
-  const rawMin = filterUtilMin.value
-  const rawMax = filterUtilMax.value
-  if (rawMin !== '' && rawMin !== null && rawMin !== undefined) parts.push(`utilization_min=${Number(rawMin) / 100}`)
-  if (rawMax !== '' && rawMax !== null && rawMax !== undefined) parts.push(`utilization_max=${Number(rawMax) / 100}`)
-  return parts.join(' AND ')
-})
-
-// Title-cased action verb for dialog headers: CREDIT → "Credit",
-// RESET_SPENT → "Reset spent".
-function actionVerb(action: BudgetBulkAction): string {
-  const lower = action.toLowerCase().replace('_', ' ')
-  return lower.charAt(0).toUpperCase() + lower.slice(1)
-}
-
-function cancelFilterBulk() {
-  if (filterBulkRunning.value) return
-  filterBulkPreview.cancelPreview()
-  filterBulkPreview.resetPreview()
-  filterBulkAction.value = null
-  filterBulkAmount.value = undefined
-  filterBulkSpent.value = undefined
-  filterBulkUnit.value = ''
-  filterBulkReason.value = ''
-  filterBulkSubmitError.value = ''
-  filterBulkFrozenCount.value = 0
-}
-
-async function executeFilterBulk() {
-  if (!filterBulkAction.value || filterBulkRunning.value) return
-  if (filterBulkPreview.previewLoading.value) return
-  if (filterBulkPreview.previewCount.value === 0) return
-  if (filterBulkPreview.cappedAtMax.value) return
-
-  const action = filterBulkAction.value
-  // Defense-in-depth: server rejects missing tenant_id with 400. The
-  // disabled-state on the entry button already enforces this but a
-  // programmatic confirm (test harness, browser devtools) could slip past.
-  const tenantId = selectedTenant.value
-  if (!tenantId) {
-    filterBulkSubmitError.value = 'Select a tenant before submitting a bulk action.'
-    return
-  }
-  const filter: BudgetBulkFilter = { tenant_id: tenantId }
-  if (filterStatus.value) filter.status = filterStatus.value
-  else {
-    const required = bulkActionEligibleStatus(action)
-    if (required) filter.status = required
-  }
-  if (filterUnit.value) filter.unit = filterUnit.value
-  if (filterScope.value) filter.scope_prefix = filterScope.value
-  const q = debouncedSearch.value.trim()
-  if (q) filter.search = q
-  const rawMin = filterUtilMin.value
-  const rawMax = filterUtilMax.value
-  if (rawMin !== '' && rawMin !== null && rawMin !== undefined) {
-    const n = Number(rawMin)
-    if (Number.isFinite(n)) filter.utilization_min = Math.max(0, Math.min(1, n / 100))
-  }
-  if (rawMax !== '' && rawMax !== null && rawMax !== undefined) {
-    const n = Number(rawMax)
-    if (Number.isFinite(n)) filter.utilization_max = Math.max(0, Math.min(1, n / 100))
-  }
-
-  filterBulkRunning.value = true
-  filterBulkSubmitError.value = ''
-  try {
-    const body: BudgetBulkActionRequest = {
-      filter,
-      action,
-      idempotency_key: generateIdempotencyKey(),
-    }
-    // Spec v0.1.25.26: amount and spent are Amount objects ({unit, amount}),
-    // not scalar numbers. Scalar send ⇒ server 400 INVALID_REQUEST.
-    const unit = filterBulkUnit.value
-    if (filterBulkAmount.value !== undefined) {
-      body.amount = { unit, amount: filterBulkAmount.value }
-    }
-    if (filterBulkSpent.value !== undefined) {
-      body.spent = { unit, amount: filterBulkSpent.value }
-    }
-    if (filterBulkReason.value) body.reason = filterBulkReason.value
-    // Only send expected_count when the preview walk completed naturally.
-    // A partial (capped) count would guarantee COUNT_MISMATCH against the
-    // server's true total. Same rule as TenantsView / WebhooksView.
-    if (filterBulkPreview.reachedEnd.value) {
-      body.expected_count = filterBulkPreview.previewCount.value
-    }
-    const res = await bulkActionBudgets(body)
-    const pastTense: Record<BudgetBulkAction, string> = {
-      CREDIT: 'credited',
-      DEBIT: 'debited',
-      RESET: 'allocation reset',
-      RESET_SPENT: 'spent reset',
-      REPAY_DEBT: 'debt repaid',
-    }
-    const summaryParts = [`${res.succeeded.length}/${res.total_matched} budgets ${pastTense[action]}`]
-    if (res.skipped.length) summaryParts.push(`${res.skipped.length} skipped`)
-    if (res.failed.length) summaryParts.push(`${res.failed.length} failed`)
-    const summary = summaryParts.join(', ')
-    if (res.failed.length) toast.error(`${summary} — see details`)
-    else toast.success(summary)
-    // Snapshot the label map BEFORE resetPreview() clears it — the
-    // result dialog needs it to render scope alongside each row's
-    // ledger-id (opaque UUID on its own).
-    const labels = { ...filterBulkPreview.previewLabels.value }
-    // Close the preview first; the result dialog opens as a separate overlay.
-    filterBulkAction.value = null
-    filterBulkAmount.value = undefined
-    filterBulkSpent.value = undefined
-    filterBulkUnit.value = ''
-    filterBulkReason.value = ''
-    filterBulkPreview.resetPreview()
-    if (res.failed.length || res.skipped.length) {
-      bulkResult.value = { actionVerb: actionVerb(action), response: res, labelById: labels, tenantId }
-    }
-  } catch (e) {
-    if (e instanceof ApiError && (e.errorCode === 'LIMIT_EXCEEDED' || e.errorCode === 'COUNT_MISMATCH')) {
-      filterBulkSubmitError.value = formatBulkRequestError(e.errorCode, 'budgets', 500, e.details as Record<string, unknown> | undefined) ?? `Bulk ${action} failed: ${toMessage(e)}`
-    } else {
-      filterBulkSubmitError.value = `Bulk ${action} failed: ${toMessage(e)}`
-    }
-  } finally {
-    filterBulkRunning.value = false
-    await loadList()
   }
 }
 

@@ -15,6 +15,23 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.74] — 2026-07-17
+
+### Changed
+
+- Budget filter-apply balance mutations now run through a focused
+  `useBudgetFilterBulk` protocol boundary. Setup validation, bounded preview,
+  exact-count gating, request construction, result messaging, and refresh
+  ownership are unchanged; row-select Freeze/Unfreeze remains independent.
+
+### Fixed
+
+- Bulk Preview now captures one immutable filter tuple and reuses it for every
+  cursor page, the confirmation summary, and the final mutation. A route or
+  filter change during an in-flight preview can no longer pair a new filter
+  with an old cursor or submit a tuple different from the one the operator
+  reviewed.
+
 ## [0.1.25.73] — 2026-07-17
 
 ### Changed

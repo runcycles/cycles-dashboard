@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.73 (2026-07-17)
+**Current release:** v0.1.25.74 (2026-07-17)
 
 ## Baseline requirements
 
@@ -16,6 +16,49 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-07-17 — v0.1.25.74: budget filter-bulk ownership
+
+After the `.71` funding/detail extraction, `BudgetsView.vue` still owned the
+complete filter-apply balance-mutation protocol alongside list/detail
+acquisition, URL filters, row selection, Freeze/Unfreeze fan-out,
+virtualization, export, and presentation. The remaining protocol covered five
+wire actions; zero-aware RESET/RESET_SPENT validation; Amount wrapping;
+action-derived status eligibility; bounded cursor preview; FROZEN-row warning
+counts; exact `expected_count` gating; UUID idempotency; error-code
+humanization; result-label capture; notifications; and refresh settlement.
+
+`useBudgetFilterBulk` now owns that cohesive protocol. The parent supplies its
+current server list params and refresh callback, and retains every filter ref,
+route watcher, polling decision, row-select mutation, and dialog. The
+composable defers selecting the statically imported list/writer callables
+until preview/submit, so capability-only mounts do not need an unused mutation
+export. `BudgetsView.vue` drops from
+1,634 to 1,331 lines; the setup and shared Preview/Result markup is unchanged.
+
+The extraction deliberately closes one latent ownership race. Preview now
+captures one shallow-frozen string tuple when the operator advances from
+setup. Every cursor page, the visible filter summary, and the final bulk
+request reuse that tuple. A same-route filter change or programmatic
+navigation during an in-flight walk can therefore refresh the owning list but
+cannot combine a new tenant/filter with an old cursor, count a different set
+from the one submitted, or route result links to the wrong tenant. The server
+still owns final drift detection through `expected_count`.
+
+Eleven focused composable tests cover tenant/cross-tenant gating, unit seeding,
+deferred callable access, zero and spent validation, exact request/filter wire
+shape, complete-count gating, RESET_SPENT FROZEN truthfulness, result labels,
+the mid-walk filter race, revalidation at Preview, direct-call defense, count
+drift, and generic retryable failures. The existing 30 filter-bulk and
+row-select integration tests remain unchanged and green. The first full-suite
+run caught eager resolution of `bulkActionBudgets` in capability-only mounts;
+the writer and preview reader now resolve only when used, matching the
+established funding-composable contract. Final validation: 1,292/1,292 tests
+across 112 files; 97.10% line coverage; lint, strict typecheck, production
+build, and development/production Compose
+validation pass. No endpoint, ordinary request shape, polling cadence, route,
+layout, or operator copy changes; only the preview/submit filter ownership is
+hardened.
 
 ### 2026-07-17 — v0.1.25.73: Overview acquisition boundary
 
