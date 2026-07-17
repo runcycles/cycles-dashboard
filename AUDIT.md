@@ -40,9 +40,10 @@ rejected across application and test code; test-only CommonJS access remains
 an explicitly scoped exception.
 
 The first clean-up pass resolved the actionable findings without changing API
-or UI behavior: `CommandPalette` now has a defensive zero fallback if a future
-parsed mode reaches its selectable-count computed; `CorrelationIdChip` no
-longer exposes a prop and handler under the same `pivot` key; the Budgets,
+or UI behavior: `CommandPalette` now has a defensive, exhaustiveness-checked
+zero fallback if a future parsed mode reaches its selectable-count computed;
+`CorrelationIdChip` no longer exposes a prop and handler under the same
+`pivot` key; the Budgets,
 Tenants, and Webhooks selection toggles use explicit branches instead of bare
 conditional expressions; and one unused Events race-test counter was removed.
 Self-review then tightened the new gate before merge: the seven stale disable

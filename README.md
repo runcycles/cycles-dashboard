@@ -266,6 +266,7 @@ Each page manages its own polling lifecycle via the `usePolling` composable:
 ## Building
 
 ```bash
+npm run lint       # Run ESLint correctness checks
 npm run build      # Type-check + production build → dist/
 npm run test       # Run Vitest unit tests
 npm run dev        # Development server with HMR
