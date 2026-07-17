@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.72 (2026-07-16)
+**Current release:** v0.1.25.73 (2026-07-17)
 
 ## Baseline requirements
 
@@ -16,6 +16,39 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-07-17 — v0.1.25.73: Overview acquisition boundary
+
+`OverviewView.vue` remained the dashboard's second-largest view at 1,531
+lines. Its first ~270 lines mixed an unusually stateful data protocol into the
+same component that owns attention-card filtering, chart construction,
+drill-down navigation, and markup: four cheap phase-one requests; four bounded
+cursor walks; aggregate-signature and tenth-tick walk gates; capped-walk
+partial flags; tick-owned exponential retry; phase-one error precedence; and a
+queued manual refresh that works around the shared poller's deliberate
+in-flight deduplication.
+
+`useOverviewData` now owns that acquisition protocol as one typed boundary.
+The production defaults remain the same API client, polling composable,
+30-second cadence, page size, and cursor-walk cap. API and polling dependencies
+are injectable for deterministic tests, while specialized in-flight behavior
+remains inside the shared poller. The composable returns only its owned raw
+data, partial flags, loading/freshness state, error banner text, and
+`refreshAll`; closed-tenant filtering, sorting, attention-axis computation,
+chart options, route queries, and every template branch remain in the view.
+`OverviewView.vue` drops to 1,278 lines without a presentation extraction or
+wire change.
+
+Seven focused composable tests exercise both-phase publication, unchanged and
+changed signature gates, the tenth-tick fallback, capped-walk partial results,
+walk-failure backoff with phase-one error precedence, successful recovery and
+backoff reset, and queued manual refresh. The existing 104 Overview/chart
+integration tests remain unchanged and green, independently proving the move
+preserved the page-level contract. Final validation: 1,281/1,281 tests across
+111 files; 96.72% line coverage; lint, strict
+typecheck, production build, and development/production Compose validation
+pass. No server/spec requirement, endpoint, request shape, polling cadence,
+route, chart, layout, or operator-visible behavior changes.
 
 ### 2026-07-17 — warning-free test harness (tooling-only)
 
