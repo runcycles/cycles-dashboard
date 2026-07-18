@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.74 (2026-07-17)
+**Current release:** v0.1.25.75 (2026-07-17)
 
 ## Baseline requirements
 
@@ -16,6 +16,78 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-07-17 — v0.1.25.75: budget read-side ownership
+
+After the `.71` funding/detail-component split and `.74` filter-bulk
+extraction, `BudgetsView.vue` still implemented its complete read protocol
+inline: tenant acquisition, list and detail state, page-one request
+sequencing, list/event cursors, exact-scope event filtering, detail-route
+invalidation, polling settlement, and error precedence. The view also kept
+the filter controls, URL hydration, terminal-row presentation, row selection,
+both mutation paths, export, virtualization, and all markup.
+
+`useBudgetData` now owns the cohesive acquisition side. The parent supplies
+only getters for the current route mode, list parameters, and detail tuple.
+The composable retains the existing API functions, 60-second polling cadence,
+100-row budget page, 20-row detail-event page, sequential tenant/list poll,
+exact child-scope exclusion, separate tenant error banner, and stale list and
+detail response guards. Entering detail now invalidates list, Load-more, and
+export snapshots just as returning to the list invalidates detail/event reads;
+tenant-list settlement also re-checks the route mode. A late failure can no
+longer cross the mode boundary and paint the wrong error shell.
+`BudgetsView.vue` drops from 1,331 to 1,314 lines;
+filters, routes, dialogs, export presentation, row selection, mutations,
+virtualization, and DOM remain in the parent.
+
+The extraction also closes the remaining cursor-ownership race in this view.
+One `useAppliedQuery` epoch now represents the filter/sort tuple that produced
+the visible rows. Page-one requests retain their independent newest-request
+sequence; Load more snapshots the filter epoch and discards its result or
+error if filters change in flight. Polls and mutation refreshes reuse the
+applied tuple instead of draft text/numeric inputs still waiting at the 300ms
+debounce boundary. Repeated watchers carrying the same tuple are deduplicated,
+while PageHeader refresh remains the same-tuple retry path.
+
+Export captures the same immutable applied snapshot when its confirmation
+opens and reuses it for every cursor page. A filter change before or during
+the walk cancels the export before a mismatched page can be appended. The
+filter-bulk Preview now also receives the applied tuple rather than live form
+refs, aligning all cursor consumers with the rows the operator actually saw.
+
+Self-review closed four adjacent ownership gaps before merge. Routine
+same-tuple page-one refreshes temporarily hide their cursor, so export now
+gates on `listLoading` as well as tuple ownership instead of mistaking that
+temporary `has_more=false` state for a complete result set. Export cursor
+requests also receive the shared abort signal; entering detail closes either
+export dialog state and aborts the active HTTP request instead of waiting for
+the page to settle. List, detail, and tenant errors are now mode-scoped and
+mutations/export report through an explicit seam rather than writing a
+composable ref from the parent. Returning from a directly-loaded detail runs
+the full tenant-plus-list entry path, so the tenant picker is populated
+immediately rather than at the next 60-second poll. Finally, row selection and
+its Freeze/Unfreeze toolbar are unavailable whenever the visible rows do not
+own the current applied tuple. The existing PageHeader and filter-strip
+loading indicators continue to cover scheduled polls and now consistently
+cover extracted page-one and mutation refreshes; this is intentional feedback
+for operators, not a structural layout change.
+
+Eighteen focused composable tests cover initial polling, newest-page ownership,
+stale-error rejection, applied-vs-draft refresh, Load-more tuple reuse,
+mid-flight invalidation and retryable failure, export snapshot cancellation,
+abort-signal forwarding, duplicate watcher deduplication plus forced retry,
+transition gating,
+exact-scope event pagination and failure settlement, detail-route
+supersession, symmetric list/detail/tenant invalidation, direct-detail list
+entry, mode-scoped errors, and partial tenant failure. The existing
+BudgetsView integration suites remain green; view regressions now also pin the
+transient export/bulk-control gate, routine-refresh export interlock,
+direct-detail tenant hydration, and stale-row selection gate. Final
+validation: 1,313/1,313 tests across 113 files, 97.33% line coverage, lint,
+strict typecheck, production build, and development/production Compose config.
+No API endpoint, successful request shape, polling cadence, route schema, or
+structural layout changes. Operator copy changes only for the transient
+filter-update gate ("Updating filters…" / "Filters unavailable").
 
 ### 2026-07-17 — v0.1.25.74: budget filter-bulk ownership
 

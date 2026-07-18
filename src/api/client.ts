@@ -258,8 +258,8 @@ export const introspect = () => get<import('../types').AuthIntrospectResponse>(`
 export const getOverview = () => get<import('../types').AdminOverviewResponse>(`${BASE}/admin/overview`)
 
 // Budgets
-export const listBudgets = (params: Record<string, string>) =>
-  get<import('../types').BudgetListResponse>(`${BASE}/admin/budgets`, params)
+export const listBudgets = (params: Record<string, string>, signal?: AbortSignal) =>
+  get<import('../types').BudgetListResponse>(`${BASE}/admin/budgets`, params, signal)
 
 export const lookupBudget = (scope: string, unit: string) =>
   get<import('../types').BudgetLedger>(`${BASE}/admin/budgets/lookup`, { scope, unit })
