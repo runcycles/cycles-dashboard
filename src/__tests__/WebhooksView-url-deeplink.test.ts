@@ -185,6 +185,19 @@ describe('WebhooksView — URL deep-link smoke', () => {
     expect(params?.status).toBeUndefined()
   })
 
+  it('disables filter-bulk actions for the unrepresentable failing-only deep-link', async () => {
+    routeRef.query = { failing: '1' }
+    const { default: WebhooksView } = await import('../views/WebhooksView.vue')
+    const w = mount(WebhooksView, stdMount())
+    await flushPromises()
+
+    const pauseAll = w.findAll('button').find(button => button.text() === 'Pause all')
+    const resumeAll = w.findAll('button').find(button => button.text() === 'Resume all')
+    expect(pauseAll?.attributes('disabled')).toBeDefined()
+    expect(resumeAll?.attributes('disabled')).toBeDefined()
+    expect(pauseAll?.attributes('title')).toContain('failing-only')
+  })
+
   // Round 4 (F3): the ?status watcher was adopt-only — Back to a bare
   // /webhooks kept the stale deep-linked filter, so a bare URL showed
   // filtered data (the defect class rounds 2–3 fixed for the other

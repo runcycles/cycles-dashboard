@@ -15,6 +15,37 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.77] — 2026-07-18
+
+### Changed
+
+- Tenant and webhook filter-wide suspend/pause protocols now run through
+  focused `useTenantFilterBulk` and `useWebhookFilterBulk` composables. The
+  views retain filters, row selection, polling, dialogs, and presentation.
+- `TenantsView` drops from 1,122 to 985 lines and `WebhooksView` from 1,102 to
+  988 lines without changing the existing preview or result-dialog layout.
+
+### Fixed
+
+- Bulk Preview now captures one immutable action/filter snapshot and reuses it
+  for every cursor page, the visible summary, `expected_count`, and the final
+  request. Mid-preview filter or route changes can no longer mutate a tenant or
+  webhook set different from the one the operator reviewed.
+- Webhook filter-bulk controls refuse the derived **failing only** filter,
+  matching the existing system-wide and wildcard guards. The server bulk
+  schema cannot represent that predicate, so enabling it previously applied a
+  broader set than the visible table implied.
+- A list response that reports `has_more=true` without a continuation cursor is
+  now classified as a partial preview. The dashboard omits `expected_count`
+  instead of treating the lower bound as exact.
+- Re-entrant filter-bulk confirmation is rejected before error or loading state
+  can be changed; direct execution without an owned Preview snapshot is also
+  refused.
+
+No API endpoint, successful request shape, server/spec requirement, or polling
+cadence changes. Validation: 1,353 tests; 97.43% line coverage; lint,
+typecheck, production build, and both Compose configurations pass.
+
 ## [0.1.25.76] — 2026-07-18
 
 ### Changed

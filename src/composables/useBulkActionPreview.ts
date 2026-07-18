@@ -93,8 +93,9 @@ export function useBulkActionPreview<T>(options: UseBulkActionPreviewOptions<T>)
   // When the walk hits maxMatches: count is a lower bound; bulk submit
   // must not pass expected_count.
   const cappedAtMax = ref(false)
-  // When the walk hits maxPages without finishing AND without hitting
-  // maxMatches: count is a partial sample, not a true total.
+  // When the walk cannot finish (page cap or a malformed missing
+  // continuation cursor) without hitting maxMatches: count is a partial
+  // sample, not a true total.
   const cappedAtPages = ref(false)
   // When the walk completed naturally (hasMore=false) without either cap:
   // count is exact and bulk submit can pass expected_count for tighter
@@ -124,6 +125,7 @@ export function useBulkActionPreview<T>(options: UseBulkActionPreviewOptions<T>)
     const samples: PreviewSample[] = []
     const labels: Record<string, string> = {}
     let hasMore = true
+    let missingContinuation = false
 
     try {
       while (hasMore && pages < maxPages && count < maxMatches) {
@@ -157,10 +159,13 @@ export function useBulkActionPreview<T>(options: UseBulkActionPreviewOptions<T>)
         if (options.labelFn) previewLabels.value = { ...labels }
         hasMore = page.hasMore
         cursor = page.nextCursor
-        if (!cursor) break
+        if (hasMore && !cursor) {
+          missingContinuation = true
+          break
+        }
       }
       cappedAtMax.value = count >= maxMatches
-      cappedAtPages.value = !cappedAtMax.value && hasMore && pages >= maxPages
+      cappedAtPages.value = !cappedAtMax.value && hasMore && (pages >= maxPages || missingContinuation)
       reachedEnd.value = !cappedAtMax.value && !cappedAtPages.value
     } catch (e) {
       if (myAbort.signal.aborted) return

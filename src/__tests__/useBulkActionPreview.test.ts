@@ -105,6 +105,22 @@ describe('useBulkActionPreview', () => {
     expect(p.reachedEnd.value).toBe(false)
   })
 
+  it('treats has_more without a continuation cursor as partial, never exact', async () => {
+    const fetchPage = pages({
+      items: [row('a')],
+      hasMore: true,
+      nextCursor: '',
+    })
+    const p = useBulkActionPreview<Row>({ fetchPage, filterFn: acceptAll, toSample })
+
+    await p.startPreview()
+
+    expect(p.previewCount.value).toBe(1)
+    expect(p.cappedAtPages.value).toBe(true)
+    expect(p.reachedEnd.value).toBe(false)
+    expect(fetchPage).toHaveBeenCalledTimes(1)
+  })
+
   it('reports zero matches when no items pass the filter', async () => {
     const fetchPage = pages({
       items: [row('a', 'CLOSED'), row('b', 'CLOSED')],

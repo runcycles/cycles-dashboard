@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.76 (2026-07-18)
+**Current release:** v0.1.25.77 (2026-07-18)
 
 ## Baseline requirements
 
@@ -16,6 +16,66 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-07-18 — v0.1.25.77: tenant/webhook filter-bulk snapshot ownership
+
+`TenantsView` and `WebhooksView` still owned their complete filter-wide
+mutation protocols inline: action-derived eligibility, bounded cursor Preview,
+exact-count gating, idempotency, bulk error humanization, result settlement,
+and owner refresh. More importantly, both protocols read live form refs in
+every preview page and rebuilt the request from those refs at submit time. A
+filter or same-route navigation change during the cursor walk could therefore
+pair a new filter with an old continuation, change the summary while the modal
+was open, or submit a different tenant/webhook set from the one the operator
+reviewed. The server's `COUNT_MISMATCH` protected only complete walks and could
+not make the visible review truthful.
+
+`useTenantFilterBulk` and `useWebhookFilterBulk` now own those two destructive
+flows. Opening Preview captures one normalized, shallow-frozen action/filter
+tuple. Every list page, client-side eligibility predicate, summary string,
+`expected_count`, and final request derives from that same tuple. A route or
+control change may refresh the owning list behind the modal, but cannot alter
+the already-reviewed destructive target definition. Direct execution without
+an owned snapshot is rejected, and the duplicate-submit guard runs before any
+visible error or loading mutation.
+
+The extraction preserves the existing wire and settlement contracts. Tenant
+SUSPEND still derives `status=ACTIVE`; REACTIVATE derives `status=SUSPENDED`;
+specific parent and trimmed search filters remain optional; root-level is still
+blocked because the server has no null-parent filter. Webhook PAUSE still
+derives `status=ACTIVE`; RESUME derives `status=PAUSED`; tenant and literal
+search remain optional; the system pseudo-tenant and wildcard matcher remain
+blocked. Complete walks alone send `expected_count`, UUID idempotency remains
+per confirmation, count/limit errors stay inline and retryable, failed/skipped
+rows still open the shared result dialog, and refresh runs after settlement.
+The view templates and successful request bodies are unchanged.
+
+Review also found that Webhooks' derived `failing=1` filter was not included in
+either the preview predicate or the server request, even though the controls
+said “Apply to all matching filter.” The webhook bulk schema has no
+`consecutive_failures` predicate, so that state now refuses to arm alongside
+the other unrepresentable filters. The disabled controls explain all three
+unsupported modes in their tooltip.
+
+The shared preview walker had one related truthfulness edge: `has_more=true`
+with an empty continuation cursor broke the loop but marked `reachedEnd=true`.
+Callers could then send a lower-bound count as exact. A missing continuation is
+now reported through the existing partial-preview state, which keeps the count
+visible but omits `expected_count`. This matches the defensive cursor contract
+already used by Overview and Tenant Detail.
+
+The two views retain URL/filter refs, polling and page-one data, Load more,
+export, row-select batches, mutations outside this filter-wide path, dialogs,
+virtualization, and all presentation. `TenantsView.vue` drops from 1,122 to 985
+lines and `WebhooksView.vue` from 1,102 to 988. Focused tests cover immutable
+multi-page tuples, action-derived status, exact and malformed-continuation
+counts, unsupported filter gates, direct-call defense, duplicate submission,
+count/limit error recovery, result capture, and the live failing-only URL
+integration. No governance-spec, server-fleet, endpoint, successful wire
+shape, polling cadence, or ordinary layout change. Final validation:
+1,353/1,353 tests across 116 files; 97.43% line coverage; lint, strict
+typecheck, production build, and development/production Compose validation
+pass.
 
 ### 2026-07-18 — v0.1.25.76: truthful Tenant Detail acquisition
 

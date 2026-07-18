@@ -9,12 +9,10 @@ import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useTerminalAwareList } from '../composables/useTerminalAwareList'
 import { useListExport } from '../composables/useListExport'
-import { listWebhooks, listTenants, createWebhook, updateWebhook, getWebhookSecurityConfig, updateWebhookSecurityConfig, bulkActionWebhooks, ApiError } from '../api/client'
+import { listWebhooks, listTenants, createWebhook, updateWebhook, getWebhookSecurityConfig, updateWebhookSecurityConfig } from '../api/client'
 import { rateLimitedBatch } from '../utils/rateLimitedBatch'
 import { synthesizeRowSelectBulkResult } from '../utils/rowSelectBulkResult'
 import type { RowSelectBulkResponse } from '../utils/rowSelectBulkResult'
-import { generateIdempotencyKey } from '../utils/idempotencyKey'
-import type { WebhookBulkAction, WebhookBulkFilter } from '../types'
 import { useAuthStore } from '../stores/auth'
 import type { WebhookSubscription, WebhookCreateRequest, WebhookCreateResponse, Tenant, WebhookSecurityConfig } from '../types'
 import { EVENT_TYPES, TENANT_ALLOWED_EVENT_TYPES } from '../types'
@@ -39,10 +37,8 @@ import WebhookAdvancedFields from '../components/WebhookAdvancedFields.vue'
 import { emptyWebhookAdvancedForm, webhookAdvancedToRequest, webhookAdvancedError } from '../utils/webhookAdvanced'
 import { writeClipboardJson } from '../utils/clipboard'
 import { useToast } from '../composables/useToast'
-import { useBulkActionPreview } from '../composables/useBulkActionPreview'
+import { useWebhookFilterBulk, type WebhookFilterBulkResult } from '../composables/useWebhookFilterBulk'
 import { toMessage } from '../utils/errors'
-import { formatBulkRequestError } from '../utils/errorCodeMessages'
-import type { WebhookBulkActionResponse } from '../types'
 
 const toast = useToast()
 
@@ -264,6 +260,7 @@ function toggleSelectAll() {
 const bulkAction = ref<'PAUSED' | 'ACTIVE' | null>(null)
 const bulkProgress = ref({ done: 0, total: 0, failed: 0 })
 const bulkRunning = ref(false)
+const bulkResult = ref<WebhookFilterBulkResult | { actionVerb: string; response: RowSelectBulkResponse } | null>(null)
 let bulkAbort: AbortController | null = null
 
 function openBulk(action: 'PAUSED' | 'ACTIVE') { bulkAction.value = action }
@@ -331,144 +328,31 @@ function cancelBulk() {
   }
 }
 
-// ─── W1 filter-apply path (cycles-governance-admin v0.1.25.21) ───────
-// Mirrors TenantsView: additive alongside the row-select path above.
-// Single POST to /v1/admin/webhooks/bulk-action, filter body is
-// derived from the active UI filters + the action's implied status.
-//
-//   - PAUSE → status=ACTIVE (only mutate webhooks currently delivering)
-//   - RESUME → status=PAUSED (only un-pause operator-paused subs; the
-//     server auto-DISABLES after repeated failures, and a bulk RESUME
-//     should NOT sweep those back up — they need per-row verification)
-//   - DELETE not offered on the filter-apply path — destructive,
-//     needs a per-row confirmation flow that the dashboard owns.
-//
-// Guardrails:
-//   - tenantFilter === SYSTEM_TENANT_ID is a dashboard pseudo-value
-//     with no server-side equivalent, so the button is disabled.
-//   - urlFilter containing `*` is wildcard-matched client-side only;
-//     the server's `search` is literal substring, so sending the
-//     wildcard string would silently produce a different match set.
-//     Disable the button in that case.
-const filterBulkAction = ref<WebhookBulkAction | null>(null)
-const filterBulkRunning = ref(false)
-const filterBulkSubmitError = ref('')
-// Per-row result dialog (BulkActionResultDialog). Opens with the server
-// response whenever failed[] or skipped[] is non-empty — surfaces per-row
-// error_code + message for triage without tailing the browser console.
-const bulkResult = ref<{ actionVerb: string; response: WebhookBulkActionResponse | RowSelectBulkResponse } | null>(null)
-
-// O1: cursor-walk preview before commit. Walks listWebhooks with the
-// same `search` server-side filter as the bulk action, then filters
-// each page client-side by the action-derived status + tenant_id (the
-// list endpoint accepts neither). `expected_count` is sent on submit
-// when the walk reached an exact total so the server's COUNT_MISMATCH
-// gate engages on drift between preview and submit.
-const filterBulkPreview = useBulkActionPreview<WebhookSubscription>({
-  fetchPage: async (cursor) => {
-    const params: Record<string, string> = {}
-    const q = debouncedUrlFilter.value.trim()
-    if (q && !q.includes('*')) params.search = q
-    if (cursor) params.cursor = cursor
-    const res = await listWebhooks(params)
-    return { items: res.subscriptions, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
-  },
-  filterFn: (w) => {
-    if (!filterBulkAction.value) return false
-    const wantStatus = filterBulkAction.value === 'PAUSE' ? 'ACTIVE' : 'PAUSED'
-    if (w.status !== wantStatus) return false
-    if (tenantFilter.value && tenantFilter.value !== SYSTEM_TENANT_ID && w.tenant_id !== tenantFilter.value) return false
-    // Wildcard branch falls through the server `search` param, so apply
-    // the same client-side wildcard predicate the table uses to keep
-    // the preview honest with what's on screen.
-    const q = debouncedUrlFilter.value.trim()
-    if (q && q.includes('*') && !urlMatches(w, q)) return false
-    return true
-  },
-  toSample: (w) => ({
-    id: w.subscription_id,
-    primary: w.url,
-    status: w.status,
+// Filter-apply bulk protocol. One immutable tenant/search tuple owns Preview
+// and submit. Derived failing-only, wildcard, and system-pseudo filters cannot
+// be represented by the server endpoint and therefore refuse to arm.
+const webhookFilterBulk = useWebhookFilterBulk({
+  getFilters: () => ({
+    tenantId: tenantFilter.value,
+    search: debouncedUrlFilter.value,
+    failingOnly: failingFilter.value,
   }),
+  refresh: async () => refresh(),
+  onResult: (result) => { bulkResult.value = result },
+  onSuccess: (message) => toast.success(message),
+  onError: (message) => toast.error(message),
 })
-
-function openFilterBulk(action: WebhookBulkAction) {
-  filterBulkAction.value = action
-  filterBulkSubmitError.value = ''
-  void filterBulkPreview.startPreview()
-}
-function canApplyWebhookFilterBulk(): boolean {
-  if (tenantFilter.value === SYSTEM_TENANT_ID) return false
-  if (debouncedUrlFilter.value.includes('*')) return false
-  return true
-}
-const filterBulkSummary = computed<string>(() => {
-  const parts: string[] = []
-  if (filterBulkAction.value === 'PAUSE') parts.push('status=ACTIVE')
-  else if (filterBulkAction.value === 'RESUME') parts.push('status=PAUSED')
-  if (tenantFilter.value && tenantFilter.value !== SYSTEM_TENANT_ID) parts.push(`tenant_id=${tenantFilter.value}`)
-  const q = debouncedUrlFilter.value.trim()
-  if (q && !q.includes('*')) parts.push(`search="${q}"`)
-  return parts.join(' AND ')
-})
-function cancelFilterBulk() {
-  if (filterBulkRunning.value) return
-  filterBulkPreview.cancelPreview()
-  filterBulkPreview.resetPreview()
-  filterBulkAction.value = null
-  filterBulkSubmitError.value = ''
-}
-async function executeFilterBulk() {
-  if (!filterBulkAction.value || filterBulkRunning.value) return
-  if (filterBulkPreview.previewLoading.value) return
-  if (filterBulkPreview.previewCount.value === 0) return
-  if (filterBulkPreview.cappedAtMax.value) return
-
-  const action = filterBulkAction.value
-  const filter: WebhookBulkFilter = {}
-  if (action === 'PAUSE') filter.status = 'ACTIVE'
-  else if (action === 'RESUME') filter.status = 'PAUSED'
-  if (tenantFilter.value && tenantFilter.value !== SYSTEM_TENANT_ID) filter.tenant_id = tenantFilter.value
-  const q = debouncedUrlFilter.value.trim()
-  if (q && !q.includes('*')) filter.search = q
-  filterBulkRunning.value = true
-  filterBulkSubmitError.value = ''
-  try {
-    const body: import('../types').WebhookBulkActionRequest = {
-      filter,
-      action,
-      idempotency_key: generateIdempotencyKey(),
-    }
-    if (filterBulkPreview.reachedEnd.value) {
-      body.expected_count = filterBulkPreview.previewCount.value
-    }
-    const res = await bulkActionWebhooks(body)
-    const verb = action === 'PAUSE' ? 'paused' : 'resumed'
-    const parts = [`${res.succeeded.length}/${res.total_matched} webhooks ${verb}`]
-    if (res.skipped.length) parts.push(`${res.skipped.length} skipped (already in target state)`)
-    if (res.failed.length) parts.push(`${res.failed.length} failed`)
-    const summary = parts.join(', ')
-    if (res.failed.length) toast.error(`${summary} — see details`)
-    else toast.success(summary)
-    filterBulkAction.value = null
-    filterBulkPreview.resetPreview()
-    if (res.failed.length || res.skipped.length) {
-      bulkResult.value = { actionVerb: action === 'PAUSE' ? 'Pause' : 'Resume', response: res }
-    }
-  } catch (e) {
-    // Humanize bulk-action safety-gate codes (governance spec v0.1.25.23
-    // ErrorCode enum widening; v0.1.25.21 prose). See TenantsView
-    // executeFilterBulk for the full rationale.
-    if (e instanceof ApiError && (e.errorCode === 'LIMIT_EXCEEDED' || e.errorCode === 'COUNT_MISMATCH')) {
-      filterBulkSubmitError.value = formatBulkRequestError(e.errorCode, 'webhooks', 500, e.details as Record<string, unknown> | undefined) ?? `Bulk ${action} failed: ${toMessage(e)}`
-    } else {
-      filterBulkSubmitError.value = `Bulk ${action} failed: ${toMessage(e)}`
-    }
-  } finally {
-    filterBulkRunning.value = false
-    await refresh()
-  }
-}
+const {
+  action: filterBulkAction,
+  running: filterBulkRunning,
+  submitError: filterBulkSubmitError,
+  summary: filterBulkSummary,
+  canOpen: canApplyWebhookFilterBulk,
+  open: openFilterBulk,
+  cancel: cancelFilterBulk,
+  execute: executeFilterBulk,
+} = webhookFilterBulk
+const filterBulkPreview = webhookFilterBulk.preview
 
 function healthColor(w: WebhookSubscription): string {
   if (w.status === 'DISABLED') return 'bg-red-500'
@@ -844,13 +728,13 @@ const gridTemplate = computed(() =>
             @click="openFilterBulk('PAUSE')"
             :disabled="!canApplyWebhookFilterBulk() || filterBulkRunning"
             class="text-xs text-red-700 dark:text-red-300 hover:text-red-900 dark:hover:text-red-200 border border-red-300 dark:border-red-700 bg-white dark:bg-gray-800 rounded px-2.5 py-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-            :title="canApplyWebhookFilterBulk() ? 'Pause all ACTIVE webhooks matching filter' : 'System-wide or wildcard filter is not supported by server bulk-action'"
+            :title="canApplyWebhookFilterBulk() ? 'Pause all ACTIVE webhooks matching filter' : 'System-wide, wildcard, and failing-only filters are not supported by server bulk-action'"
           >Pause all</button>
           <button
             @click="openFilterBulk('RESUME')"
             :disabled="!canApplyWebhookFilterBulk() || filterBulkRunning"
             class="text-xs text-green-700 dark:text-green-300 hover:text-green-900 dark:hover:text-green-200 border border-green-300 dark:border-green-700 bg-white dark:bg-gray-800 rounded px-2.5 py-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-            :title="canApplyWebhookFilterBulk() ? 'Resume all PAUSED webhooks matching filter' : 'System-wide or wildcard filter is not supported by server bulk-action'"
+            :title="canApplyWebhookFilterBulk() ? 'Resume all PAUSED webhooks matching filter' : 'System-wide, wildcard, and failing-only filters are not supported by server bulk-action'"
           >Resume all</button>
         </div>
       </div>
@@ -1042,10 +926,9 @@ const gridTemplate = computed(() =>
       @cancel="cancelBulk"
     />
 
-    <!-- O1: filter-apply preview. See TenantsView for the full pattern
-         rationale. DISABLED subscriptions (auto-disabled after failures)
-         are filtered out by the action's status predicate (PAUSE wants
-         ACTIVE, RESUME wants PAUSED) — verify-then-enable stays per-row. -->
+    <!-- Filter-apply preview. One immutable tenant/search/action snapshot
+         drives every cursor page, this summary, and the final request.
+         DISABLED subscriptions remain an explicit per-row decision. -->
     <BulkActionPreviewDialog
       v-if="filterBulkAction"
       :action-verb="filterBulkAction === 'PAUSE' ? 'Pause' : 'Resume'"
