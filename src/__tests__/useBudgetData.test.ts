@@ -243,21 +243,29 @@ describe('useBudgetData', () => {
     const harness = setup()
     await harness.runTick()
     const snapshot = harness.data.snapshotListQuery()
+    const exportController = new AbortController()
     harness.setListParams({ limit: '100', status: 'FROZEN' })
     harness.listBudgets.mockResolvedValueOnce({
       ledgers: [budget('tenant:acme/export-page')],
       has_more: false,
     })
 
-    await expect(harness.data.fetchListPage(snapshot, 'export-cursor')).resolves.toEqual({
+    await expect(harness.data.fetchListPage(
+      snapshot,
+      'export-cursor',
+      exportController.signal,
+    )).resolves.toEqual({
       items: [budget('tenant:acme/export-page')],
       hasMore: false,
       nextCursor: '',
     })
-    expect(harness.listBudgets).toHaveBeenLastCalledWith(expect.objectContaining({
-      status: 'ACTIVE',
-      cursor: 'export-cursor',
-    }))
+    expect(harness.listBudgets).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        status: 'ACTIVE',
+        cursor: 'export-cursor',
+      }),
+      exportController.signal,
+    )
 
     const inFlightPage = deferred<{ ledgers: BudgetLedger[]; has_more: boolean }>()
     harness.listBudgets
@@ -432,6 +440,48 @@ describe('useBudgetData', () => {
     expect(harness.listBudgets).not.toHaveBeenCalled()
   })
 
+  it('loads tenants and page one when a directly-loaded detail enters list mode', async () => {
+    const harness = setup('detail')
+    await expect(harness.runTick()).resolves.toBe(true)
+    expect(harness.listTenants).not.toHaveBeenCalled()
+    expect(harness.listBudgets).not.toHaveBeenCalled()
+
+    harness.setDetailMode(false)
+    harness.data.invalidateDetail()
+    await expect(harness.data.loadListMode(true)).resolves.toBe(true)
+
+    expect(harness.listTenants).toHaveBeenCalledOnce()
+    expect(harness.listBudgets).toHaveBeenCalledOnce()
+    expect(harness.data.tenants.value.map(item => item.tenant_id)).toEqual(['acme'])
+    expect(harness.data.budgets.value.map(item => item.scope)).toEqual(['tenant:acme/initial'])
+  })
+
+  it('isolates committed list and detail errors across mode transitions', async () => {
+    const harness = setup()
+    harness.listTenants.mockRejectedValueOnce(new Error('tenant list unavailable'))
+    harness.listBudgets.mockRejectedValueOnce(new Error('budget list unavailable'))
+    await expect(harness.runTick()).resolves.toBe(false)
+    expect(harness.data.error.value).toBe('budget list unavailable')
+    expect(harness.data.tenantsError.value).toContain('tenant list unavailable')
+
+    harness.setDetailMode(true)
+    harness.data.invalidateList()
+    expect(harness.data.error.value).toBe('')
+    expect(harness.data.tenantsError.value).toBe('')
+
+    harness.lookupBudget.mockRejectedValueOnce(new Error('detail unavailable'))
+    await expect(harness.data.loadDetail()).resolves.toBe(false)
+    expect(harness.data.error.value).toBe('detail unavailable')
+
+    harness.setDetailMode(false)
+    harness.data.invalidateDetail()
+    expect(harness.data.error.value).toBe('')
+    harness.data.reportError('export unavailable')
+    expect(harness.data.error.value).toBe('export unavailable')
+    harness.data.dismissError()
+    expect(harness.data.error.value).toBe('')
+  })
+
   it('keeps tenant-list failure separate while still committing budget rows', async () => {
     const harness = setup()
     harness.listTenants.mockRejectedValueOnce(new Error('tenant service unavailable'))
@@ -441,5 +491,7 @@ describe('useBudgetData', () => {
     expect(harness.data.tenantsError.value).toContain('tenant service unavailable')
     expect(harness.data.budgets.value.map(item => item.scope)).toEqual(['tenant:acme/initial'])
     expect(harness.data.error.value).toBe('')
+    harness.data.dismissTenantsError()
+    expect(harness.data.tenantsError.value).toBe('')
   })
 })

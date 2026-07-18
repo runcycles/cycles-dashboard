@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import {
   listBudgets as listBudgetsDefault,
   listEvents as listEventsDefault,
@@ -65,13 +65,18 @@ export function useBudgetData(options: UseBudgetDataOptions) {
   // False only while the first page for a newly-applied tuple is unresolved
   // or failed. Routine same-tuple refresh failures preserve row ownership.
   const resultsMatchAppliedFilters = ref(false)
-  const error = ref('')
+  const listError = ref('')
 
   const detail = ref<BudgetLedger | null>(null)
   const detailEvents = ref<Event[]>([])
   const detailEventsCursor = ref('')
   const detailEventsHasMore = ref(false)
   const detailEventsLoadingMore = ref(false)
+  const detailError = ref('')
+  // Keep mode errors independent even though the view renders one banner.
+  // A committed list failure must not turn a subsequent detail lookup into an
+  // error shell, and a detail failure must not follow the operator back.
+  const error = computed(() => options.isDetail() ? detailError.value : listError.value)
 
   const {
     appliedParams: appliedListParams,
@@ -118,13 +123,13 @@ export function useBudgetData(options: UseBudgetDataOptions) {
       budgets.value = response.ledgers
       hasMore.value = !!response.has_more
       nextCursor.value = response.next_cursor ?? ''
-      error.value = ''
+      listError.value = ''
       initialLoadDone.value = true
       resultsMatchAppliedFilters.value = true
       return true
     } catch (cause) {
       if (!ownsPageOne(request)) return POLLING_STALE
-      error.value = toMessage(cause)
+      listError.value = toMessage(cause)
       return false
     } finally {
       if (ownsPageOne(request)) listLoading.value = false
@@ -154,11 +159,19 @@ export function useBudgetData(options: UseBudgetDataOptions) {
   }
 
   /** Fetch one cursor page for a caller-owned applied snapshot (export). */
-  async function fetchListPage(snapshot: AppliedQuerySnapshot, cursor: string) {
+  async function fetchListPage(
+    snapshot: AppliedQuerySnapshot,
+    cursor: string,
+    signal?: AbortSignal,
+  ) {
     if (options.isDetail() || !resultsMatchAppliedFilters.value || !ownsListQuery(snapshot)) {
       throw new Error('Export cancelled because the applied budget filters changed.')
     }
-    const response = await listBudgets()({ ...snapshot.params, ...(cursor ? { cursor } : {}) })
+    const params = { ...snapshot.params, ...(cursor ? { cursor } : {}) }
+    const requestPage = listBudgets()
+    const response = signal
+      ? await requestPage(params, signal)
+      : await requestPage(params)
     if (options.isDetail() || !resultsMatchAppliedFilters.value || !ownsListQuery(snapshot)) {
       throw new Error('Export cancelled because the applied budget filters changed.')
     }
@@ -183,7 +196,7 @@ export function useBudgetData(options: UseBudgetDataOptions) {
       return true
     } catch (cause) {
       if (!ownsListQuery(filterSnapshot)) return POLLING_STALE
-      error.value = toMessage(cause)
+      listError.value = toMessage(cause)
       return false
     } finally {
       loadingMore.value = false
@@ -195,6 +208,7 @@ export function useBudgetData(options: UseBudgetDataOptions) {
   async function loadDetail() {
     const sequence = ++detailLoadSequence
     const { scope, unit } = options.getDetailTarget()
+    detailError.value = ''
     const changedLedger = !detail.value || detail.value.scope !== scope || detail.value.unit !== unit
     if (changedLedger) {
       detail.value = null
@@ -218,11 +232,11 @@ export function useBudgetData(options: UseBudgetDataOptions) {
       detailEvents.value = response.events.filter(event => event.scope === scope)
       detailEventsHasMore.value = !!response.has_more
       detailEventsCursor.value = response.next_cursor ?? ''
-      error.value = ''
+      detailError.value = ''
       return true
     } catch (cause) {
       if (sequence !== detailLoadSequence) return POLLING_STALE
-      error.value = toMessage(cause)
+      detailError.value = toMessage(cause)
       return false
     }
   }
@@ -247,7 +261,7 @@ export function useBudgetData(options: UseBudgetDataOptions) {
       return true
     } catch (cause) {
       if (sequence !== detailLoadSequence) return POLLING_STALE
-      error.value = toMessage(cause)
+      detailError.value = toMessage(cause)
       return false
     } finally {
       if (sequence === detailLoadSequence) detailEventsLoadingMore.value = false
@@ -257,6 +271,7 @@ export function useBudgetData(options: UseBudgetDataOptions) {
   function invalidateDetail(): void {
     detailLoadSequence++
     detailEventsLoadingMore.value = false
+    detailError.value = ''
   }
 
   function invalidateList(): void {
@@ -267,16 +282,38 @@ export function useBudgetData(options: UseBudgetDataOptions) {
     }
     loadingMore.value = false
     listLoading.value = false
+    listError.value = ''
+    tenantsError.value = ''
+  }
+
+  async function loadListMode(applyCurrentParams = false) {
+    if (options.isDetail()) return POLLING_STALE
+    const tenantsLoaded = await loadTenants()
+    if (tenantsLoaded === POLLING_STALE) return POLLING_STALE
+    const budgetsLoaded = applyCurrentParams
+      ? await applyListParams()
+      : await refreshList()
+    if (tenantsLoaded === false || budgetsLoaded === false) return false
+    if (budgetsLoaded === POLLING_STALE) return POLLING_STALE
+    return true
   }
 
   async function tick() {
     if (options.isDetail()) return loadDetail()
-    const tenantsLoaded = await loadTenants()
-    if (tenantsLoaded === POLLING_STALE) return POLLING_STALE
-    const budgetsLoaded = await refreshList()
-    if (tenantsLoaded === false || budgetsLoaded === false) return false
-    if (budgetsLoaded === POLLING_STALE) return POLLING_STALE
-    return true
+    return loadListMode()
+  }
+
+  function reportError(message: string): void {
+    if (options.isDetail()) detailError.value = message
+    else listError.value = message
+  }
+
+  function dismissError(): void {
+    reportError('')
+  }
+
+  function dismissTenantsError(): void {
+    tenantsError.value = ''
   }
 
   const poll = dependencies.usePolling ?? usePollingDefault
@@ -303,12 +340,16 @@ export function useBudgetData(options: UseBudgetDataOptions) {
     ownsListQuery,
     fetchListPage,
     refreshList,
+    loadListMode,
     applyListParams,
     loadMore,
     loadDetail,
     loadMoreDetailEvents,
     invalidateList,
     invalidateDetail,
+    reportError,
+    dismissError,
+    dismissTenantsError,
     refresh,
     isLoading,
     lastSuccessAt,

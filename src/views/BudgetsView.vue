@@ -93,12 +93,16 @@ const {
   ownsListQuery,
   fetchListPage,
   refreshList,
+  loadListMode,
   applyListParams,
   loadMore,
   loadDetail,
   loadMoreDetailEvents,
   invalidateList,
   invalidateDetail,
+  reportError,
+  dismissError,
+  dismissTenantsError,
   refresh,
   isLoading,
   lastSuccessAt,
@@ -299,7 +303,7 @@ async function executeBudgetAction() {
     toast.success(action === 'freeze' ? 'Budget frozen' : 'Budget unfrozen')
   } catch (e) {
     const msg = toMessage(e)
-    error.value = msg
+    reportError(msg)
     toast.error(`${action === 'freeze' ? 'Freeze' : 'Unfreeze'} failed: ${msg}`)
   }
   finally { pendingAction.value = null }
@@ -392,8 +396,8 @@ const {
   frozenWarning: filterBulkFrozenWarning,
   summary: filterBulkSummary,
   preview: filterBulkPreview,
-  canOpen: canBulkActAppliedTuple,
-  openSetup: openBulkSetupProtocol,
+  canOpen: filterBulkProtocolCanOpen,
+  openSetup: openFilterBulkSetupProtocol,
   cancelSetup: cancelBulkSetup,
   submitSetup: submitBulkSetup,
   cancelPreview: cancelFilterBulk,
@@ -410,7 +414,7 @@ const {
 })
 
 const canBulkAct = computed(() => (
-  resultsMatchAppliedFilters.value && canBulkActAppliedTuple()
+  resultsMatchAppliedFilters.value && filterBulkProtocolCanOpen()
 ))
 const filterBulkButtonLabel = computed(() => {
   if (!resultsMatchAppliedFilters.value) {
@@ -427,9 +431,9 @@ const filterBulkButtonTitle = computed(() => {
   return canBulkAct.value ? 'Apply an action to every budget matching the current filter' : ''
 })
 
-function openBulkSetup() {
+function openFilterBulkSetup() {
   if (!resultsMatchAppliedFilters.value) return
-  openBulkSetupProtocol()
+  openFilterBulkSetupProtocol()
 }
 
 // ─── Row-select bulk path (v0.1.25.36). Sibling of the filter-apply
@@ -465,12 +469,14 @@ watch(() => route.query.filter, () => {
 })
 
 function toggleSelect(ledgerId: string) {
+  if (!resultsMatchAppliedFilters.value) return
   const next = new Set(selected.value)
   if (next.has(ledgerId)) next.delete(ledgerId)
   else next.add(ledgerId)
   selected.value = next
 }
 function toggleSelectAll() {
+  if (!resultsMatchAppliedFilters.value) return
   if (selectedVisibleAll.value) {
     selected.value = new Set()
   } else {
@@ -478,11 +484,14 @@ function toggleSelectAll() {
   }
 }
 const selectedVisibleAll = computed(() =>
+  resultsMatchAppliedFilters.value &&
   sortedBudgets.value.length > 0 &&
   sortedBudgets.value.every(b => selected.value.has(b.ledger_id)),
 )
 const selectedVisibleCount = computed(() =>
-  sortedBudgets.value.filter(b => selected.value.has(b.ledger_id)).length,
+  resultsMatchAppliedFilters.value
+    ? sortedBudgets.value.filter(b => selected.value.has(b.ledger_id)).length
+    : 0,
 )
 
 // Bulk freeze / unfreeze state machine. Same shape as TenantsView's
@@ -493,8 +502,15 @@ const bulkStatusRunning = ref(false)
 let bulkStatusAbort: AbortController | null = null
 
 function openBulkStatus(action: 'freeze' | 'unfreeze') {
+  if (!resultsMatchAppliedFilters.value) return
   bulkStatusAction.value = action
 }
+
+watch(resultsMatchAppliedFilters, (matches) => {
+  if (matches) return
+  selected.value = new Set()
+  if (!bulkStatusRunning.value) bulkStatusAction.value = null
+})
 
 // Filter the selection to rows whose current status allows the transition
 // BEFORE arming the confirm dialog. Freeze needs ACTIVE, unfreeze needs
@@ -511,6 +527,10 @@ function bulkStatusTargets(): BudgetLedger[] {
 
 async function executeBulkStatus() {
   if (!bulkStatusAction.value || bulkStatusRunning.value) return
+  if (!resultsMatchAppliedFilters.value) {
+    bulkStatusAction.value = null
+    return
+  }
   const action = bulkStatusAction.value
   const targets = bulkStatusTargets()
   bulkStatusProgress.value = { done: 0, total: targets.length, failed: 0 }
@@ -607,6 +627,7 @@ watch(() => route.query, (q, previousQuery) => {
   const nextUtilMax = parseUtilPct(q.utilization_max)
   if (nextUtilMax !== filterUtilMax.value) filterUtilMax.value = nextUtilMax
   if (isDetail.value) {
+    cancelBudgetExport()
     invalidateList()
     void loadDetail()
   } else {
@@ -615,8 +636,8 @@ watch(() => route.query, (q, previousQuery) => {
     // leak into the list shell after navigation.
     invalidateDetail()
     const paramsChanged = JSON.stringify(buildListParams()) !== JSON.stringify(appliedListParams.value)
-    if (paramsChanged) void applyListParams()
-    else if (wasDetail) void refreshList()
+    if (wasDetail) void loadListMode(paramsChanged)
+    else if (paramsChanged) void applyListParams()
   }
 })
 
@@ -652,12 +673,12 @@ const {
   currentItems: sortedBudgets,
   hasMore,
   nextCursor,
-  fetchPage: async (cursor) => {
+  fetchPage: async (cursor, signal) => {
     const snapshot = exportFilterSnapshot
     if (!snapshot || !ownsListQuery(snapshot)) {
       throw new Error('Export cancelled because the applied budget filters changed.')
     }
-    return fetchListPage(snapshot, cursor)
+    return fetchListPage(snapshot, cursor, signal)
   },
   // Server-side params cover the explicit filters; terminal visibility is
   // a local presentation rule and must be applied to every cursor page.
@@ -677,8 +698,15 @@ const {
   ],
 })
 
+const canExport = computed(() => (
+  !isDetail.value &&
+  !listLoading.value &&
+  resultsMatchAppliedFilters.value &&
+  sortedBudgets.value.length > 0
+))
+
 function confirmExport(format: 'csv' | 'json') {
-  if (isDetail.value || !resultsMatchAppliedFilters.value) return
+  if (!canExport.value) return
   exportFilterSnapshot = snapshotListQuery()
   openExportConfirm(format)
 }
@@ -690,7 +718,7 @@ function cancelExport() {
 
 async function executeExport() {
   const snapshot = exportFilterSnapshot
-  if (isDetail.value || !resultsMatchAppliedFilters.value || !snapshot || !ownsListQuery(snapshot)) {
+  if (!canExport.value || !snapshot || !ownsListQuery(snapshot)) {
     cancelExport()
     return
   }
@@ -703,10 +731,13 @@ async function executeExport() {
 
 function cancelBudgetExport() {
   cancelRunningExport()
+  closeExportConfirm()
   exportFilterSnapshot = null
 }
 
-watch(exportError, (v) => { if (v) error.value = v })
+watch(exportError, (v) => {
+  if (v && !isDetail.value) reportError(v)
+})
 
 // V1 virtualization — list mode only (not the detail card, which
 // embeds EventTimeline and is naturally bounded by its 20-row page).
@@ -775,25 +806,25 @@ function rowTenantId(b: BudgetLedger): string {
         </button>
       </template>
       <template v-if="!isDetail" #actions>
-        <button @click="confirmExport('csv')" :disabled="!resultsMatchAppliedFilters || sortedBudgets.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+        <button @click="confirmExport('csv')" :disabled="!canExport" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
           <DownloadIcon class="w-3.5 h-3.5" />
           Export CSV
         </button>
-        <button @click="confirmExport('json')" :disabled="!resultsMatchAppliedFilters || sortedBudgets.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+        <button @click="confirmExport('json')" :disabled="!canExport" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
           <DownloadIcon class="w-3.5 h-3.5" />
           Export JSON
         </button>
       </template>
     </PageHeader>
 
-    <InlineErrorBanner v-if="error" :message="error" @dismiss="error = ''" />
+    <InlineErrorBanner v-if="error" :message="error" @dismiss="dismissError" />
     <!-- M6: tenant-list fetch failure promoted to a top-banner so
          operators notice it. Pre-fix it lived as tiny red text inside
          the filter strip below the dropdown, easy to miss while
          focusing on the main table — a dropdown stuck on "All tenants"
          with no filtering options looked like the server just had one
          tenant, not like something had failed. -->
-    <InlineErrorBanner v-if="tenantsError" :message="tenantsError" @dismiss="tenantsError = ''" />
+    <InlineErrorBanner v-if="!isDetail && tenantsError" :message="tenantsError" @dismiss="dismissTenantsError" />
 
 
     <!-- Detail mode -->
@@ -932,7 +963,7 @@ function rowTenantId(b: BudgetLedger): string {
           >
             <div class="w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
             <button
-              @click="openBulkSetup"
+              @click="openFilterBulkSetup"
               :disabled="!canBulkAct || filterBulkRunning"
               :title="filterBulkButtonTitle"
               class="text-xs text-gray-800 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 rounded px-2.5 py-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
@@ -962,7 +993,7 @@ function rowTenantId(b: BudgetLedger): string {
         <div role="rowgroup" class="table-header border-b border-gray-200 sticky top-0 z-10">
           <div role="row" class="grid text-xs font-bold uppercase tracking-wider" :style="{ gridTemplateColumns: gridTemplate }">
             <div v-if="canManage" role="columnheader" class="table-cell">
-              <input type="checkbox" :checked="selectedVisibleAll" @change="toggleSelectAll" aria-label="Select all visible budgets" />
+              <input type="checkbox" :checked="selectedVisibleAll" :disabled="!resultsMatchAppliedFilters" @change="toggleSelectAll" aria-label="Select all visible budgets" />
             </div>
             <SortHeader as="div" label="Tenant" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
             <SortHeader as="div" label="Scope" column="scope" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
@@ -994,6 +1025,7 @@ function rowTenantId(b: BudgetLedger): string {
                 <input
                   type="checkbox"
                   :checked="selected.has(sortedBudgets[v.index].ledger_id)"
+                  :disabled="!resultsMatchAppliedFilters"
                   @change="toggleSelect(sortedBudgets[v.index].ledger_id)"
                   :aria-label="`Select budget ${sortedBudgets[v.index].scope}`"
                 />
@@ -1082,7 +1114,7 @@ function rowTenantId(b: BudgetLedger): string {
         leave-to-class="opacity-0 -translate-y-4"
       >
         <div
-          v-if="canManage && selectedVisibleCount > 0"
+          v-if="canManage && resultsMatchAppliedFilters && selectedVisibleCount > 0"
           role="toolbar"
           aria-label="Bulk budget actions"
           class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-gray-900 dark:border dark:border-gray-700 border-2 border-blue-400 shadow-2xl rounded-lg px-4 py-2.5 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 max-w-[90vw]"

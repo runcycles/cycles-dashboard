@@ -99,6 +99,12 @@ function ledger(id: string, opts: Partial<{ scope: string; unit: string; status:
   }
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => { resolve = res })
+  return { promise, resolve }
+}
+
 function stdMounts() {
   return { stubs: { RouterLink: { template: '<a><slot /></a>' }, Teleport: true } }
 }
@@ -200,6 +206,31 @@ describe('BudgetsView — row-select bulk (v0.1.25.36)', () => {
     await flushPromises()
 
     expect(w.find('[role="toolbar"][aria-label="Bulk budget actions"]').exists()).toBe(false)
+  })
+
+  it('disables row selection until a changed filter owns page one', async () => {
+    listBudgetsMock.mockResolvedValue({ ledgers: [ledger('a'), ledger('b')], has_more: false })
+    const { default: BudgetsView } = await import('../views/BudgetsView.vue')
+    const w = mount(BudgetsView, { global: stdMounts() })
+    await flushPromises()
+    await selectTenant(w, 'acme')
+    await toggleRow(w, 'tenant:acme/a')
+
+    const pending = deferred<{ ledgers: ReturnType<typeof ledger>[]; has_more: boolean }>()
+    listBudgetsMock.mockImplementation(() => pending.promise)
+    await w.find<HTMLInputElement>('input#budget-scope').setValue('tenant:acme')
+    await flushPromises()
+
+    expect(w.find('[role="toolbar"][aria-label="Bulk budget actions"]').exists()).toBe(false)
+    expect(w.find('input[aria-label="Select all visible budgets"]').attributes('disabled')).toBeDefined()
+    const rowCheckboxes = w.findAll('input[type="checkbox"]')
+      .filter(input => (input.attributes('aria-label') || '').startsWith('Select budget '))
+    expect(rowCheckboxes.length).toBeGreaterThan(0)
+    expect(rowCheckboxes.every(input => input.attributes('disabled') !== undefined)).toBe(true)
+
+    pending.resolve({ ledgers: [ledger('a'), ledger('b')], has_more: false })
+    await flushPromises()
+    expect(w.find('input[aria-label="Select all visible budgets"]').attributes('disabled')).toBeUndefined()
   })
 
   it('bulk Freeze fans out over freezeBudget for every ACTIVE selected row', async () => {

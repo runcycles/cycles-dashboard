@@ -35,9 +35,18 @@ UX work that does not advance spec alignment.
 - Export and filter-wide mutation controls stay disabled with an explicit
   "Updating filters…" state until the newly-applied page owns the visible
   rows, preventing old first-page data from being paired with the new tuple.
+- Export also stays disabled during a routine page-one refresh, whose cursor is
+  temporarily hidden. This prevents the fast path from silently downloading
+  only the currently loaded rows; active export pages are now abortable when
+  the operator enters detail mode.
 - Navigating between budget list and detail modes now invalidates the abandoned
   mode's in-flight reads, preventing a late result or error from leaking into
   the other shell.
+- List, detail, tenant-list, mutation, and export errors are scoped to the
+  shell that owns them instead of carrying a stale banner across navigation.
+- Returning from a directly-loaded budget detail now loads tenant choices with
+  page one immediately, and stale visible rows cannot be selected for bulk
+  Freeze/Unfreeze while a changed filter is unresolved or failed.
 
 ## [0.1.25.74] — 2026-07-17
 

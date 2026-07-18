@@ -174,4 +174,32 @@ describe('BudgetsView — loadList sequencing guard (round 7)', () => {
     expect(w.text()).toContain('scope-newest')
     expect(w.text()).not.toContain('stale 502')
   })
+
+  it('disables export while a routine page-one refresh has hidden the cursor', async () => {
+    listBudgetsMock.mockResolvedValueOnce({
+      ledgers: [ledger('scope-initial')],
+      has_more: true,
+      next_cursor: 'cursor-1',
+    })
+    const { default: BudgetsView } = await import('../views/BudgetsView.vue')
+    const w = mount(BudgetsView, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
+    await flushPromises()
+
+    const pageOne = deferred<{ ledgers: BudgetLedger[]; has_more: boolean; next_cursor: string }>()
+    listBudgetsMock.mockImplementationOnce(() => pageOne.promise)
+    const refreshButton = w.findAll('button').find(button => button.text() === 'Refresh')!
+    await refreshButton.trigger('click')
+    await flushPromises()
+
+    const exportCsv = w.findAll('button').find(button => button.text() === 'Export CSV')!
+    expect(exportCsv.attributes('disabled')).toBeDefined()
+
+    pageOne.resolve({
+      ledgers: [ledger('scope-refreshed')],
+      has_more: true,
+      next_cursor: 'cursor-2',
+    })
+    await flushPromises()
+    expect(exportCsv.attributes('disabled')).toBeUndefined()
+  })
 })

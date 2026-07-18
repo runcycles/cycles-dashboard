@@ -13,11 +13,14 @@
 //
 // Plus combos and ?filter=BOGUS (unknown value ignored, not crash).
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
+import { reactive } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '../stores/auth'
 import type { Capabilities } from '../types'
+
+enableAutoUnmount(afterEach)
 
 const listBudgetsMock = vi.fn()
 const lookupBudgetMock = vi.fn()
@@ -35,7 +38,11 @@ vi.mock('../api/client', async () => {
   }
 })
 
-const routeRef: { query: Record<string, string>; params: Record<string, string> } = { query: {}, params: {} }
+const routeRef = reactive<{
+  name: string
+  query: Record<string, string>
+  params: Record<string, string>
+}>({ name: 'budgets', query: {}, params: {} })
 
 vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
@@ -191,5 +198,29 @@ describe('BudgetsView — URL deep-link smoke', () => {
     expect(w.text()).toContain('Budget details unavailable')
     expect(w.find('#budget-tenant').exists()).toBe(false)
     expect(w.text()).not.toContain('Viewing budgets across all tenants')
+  })
+
+  it('loads tenant choices when returning from a directly-loaded detail', async () => {
+    routeRef.query = { scope: 'tenant:acme/*', unit: 'USD_MICROCENTS' }
+    listTenantsMock.mockResolvedValue({
+      tenants: [{
+        tenant_id: 'acme',
+        name: 'Acme',
+        status: 'ACTIVE',
+        created_at: '2026-01-01T00:00:00Z',
+      }],
+      has_more: false,
+    })
+    const { default: BudgetsView } = await import('../views/BudgetsView.vue')
+    const w = mount(BudgetsView, stdMount())
+    await flushPromises()
+    expect(listTenantsMock).not.toHaveBeenCalled()
+
+    routeRef.query = {}
+    await flushPromises()
+
+    expect(listTenantsMock).toHaveBeenCalledOnce()
+    expect(listBudgetsMock).toHaveBeenCalledOnce()
+    expect(w.find('#budget-tenant').text()).toContain('Acme')
   })
 })
