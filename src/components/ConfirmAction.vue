@@ -9,11 +9,16 @@ const props = defineProps<{
   confirmLabel: string
   danger?: boolean
   // When true, the confirm button is disabled and shows a spinner; the
-  // dialog backdrop / Cancel / Escape are also blocked. Lets callers do
+  // dialog backdrop and Escape are blocked. Cancel is also blocked unless
+  // cancellableWhileLoading opts into an explicit stop action. Lets callers do
   // `await mutateThing()` *with the dialog still open* instead of the
   // old anti-pattern of closing the dialog before the request starts
   // (which left users staring at nothing during 403/timeout flows).
   loading?: boolean
+  // Opt-in for bounded batch operations that can stop scheduling remaining
+  // rows through an AbortSignal. Backdrop and Escape stay blocked so an
+  // in-flight cancellation is always an explicit button action.
+  cancellableWhileLoading?: boolean
   // When set, renders an inline error block above the action buttons.
   // Keeps the dialog open so the user can read the error in context
   // (rather than guessing which toast belonged to which click).
@@ -24,21 +29,19 @@ const emit = defineEmits<{ confirm: []; cancel: [] }>()
 const dialogRef = ref<HTMLElement | null>(null)
 useFocusTrap(dialogRef)
 
-// Focus sink for the loading window. When `loading` is true both Cancel
-// and Confirm are :disabled, so the focus trap has zero focusable
-// elements — Tab would escape the modal into background content. We
-// move focus onto this sr-only element (tabindex="-1" makes it
-// programmatically focusable but skipped in normal Tab order) and
-// announce the wait state to screen readers via aria-live="polite".
-// On loading=false (success or error) we hand focus back to the
-// confirm button so retry / dismiss is a single keystroke.
+// Focus sink for the ordinary loading window. When cancellation is not
+// supported, both buttons are disabled and the trap needs this programmatic
+// target. Cancellable batches instead move focus to their explicit Stop
+// remaining button. On settlement, focus returns to Confirm for retry/dismiss.
 const loadingSink = ref<HTMLElement | null>(null)
+const cancelBtn = ref<HTMLButtonElement | null>(null)
 const confirmBtn = ref<HTMLButtonElement | null>(null)
 
 watch(() => props.loading, async (now, before) => {
   await nextTick()
   if (now) {
-    loadingSink.value?.focus()
+    if (props.cancellableWhileLoading) cancelBtn.value?.focus()
+    else loadingSink.value?.focus()
   } else if (before) {
     // Loading just finished — return focus to the confirm button so the
     // user can either retry (if an error rendered) or close via Escape.
@@ -61,10 +64,10 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
       <p class="text-sm text-gray-600 dark:text-gray-300 mb-4">{{ message }}</p>
       <div v-if="error" class="mb-4 px-3 py-2 rounded text-xs bg-red-50 border border-red-200 text-red-700 dark:bg-red-950 dark:border-red-800 dark:text-red-300" role="alert">{{ error }}</div>
       <!--
-        Visually-hidden focus sink: target for programmatic focus while the
-        action is in flight (both buttons are :disabled, so the focus trap
-        otherwise has nothing to hold). aria-live="polite" announces the
-        loading state to screen readers without interrupting current speech.
+        Visually-hidden focus sink: target for ordinary non-cancellable loading
+        (both buttons are then disabled, so the focus trap otherwise has
+        nothing to hold). Cancellable batches focus Stop remaining instead.
+        aria-live="polite" announces progress without interrupting speech.
       -->
       <div
         ref="loadingSink"
@@ -73,7 +76,12 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
         class="sr-only"
       >{{ loading ? `${confirmLabel} in progress, please wait` : '' }}</div>
       <div class="flex flex-wrap justify-end gap-2">
-        <button @click="$emit('cancel')" :disabled="loading" class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 rounded hover:bg-gray-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Cancel</button>
+        <button
+          ref="cancelBtn"
+          @click="$emit('cancel')"
+          :disabled="loading && !cancellableWhileLoading"
+          class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 rounded hover:bg-gray-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+        >{{ loading && cancellableWhileLoading ? 'Stop remaining' : 'Cancel' }}</button>
         <button
           ref="confirmBtn"
           @click="$emit('confirm')"

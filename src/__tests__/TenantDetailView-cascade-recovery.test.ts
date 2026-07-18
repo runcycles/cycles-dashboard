@@ -29,6 +29,7 @@ const listApiKeysMock = vi.fn()
 const listPoliciesMock = vi.fn()
 const listWebhooksMock = vi.fn()
 const updateTenantStatusMock = vi.fn()
+const freezeBudgetMock = vi.fn()
 
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
@@ -41,6 +42,7 @@ vi.mock('../api/client', async () => {
     listPolicies: (...args: unknown[]) => listPoliciesMock(...args),
     listWebhooks: (...args: unknown[]) => listWebhooksMock(...args),
     updateTenantStatus: (...args: unknown[]) => updateTenantStatusMock(...args),
+    freezeBudget: (...args: unknown[]) => freezeBudgetMock(...args),
   }
 })
 
@@ -143,12 +145,14 @@ describe('TenantDetailView — cascade-recovery banner (v0.1.25.44)', () => {
     listPoliciesMock.mockReset()
     listWebhooksMock.mockReset()
     updateTenantStatusMock.mockReset()
+    freezeBudgetMock.mockReset()
 
     listTenantsMock.mockResolvedValue({ tenants: [], has_more: false })
     listBudgetsMock.mockResolvedValue({ ledgers: [], has_more: false })
     listApiKeysMock.mockResolvedValue({ keys: [], has_more: false })
     listPoliciesMock.mockResolvedValue({ policies: [] as Policy[], has_more: false })
     listWebhooksMock.mockResolvedValue({ subscriptions: [], has_more: false })
+    freezeBudgetMock.mockResolvedValue({})
   })
 
   describe('banner visibility', () => {
@@ -208,6 +212,115 @@ describe('TenantDetailView — cascade-recovery banner (v0.1.25.44)', () => {
       expect(banner.exists()).toBe(true)
       expect(banner.find('[data-testid="cascade-recovery-button"]').exists()).toBe(false)
       expect(banner.text()).toContain('Read-only view')
+    })
+
+    it('does not claim a CLOSED tenant is clean when a child scan is partial', async () => {
+      getTenantMock.mockResolvedValue(tenant('CLOSED'))
+      listBudgetsMock.mockResolvedValue({
+        ledgers: [budget('CLOSED')],
+        has_more: true,
+      })
+
+      const w = await mountView()
+      const banner = w.find('[data-testid="cascade-recovery-banner"]')
+      expect(banner.exists()).toBe(true)
+      expect(banner.text()).toContain('Cascade verification incomplete')
+      expect(banner.find('[data-testid="cascade-partial-warning"]').text()).toContain('lower bounds')
+    })
+  })
+
+  describe('cursor-truthful emergency freeze', () => {
+    it('includes an ACTIVE budget found after page one in the immutable target set', async () => {
+      getTenantMock.mockResolvedValue(tenant('ACTIVE'))
+      listBudgetsMock.mockImplementation(async (params: Record<string, string>) => params.cursor
+        ? { ledgers: [{ ...budget('ACTIVE'), ledger_id: 'ldg-page-2', scope: 'acme/page-2' }], has_more: false }
+        : { ledgers: [budget('FROZEN')], has_more: true, next_cursor: 'page-2' })
+
+      const w = await mountView()
+      const openButton = w.findAll('button').find(button => button.text() === 'Emergency Freeze (1)')
+      expect(openButton).toBeDefined()
+      await openButton!.trigger('click')
+      await flushPromises()
+
+      // Replace the visible budget collection after confirmation opens. The
+      // destructive request must retain the reviewed page-two snapshot.
+      listBudgetsMock.mockResolvedValue({
+        ledgers: [{ ...budget('ACTIVE'), ledger_id: 'ldg-late', scope: 'acme/late' }],
+        has_more: false,
+      })
+      const keysTab = w.findAll('button').find(button => button.text().includes('API Keys'))
+      await keysTab!.trigger('click')
+      await flushPromises()
+      const budgetsTab = w.findAll('button').find(button => button.text().includes('Budgets'))
+      await budgetsTab!.trigger('click')
+      await flushPromises()
+
+      const confirmButton = w.findAll('button').find(button => button.text() === 'Freeze 1 budgets')
+      expect(confirmButton).toBeDefined()
+      await confirmButton!.trigger('click')
+      await flushPromises()
+
+      expect(freezeBudgetMock).toHaveBeenCalledWith(
+        'acme/page-2',
+        'tokens',
+        '[EMERGENCY_FREEZE] Tenant lockdown via admin dashboard',
+      )
+      expect(freezeBudgetMock).not.toHaveBeenCalledWith(
+        'acme/late',
+        'tokens',
+        expect.any(String),
+      )
+    })
+
+    it('refuses to arm Emergency Freeze when the action-time budget scan is partial', async () => {
+      getTenantMock.mockResolvedValue(tenant('ACTIVE'))
+      listBudgetsMock.mockResolvedValue({ ledgers: [budget('ACTIVE')], has_more: true })
+
+      const w = await mountView()
+      const button = w.findAll('button').find(item => item.text().includes('Emergency Freeze'))
+      expect(button).toBeDefined()
+      expect(button!.attributes('disabled')).toBeUndefined()
+      expect(button!.text()).toContain('re-scan')
+      await button!.trigger('click')
+      await flushPromises()
+
+      expect(w.text()).not.toContain('Emergency Freeze scanned budgets?')
+      expect(freezeBudgetMock).not.toHaveBeenCalled()
+      expect(w.find('[data-testid="budgets-partial-warning"]').text()).toContain('lower bounds')
+    })
+
+    it('lets the operator stop scheduling remaining budgets during execution', async () => {
+      getTenantMock.mockResolvedValue(tenant('ACTIVE'))
+      listBudgetsMock.mockResolvedValue({
+        ledgers: Array.from({ length: 5 }, (_, index) => ({
+          ...budget('ACTIVE'),
+          ledger_id: `ldg-${index}`,
+          scope: `acme/${index}`,
+        })),
+        has_more: false,
+      })
+      const freezeResolvers: Array<() => void> = []
+      freezeBudgetMock.mockImplementation(() => new Promise<void>((resolve) => {
+        freezeResolvers.push(resolve)
+      }))
+
+      const w = await mountView()
+      const openButton = w.findAll('button').find(button => button.text() === 'Emergency Freeze (5)')
+      await openButton!.trigger('click')
+      await flushPromises()
+      const confirmButton = w.findAll('button').find(button => button.text() === 'Freeze 5 budgets')
+      await confirmButton!.trigger('click')
+      await vi.waitFor(() => expect(freezeBudgetMock).toHaveBeenCalledTimes(4))
+
+      const stopButton = w.findAll('button').find(button => button.text() === 'Stop remaining')
+      expect(stopButton).toBeDefined()
+      expect(stopButton!.attributes('disabled')).toBeUndefined()
+      await stopButton!.trigger('click')
+      for (const resolve of freezeResolvers) resolve()
+      await flushPromises()
+
+      expect(freezeBudgetMock).toHaveBeenCalledTimes(4)
+      expect(w.text()).toMatch(/1\s*skipped/)
     })
   })
 
@@ -328,9 +441,18 @@ describe('TenantDetailView — cascade-recovery banner (v0.1.25.44)', () => {
       expect(w.find('[data-testid="cascade-recovery-banner"]').exists()).toBe(false)
       // Confirm the refetch actually happened (4 parallel fetches).
       expect(updateTenantStatusMock).toHaveBeenCalledWith('acme', 'CLOSED')
-      expect(listBudgetsMock).toHaveBeenCalledWith({ tenant_id: 'acme' })
-      expect(listWebhooksMock).toHaveBeenCalledWith({ tenant_id: 'acme' })
-      expect(listApiKeysMock).toHaveBeenCalledWith({ tenant_id: 'acme' })
+      expect(listBudgetsMock).toHaveBeenCalledWith(
+        { tenant_id: 'acme', limit: '100' },
+        expect.any(AbortSignal),
+      )
+      expect(listWebhooksMock).toHaveBeenCalledWith(
+        { tenant_id: 'acme', limit: '100' },
+        expect.any(AbortSignal),
+      )
+      expect(listApiKeysMock).toHaveBeenCalledWith(
+        { tenant_id: 'acme', limit: '100' },
+        expect.any(AbortSignal),
+      )
     })
 
     it('keeps the successful CLOSED state when a post-close refresh fails', async () => {

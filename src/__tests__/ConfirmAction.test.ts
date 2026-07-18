@@ -62,6 +62,21 @@ describe('ConfirmAction', () => {
       await w.find('.fixed.inset-0').trigger('click.self')
       expect(w.emitted('cancel')).toHaveLength(1)
     })
+
+    it('allows only the explicit stop button for cancellable loading operations', async () => {
+      const w = mount(ConfirmAction, {
+        props: { ...baseProps, loading: true, cancellableWhileLoading: true },
+      })
+      const [cancelBtn, confirmBtn] = w.findAll('button')
+      expect(cancelBtn.attributes('disabled')).toBeUndefined()
+      expect(cancelBtn.text()).toBe('Stop remaining')
+      expect(confirmBtn.attributes('disabled')).toBeDefined()
+
+      await w.find('.fixed.inset-0').trigger('click.self')
+      expect(w.emitted('cancel')).toBeUndefined()
+      await cancelBtn.trigger('click')
+      expect(w.emitted('cancel')).toHaveLength(1)
+    })
   })
 
   // Accessibility: when loading=true both buttons become disabled, leaving
@@ -116,6 +131,17 @@ describe('ConfirmAction', () => {
       await new Promise(r => setTimeout(r, 0))
       const buttons = w.findAll('button')
       expect(document.activeElement).toBe(buttons[1].element)
+      w.unmount()
+    })
+
+    it('moves focus to Stop remaining when a cancellable batch starts', async () => {
+      const w = mount(ConfirmAction, {
+        props: { ...baseProps, cancellableWhileLoading: true },
+        attachTo: document.body,
+      })
+      await w.setProps({ loading: true })
+      await new Promise(r => setTimeout(r, 0))
+      expect(document.activeElement).toBe(w.findAll('button')[0].element)
       w.unmount()
     })
   })

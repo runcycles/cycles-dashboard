@@ -269,8 +269,8 @@ export const listEvents = (params: Record<string, string>) =>
   get<import('../types').EventListResponse>(`${BASE}/admin/events`, params)
 
 // Webhooks
-export const listWebhooks = (params?: Record<string, string>) =>
-  get<import('../types').WebhookListResponse>(`${BASE}/admin/webhooks`, params)
+export const listWebhooks = (params?: Record<string, string>, signal?: AbortSignal) =>
+  get<import('../types').WebhookListResponse>(`${BASE}/admin/webhooks`, params, signal)
 
 export const getWebhook = (id: string) =>
   get<import('../types').WebhookSubscription>(`${BASE}/admin/webhooks/${id}`)
@@ -283,19 +283,19 @@ export const listAuditLogs = (params: Record<string, string>) =>
   get<import('../types').AuditLogListResponse>(`${BASE}/admin/audit/logs`, params)
 
 // Tenants
-export const listTenants = (params?: Record<string, string>) =>
-  get<import('../types').TenantListResponse>(`${BASE}/admin/tenants`, params)
+export const listTenants = (params?: Record<string, string>, signal?: AbortSignal) =>
+  get<import('../types').TenantListResponse>(`${BASE}/admin/tenants`, params, signal)
 
-export const getTenant = (id: string) =>
-  get<import('../types').Tenant>(`${BASE}/admin/tenants/${id}`)
+export const getTenant = (id: string, signal?: AbortSignal) =>
+  get<import('../types').Tenant>(`${BASE}/admin/tenants/${id}`, undefined, signal)
 
 // API Keys
-export const listApiKeys = (params?: Record<string, string>) =>
-  get<import('../types').ApiKeyListResponse>(`${BASE}/admin/api-keys`, params)
+export const listApiKeys = (params?: Record<string, string>, signal?: AbortSignal) =>
+  get<import('../types').ApiKeyListResponse>(`${BASE}/admin/api-keys`, params, signal)
 
 // Policies
-export const listPolicies = (params: Record<string, string>) =>
-  get<import('../types').PolicyListResponse>(`${BASE}/admin/policies`, params)
+export const listPolicies = (params: Record<string, string>, signal?: AbortSignal) =>
+  get<import('../types').PolicyListResponse>(`${BASE}/admin/policies`, params, signal)
 
 // v0.1.25.20: createPolicy — admin-on-behalf-of (spec v0.1.25.13). Same
 // shape as createBudget — tenant_id required in body, server uses it to
