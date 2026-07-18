@@ -322,7 +322,7 @@ describe('useTenantDetailData', () => {
     await expect(directRefresh).resolves.toBe('applied')
   })
 
-  it('does not let a single-axis success clear a poll error or advance page-wide freshness', async () => {
+  it('keeps a poll error through unrelated refreshes but clears it on a same-axis retry', async () => {
     const h = createHarness()
     await h.tick()
     const priorSuccess = new Date('2026-07-18T00:00:00Z')
@@ -337,6 +337,10 @@ describe('useTenantDetailData', () => {
 
     expect(h.data.policies.value.map(item => item.policy_id)).toEqual(['fresh-policy'])
     expect(h.data.error.value).toBe('budget poll failed')
+    expect(h.data.lastSuccessAt.value).toBe(priorSuccess)
+
+    await expect(h.data.refreshBudgets()).resolves.toBe('applied')
+    expect(h.data.error.value).toBe('')
     expect(h.data.lastSuccessAt.value).toBe(priorSuccess)
   })
 

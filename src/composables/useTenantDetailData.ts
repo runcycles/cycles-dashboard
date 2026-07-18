@@ -33,6 +33,24 @@ export type TenantDetailRefreshResult = 'applied' | 'failed' | 'superseded'
 type TenantDetailReadOwner = 'poll' | 'tenant' | 'tenants' | 'budgets' | 'keys' | 'policies' | 'webhooks' | 'cascade'
 type TenantDetailErrorOwner = TenantDetailReadOwner | 'external'
 
+class TenantDetailReadFailure {
+  readonly owner: TenantDetailReadOwner
+  readonly cause: unknown
+
+  constructor(owner: TenantDetailReadOwner, cause: unknown) {
+    this.owner = owner
+    this.cause = cause
+  }
+}
+
+async function ownedRead<T>(owner: TenantDetailReadOwner, read: () => Promise<T>): Promise<T> {
+  try {
+    return await read()
+  } catch (cause) {
+    throw new TenantDetailReadFailure(owner, cause)
+  }
+}
+
 type TenantDetailPolling = (
   callback: Parameters<typeof usePollingDefault>[0],
   intervalMs: number,
@@ -259,9 +277,15 @@ export function useTenantDetailData(options: UseTenantDetailDataOptions) {
     error.value = ''
   }
 
-  function reportFailure(cause: unknown): false | typeof POLLING_STALE {
-    if (cause instanceof DOMException && cause.name === 'AbortError') return POLLING_STALE
-    setError('poll', toMessage(cause))
+  function reportFailure(
+    cause: unknown,
+    fallbackOwner: TenantDetailReadOwner = 'poll',
+  ): false | typeof POLLING_STALE {
+    const readFailure = cause instanceof TenantDetailReadFailure ? cause : null
+    const actualCause = readFailure?.cause ?? cause
+    const owner = readFailure?.owner ?? fallbackOwner
+    if (actualCause instanceof DOMException && actualCause.name === 'AbortError') return POLLING_STALE
+    setError(owner, toMessage(actualCause))
     return false
   }
 
@@ -280,16 +304,16 @@ export function useTenantDetailData(options: UseTenantDetailDataOptions) {
         clearAllErrors()
         return false
       }
-      return reportFailure(cause)
+      return reportFailure(cause, 'tenant')
     }
 
     try {
       const [budgetResult, tenantListResult, keyResult, policyResult, webhookResult] = await Promise.all([
-        walkBudgets(signal),
-        walkTenants(signal),
-        walkApiKeys(signal),
-        walkPolicies(signal),
-        walkWebhooks(signal),
+        ownedRead('budgets', () => walkBudgets(signal)),
+        ownedRead('tenants', () => walkTenants(signal)),
+        ownedRead('keys', () => walkApiKeys(signal)),
+        ownedRead('policies', () => walkPolicies(signal)),
+        ownedRead('webhooks', () => walkWebhooks(signal)),
       ])
       if (!owns(generation, signal)) return POLLING_STALE
       tenant.value = tenantResult
@@ -320,7 +344,7 @@ export function useTenantDetailData(options: UseTenantDetailDataOptions) {
         clearAllErrors()
         return false
       }
-      return reportFailure(cause)
+      return reportFailure(cause, 'tenant')
     }
 
     try {
@@ -329,11 +353,11 @@ export function useTenantDetailData(options: UseTenantDetailDataOptions) {
       const needsPolicies = activeTab === 'policies'
       const needsWebhooks = isTerminalTenant(nextTenant)
       const [budgetResult, tenantListResult, keyResult, policyResult, webhookResult] = await Promise.all([
-        walkBudgets(signal),
-        walkTenants(signal),
-        needsKeys ? walkApiKeys(signal) : Promise.resolve(null),
-        needsPolicies ? walkPolicies(signal) : Promise.resolve(null),
-        needsWebhooks ? walkWebhooks(signal) : Promise.resolve(null),
+        ownedRead('budgets', () => walkBudgets(signal)),
+        ownedRead('tenants', () => walkTenants(signal)),
+        needsKeys ? ownedRead('keys', () => walkApiKeys(signal)) : Promise.resolve(null),
+        needsPolicies ? ownedRead('policies', () => walkPolicies(signal)) : Promise.resolve(null),
+        needsWebhooks ? ownedRead('webhooks', () => walkWebhooks(signal)) : Promise.resolve(null),
       ])
       if (!owns(generation, signal)) return POLLING_STALE
 
@@ -413,7 +437,8 @@ export function useTenantDetailData(options: UseTenantDetailDataOptions) {
   /**
    * Refresh the tenant-close convergence axes after a committed CLOSE.
    * Successful siblings publish even when another read fails, matching the
-   * mutation-terminal contract while returning false for operator warning.
+   * mutation-terminal contract while returning a failed settlement for the
+   * operator warning. A newer direct read yields superseded instead.
    */
   async function refreshCascadeState(): Promise<TenantDetailRefreshResult> {
     const { generation, controller } = startDirectRefresh()

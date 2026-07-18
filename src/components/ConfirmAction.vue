@@ -9,7 +9,8 @@ const props = defineProps<{
   confirmLabel: string
   danger?: boolean
   // When true, the confirm button is disabled and shows a spinner; the
-  // dialog backdrop / Cancel / Escape are also blocked. Lets callers do
+  // dialog backdrop and Escape are blocked. Cancel is also blocked unless
+  // cancellableWhileLoading opts into an explicit stop action. Lets callers do
   // `await mutateThing()` *with the dialog still open* instead of the
   // old anti-pattern of closing the dialog before the request starts
   // (which left users staring at nothing during 403/timeout flows).
@@ -63,10 +64,10 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
       <p class="text-sm text-gray-600 dark:text-gray-300 mb-4">{{ message }}</p>
       <div v-if="error" class="mb-4 px-3 py-2 rounded text-xs bg-red-50 border border-red-200 text-red-700 dark:bg-red-950 dark:border-red-800 dark:text-red-300" role="alert">{{ error }}</div>
       <!--
-        Visually-hidden focus sink: target for programmatic focus while the
-        action is in flight (both buttons are :disabled, so the focus trap
-        otherwise has nothing to hold). aria-live="polite" announces the
-        loading state to screen readers without interrupting current speech.
+        Visually-hidden focus sink: target for ordinary non-cancellable loading
+        (both buttons are then disabled, so the focus trap otherwise has
+        nothing to hold). Cancellable batches focus Stop remaining instead.
+        aria-live="polite" announces progress without interrupting speech.
       -->
       <div
         ref="loadingSink"

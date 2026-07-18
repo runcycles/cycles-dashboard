@@ -53,6 +53,10 @@ UX work that does not advance spec alignment.
   nor can an unrelated child success hide a stale page-wide poll failure.
 - Emergency Freeze and the existing tenant, webhook, and budget row-select
   batches now make their AbortSignal-backed cancellation paths reachable.
+- Poll failures retain the child axis that actually failed, so a successful
+  same-axis direct retry clears the repaired error while unrelated reads do
+  not. A stop request made after every batch row was already claimed and
+  settled now reports normal completion instead of an empty cancelled result.
 
 ## [0.1.25.75] — 2026-07-17
 

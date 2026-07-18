@@ -30,7 +30,9 @@ import { ApiError } from '../api/client'
  *
  * ## Return value
  * `{ done, failed, cancelled, errors }`. `done` counts every settled
- * item (success + failed + cancelled). `errors` is an array of
+ * item (success + failed). `cancelled` is true only when cancellation left
+ * at least one item unsettled; a stop request after every row was already
+ * claimed and settled reports normal completion. `errors` is an array of
  * `{ index, error }` for every non-429 failure (so the calling view
  * can log / surface specifics without needing to pipe through its own
  * error accumulator).
@@ -159,5 +161,9 @@ export async function rateLimitedBatch<T>(
   const workers = Array.from({ length: pumpCount }, () => pumpWorker())
   await Promise.all(workers)
 
-  return { done, failed, cancelled, errors }
+  // A stop request can arrive after every row has already been claimed. The
+  // in-flight workers still settle, then observe the aborted signal on their
+  // next loop boundary. Do not describe that fully-settled run as cancelled or
+  // open an empty skipped-row dialog in callers — no work was left behind.
+  return { done, failed, cancelled: cancelled && done < total, errors }
 }

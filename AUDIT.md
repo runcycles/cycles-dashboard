@@ -81,6 +81,18 @@ tenant suspend/reactivate, webhook pause/enable, and budget freeze/unfreeze all
 enable the contract, so already-started writes settle while unstarted rows are
 reported as skipped.
 
+A second self-review tightened both contracts. Poll failures were initially
+tagged with the generic `poll` owner at the outer `Promise.all` catch, so the
+documented same-axis retry rule only worked for errors originating in a direct
+read. Each cursor walk now carries its budgets/keys/policies/webhooks/tenants
+owner through rejection, while route-tenant reads retain `tenant`; a matching
+direct retry clears that error without touching page-wide freshness. The newly
+reachable stop control also exposed a terminal edge: with at most four rows,
+every row can already be in flight before the click, and the workers observed
+the aborted signal after all rows settled. `rateLimitedBatch` now reports
+`cancelled` only when `done < total`, preventing “4/4 completed (cancelled)”
+toasts and empty skipped-row dialogs. Focused tests pin both cases.
+
 Thirteen focused composable tests cover multi-page acquisition, page-cap and
 missing-cursor partiality, lazy ACTIVE and CLOSED poll shapes, stale-poll
 rejection, abort settlement, route-404 classification, partial cascade
@@ -89,8 +101,8 @@ superseded direct settlement. Four integration assertions prove
 page-two budgets enter Emergency Freeze, partial scans refuse to arm that action,
 an in-flight freeze can stop before its unstarted tail, and a CLOSED tenant with
 partial verification never renders as clean. `ConfirmAction` component tests
-also pin the opt-in button and focus behavior. Final validation: 1,332/1,332
-tests across 114 files; 97.15% line coverage; lint, strict
+also pin the opt-in button and focus behavior. Final validation: 1,333/1,333
+tests across 114 files; 97.18% line coverage; lint, strict
 typecheck, production build, and development/production Compose validation
 pass. Twelve targeted live Chromium checks also pass, including Tenant Detail
 axe coverage, dark-mode state, and the complete Emergency Freeze flow. No

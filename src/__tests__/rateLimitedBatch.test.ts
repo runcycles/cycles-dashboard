@@ -140,6 +140,23 @@ describe('rateLimitedBatch', () => {
     expect(processed).toBeLessThan(10)
   })
 
+  it('reports normal completion when stop is requested after every row is already claimed', async () => {
+    const controller = new AbortController()
+    const resolvers: Array<() => void> = []
+    const pending = rateLimitedBatch([1, 2, 3, 4], async () => {
+      await new Promise<void>((resolve) => { resolvers.push(resolve) })
+    }, { concurrency: 4, signal: controller.signal })
+
+    expect(resolvers).toHaveLength(4)
+    controller.abort()
+    for (const resolve of resolvers) resolve()
+    const result = await pending
+
+    expect(result.done).toBe(4)
+    expect(result.failed).toBe(0)
+    expect(result.cancelled).toBe(false)
+  })
+
   it('aborts out of a 429 backoff sleep without waiting for it to expire', async () => {
     // The sleep between 429 retries must settle immediately on abort,
     // otherwise cancelling a bulk op during a long backoff would leave
