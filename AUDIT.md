@@ -48,14 +48,18 @@ search remain optional; the system pseudo-tenant and wildcard matcher remain
 blocked. Complete walks alone send `expected_count`, UUID idempotency remains
 per confirmation, count/limit errors stay inline and retryable, failed/skipped
 rows still open the shared result dialog, and refresh runs after settlement.
-The view templates and successful request bodies are unchanged.
+Successful request bodies and the preview/result-dialog templates are
+unchanged; the webhook filter bar alone gains the unsupported-state help text
+described below.
 
 Review also found that Webhooks' derived `failing=1` filter was not included in
 either the preview predicate or the server request, even though the controls
 said “Apply to all matching filter.” The webhook bulk schema has no
 `consecutive_failures` predicate, so that state now refuses to arm alongside
 the other unrepresentable filters. The disabled controls explain all three
-unsupported modes in their tooltip.
+unsupported modes with visible, predicate-specific text. The explanation does
+not depend on hover or focus reaching a disabled native button, so it remains
+available to keyboard and touch operators.
 
 The shared preview walker had one related truthfulness edge: `has_more=true`
 with an empty continuation cursor broke the loop but marked `reachedEnd=true`.
@@ -64,16 +68,35 @@ now reported through the existing partial-preview state, which keeps the count
 visible but omits `expected_count`. This matches the defensive cursor contract
 already used by Overview and Tenant Detail.
 
+Self-review found a second incomplete-walk boundary: when an early page found
+matches and a later page threw, the walker correctly displayed the error but
+retained the earlier count. Confirm remained enabled, and callers could submit
+that incomplete selection without `expected_count`. The shared dialog now
+disables Confirm whenever the walk has an error, while the budget, tenant, and
+webhook composables independently reject the same state as a defense against
+direct calls. Focused tests exercise the page-one-success/page-two-failure
+sequence in all three protocols.
+
+The extracted tenant and webhook owners now store action plus filters in one
+frozen selection rather than adjacent writable refs. Their exposed `action` is
+a read-only computed projection, preventing a caller from changing PAUSE to
+RESUME (or SUSPEND to REACTIVATE) after Preview. `canOpen` now reports only
+whether the live filter is representable; `open` retains the in-flight guard.
+This keeps disabled-state copy truthful during settlement without permitting a
+second Preview. The shared `cappedAtPages` contract also documents both bounded
+page walks and missing continuation cursors.
+
 The two views retain URL/filter refs, polling and page-one data, Load more,
 export, row-select batches, mutations outside this filter-wide path, dialogs,
-virtualization, and all presentation. `TenantsView.vue` drops from 1,122 to 985
-lines and `WebhooksView.vue` from 1,102 to 988. Focused tests cover immutable
+virtualization, and list presentation. `TenantsView.vue` drops from 1,122 to
+985 lines and `WebhooksView.vue` from 1,102 to 996. Focused tests cover immutable
 multi-page tuples, action-derived status, exact and malformed-continuation
 counts, unsupported filter gates, direct-call defense, duplicate submission,
-count/limit error recovery, result capture, and the live failing-only URL
-integration. No governance-spec, server-fleet, endpoint, successful wire
-shape, polling cadence, or ordinary layout change. Final validation:
-1,353/1,353 tests across 116 files; 97.43% line coverage; lint, strict
+partial-walk error blocking, count/limit error recovery, result capture,
+read-only action ownership, and the live failing-only URL integration. No
+governance-spec, server-fleet, endpoint, successful wire shape, polling
+cadence, or list/table/dialog layout change. Final validation:
+1,356/1,356 tests across 116 files; 97.43% line coverage; lint, strict
 typecheck, production build, and development/production Compose validation
 pass.
 

@@ -288,6 +288,21 @@ describe('useBudgetFilterBulk', () => {
     expect(h.refresh).not.toHaveBeenCalled()
   })
 
+  it('blocks submission when a later preview page fails after finding matches', async () => {
+    const h = createHarness()
+    h.list
+      .mockResolvedValueOnce({ ledgers: [ledger('one')], has_more: true, next_cursor: 'cursor-1' })
+      .mockRejectedValueOnce(new Error('page two unavailable'))
+
+    await h.preview()
+
+    expect(h.bulk.preview.previewCount.value).toBe(1)
+    expect(h.bulk.preview.previewError.value).toBe('page two unavailable')
+    await expect(h.bulk.execute()).resolves.toBe(false)
+    expect(h.submit).not.toHaveBeenCalled()
+    expect(h.refresh).not.toHaveBeenCalled()
+  })
+
   it('humanizes count drift, keeps the preview retryable, and refreshes the owner', async () => {
     const h = createHarness()
     h.submit.mockRejectedValue(new ApiError(

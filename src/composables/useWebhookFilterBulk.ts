@@ -51,6 +51,11 @@ interface WebhookFilterSnapshot {
   search: string
 }
 
+interface WebhookFilterBulkSelection {
+  action: WebhookFilterBulkAction
+  filters: Readonly<WebhookFilterSnapshot>
+}
+
 function requiredStatus(action: WebhookFilterBulkAction): 'ACTIVE' | 'PAUSED' {
   return action === 'PAUSE' ? 'ACTIVE' : 'PAUSED'
 }
@@ -68,6 +73,19 @@ function normalizedSnapshot(filters: WebhookFilterBulkFilters): WebhookFilterSna
 
 function isRepresentable(filters: WebhookFilterBulkFilters): boolean {
   return filters.tenantId !== SYSTEM_TENANT_ID && !filters.search.includes('*') && !filters.failingOnly
+}
+
+function representabilityError(filters: WebhookFilterBulkFilters): string {
+  if (filters.tenantId === SYSTEM_TENANT_ID) {
+    return 'Bulk actions are unavailable for the system-wide filter because the server has no equivalent tenant selector.'
+  }
+  if (filters.search.includes('*')) {
+    return 'Bulk actions are unavailable for wildcard URL filters because the server accepts literal search text only.'
+  }
+  if (filters.failingOnly) {
+    return 'Bulk actions are unavailable for the failing-only filter because the server has no failure-state selector.'
+  }
+  return ''
 }
 
 function buildFilter(
@@ -89,16 +107,17 @@ function buildFilter(
  * preview page, the visible summary, expected_count, and final mutation.
  */
 export function useWebhookFilterBulk(options: UseWebhookFilterBulkOptions) {
-  const action = ref<WebhookFilterBulkAction | null>(null)
+  const selection = ref<Readonly<WebhookFilterBulkSelection> | null>(null)
+  const action = computed(() => selection.value?.action ?? null)
   const running = ref(false)
   const submitError = ref('')
-  const filterSnapshot = ref<Readonly<WebhookFilterSnapshot> | null>(null)
+  const unsupportedReason = computed(() => representabilityError(options.getFilters()))
 
   const createKey = options.createIdempotencyKey ?? generateIdempotencyKey
 
   const preview = useBulkActionPreview<WebhookSubscription>({
     fetchPage: async (cursor) => {
-      const snapshot = filterSnapshot.value
+      const snapshot = selection.value?.filters
       if (!snapshot) return { items: [], hasMore: false, nextCursor: '' }
       const params: Record<string, string> = {}
       if (snapshot.search) params.search = snapshot.search
@@ -111,10 +130,10 @@ export function useWebhookFilterBulk(options: UseWebhookFilterBulkOptions) {
       }
     },
     filterFn: (webhook) => {
-      const snapshot = filterSnapshot.value
-      const submittedAction = action.value
-      if (!snapshot || !submittedAction) return false
-      if (webhook.status !== requiredStatus(submittedAction)) return false
+      const ownedSelection = selection.value
+      if (!ownedSelection) return false
+      if (webhook.status !== requiredStatus(ownedSelection.action)) return false
+      const snapshot = ownedSelection.filters
       if (snapshot.tenantId && webhook.tenant_id !== snapshot.tenantId) return false
       return true
     },
@@ -126,9 +145,9 @@ export function useWebhookFilterBulk(options: UseWebhookFilterBulkOptions) {
   })
 
   const summary = computed(() => {
-    const snapshot = filterSnapshot.value
-    const submittedAction = action.value
-    if (!snapshot || !submittedAction) return ''
+    const ownedSelection = selection.value
+    if (!ownedSelection) return ''
+    const { action: submittedAction, filters: snapshot } = ownedSelection
     const parts = [`status=${requiredStatus(submittedAction)}`]
     if (snapshot.tenantId) parts.push(`tenant_id=${snapshot.tenantId}`)
     if (snapshot.search) parts.push(`search="${snapshot.search}"`)
@@ -136,22 +155,23 @@ export function useWebhookFilterBulk(options: UseWebhookFilterBulkOptions) {
   })
 
   function canOpen(): boolean {
-    return !running.value && isRepresentable(options.getFilters())
+    return isRepresentable(options.getFilters())
   }
 
   function open(nextAction: WebhookFilterBulkAction): void {
-    if (!canOpen()) return
+    if (running.value || !canOpen()) return
     const currentFilters = options.getFilters()
     if (!isRepresentable(currentFilters)) return
-    action.value = nextAction
-    filterSnapshot.value = normalizedSnapshot(currentFilters)
+    selection.value = Object.freeze({
+      action: nextAction,
+      filters: normalizedSnapshot(currentFilters),
+    })
     submitError.value = ''
     void preview.startPreview()
   }
 
   function resetArmedState(): void {
-    action.value = null
-    filterSnapshot.value = null
+    selection.value = null
     submitError.value = ''
   }
 
@@ -163,16 +183,16 @@ export function useWebhookFilterBulk(options: UseWebhookFilterBulkOptions) {
   }
 
   async function execute(): Promise<boolean> {
-    if (!action.value || running.value) return false
-    if (preview.previewLoading.value || preview.previewCount.value === 0 || preview.cappedAtMax.value) return false
+    const ownedSelection = selection.value
+    if (!ownedSelection || running.value) return false
+    if (
+      preview.previewLoading.value
+      || preview.previewError.value
+      || preview.previewCount.value === 0
+      || preview.cappedAtMax.value
+    ) return false
 
-    const snapshot = filterSnapshot.value
-    if (!snapshot) {
-      submitError.value = 'Preview this webhook selection before submitting the bulk action.'
-      return false
-    }
-
-    const submittedAction = action.value
+    const { filters: snapshot, action: submittedAction } = ownedSelection
     running.value = true
     submitError.value = ''
     try {
@@ -221,6 +241,7 @@ export function useWebhookFilterBulk(options: UseWebhookFilterBulkOptions) {
     running,
     submitError,
     summary,
+    unsupportedReason,
     preview,
     canOpen,
     open,

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { isReadonly } from 'vue'
 import { ApiError } from '../api/client'
 import {
   useWebhookFilterBulk,
@@ -80,13 +81,14 @@ function createHarness(initialFilters: WebhookFilterBulkFilters = {
 
 describe('useWebhookFilterBulk', () => {
   it.each([
-    { filters: { tenantId: '__system__', search: '', failingOnly: false }, label: 'system pseudo-tenant' },
-    { filters: { tenantId: '', search: '*.internal', failingOnly: false }, label: 'wildcard search' },
-    { filters: { tenantId: '', search: '', failingOnly: true }, label: 'failing-only predicate' },
-  ] satisfies Array<{ filters: WebhookFilterBulkFilters; label: string }>)('refuses an unrepresentable $label filter', ({ filters }) => {
+    { filters: { tenantId: '__system__', search: '', failingOnly: false }, label: 'system pseudo-tenant', reason: 'system-wide filter' },
+    { filters: { tenantId: '', search: '*.internal', failingOnly: false }, label: 'wildcard search', reason: 'wildcard URL filters' },
+    { filters: { tenantId: '', search: '', failingOnly: true }, label: 'failing-only predicate', reason: 'failing-only filter' },
+  ] satisfies Array<{ filters: WebhookFilterBulkFilters; label: string; reason: string }>)('refuses an unrepresentable $label filter', ({ filters, reason }) => {
     const h = createHarness(filters)
 
     expect(h.bulk.canOpen()).toBe(false)
+    expect(h.bulk.unsupportedReason.value).toContain(reason)
     h.bulk.open('PAUSE')
 
     expect(h.bulk.action.value).toBeNull()
@@ -152,14 +154,29 @@ describe('useWebhookFilterBulk', () => {
     expect(h.onResult).toHaveBeenCalledWith(expect.objectContaining({ actionVerb: 'Resume' }))
   })
 
-  it('rejects direct execution without an owned preview snapshot', async () => {
+  it('exposes the captured action as readonly and rejects execution before Preview', async () => {
     const h = createHarness()
-    h.bulk.action.value = 'PAUSE'
-    h.bulk.preview.previewCount.value = 1
+
+    expect(isReadonly(h.bulk.action)).toBe(true)
+    expect(h.bulk.action.value).toBeNull()
 
     await expect(h.bulk.execute()).resolves.toBe(false)
 
-    expect(h.bulk.submitError.value).toContain('Preview this webhook selection')
+    expect(h.submit).not.toHaveBeenCalled()
+    expect(h.refresh).not.toHaveBeenCalled()
+  })
+
+  it('blocks submission when a later preview page fails after finding matches', async () => {
+    const h = createHarness()
+    h.list
+      .mockResolvedValueOnce({ subscriptions: [webhook('one')], has_more: true, next_cursor: 'cursor-1' })
+      .mockRejectedValueOnce(new Error('page two unavailable'))
+
+    await h.preview()
+
+    expect(h.bulk.preview.previewCount.value).toBe(1)
+    expect(h.bulk.preview.previewError.value).toBe('page two unavailable')
+    await expect(h.bulk.execute()).resolves.toBe(false)
     expect(h.submit).not.toHaveBeenCalled()
     expect(h.refresh).not.toHaveBeenCalled()
   })
@@ -206,6 +223,9 @@ describe('useWebhookFilterBulk', () => {
 
     const first = h.bulk.execute()
     await vi.waitFor(() => expect(h.bulk.running.value).toBe(true))
+    expect(h.bulk.canOpen()).toBe(true)
+    h.bulk.open('RESUME')
+    expect(h.bulk.action.value).toBe('PAUSE')
     await expect(h.bulk.execute()).resolves.toBe(false)
     expect(h.submit).toHaveBeenCalledOnce()
 

@@ -347,6 +347,7 @@ const {
   running: filterBulkRunning,
   submitError: filterBulkSubmitError,
   summary: filterBulkSummary,
+  unsupportedReason: filterBulkUnsupportedReason,
   canOpen: canApplyWebhookFilterBulk,
   open: openFilterBulk,
   cancel: cancelFilterBulk,
@@ -712,8 +713,8 @@ const gridTemplate = computed(() =>
         </label>
         <!-- Filter-apply bulk actions (see TenantsView for rationale).
              Appears when a filter is set AND no row-select is active.
-             Disabled for SYSTEM_TENANT_ID (no server equivalent) and
-             for wildcard url-filters (server uses literal substring).
+             System-wide, wildcard, and derived failing-only filters are
+             disabled because the server cannot represent those predicates.
              Grouped in inline-flex so label + buttons wrap together
              on narrow viewports. -->
         <div
@@ -727,15 +728,22 @@ const gridTemplate = computed(() =>
           <button
             @click="openFilterBulk('PAUSE')"
             :disabled="!canApplyWebhookFilterBulk() || filterBulkRunning"
+            :aria-describedby="filterBulkUnsupportedReason ? 'webhook-filter-bulk-unavailable' : undefined"
             class="text-xs text-red-700 dark:text-red-300 hover:text-red-900 dark:hover:text-red-200 border border-red-300 dark:border-red-700 bg-white dark:bg-gray-800 rounded px-2.5 py-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-            :title="canApplyWebhookFilterBulk() ? 'Pause all ACTIVE webhooks matching filter' : 'System-wide, wildcard, and failing-only filters are not supported by server bulk-action'"
+            :title="canApplyWebhookFilterBulk() ? 'Pause all ACTIVE webhooks matching filter' : undefined"
           >Pause all</button>
           <button
             @click="openFilterBulk('RESUME')"
             :disabled="!canApplyWebhookFilterBulk() || filterBulkRunning"
+            :aria-describedby="filterBulkUnsupportedReason ? 'webhook-filter-bulk-unavailable' : undefined"
             class="text-xs text-green-700 dark:text-green-300 hover:text-green-900 dark:hover:text-green-200 border border-green-300 dark:border-green-700 bg-white dark:bg-gray-800 rounded px-2.5 py-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-            :title="canApplyWebhookFilterBulk() ? 'Resume all PAUSED webhooks matching filter' : 'System-wide, wildcard, and failing-only filters are not supported by server bulk-action'"
+            :title="canApplyWebhookFilterBulk() ? 'Resume all PAUSED webhooks matching filter' : undefined"
           >Resume all</button>
+          <p
+            v-if="filterBulkUnsupportedReason"
+            id="webhook-filter-bulk-unavailable"
+            class="basis-full muted-sm"
+          >{{ filterBulkUnsupportedReason }}</p>
         </div>
       </div>
     </div>

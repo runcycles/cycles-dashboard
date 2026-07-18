@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { isReadonly } from 'vue'
 import { ApiError } from '../api/client'
 import {
   useTenantFilterBulk,
@@ -168,14 +169,29 @@ describe('useTenantFilterBulk', () => {
     expect(h.submit.mock.calls[0]?.[0]).not.toHaveProperty('expected_count')
   })
 
-  it('rejects direct execution without an owned preview snapshot', async () => {
+  it('exposes the captured action as readonly and rejects execution before Preview', async () => {
     const h = createHarness()
-    h.bulk.action.value = 'SUSPEND'
-    h.bulk.preview.previewCount.value = 1
+
+    expect(isReadonly(h.bulk.action)).toBe(true)
+    expect(h.bulk.action.value).toBeNull()
 
     await expect(h.bulk.execute()).resolves.toBe(false)
 
-    expect(h.bulk.submitError.value).toContain('Preview this tenant selection')
+    expect(h.submit).not.toHaveBeenCalled()
+    expect(h.refresh).not.toHaveBeenCalled()
+  })
+
+  it('blocks submission when a later preview page fails after finding matches', async () => {
+    const h = createHarness()
+    h.list
+      .mockResolvedValueOnce({ tenants: [tenant('one')], has_more: true, next_cursor: 'cursor-1' })
+      .mockRejectedValueOnce(new Error('page two unavailable'))
+
+    await h.preview()
+
+    expect(h.bulk.preview.previewCount.value).toBe(1)
+    expect(h.bulk.preview.previewError.value).toBe('page two unavailable')
+    await expect(h.bulk.execute()).resolves.toBe(false)
     expect(h.submit).not.toHaveBeenCalled()
     expect(h.refresh).not.toHaveBeenCalled()
   })
@@ -213,6 +229,9 @@ describe('useTenantFilterBulk', () => {
 
     const first = h.bulk.execute()
     await vi.waitFor(() => expect(h.bulk.running.value).toBe(true))
+    expect(h.bulk.canOpen()).toBe(true)
+    h.bulk.open('REACTIVATE')
+    expect(h.bulk.action.value).toBe('SUSPEND')
     await expect(h.bulk.execute()).resolves.toBe(false)
     expect(h.submit).toHaveBeenCalledOnce()
 

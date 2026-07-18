@@ -195,7 +195,9 @@ describe('WebhooksView — URL deep-link smoke', () => {
     const resumeAll = w.findAll('button').find(button => button.text() === 'Resume all')
     expect(pauseAll?.attributes('disabled')).toBeDefined()
     expect(resumeAll?.attributes('disabled')).toBeDefined()
-    expect(pauseAll?.attributes('title')).toContain('failing-only')
+    expect(pauseAll?.attributes('aria-describedby')).toBe('webhook-filter-bulk-unavailable')
+    expect(resumeAll?.attributes('aria-describedby')).toBe('webhook-filter-bulk-unavailable')
+    expect(w.get('#webhook-filter-bulk-unavailable').text()).toContain('failing-only filter')
   })
 
   // Round 4 (F3): the ?status watcher was adopt-only — Back to a bare

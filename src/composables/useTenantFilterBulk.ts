@@ -48,6 +48,11 @@ interface TenantFilterSnapshot {
   parentTenantId: string
 }
 
+interface TenantFilterBulkSelection {
+  action: TenantFilterBulkAction
+  filters: Readonly<TenantFilterSnapshot>
+}
+
 function requiredStatus(action: TenantFilterBulkAction): string {
   return action === 'SUSPEND' ? 'ACTIVE' : 'SUSPENDED'
 }
@@ -82,16 +87,16 @@ function buildFilter(
  * one the operator reviewed.
  */
 export function useTenantFilterBulk(options: UseTenantFilterBulkOptions) {
-  const action = ref<TenantFilterBulkAction | null>(null)
+  const selection = ref<Readonly<TenantFilterBulkSelection> | null>(null)
+  const action = computed(() => selection.value?.action ?? null)
   const running = ref(false)
   const submitError = ref('')
-  const filterSnapshot = ref<Readonly<TenantFilterSnapshot> | null>(null)
 
   const createKey = options.createIdempotencyKey ?? generateIdempotencyKey
 
   const preview = useBulkActionPreview<Tenant>({
     fetchPage: async (cursor) => {
-      const snapshot = filterSnapshot.value
+      const snapshot = selection.value?.filters
       if (!snapshot) return { items: [], hasMore: false, nextCursor: '' }
       const params: Record<string, string> = {}
       if (snapshot.search) params.search = snapshot.search
@@ -104,10 +109,10 @@ export function useTenantFilterBulk(options: UseTenantFilterBulkOptions) {
       }
     },
     filterFn: (tenant) => {
-      const snapshot = filterSnapshot.value
-      const submittedAction = action.value
-      if (!snapshot || !submittedAction) return false
-      if (tenant.status !== requiredStatus(submittedAction)) return false
+      const ownedSelection = selection.value
+      if (!ownedSelection) return false
+      if (tenant.status !== requiredStatus(ownedSelection.action)) return false
+      const snapshot = ownedSelection.filters
       if (snapshot.parentTenantId && tenant.parent_tenant_id !== snapshot.parentTenantId) return false
       return true
     },
@@ -119,9 +124,9 @@ export function useTenantFilterBulk(options: UseTenantFilterBulkOptions) {
   })
 
   const summary = computed(() => {
-    const snapshot = filterSnapshot.value
-    const submittedAction = action.value
-    if (!snapshot || !submittedAction) return ''
+    const ownedSelection = selection.value
+    if (!ownedSelection) return ''
+    const { action: submittedAction, filters: snapshot } = ownedSelection
     const parts = [`status=${requiredStatus(submittedAction)}`]
     if (snapshot.parentTenantId) parts.push(`parent_tenant_id=${snapshot.parentTenantId}`)
     if (snapshot.search) parts.push(`search="${snapshot.search}"`)
@@ -129,22 +134,20 @@ export function useTenantFilterBulk(options: UseTenantFilterBulkOptions) {
   })
 
   function canOpen(): boolean {
-    return !running.value && options.getFilters().parentTenantId !== '__root__'
+    return options.getFilters().parentTenantId !== '__root__'
   }
 
   function open(nextAction: TenantFilterBulkAction): void {
-    if (!canOpen()) return
+    if (running.value || !canOpen()) return
     const snapshot = normalizedSnapshot(options.getFilters())
     if (snapshot.parentTenantId === '__root__') return
-    action.value = nextAction
-    filterSnapshot.value = snapshot
+    selection.value = Object.freeze({ action: nextAction, filters: snapshot })
     submitError.value = ''
     void preview.startPreview()
   }
 
   function resetArmedState(): void {
-    action.value = null
-    filterSnapshot.value = null
+    selection.value = null
     submitError.value = ''
   }
 
@@ -156,16 +159,16 @@ export function useTenantFilterBulk(options: UseTenantFilterBulkOptions) {
   }
 
   async function execute(): Promise<boolean> {
-    if (!action.value || running.value) return false
-    if (preview.previewLoading.value || preview.previewCount.value === 0 || preview.cappedAtMax.value) return false
+    const ownedSelection = selection.value
+    if (!ownedSelection || running.value) return false
+    if (
+      preview.previewLoading.value
+      || preview.previewError.value
+      || preview.previewCount.value === 0
+      || preview.cappedAtMax.value
+    ) return false
 
-    const snapshot = filterSnapshot.value
-    if (!snapshot || snapshot.parentTenantId === '__root__') {
-      submitError.value = 'Preview this tenant selection before submitting the bulk action.'
-      return false
-    }
-
-    const submittedAction = action.value
+    const { filters: snapshot, action: submittedAction } = ownedSelection
     running.value = true
     submitError.value = ''
     try {

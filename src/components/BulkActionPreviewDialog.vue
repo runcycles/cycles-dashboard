@@ -25,7 +25,7 @@ const props = defineProps<{
   samples: PreviewSample[]
   /** True iff the walk hit the maxMatches cap (count is a lower bound; submit would LIMIT_EXCEEDED). */
   cappedAtMax: boolean
-  /** True iff the walk hit maxPages without finishing (count is partial; do not send expected_count). */
+  /** True iff a page bound or missing continuation stops the walk before exhaustion (count is partial). */
   cappedAtPages: boolean
   /**
    * True iff the walk completed naturally (count is exact). Callers
@@ -211,7 +211,7 @@ const SERVER_MAX = props.serverMaxPerRequest ?? 500
           ref="confirmBtn"
           type="button"
           @click="$emit('confirm')"
-          :disabled="loading || submitting || count === 0 || cappedAtMax"
+          :disabled="loading || submitting || Boolean(error) || count === 0 || cappedAtMax"
           :class="confirmDanger
             ? 'bg-red-600 hover:bg-red-700 text-white'
             : 'bg-gray-900 hover:bg-gray-800 text-white dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-300'"

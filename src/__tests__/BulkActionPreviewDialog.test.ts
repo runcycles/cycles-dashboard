@@ -158,9 +158,13 @@ describe('BulkActionPreviewDialog', () => {
   })
 
   describe('error surfaces', () => {
-    it('renders walk-error inline (network-during-count)', () => {
-      const w = mount(BulkActionPreviewDialog, { props: { ...baseProps, error: 'network down' } })
+    it('renders walk-error inline and disables Confirm even when earlier pages found matches', () => {
+      const w = mount(BulkActionPreviewDialog, {
+        props: { ...baseProps, count: 3, samples: [sample('a')], error: 'network down' },
+      })
       expect(w.find('[role="alert"]').text()).toContain('network down')
+      const buttons = w.findAll('button')
+      expect(buttons[buttons.length - 1].attributes('disabled')).toBeDefined()
     })
 
     it('renders submit-error inline (LIMIT_EXCEEDED / COUNT_MISMATCH)', () => {

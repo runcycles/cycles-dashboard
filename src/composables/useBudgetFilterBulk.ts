@@ -286,7 +286,12 @@ export function useBudgetFilterBulk(options: UseBudgetFilterBulkOptions) {
 
   async function execute(): Promise<boolean> {
     if (!action.value || running.value) return false
-    if (preview.previewLoading.value || preview.previewCount.value === 0 || preview.cappedAtMax.value) return false
+    if (
+      preview.previewLoading.value
+      || preview.previewError.value
+      || preview.previewCount.value === 0
+      || preview.cappedAtMax.value
+    ) return false
 
     const snapshot = listParamsSnapshot.value
     const tenantId = snapshot?.tenant_id ?? ''

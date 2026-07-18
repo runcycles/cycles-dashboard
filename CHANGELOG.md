@@ -23,7 +23,7 @@ UX work that does not advance spec alignment.
   focused `useTenantFilterBulk` and `useWebhookFilterBulk` composables. The
   views retain filters, row selection, polling, dialogs, and presentation.
 - `TenantsView` drops from 1,122 to 985 lines and `WebhooksView` from 1,102 to
-  988 lines without changing the existing preview or result-dialog layout.
+  996 lines without changing the existing preview or result-dialog layout.
 
 ### Fixed
 
@@ -34,16 +34,24 @@ UX work that does not advance spec alignment.
 - Webhook filter-bulk controls refuse the derived **failing only** filter,
   matching the existing system-wide and wildcard guards. The server bulk
   schema cannot represent that predicate, so enabling it previously applied a
-  broader set than the visible table implied.
+  broader set than the visible table implied. Each unsupported state now has a
+  visible, predicate-specific explanation instead of relying on a disabled
+  control's tooltip.
 - A list response that reports `has_more=true` without a continuation cursor is
   now classified as a partial preview. The dashboard omits `expected_count`
   instead of treating the lower bound as exact.
+- A preview-page failure after earlier pages found matches now disables Confirm
+  and is rejected by every filter-bulk composable. An incomplete count can no
+  longer be submitted without the server's exact-count drift guard.
+- Tenant and webhook Preview ownership now stores the action and filters in one
+  frozen selection and exposes the action read-only. Consumers cannot change
+  the mutation after the operator reviews its target set.
 - Re-entrant filter-bulk confirmation is rejected before error or loading state
   can be changed; direct execution without an owned Preview snapshot is also
   refused.
 
 No API endpoint, successful request shape, server/spec requirement, or polling
-cadence changes. Validation: 1,353 tests; 97.43% line coverage; lint,
+cadence changes. Validation: 1,356 tests; 97.43% line coverage; lint,
 typecheck, production build, and both Compose configurations pass.
 
 ## [0.1.25.76] — 2026-07-18
