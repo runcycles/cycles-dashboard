@@ -15,11 +15,11 @@ function source(path: string): string {
 describe('published server deployment pins', () => {
   it('pins the patch dashboard image in production Compose and the README example', () => {
     for (const file of ['docker-compose.prod.yml', 'README.md']) {
-      expect(source(file)).toContain('ghcr.io/runcycles/cycles-dashboard:0.1.25.75')
+      expect(source(file)).toContain('ghcr.io/runcycles/cycles-dashboard:0.1.25.76')
       expect(source(file)).not.toMatch(/ghcr\.io\/runcycles\/cycles-dashboard:(?:latest|main)\b/)
     }
-    expect(JSON.parse(source('package.json')).version).toBe('0.1.25.75')
-    expect(JSON.parse(source('package-lock.json')).version).toBe('0.1.25.75')
+    expect(JSON.parse(source('package.json')).version).toBe('0.1.25.76')
+    expect(JSON.parse(source('package-lock.json')).version).toBe('0.1.25.76')
   })
 
   it.each(['docker-compose.yml', 'docker-compose.prod.yml', 'README.md'])(

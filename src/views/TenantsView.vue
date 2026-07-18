@@ -1044,6 +1044,7 @@ const gridTemplate = computed(() =>
       :confirm-label="bulkRunning ? 'Working…' : bulkAction === 'SUSPENDED' ? 'Suspend all' : 'Reactivate all'"
       :danger="bulkAction === 'SUSPENDED'"
       :loading="bulkRunning"
+      cancellable-while-loading
       @confirm="executeBulk"
       @cancel="cancelBulk"
     />

@@ -1,13 +1,17 @@
 <script setup lang="ts">
 import { ref, computed, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { usePolling } from '../composables/usePolling'
 import { useFocusTrap } from '../composables/useFocusTrap'
-import { POLL_SLOW_MS } from '../composables/pollingConstants'
 import { useTerminalAwareList } from '../composables/useTerminalAwareList'
-import { getTenant, listTenants, listBudgets, listApiKeys, listPolicies, listWebhooks, updateTenantStatus, updateTenant, revokeApiKey, createApiKey, updateApiKey, createBudget, createPolicy, updatePolicy, freezeBudget, ApiError } from '../api/client'
+import {
+  TENANT_DETAIL_SCAN_MAX_ROWS,
+  useTenantDetailData,
+  type TenantDetailRefreshResult,
+  type TenantDetailTab,
+} from '../composables/useTenantDetailData'
+import { updateTenantStatus, updateTenant, revokeApiKey, createApiKey, updateApiKey, createBudget, createPolicy, updatePolicy, freezeBudget } from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import type { Tenant, TenantUpdateRequest, BudgetLedger, ApiKey, ApiKeyCreateRequest, ApiKeyCreateResponse, ApiKeyUpdateRequest, Policy, WebhookSubscription, BudgetCreateRequest, PolicyCreateRequest, PolicyUpdateRequest } from '../types'
+import type { TenantUpdateRequest, BudgetLedger, ApiKey, ApiKeyCreateRequest, ApiKeyCreateResponse, ApiKeyUpdateRequest, Policy, BudgetCreateRequest, PolicyCreateRequest, PolicyUpdateRequest } from '../types'
 import { COMMIT_OVERAGE_POLICIES, PERMISSIONS } from '../types'
 import PermissionPicker from '../components/PermissionPicker.vue'
 import PolicyAdvancedFields from '../components/PolicyAdvancedFields.vue'
@@ -53,6 +57,14 @@ const canManageKeys = computed(() => auth.capabilities?.manage_api_keys !== fals
 const canManageBudgets = computed(() => auth.capabilities?.manage_budgets !== false)
 const canManagePolicies = computed(() => auth.capabilities?.manage_policies !== false)
 
+const tab = ref<TenantDetailTab>('budgets')
+// Declared before the acquisition composable because its first test tick can
+// run synchronously. Polls yield while any mutation owns a post-commit refresh.
+const closeTenantLoading = ref(false)
+const rerunCascadeLoading = ref(false)
+const emergencyFreezeRunning = ref(false)
+const emergencyFreezePreparing = ref(false)
+
 // Breadcrumb back-link origin. When the operator clicks a child tenant
 // from another tenant's "Children" list, the link threads ?parent=<src>
 // so the back arrow here returns to that source instead of defaulting to
@@ -80,28 +92,42 @@ function goBack() {
   }
 }
 
-const tenant = ref<Tenant | null>(null)
-// v0.1.25.21 (#2): sibling tenants keyed off this tenant's id — used
-// for the "Children" list on the header card.
-const allTenants = ref<Tenant[]>([])
-const budgets = ref<BudgetLedger[]>([])
-const apiKeys = ref<ApiKey[]>([])
-const policies = ref<Policy[]>([])
-// v0.1.25.44: webhook subscriptions owned by this tenant — not
-// displayed in a tab yet, but needed for the cascade-recovery banner
-// so it can tell an operator exactly how many are still non-terminal
-// under a CLOSED tenant. Fetched on initial mount and on every poll
-// while the tenant is CLOSED (banner-relevant window); skipped on
-// ACTIVE/SUSPENDED polls to keep per-tick cost bounded.
-const webhooks = ref<WebhookSubscription[]>([])
-const error = ref('')
-// P0-C2: distinguish "initial fetch pending" from "server returned 404" so
-// the view can render a skeleton vs. a dedicated not-found card instead of
-// a blank page. Generic errors still flow into `error.value` / the top
-// banner; 404 is special-cased because the banner phrasing ("failed to
-// load") misreads for a route that simply doesn't exist.
-const notFound = ref(false)
-const tab = ref<'budgets' | 'keys' | 'policies'>('budgets')
+// Cursor-aware acquisition owns every child collection and its completeness
+// bit. The view keeps presentation and all mutation forms.
+const {
+  tenant,
+  allTenants,
+  budgets,
+  apiKeys,
+  policies,
+  webhooks,
+  tenantsPartial,
+  budgetsPartial,
+  apiKeysPartial,
+  policiesPartial,
+  webhooksPartial,
+  cascadePartial,
+  error,
+  notFound,
+  initialLoadDone,
+  refresh,
+  isLoading,
+  lastSuccessAt,
+  refreshTenant,
+  refreshBudgets,
+  refreshApiKeys,
+  refreshPolicies,
+  refreshCascadeState,
+  commitTenant,
+  reportError,
+  dismissError,
+} = useTenantDetailData({
+  tenantId: id,
+  getActiveTab: () => tab.value,
+  isMutationRunning: () => (
+    closeTenantLoading.value || rerunCascadeLoading.value || emergencyFreezeRunning.value
+  ),
+})
 
 // v0.1.25.46: hide terminal rows in the embedded sub-lists by default.
 // Pre-fix, the budgets/keys tables rendered in whatever order the API
@@ -132,22 +158,9 @@ const {
   statusOf: k => k.status,
 })
 
-// R9 (scale-hardening): lazy tabs. Pre-fix, Promise.all([budgets, keys,
-// policies, tenants]) ran on every mount and poll regardless of which
-// tab was open. At 10k+ keys or policies per tenant, that's two
-// unbounded fetches the operator never asked for. Post-fix: keys and
-// policies are only fetched if their tab is currently active or has
-// been opened previously in this session. Budgets are still always
-// fetched — the header rollup card depends on them. Tab activation
-// triggers a refresh so the first open doesn't wait up to 60s for
-// the next poll.
-// R9 scale-hardening: lazy refresh on POLL — the periodic 60s tick
-// refreshes only the active tab's data to avoid fetching unbounded
-// key/policy lists every minute for tenants that have many. The
-// INITIAL mount, however, loads everything so tab-count badges are
-// accurate from first paint. Previous "lazy even on mount" approach
-// with keysLoaded / policiesLoaded flags had a reactivity bug that
-// left badges stuck on "…" — replaced with this simpler flow.
+// The initial tick scans every child axis to seed truthful badge/cascade
+// state. Steady polls always scan budgets + tenant hierarchy, refresh only
+// the active key/policy tab, and add key/webhook scans while CLOSED.
 
 // v0.1.25.21 (#6): spend rollup — aggregate allocated / remaining /
 // spent / debt across the tenant's budgets, grouped by unit. Budgets in
@@ -170,20 +183,47 @@ const rollupByUnit = computed(() => {
 })
 const rollupUnits = computed(() => Object.keys(rollupByUnit.value).sort())
 
-const childTenants = computed<Tenant[]>(() =>
+const childTenants = computed(() =>
   allTenants.value.filter(t => t.parent_tenant_id === id),
 )
+
+function tabCountLabel(target: TenantDetailTab): string {
+  const [count, partial] = target === 'budgets'
+    ? [budgets.value.length, budgetsPartial.value]
+    : target === 'keys'
+      ? [apiKeys.value.length, apiKeysPartial.value]
+      : [policies.value.length, policiesPartial.value]
+  return `${count.toLocaleString()}${partial ? '+' : ''}`
+}
+
+function selectTab(target: TenantDetailTab): void {
+  if (tab.value === target) return
+  tab.value = target
+  // The initial scan seeds every tab. Subsequent activation runs a dedicated
+  // refresh so an in-flight poll for the previous tab cannot swallow it.
+  if (target === 'budgets') void refreshBudgets()
+  else if (target === 'keys') void refreshApiKeys()
+  else void refreshPolicies()
+}
+
+const partialCascadeAxes = computed(() => [
+  budgetsPartial.value ? 'budgets' : '',
+  webhooksPartial.value ? 'webhooks' : '',
+  apiKeysPartial.value ? 'API keys' : '',
+].filter(Boolean).join(', '))
+
+function warnRefreshSettlement(result: TenantDetailRefreshResult, committedLabel: string): void {
+  if (result === 'applied') return
+  if (result === 'failed') {
+    toast.warning(`${committedLabel}, but refresh failed: ${error.value}`)
+  } else {
+    toast.warning(`${committedLabel}; its refresh was superseded by a newer view update`)
+  }
+}
 
 // Tenant status action
 const pendingTenantAction = ref<'SUSPENDED' | 'ACTIVE' | 'CLOSED' | null>(null)
 const closeConfirmInput = ref('')
-
-// In-flight flag for the typed-confirmation CLOSE dialog. While the
-// PATCH is pending, both buttons are disabled and Escape / backdrop
-// are ignored (mirrors ConfirmAction's `loading` contract) — pre-fix
-// a double-click fired the PATCH twice and Cancel closed the dialog
-// mid-flight, hiding the outcome.
-const closeTenantLoading = ref(false)
 
 // A11y for the hand-rolled CLOSE dialog — parity with what
 // ConfirmAction gets from being a dedicated component. useFocusTrap
@@ -228,15 +268,15 @@ async function executeTenantAction() {
     // immediately: if a follow-up GET fails, the UI must not keep offering
     // actions that are no longer legal for the now-closed tenant.
     try {
-      tenant.value = await updateTenantStatus(id, action)
+      commitTenant(await updateTenantStatus(id, action))
     } catch (e) {
       const msg = toMessage(e)
-      error.value = msg
+      reportError(msg)
       toast.error(`Tenant status change failed: ${msg}`)
       return
     }
 
-    error.value = ''
+    dismissError()
     const labels: Record<string, string> = { SUSPENDED: 'Tenant suspended', ACTIVE: 'Tenant reactivated', CLOSED: 'Tenant permanently closed' }
     toast.success(labels[action])
     // On CLOSE, refetch the cascade children alongside the tenant so
@@ -246,31 +286,15 @@ async function executeTenantAction() {
     // even when the cascade completed cleanly, since the stale refs
     // still showed ACTIVE/FROZEN children. Other actions (suspend/
     // reactivate) don't trigger cascade — tenant-only refetch suffices.
-    try {
-      if (action === 'CLOSED') {
-        const results = await Promise.allSettled([
-          getTenant(id),
-          listBudgets({ tenant_id: id }),
-          listWebhooks({ tenant_id: id }),
-          listApiKeys({ tenant_id: id }),
-        ] as const)
-        const [tRes, bRes, wRes, kRes] = results
-        if (tRes.status === 'fulfilled') tenant.value = tRes.value
-        if (bRes.status === 'fulfilled') budgets.value = bRes.value.ledgers
-        if (wRes.status === 'fulfilled') webhooks.value = wRes.value.subscriptions
-        if (kRes.status === 'fulfilled') apiKeys.value = kRes.value.keys
-
-        // Preserve every successful sibling refresh, but still tell the
-        // operator that one of the post-mutation reads needs a retry.
-        const failed = results.find(result => result.status === 'rejected')
-        if (failed?.status === 'rejected') throw failed.reason
-      } else {
-        tenant.value = await getTenant(id)
-      }
-    } catch (e) {
-      const msg = toMessage(e)
-      error.value = `Tenant status changed, but refresh failed: ${msg}`
-      toast.warning(error.value)
+    const refreshed = action === 'CLOSED'
+      ? await refreshCascadeState()
+      : await refreshTenant()
+    if (refreshed === 'failed') {
+      const message = `Tenant status changed, but refresh failed: ${error.value}`
+      reportError(message)
+      toast.warning(message)
+    } else if (refreshed === 'superseded') {
+      toast.warning('Tenant status changed; its refresh was superseded by a newer view update')
     }
   }
   finally {
@@ -307,11 +331,10 @@ async function executeKeyRevoke() {
   try {
     await revokeApiKey(pendingKeyRevoke.value.key_id, 'Revoked via admin dashboard')
     toast.success('API key revoked')
-    const kRes = await listApiKeys({ tenant_id: id })
-    apiKeys.value = kRes.keys
+    warnRefreshSettlement(await refreshApiKeys(), 'API key revoked')
   } catch (e) {
     const msg = toMessage(e)
-    error.value = msg
+    reportError(msg)
     toast.error(`Revoke failed: ${msg}`)
   }
   finally { pendingKeyRevoke.value = null }
@@ -352,9 +375,8 @@ async function submitEditTenant() {
     // "disable extensions" value an operator must be able to set.
     if (String(editTenantForm.value.max_reservation_extensions).trim() !== '') body.max_reservation_extensions = Number(editTenantForm.value.max_reservation_extensions)
     // reservation_expiry_policy is never sent — create-only per spec.
-    await updateTenant(id, body)
+    commitTenant(await updateTenant(id, body))
     toast.success('Tenant updated')
-    tenant.value = await getTenant(id)
     showEditTenant.value = false
   } catch (e) { editTenantError.value = toMessage(e) }
   finally { editTenantLoading.value = false }
@@ -386,6 +408,11 @@ async function submitCreateKey() {
     showCreateKey.value = false
   } catch (e) { createKeyError.value = toMessage(e) }
   finally { createKeyLoading.value = false }
+}
+
+async function closeCreatedKeySecret() {
+  createdKeySecret.value = null
+  warnRefreshSettlement(await refreshApiKeys(), 'API key created')
 }
 
 // Edit API key — mirrors the ApiKeysView.vue flow (v0.1.25.24
@@ -467,8 +494,7 @@ async function submitEditKey() {
     await updateApiKey(original.key_id, body)
     toast.success('API key updated')
     editingKey.value = null
-    const kRes = await listApiKeys({ tenant_id: id })
-    apiKeys.value = kRes.keys
+    warnRefreshSettlement(await refreshApiKeys(), 'API key updated')
   } catch (e) { editKeyError.value = toMessage(e) }
   finally { editKeyLoading.value = false }
 }
@@ -548,7 +574,7 @@ async function submitCreateBudget() {
     await createBudget(id, body)
     showCreateBudget.value = false
     toast.success('Budget created')
-    refresh()
+    warnRefreshSettlement(await refreshBudgets(), 'Budget created')
   } catch (e) { createBudgetError.value = toMessage(e) }
   finally { createBudgetLoading.value = false }
 }
@@ -622,7 +648,7 @@ async function submitCreatePolicy() {
     await createPolicy(id, body)
     showCreatePolicy.value = false
     toast.success('Policy created')
-    refresh()
+    warnRefreshSettlement(await refreshPolicies(), 'Policy created')
   } catch (e) { createPolicyError.value = toMessage(e) }
   finally { createPolicyLoading.value = false }
 }
@@ -698,7 +724,7 @@ async function submitEditPolicy() {
     await updatePolicy(editPolicyTarget.value.policy_id, body)
     showEditPolicy.value = false
     toast.success('Policy updated')
-    refresh()
+    warnRefreshSettlement(await refreshPolicies(), 'Policy updated')
   } catch (e) { editPolicyError.value = toMessage(e) }
   finally { editPolicyLoading.value = false }
 }
@@ -709,9 +735,10 @@ async function submitEditPolicy() {
 // filter to ACTIVE because freezing FROZEN budgets would either no-op
 // or 409 depending on server state; either way it's noise.
 const pendingEmergencyFreeze = ref(false)
-const emergencyFreezeRunning = ref(false)
 const emergencyFreezeProgress = ref({ done: 0, total: 0, failed: 0 })
 const activeBudgets = computed(() => budgets.value.filter(b => b.status === 'ACTIVE'))
+type EmergencyFreezeTarget = Readonly<Pick<BudgetLedger, 'ledger_id' | 'tenant_id' | 'scope' | 'unit'>>
+const emergencyFreezeTargets = ref<EmergencyFreezeTarget[]>([])
 // Counts for the close-tenant cascade preview dialog. Spec v0.1.25.29
 // Rule 1 closes every non-terminal budget (ACTIVE or FROZEN) and every
 // ACTIVE api-key; webhooks always land in DISABLED regardless of start
@@ -735,14 +762,14 @@ const cascadeChildren = computed(() => ({
 }))
 const cascadePending = computed(() => cascadePendingCounts(cascadeChildren.value))
 const showRecoveryBanner = computed(() =>
-  cascadeIsIncomplete(tenant.value, cascadeChildren.value),
+  cascadeIsIncomplete(tenant.value, cascadeChildren.value) ||
+  (isTerminalTenant(tenant.value) && cascadePartial.value),
 )
 // Rerun-cascade confirm dialog + request lifecycle. Kept in its own
 // ref set (not shoehorned into pendingTenantAction) because the
 // initial-CLOSE flow requires typing the tenant name whereas re-run
 // is a single-click confirm — different UX, same underlying PATCH.
 const pendingRerunCascade = ref(false)
-const rerunCascadeLoading = ref(false)
 const rerunCascadeError = ref('')
 
 async function rerunCascade() {
@@ -753,26 +780,30 @@ async function rerunCascade() {
     // Idempotent PATCH {status: CLOSED} — no-op at the tenant level,
     // drives the cascade over any remaining non-terminal children per
     // spec v0.1.25.31 Rule 1(b)/(c).
-    await updateTenantStatus(id, 'CLOSED')
-    const [tRes, bRes, wRes, kRes] = await Promise.all([
-      getTenant(id),
-      listBudgets({ tenant_id: id }),
-      listWebhooks({ tenant_id: id }),
-      listApiKeys({ tenant_id: id }),
-    ])
-    tenant.value = tRes
-    budgets.value = bRes.ledgers
-    webhooks.value = wRes.subscriptions
-    apiKeys.value = kRes.keys
-    const remaining = cascadePendingCounts({
-      budgets: bRes.ledgers,
-      webhooks: wRes.subscriptions,
-      apiKeys: kRes.keys,
-    }).total
+    commitTenant(await updateTenantStatus(id, 'CLOSED'))
+    const refreshed = await refreshCascadeState()
+    if (refreshed === 'failed') {
+      const message = `Cascade re-run committed, but verification failed: ${error.value}`
+      rerunCascadeError.value = message
+      toast.warning(message)
+      return
+    }
+    if (refreshed === 'superseded') {
+      const message = 'Cascade re-run committed, but verification was superseded by a newer view update'
+      rerunCascadeError.value = message
+      toast.warning(message)
+      return
+    }
+    const remaining = cascadePending.value.total
     if (remaining === 0) {
-      toast.success('Cascade complete — all owned objects terminal')
+      if (cascadePartial.value) {
+        toast.warning(`Cascade re-run complete — verification remains partial within the ${TENANT_DETAIL_SCAN_MAX_ROWS.toLocaleString()}-row scan bound`)
+      } else {
+        toast.success('Cascade complete — all owned objects terminal')
+      }
     } else {
-      toast.success(`Cascade re-run — ${remaining} object${remaining === 1 ? '' : 's'} still non-terminal; retry may be needed`)
+      const qualifier = cascadePartial.value ? 'at least ' : ''
+      toast.success(`Cascade re-run — ${qualifier}${remaining} object${remaining === 1 ? '' : 's'} still non-terminal; retry may be needed`)
     }
     pendingRerunCascade.value = false
   } catch (e) {
@@ -801,10 +832,47 @@ const emergencyFreezeResult = ref<{
   tenantId: string
 } | null>(null)
 
-function openEmergencyFreeze() { pendingEmergencyFreeze.value = true }
+async function openEmergencyFreeze() {
+  if (emergencyFreezePreparing.value) return
+  if (isTerminalTenant(tenant.value)) return
+  emergencyFreezePreparing.value = true
+  try {
+    // Confirmation owns a newly completed scan, not the latest ambient poll.
+    // Freeze execution reuses this immutable snapshot even if a later poll or
+    // external writer changes the visible collection while the dialog is open.
+    const scanResult = await refreshBudgets()
+    if (scanResult === 'failed') {
+      toast.error(`Emergency Freeze unavailable — budget scan failed: ${error.value}`)
+      return
+    }
+    if (scanResult === 'superseded') {
+      toast.warning('Emergency Freeze scan was superseded by a newer view update — retry when the page settles')
+      return
+    }
+    if (budgetsPartial.value) {
+      toast.error(`Emergency Freeze unavailable — the budget scan could not complete within ${TENANT_DETAIL_SCAN_MAX_ROWS.toLocaleString()} rows`)
+      return
+    }
+    const targets = activeBudgets.value.map(b => Object.freeze({
+      ledger_id: b.ledger_id,
+      tenant_id: b.tenant_id,
+      scope: b.scope,
+      unit: b.unit,
+    }))
+    if (targets.length === 0) {
+      toast.warning('Emergency Freeze not needed — no ACTIVE budgets remain')
+      return
+    }
+    emergencyFreezeTargets.value = targets
+    pendingEmergencyFreeze.value = true
+  } finally {
+    emergencyFreezePreparing.value = false
+  }
+}
 async function executeEmergencyFreeze() {
   if (emergencyFreezeRunning.value) return
-  const targets = activeBudgets.value.slice()
+  const targets = emergencyFreezeTargets.value.slice()
+  if (targets.length === 0) return
   emergencyFreezeProgress.value = { done: 0, total: targets.length, failed: 0 }
   emergencyFreezeRunning.value = true
   emergencyFreezeAbort = new AbortController()
@@ -832,6 +900,7 @@ async function executeEmergencyFreeze() {
   else if (result.cancelled) toast.success(`${summary} (cancelled by user)`)
   else toast.success(summary)
   pendingEmergencyFreeze.value = false
+  emergencyFreezeTargets.value = []
   if (result.failed > 0 || result.cancelled) {
     const labels: Record<string, string> = {}
     for (const b of targets) labels[b.ledger_id] = `${b.scope} (${b.unit})`
@@ -847,103 +916,17 @@ async function executeEmergencyFreeze() {
       tenantId: id,
     }
   }
-  await refresh()
+  warnRefreshSettlement(await refreshBudgets(), 'Budgets frozen')
 }
 function cancelEmergencyFreeze() {
   if (emergencyFreezeRunning.value) {
     emergencyFreezeAbort?.abort()
   } else {
     pendingEmergencyFreeze.value = false
+    emergencyFreezeTargets.value = []
   }
 }
 
-// Tracks whether the first full fetch has completed. Before it does,
-// all four lists (tenant, budgets, keys, policies) are fetched in
-// parallel so tab counts are accurate from first paint. After, the
-// poll tick switches to lazy mode: only refreshes the active tab.
-// Promoted to a ref so the template can gate the initial LoadingSkeleton
-// on it (P0-C2).
-const initialLoadDone = ref(false)
-
-const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
-  // Skip polls while a rerun-cascade PATCH+refetch is in flight. Without
-  // this, a poll tick that interleaves between the PATCH and its four
-  // post-PATCH GETs can resolve after them and clobber the fresh state
-  // with pre-PATCH data, re-showing the banner until the next tick.
-  if (rerunCascadeLoading.value) return
-  try {
-    if (!initialLoadDone.value) {
-      // Mount-time eager load: fetch everything so badge counts are
-      // accurate immediately. One-time per component instance; the
-      // cost for a 10k-key tenant is capped at this single fetch
-      // rather than recurring every 60s.
-      const [tRes, bRes, ttRes, kRes, pRes, wRes] = await Promise.all([
-        getTenant(id),
-        listBudgets({ tenant_id: id }),
-        listTenants(),
-        listApiKeys({ tenant_id: id }),
-        listPolicies({ tenant_id: id }),
-        listWebhooks({ tenant_id: id }),
-      ])
-      tenant.value = tRes
-      budgets.value = bRes.ledgers
-      allTenants.value = ttRes.tenants
-      apiKeys.value = kRes.keys
-      policies.value = pRes.policies
-      webhooks.value = wRes.subscriptions
-      initialLoadDone.value = true
-      error.value = ''
-      notFound.value = false
-      return
-    }
-
-    // Poll tick (steady state): always refresh tenant + budgets +
-    // tenant list (header card), but only refresh the active tab's
-    // sub-list to keep per-poll cost bounded on tenants with many
-    // keys/policies.
-    tenant.value = await getTenant(id)
-    const [bRes, ttRes] = await Promise.all([
-      listBudgets({ tenant_id: id }),
-      listTenants(),
-    ])
-    budgets.value = bRes.ledgers
-    allTenants.value = ttRes.tenants
-    if (tab.value === 'keys') {
-      const kRes = await listApiKeys({ tenant_id: id })
-      apiKeys.value = kRes.keys
-    } else if (tab.value === 'policies') {
-      const pRes = await listPolicies({ tenant_id: id })
-      policies.value = pRes.policies
-    }
-    // v0.1.25.44: while the tenant is CLOSED, keep the cascade-recovery
-    // banner's inputs fresh by re-fetching webhooks + api-keys on every
-    // poll so a successful cascade converges the banner on the next
-    // tick without the operator having to refresh manually. On
-    // ACTIVE/SUSPENDED tenants the banner can never render, so we skip
-    // these fetches to preserve the existing lazy-by-tab poll cost.
-    if (isTerminalTenant(tenant.value)) {
-      const [wRes, kRes] = await Promise.all([
-        listWebhooks({ tenant_id: id }),
-        listApiKeys({ tenant_id: id }),
-      ])
-      webhooks.value = wRes.subscriptions
-      apiKeys.value = kRes.keys
-    }
-    error.value = ''
-    notFound.value = false
-  } catch (e) {
-    // 404 is a distinct state, not a transient error. A missing tenant
-    // means the URL is stale or wrong; the user wants a clear "no such
-    // tenant" card, not a retry-hinting red banner.
-    if (e instanceof ApiError && e.status === 404) {
-      notFound.value = true
-      error.value = ''
-    } else {
-      error.value = toMessage(e)
-    }
-    return false
-  }
-}, POLL_SLOW_MS)
 </script>
 
 <template>
@@ -955,7 +938,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
         </button>
       </template>
     </PageHeader>
-    <InlineErrorBanner v-if="error" :message="error" @dismiss="error = ''" />
+    <InlineErrorBanner v-if="error" :message="error" @dismiss="dismissError" />
 
     <!-- P0-C2: dedicated not-found card. Separate from the error banner
          because a 404 is not a transient failure — the URL is wrong and
@@ -995,11 +978,14 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
          paged into triage can at least see the signal and escalate;
          the action button is gated on `manage_tenants`. -->
     <div v-if="showRecoveryBanner" class="mb-4 bg-amber-50 border border-amber-400 rounded-lg px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/50 dark:border-amber-600 dark:text-amber-100" role="status" data-testid="cascade-recovery-banner">
-      <p class="font-medium mb-1">Cascade incomplete</p>
-      <p class="text-xs mb-2">
+      <p class="font-medium mb-1">{{ cascadePending.total > 0 ? 'Cascade incomplete' : 'Cascade verification incomplete' }}</p>
+      <p v-if="cascadePending.total > 0" class="text-xs mb-2">
         This tenant is CLOSED but
         <template v-if="cascadePending.budgets > 0"><strong>{{ cascadePending.budgets }}</strong> budget{{ cascadePending.budgets === 1 ? '' : 's' }}</template><template v-if="cascadePending.budgets > 0 && (cascadePending.webhooks > 0 || cascadePending.apiKeys > 0)">, </template><template v-if="cascadePending.webhooks > 0"><strong>{{ cascadePending.webhooks }}</strong> webhook{{ cascadePending.webhooks === 1 ? '' : 's' }}</template><template v-if="cascadePending.webhooks > 0 && cascadePending.apiKeys > 0">, </template><template v-if="cascadePending.apiKeys > 0"><strong>{{ cascadePending.apiKeys }}</strong> API key{{ cascadePending.apiKeys === 1 ? '' : 's' }}</template>
         {{ cascadePending.total === 1 ? 'is' : 'are' }} still non-terminal. Re-running the cascade drives the remaining objects to their terminal states (spec v0.1.25.31 Rule 1(c)).
+      </p>
+      <p v-if="cascadePartial" class="text-xs mb-2" data-testid="cascade-partial-warning">
+        Scanned up to {{ TENANT_DETAIL_SCAN_MAX_ROWS.toLocaleString() }} rows on {{ partialCascadeAxes }} without reaching a complete continuation. Counts are lower bounds, and additional non-terminal objects may exist.
       </p>
       <button
         v-if="canManageTenants"
@@ -1012,7 +998,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
     </div>
 
     <div v-if="isTerminalTenant(tenant)" class="mb-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800 dark:bg-amber-950/40 dark:border-amber-800 dark:text-amber-200" role="status">
-      <strong>Tenant closed.</strong> All owned objects (budgets, webhooks, API keys) are terminal and read-only. Per spec v0.1.25.29, there is no re-open path.
+      <strong>Tenant closed.</strong> The tenant and its owned objects are permanently read-only. Per spec v0.1.25.29, there is no re-open path.
     </div>
 
     <template v-if="tenant">
@@ -1035,7 +1021,13 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
               <button @click="openEditTenant" class="btn-pill-secondary">Edit</button>
               <!-- #7 Emergency Freeze: only shown if there are ACTIVE budgets
                    to freeze. Otherwise the button would just confirm a no-op. -->
-              <button v-if="canManageBudgets && activeBudgets.length > 0" @click="openEmergencyFreeze" class="btn-pill-danger">Emergency Freeze ({{ activeBudgets.length }})</button>
+              <button
+                v-if="canManageBudgets && !isTerminalTenant(tenant) && (activeBudgets.length > 0 || budgetsPartial)"
+                @click="openEmergencyFreeze"
+                :disabled="emergencyFreezePreparing"
+                :title="budgetsPartial ? `Re-scan required because the last budget scan could not complete within ${TENANT_DETAIL_SCAN_MAX_ROWS.toLocaleString()} rows` : 'Scan ACTIVE budgets and review the immutable target count'"
+                class="btn-pill-danger disabled:opacity-50 disabled:cursor-not-allowed"
+              >{{ emergencyFreezePreparing ? 'Scanning budgets…' : budgetsPartial ? 'Emergency Freeze (re-scan)' : `Emergency Freeze (${activeBudgets.length})` }}</button>
               <button v-if="tenant.status === 'ACTIVE'" @click="pendingTenantAction = 'SUSPENDED'" class="btn-pill-danger">Suspend</button>
               <button v-if="tenant.status === 'SUSPENDED'" @click="pendingTenantAction = 'ACTIVE'" class="btn-pill-success">Reactivate</button>
               <button v-if="tenant.status !== 'CLOSED'" @click="pendingTenantAction = 'CLOSED'" class="btn-pill-danger">Close</button>
@@ -1049,15 +1041,15 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
         <p v-if="tenant.parent_tenant_id" class="text-sm muted mt-1">
           Parent: <router-link :to="{ name: 'tenant-detail', params: { id: tenant.parent_tenant_id } }" class="text-blue-600 hover:underline">{{ tenant.parent_tenant_id }}</router-link>
         </p>
-        <div v-if="childTenants.length > 0" class="text-sm muted mt-2 flex items-center gap-1 flex-wrap">
-          <span class="muted">Children ({{ childTenants.length }}):</span>
+        <div v-if="childTenants.length > 0 || tenantsPartial" class="text-sm muted mt-2 flex items-center gap-1 flex-wrap">
+          <span class="muted">Children ({{ childTenants.length.toLocaleString() }}{{ tenantsPartial ? '+' : '' }}):</span>
           <router-link
             v-for="c in childTenants.slice(0, 6)"
             :key="c.tenant_id"
             :to="{ name: 'tenant-detail', params: { id: c.tenant_id }, query: { parent: tenant.tenant_id } }"
             class="text-blue-600 hover:underline text-xs font-mono"
           >{{ c.tenant_id }}</router-link>
-          <router-link v-if="childTenants.length > 6" :to="{ name: 'tenants', query: { parent: tenant.tenant_id } }" class="muted-sm hover:text-gray-700 hover:underline">… +{{ childTenants.length - 6 }} more</router-link>
+          <router-link v-if="childTenants.length > 6 || tenantsPartial" :to="{ name: 'tenants', query: { parent: tenant.tenant_id } }" class="muted-sm hover:text-gray-700 hover:underline">{{ tenantsPartial ? 'View all…' : `… +${childTenants.length - 6} more` }}</router-link>
         </div>
       </div>
 
@@ -1067,7 +1059,10 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
            more-informative view for "how close is this tenant to its
            allocated capacity overall." -->
       <div v-if="rollupUnits.length > 0" class="card p-4 mb-4">
-        <h3 class="text-sm font-medium text-gray-700 mb-3">Spend rollup (ACTIVE budgets)</h3>
+        <div class="flex items-baseline gap-2 mb-3 flex-wrap">
+          <h3 class="text-sm font-medium text-gray-700">Spend rollup (ACTIVE budgets)</h3>
+          <span v-if="budgetsPartial" class="text-xs text-amber-700 dark:text-amber-300" data-testid="budget-rollup-partial">Lower bound — scan incomplete within {{ TENANT_DETAIL_SCAN_MAX_ROWS.toLocaleString() }} rows</span>
+        </div>
         <div class="space-y-3">
           <div v-for="u in rollupUnits" :key="u" class="grid grid-cols-5 gap-3 text-sm items-baseline">
             <div class="col-span-1">
@@ -1092,11 +1087,11 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
            recurring every minute. -->
       <div class="flex border-b border-gray-200 mb-4">
         <button v-for="t in (['budgets', 'keys', 'policies'] as const)" :key="t"
-          @click="tab = t"
+          @click="selectTab(t)"
           :class="tab === t ? 'border-gray-900 text-gray-900' : 'border-transparent muted hover:text-gray-700'"
           class="px-4 py-2 text-sm font-medium border-b-2 -mb-px cursor-pointer transition-colors">
           {{ t === 'keys' ? 'API Keys' : t.charAt(0).toUpperCase() + t.slice(1) }}
-          <span class="ml-1 muted-sm">({{ t === 'budgets' ? budgets.length : t === 'keys' ? apiKeys.length : policies.length }})</span>
+          <span class="ml-1 muted-sm">({{ tabCountLabel(t) }})</span>
         </button>
       </div>
 
@@ -1104,6 +1099,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
            row (above) per design convention — every primary action in
            the same place. -->
       <div v-if="tab === 'budgets'" class="card-table">
+        <p v-if="budgetsPartial" class="banner-warning m-3 text-xs" data-testid="budgets-partial-warning">Budget scan incomplete within {{ TENANT_DETAIL_SCAN_MAX_ROWS.toLocaleString() }} rows. Counts and rollups are lower bounds.</p>
         <div v-if="budgets.length > 0" class="flex items-center justify-end px-3 pt-2">
           <label class="text-sm flex items-center gap-1.5 text-gray-700 dark:text-gray-200 whitespace-nowrap">
             <input v-model="includeTerminalBudgets" type="checkbox" :aria-label="`Show ${terminalBudgetsVerb} budgets`" />
@@ -1128,6 +1124,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
 
       <!-- API Keys tab. Create button lives in the page header. -->
       <div v-if="tab === 'keys'" class="card-table">
+        <p v-if="apiKeysPartial" class="banner-warning m-3 text-xs" data-testid="keys-partial-warning">API-key scan incomplete within {{ TENANT_DETAIL_SCAN_MAX_ROWS.toLocaleString() }} rows. The tab count is a lower bound.</p>
         <div v-if="apiKeys.length > 0" class="flex items-center justify-end px-3 pt-2">
           <label class="text-sm flex items-center gap-1.5 text-gray-700 dark:text-gray-200 whitespace-nowrap">
             <input v-model="includeTerminalKeys" type="checkbox" :aria-label="`Show ${terminalKeysVerb} keys`" />
@@ -1165,6 +1162,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
 
       <!-- Policies tab. Create button lives in the page header. -->
       <div v-if="tab === 'policies'" class="card-table">
+        <p v-if="policiesPartial" class="banner-warning m-3 text-xs" data-testid="policies-partial-warning">Policy scan incomplete within {{ TENANT_DETAIL_SCAN_MAX_ROWS.toLocaleString() }} rows. The tab count is a lower bound.</p>
         <table class="w-full text-sm min-w-[520px]">
           <thead class="table-header">
             <tr><th class="table-cell text-left">Policy ID</th><th class="table-cell text-left">Name</th><th class="table-cell text-left">Scope</th><th class="table-cell text-left">Status</th><th v-if="canManagePolicies" class="table-cell w-20"></th></tr>
@@ -1210,10 +1208,11 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
         <h3 class="text-sm font-semibold text-red-600 mb-2">Permanently close this tenant?</h3>
         <p class="text-sm text-gray-600 mb-3">This action is <strong>irreversible</strong>. Closing <strong>{{ tenant?.name || id }}</strong> cascades every owned object into its terminal state (spec v0.1.25.29 Rule 1):</p>
         <ul class="text-sm text-gray-600 list-disc pl-5 mb-3 space-y-0.5">
-          <li v-if="cascadePreview.nonTerminalBudgets > 0">{{ cascadePreview.nonTerminalBudgets }} budget{{ cascadePreview.nonTerminalBudgets === 1 ? '' : 's' }} → <strong>CLOSED</strong> (open reservations released)</li>
-          <li v-if="cascadePreview.activeKeys > 0">{{ cascadePreview.activeKeys }} API key{{ cascadePreview.activeKeys === 1 ? '' : 's' }} → <strong>REVOKED</strong></li>
+          <li v-if="cascadePreview.nonTerminalBudgets > 0">{{ budgetsPartial ? 'At least ' : '' }}{{ cascadePreview.nonTerminalBudgets }} budget{{ cascadePreview.nonTerminalBudgets === 1 ? '' : 's' }} → <strong>CLOSED</strong> (open reservations released)</li>
+          <li v-if="cascadePreview.activeKeys > 0">{{ apiKeysPartial ? 'At least ' : '' }}{{ cascadePreview.activeKeys }} API key{{ cascadePreview.activeKeys === 1 ? '' : 's' }} → <strong>REVOKED</strong></li>
           <li>Every owned webhook subscription → <strong>DISABLED</strong></li>
         </ul>
+        <p v-if="cascadePartial" class="banner-warning mb-3 text-xs">The preview is partial within the {{ TENANT_DETAIL_SCAN_MAX_ROWS.toLocaleString() }}-row scan bound on {{ partialCascadeAxes }}. The server-side cascade still applies to every owned object.</p>
         <p class="text-sm text-gray-600 mb-2">Afterwards, any mutation against these objects will return <code class="text-xs bg-gray-100 rounded px-1 py-0.5">TENANT_CLOSED</code> (409). There is no re-open path.</p>
         <p class="text-sm text-gray-600 mb-2">To confirm, type the tenant name below:</p>
         <input v-model="closeConfirmInput" type="text" :placeholder="tenant?.name || id" :disabled="closeTenantLoading" class="form-input mb-4 font-mono" autocomplete="off" aria-label="Type the tenant name to confirm" />
@@ -1247,7 +1246,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
     <ConfirmAction
       v-if="pendingRerunCascade"
       title="Re-run cascade on this closed tenant?"
-      :message="`This will close ${cascadePending.budgets} budget${cascadePending.budgets === 1 ? '' : 's'}, disable ${cascadePending.webhooks} webhook${cascadePending.webhooks === 1 ? '' : 's'}, and revoke ${cascadePending.apiKeys} API key${cascadePending.apiKeys === 1 ? '' : 's'} still non-terminal on this CLOSED tenant. This happens on tenants closed before admin v0.1.25.35 (no cascade ran) or after a partial-failure cascade. No-op at the tenant level; only the owned objects transition. This cannot be undone.`"
+      :message="`This will close ${cascadePending.budgets} budget${cascadePending.budgets === 1 ? '' : 's'}, disable ${cascadePending.webhooks} webhook${cascadePending.webhooks === 1 ? '' : 's'}, and revoke ${cascadePending.apiKeys} API key${cascadePending.apiKeys === 1 ? '' : 's'} still non-terminal on this CLOSED tenant.${cascadePartial ? ` These are lower bounds because at least one child scan could not complete within ${TENANT_DETAIL_SCAN_MAX_ROWS.toLocaleString()} rows.` : ''} This happens on tenants closed before admin v0.1.25.35 (no cascade ran) or after a partial-failure cascade. No-op at the tenant level; only the owned objects transition. This cannot be undone.`"
       confirm-label="Re-run Cascade"
       :danger="true"
       :loading="rerunCascadeLoading"
@@ -1315,7 +1314,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
       </div>
     </FormDialog>
 
-    <SecretReveal v-if="createdKeySecret" title="API Key Created" :secret="createdKeySecret.key_secret" label="API Key Secret" @close="createdKeySecret = null; refresh()" />
+    <SecretReveal v-if="createdKeySecret" title="API Key Created" :secret="createdKeySecret.key_secret" label="API Key Secret" @close="closeCreatedKeySecret" />
 
     <!-- Edit API Key — mirrors ApiKeysView.vue's edit dialog, including
          the green/red pending-changes diff so operators see what the
@@ -1366,19 +1365,19 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
     </FormDialog>
 
     <!-- v0.1.25.21 (#7): Emergency Freeze confirm. Intentionally spells
-         out the blast radius (N budgets, list of scopes if small) so ops
-         sees exactly what they're about to hit. Uses bulk-loader pattern
-         from TenantsView — sequential calls, progress in message slot,
-         cancel between requests. -->
+         out the blast radius from the complete action-time scan. The target
+         snapshot remains immutable while rateLimitedBatch executes with
+         bounded concurrency and cancellable progress. -->
     <ConfirmAction
       v-if="pendingEmergencyFreeze"
-      title="Emergency Freeze all budgets?"
+      title="Emergency Freeze scanned budgets?"
       :message="emergencyFreezeRunning
         ? `Working… ${emergencyFreezeProgress.done}/${emergencyFreezeProgress.total} processed${emergencyFreezeProgress.failed ? ` (${emergencyFreezeProgress.failed} failed)` : ''}.`
-        : `Freezes ALL ${activeBudgets.length} ACTIVE budgets for tenant '${tenant?.name || id}'. Pending reservations against these scopes will be rejected until unfrozen. FROZEN / CLOSED budgets are skipped. Audit log records 'Emergency freeze — tenant lockdown' as the reason on each.`"
-      :confirm-label="emergencyFreezeRunning ? 'Working…' : `Freeze ${activeBudgets.length} budgets`"
+        : `Freezes the ${emergencyFreezeTargets.length} ACTIVE budgets found by the completed scan for tenant '${tenant?.name || id}'. Pending reservations against these scopes will be rejected until unfrozen. Budgets created or activated after this confirmation opened are not part of the reviewed snapshot. Audit log records 'Emergency freeze — tenant lockdown' as the reason on each.`"
+      :confirm-label="emergencyFreezeRunning ? 'Working…' : `Freeze ${emergencyFreezeTargets.length} budgets`"
       :danger="true"
       :loading="emergencyFreezeRunning"
+      cancellable-while-loading
       @confirm="executeEmergencyFreeze"
       @cancel="cancelEmergencyFreeze"
     />

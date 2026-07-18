@@ -15,6 +15,45 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.76] — 2026-07-18
+
+### Changed
+
+- Tenant Detail child acquisition now follows cursor pages through a bounded,
+  abortable `useTenantDetailData` read protocol. Its initial scan seeds every
+  tab; steady polls retain active-tab laziness and CLOSED-tenant cascade checks.
+- Tab activation and post-mutation refreshes now have explicit ownership, so a
+  late scheduled poll cannot overwrite newer state or swallow the requested
+  child-axis refresh.
+- Direct child refreshes now distinguish applied, superseded, and failed
+  settlement. Only a successful polling round advances page-wide freshness,
+  and a successful read clears errors only for the axis it actually repaired.
+- Row-select batch dialogs expose an explicit **Stop remaining** action while
+  work is running. Backdrop and Escape cancellation remain blocked so stopping
+  a partially committed operation is always deliberate.
+
+### Fixed
+
+- Tenant Detail no longer treats the server's first 100-row page as the whole
+  tenant. Tab/child counts, spend rollups, close-cascade previews, and recovery
+  verification follow continuation cursors and disclose a lower bound if the
+  1,000-row safety cap or a malformed continuation prevents completion.
+- Emergency Freeze now performs a fresh cursor walk before confirmation,
+  includes ACTIVE budgets found after page one, and freezes the immutable
+  reviewed snapshot. Confirmation refuses to open when the complete
+  client-side target set cannot be established, so the action can no longer
+  promise full coverage while silently skipping later pages.
+- A CLOSED tenant with partial cascade verification remains actionable, and
+  the permanent tombstone no longer claims every owned object is terminal when
+  only a bounded scan has been observed.
+- Successful tenant, API-key, budget, and policy mutations are no longer
+  described as failed solely because their follow-up refresh failed.
+- A quick tab change or overlapping direct refresh no longer produces a blank
+  “refresh failed” warning when the older read was intentionally superseded,
+  nor can an unrelated child success hide a stale page-wide poll failure.
+- Emergency Freeze and the existing tenant, webhook, and budget row-select
+  batches now make their AbortSignal-backed cancellation paths reachable.
+
 ## [0.1.25.75] — 2026-07-17
 
 ### Changed

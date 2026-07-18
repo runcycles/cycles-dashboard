@@ -4,15 +4,14 @@ import { ADMIN_KEY, getFixtures, loginAsAdmin } from './fixtures'
 /**
  * Tenant-wide emergency freeze — v0.1.25.21 (#7).
  *
- * TenantDetailView renders an "Emergency Freeze (N)" button that
- * sequentially freezes every ACTIVE budget for the tenant. Same
- * sequential-with-cancel pattern as the bulk ops, but with an
- * incident-response framing (one click → entire tenant budget
- * lockdown). This is the highest-blast-radius button in the UI.
+ * TenantDetailView renders an "Emergency Freeze (N)" button that performs a
+ * complete cursor scan, binds confirmation to that immutable ACTIVE-budget
+ * snapshot, and freezes it with bounded concurrency. This is the
+ * highest-blast-radius button in the UI.
  *
  * Regression class: the button's visibility gate (only when N>0
- * ACTIVE budgets exist), the sequential loop, and the
- * post-operation status-refresh. Plus the confirm-dialog copy
+ * ACTIVE budgets exist), bounded batch, and post-operation status refresh.
+ * Plus the confirmation copy
  * that spells out the blast radius (count + tenant) — if that
  * regresses silent, operators lose an important sanity prompt.
  *
@@ -48,7 +47,7 @@ test.beforeAll(async () => {
   await ctx.dispose()
 })
 
-test('Emergency Freeze button sequentially freezes every ACTIVE budget for the tenant', async ({ page }) => {
+test('Emergency Freeze freezes every ACTIVE budget in the completed tenant snapshot', async ({ page }) => {
   const fx = getFixtures()
 
   await loginAsAdmin(page)
@@ -67,10 +66,9 @@ test('Emergency Freeze button sequentially freezes every ACTIVE budget for the t
   const emergencyBtn = page.getByRole('button', { name: /emergency freeze \(\d+\)/i })
   await expect(emergencyBtn).toBeVisible({ timeout: 10_000 })
 
-  // Click to open the confirm dialog. Title spells out the count
-  // and the blast radius.
+  // Click performs a fresh scan before opening the immutable confirmation.
   await emergencyBtn.click()
-  const confirmDialog = page.getByRole('dialog', { name: /emergency freeze all budgets/i })
+  const confirmDialog = page.getByRole('dialog', { name: /emergency freeze scanned budgets/i })
   await expect(confirmDialog).toBeVisible()
 
   // Execute. Wait for each budget's freeze call — at least two (our
@@ -100,7 +98,7 @@ test('Emergency Freeze button sequentially freezes every ACTIVE budget for the t
     expect(r.status()).toBeLessThan(300)
   }
 
-  // After the sequential loop completes, the button's count drops to
+  // After the bounded batch completes, the button's count drops to
   // 0 — or the button disappears entirely (canManageBudgets &&
   // activeBudgets.length > 0). We assert the button is gone, which
   // covers both cases.

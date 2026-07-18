@@ -1154,6 +1154,7 @@ function rowTenantId(b: BudgetLedger): string {
       :confirm-label="bulkStatusRunning ? 'Working…' : bulkStatusAction === 'freeze' ? 'Freeze all' : 'Unfreeze all'"
       :danger="bulkStatusAction === 'freeze'"
       :loading="bulkStatusRunning"
+      cancellable-while-loading
       @confirm="executeBulkStatus"
       @cancel="cancelBulkStatus"
     />

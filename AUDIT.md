@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.75 (2026-07-17)
+**Current release:** v0.1.25.76 (2026-07-18)
 
 ## Baseline requirements
 
@@ -16,6 +16,86 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-07-18 — v0.1.25.76: truthful Tenant Detail acquisition
+
+`TenantDetailView` treated one response page as each tenant's complete child
+set even though every governance-admin list endpoint clamps `limit` to 100.
+The first page fed tab badges, the ACTIVE-budget spend rollup, tenant-close
+cascade preview and recovery verification, and the client-side Emergency
+Freeze target list. On a tenant with more than one page, those surfaces could
+undercount silently; most seriously, an action labeled “Freezes ALL” skipped
+every ACTIVE budget after page one, and a CLOSED tenant could appear fully
+converged while a later page still contained non-terminal children.
+
+`useTenantDetailData` now owns tenant and child acquisition as one
+cursor-aware protocol. Initial acquisition walks budgets, API keys, policies,
+webhooks, and the tenant hierarchy with the server's 100-row page limit and a
+shared ten-page/1,000-row safety bound. Steady 60-second polls retain the prior
+lazy shape: tenant, budgets, and hierarchy always refresh; only the active
+key/policy tab refreshes; CLOSED tenants additionally refresh the key and
+webhook convergence axes. Tab activation has a dedicated refresh so the
+shared poller's intentional in-flight dedupe cannot swallow it. The API client
+now accepts optional abort signals on those reads, and one publication
+generation prevents a late poll from overwriting a newer action-time refresh.
+
+Every bounded walk publishes an explicit partial bit. Tab and child counts use
+`+` lower-bound notation, spend rollup and tables display an inline partial
+warning, close preview labels affected counts as “At least,” and cascade
+recovery remains visible when verification is partial even if the scanned
+rows are terminal. The CLOSED tombstone no longer claims all owned objects
+are terminal; it states only the permanent read-only invariant. Server-side
+tenant close and re-close remain available because the admin owns the full
+cascade. Client-side Emergency Freeze performs a fresh walk when clicked and
+captures an immutable target snapshot before confirmation. It arms only when
+that walk completed naturally; a capped or malformed continuation leaves a
+“re-scan” control that refuses to open confirmation instead of promising
+incomplete coverage. A later poll can update the visible table without
+changing the reviewed destructive target set.
+
+Mutation settlement now reuses the same owned refresh seams. Tenant PATCH
+responses publish immediately, cascade refresh preserves successful sibling
+reads, and API-key/budget/policy writes distinguish a committed mutation from
+a failed follow-up refresh. This closes the same retry-after-commit ambiguity
+previously hardened in budget funding without changing successful request
+shapes.
+
+Self-review found that the first ownership pass still collapsed an intentional
+supersession and a real request failure into the same boolean result. It also
+let any successful direct child refresh clear the global error and advance the
+page-wide freshness timestamp. A quick Budgets → Policies tab change could
+therefore emit a blank “refresh failed” warning for the aborted older read, or
+hide a failed budgets/hierarchy poll behind a fresh policies timestamp.
+Dedicated refreshes now return `applied | superseded | failed`, mutation and
+Emergency Freeze callers give supersession its own retry copy, read errors are
+tagged by their owning axis, and only a successful polling round advances the
+page header's freshness signal. A same-axis retry clears its error; an
+unrelated child success cannot erase it.
+
+The same pass confirmed that `rateLimitedBatch` cancellation was wired in four
+row-select flows but unreachable because `ConfirmAction` disabled Cancel while
+`loading`. The component now has an opt-in cancellable-loading contract: its
+explicit button becomes **Stop remaining** and retains focus while the confirm
+button stays disabled; backdrop and Escape remain blocked. Emergency Freeze,
+tenant suspend/reactivate, webhook pause/enable, and budget freeze/unfreeze all
+enable the contract, so already-started writes settle while unstarted rows are
+reported as skipped.
+
+Thirteen focused composable tests cover multi-page acquisition, page-cap and
+missing-cursor partiality, lazy ACTIVE and CLOSED poll shapes, stale-poll
+rejection, abort settlement, route-404 classification, partial cascade
+refresh, mutation-owned poll yielding, axis-scoped errors/freshness, and
+superseded direct settlement. Four integration assertions prove
+page-two budgets enter Emergency Freeze, partial scans refuse to arm that action,
+an in-flight freeze can stop before its unstarted tail, and a CLOSED tenant with
+partial verification never renders as clean. `ConfirmAction` component tests
+also pin the opt-in button and focus behavior. Final validation: 1,332/1,332
+tests across 114 files; 97.15% line coverage; lint, strict
+typecheck, production build, and development/production Compose validation
+pass. Twelve targeted live Chromium checks also pass, including Tenant Detail
+axe coverage, dark-mode state, and the complete Emergency Freeze flow. No
+endpoint, mutation request shape, polling cadence, server/spec pin, or
+ordinary complete-result layout changes.
 
 ### 2026-07-17 — v0.1.25.75: budget read-side ownership
 
