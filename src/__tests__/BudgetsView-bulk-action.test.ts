@@ -301,7 +301,7 @@ describe('BudgetsView — bulk-action (Slice C, v0.1.25.26)', () => {
     await w.find<HTMLInputElement>('input#bulk-spent').setValue('150')
     await clickPreview(w)
 
-    await w.findAll('button').find(b => b.text().includes('Reset spent 1 budgets'))!.trigger('click')
+    await w.findAll('button').find(b => b.text().includes('Reset spent 1 budget'))!.trigger('click')
     await flushPromises()
 
     const body = bulkActionBudgetsMock.mock.calls[0][0]
@@ -325,7 +325,7 @@ describe('BudgetsView — bulk-action (Slice C, v0.1.25.26)', () => {
     await w.find<HTMLInputElement>('input#bulk-amount').setValue('100')
     await clickPreview(w)
 
-    await w.findAll('button').find(b => b.text().includes('Credit 1 budgets'))!.trigger('click')
+    await w.findAll('button').find(b => b.text().includes('Credit 1 budget'))!.trigger('click')
     await flushPromises()
 
     expect(w.text()).toContain('Filter matches more than 500 budgets')
@@ -348,7 +348,7 @@ describe('BudgetsView — bulk-action (Slice C, v0.1.25.26)', () => {
     await w.find<HTMLInputElement>('input#bulk-amount').setValue('100')
     await clickPreview(w)
 
-    await w.findAll('button').find(b => b.text().includes('Credit 1 budgets'))!.trigger('click')
+    await w.findAll('button').find(b => b.text().includes('Credit 1 budget'))!.trigger('click')
     await flushPromises()
 
     expect(w.text()).toContain('list changed between preview and submit')
@@ -403,14 +403,14 @@ describe('BudgetsView — bulk-action (Slice C, v0.1.25.26)', () => {
     await openBulkSetup(w)
     await w.find<HTMLInputElement>('input#bulk-amount').setValue('100')
     await clickPreview(w)
-    await w.findAll('button').find(b => b.text().includes('Credit 1 budgets'))!.trigger('click')
+    await w.findAll('button').find(b => b.text().includes('Credit 1 budget'))!.trigger('click')
     await flushPromises()
 
     // Second submit — fresh setup, fresh preview, fresh submit.
     await openBulkSetup(w)
     await w.find<HTMLInputElement>('input#bulk-amount').setValue('200')
     await clickPreview(w)
-    await w.findAll('button').find(b => b.text().includes('Credit 1 budgets'))!.trigger('click')
+    await w.findAll('button').find(b => b.text().includes('Credit 1 budget'))!.trigger('click')
     await flushPromises()
 
     expect(bulkActionBudgetsMock).toHaveBeenCalledTimes(2)
@@ -446,7 +446,7 @@ describe('BudgetsView — bulk-action (Slice C, v0.1.25.26)', () => {
 
       // Preview opened (no validation error) — confirm and check the body.
       expect(w.text()).not.toContain('Amount must be')
-      await w.findAll('button').find(b => b.text().includes('Reset spent 1 budgets'))!.trigger('click')
+      await w.findAll('button').find(b => b.text().includes('Reset spent 1 budget'))!.trigger('click')
       await flushPromises()
 
       const body = bulkActionBudgetsMock.mock.calls[0][0]
@@ -472,7 +472,7 @@ describe('BudgetsView — bulk-action (Slice C, v0.1.25.26)', () => {
       await w.find<HTMLInputElement>('input#bulk-amount').setValue('0')
       await clickPreview(w)
 
-      await w.findAll('button').find(b => b.text().includes('Reset 1 budgets'))!.trigger('click')
+      await w.findAll('button').find(b => b.text().includes('Reset 1 budget'))!.trigger('click')
       await flushPromises()
 
       expect(bulkActionBudgetsMock.mock.calls[0][0].amount).toEqual({ unit: 'USD_MICROCENTS', amount: 0 })

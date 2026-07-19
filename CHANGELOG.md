@@ -48,6 +48,17 @@ UX work that does not advance spec alignment.
   now classified as a partial preview. The dashboard omits `expected_count`
   instead of treating the lower bound as exact, and the dialog consistently
   says “N+” / “at least N” wherever that partial count appears.
+- A bounded Preview that finds zero matches before exhausting the list no
+  longer claims the complete filter is empty. It discloses that only the
+  scanned pages are known, keeps confirmation disabled, and asks the operator
+  to narrow the filter for an exact result.
+- Webhook Preview forwards the action-derived ACTIVE/PAUSED status to the list
+  endpoint as well as retaining the client-side predicate. This avoids
+  needlessly spending the bounded page budget on statuses the bulk request
+  cannot target.
+- Exact one-row Preview copy now uses singular nouns, and the over-limit state
+  says that 500+ rows match the filter instead of saying they “will be
+  affected” beside a disabled confirmation.
 - A preview-page failure after earlier pages found matches now disables Confirm
   and is rejected by every filter-bulk composable. A failed walk's incomplete
   count can no longer be submitted without the server's exact-count drift guard.
@@ -62,7 +73,7 @@ UX work that does not advance spec alignment.
   refused.
 
 No API endpoint, successful request shape, server/spec requirement, or polling
-cadence changes. Validation: 1,362 tests; 97.45% line coverage; lint,
+cadence changes. Validation: 1,364 tests; 97.45% line coverage; lint,
 typecheck, production build, and both Compose configurations pass.
 
 ## [0.1.25.76] — 2026-07-18

@@ -100,7 +100,7 @@ describe('useTenantFilterBulk', () => {
     expect(h.list).not.toHaveBeenCalled()
   })
 
-  it('reuses one immutable search/parent tuple across cursor pages and submit', async () => {
+  it('reuses one immutable search/parent/status tuple across cursor pages and submit', async () => {
     const h = createHarness({ search: ' old ', parentTenantId: 'parent-a', status: 'ACTIVE' })
     h.list
       .mockImplementationOnce(async () => {

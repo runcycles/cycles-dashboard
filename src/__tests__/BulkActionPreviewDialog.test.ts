@@ -14,6 +14,7 @@ function sample(id: string, primary = `name-${id}`, status = 'ACTIVE'): PreviewS
 
 const baseProps = {
   actionVerb: 'Suspend',
+  itemNounSingular: 'tenant',
   itemNounPlural: 'tenants',
   filterDescription: 'status=ACTIVE AND parent_tenant_id=acme',
   loading: false,
@@ -81,6 +82,15 @@ describe('BulkActionPreviewDialog', () => {
       expect(buttons[buttons.length - 1].text()).toContain('Suspend 3 tenants')
     })
 
+    it('uses singular grammar for an exact one-row preview', () => {
+      const w = mount(BulkActionPreviewDialog, {
+        props: { ...baseProps, count: 1, samples: [sample('a-1')], reachedEnd: true },
+      })
+      expect(w.text()).toContain('1 tenant will be affected')
+      expect(w.text()).not.toContain('1 tenants will be affected')
+      expect(w.findAll('button').at(-1)?.text()).toContain('Suspend 1 tenant')
+    })
+
     it('Confirm is enabled and emits confirm when clicked', async () => {
       const w = mount(BulkActionPreviewDialog, { props })
       const buttons = w.findAll('button')
@@ -107,6 +117,8 @@ describe('BulkActionPreviewDialog', () => {
 
     it('renders the cap warning and disables Confirm', () => {
       const w = mount(BulkActionPreviewDialog, { props })
+      expect(w.text()).toContain('500+ tenants match the current filter')
+      expect(w.text()).not.toContain('500+ tenants will be affected')
       expect(w.text()).toContain('maximum of 500')
       expect(w.text()).toContain('Narrow the filter')
       const buttons = w.findAll('button')
@@ -131,6 +143,16 @@ describe('BulkActionPreviewDialog', () => {
       expect(w.findAll('button').at(-1)?.attributes('disabled')).toBeUndefined()
       expect(w.text()).toContain('lower bound')
       expect(w.text()).toContain('narrow the filter')
+    })
+
+    it('does not claim an exact empty result when the bounded scan found zero', () => {
+      const w = mount(BulkActionPreviewDialog, {
+        props: { ...baseProps, count: 0, cappedAtPages: true },
+      })
+      expect(w.text()).toContain('No matching tenants were found in the pages scanned')
+      expect(w.text()).toContain('ended before reaching an exact total')
+      expect(w.text()).not.toContain('No tenants match the current filter')
+      expect(w.findAll('button').at(-1)?.attributes('disabled')).toBeDefined()
     })
   })
 

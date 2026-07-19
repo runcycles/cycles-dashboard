@@ -933,6 +933,7 @@ const gridTemplate = computed(() =>
     <BulkActionPreviewDialog
       v-if="filterBulkAction"
       :action-verb="filterBulkAction === 'SUSPEND' ? 'Suspend' : 'Reactivate'"
+      item-noun-singular="tenant"
       item-noun-plural="tenants"
       :filter-description="filterBulkSummary"
       :loading="filterBulkPreview.previewLoading.value"

@@ -946,6 +946,7 @@ const gridTemplate = computed(() =>
     <BulkActionPreviewDialog
       v-if="filterBulkAction"
       :action-verb="filterBulkAction === 'PAUSE' ? 'Pause' : 'Resume'"
+      item-noun-singular="webhook"
       item-noun-plural="webhooks"
       :filter-description="filterBulkSummary"
       :loading="filterBulkPreview.previewLoading.value"

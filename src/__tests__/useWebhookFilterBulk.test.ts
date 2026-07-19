@@ -96,7 +96,7 @@ describe('useWebhookFilterBulk', () => {
     expect(h.list).not.toHaveBeenCalled()
   })
 
-  it('reuses one immutable tenant/search tuple across cursor pages and submit', async () => {
+  it('reuses one immutable tenant/search/status tuple across cursor pages and submit', async () => {
     const h = createHarness({ tenantId: 'acme', search: ' old ', failingOnly: false, status: 'ACTIVE' })
     h.list
       .mockImplementationOnce(async () => {
@@ -119,8 +119,8 @@ describe('useWebhookFilterBulk', () => {
     await h.preview()
 
     expect(h.list.mock.calls).toEqual([
-      [{ search: 'old' }],
-      [{ search: 'old', cursor: 'cursor-1' }],
+      [{ status: 'ACTIVE', search: 'old' }],
+      [{ status: 'ACTIVE', search: 'old', cursor: 'cursor-1' }],
     ])
     expect(h.bulk.summary.value).toBe('status=ACTIVE AND tenant_id=acme AND search="old"')
 
@@ -146,6 +146,7 @@ describe('useWebhookFilterBulk', () => {
     await h.preview('RESUME')
     await h.bulk.execute()
 
+    expect(h.list).toHaveBeenCalledWith({ status: 'PAUSED' })
     expect(h.submit.mock.calls[0]?.[0]).toMatchObject({
       filter: { status: 'PAUSED', tenant_id: 'acme' },
       action: 'RESUME',

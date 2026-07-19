@@ -48,9 +48,9 @@ search remain optional; the system pseudo-tenant and wildcard matcher remain
 blocked. Complete walks alone send `expected_count`, UUID idempotency remains
 per confirmation, count/limit errors stay inline and retryable, failed/skipped
 rows still open the shared result dialog, and refresh runs after settlement.
-Successful request bodies and the preview/result-dialog templates are
-unchanged; the webhook filter bar alone gains the unsupported-state help text
-described below.
+Successful request bodies remain unchanged. Both filter bars and the shared
+Preview dialog gain the truthfulness and accessibility refinements described
+below; the result-dialog template is unchanged.
 
 Review also found that Webhooks' derived `failing=1` filter was not included in
 either the preview predicate or the server request, even though the controls
@@ -112,6 +112,23 @@ root-filter gate now mirrors Webhooks' accessible treatment: the action group
 owns visible `role=status` help via `aria-describedby`; disabled native buttons
 no longer hide the only explanation behind hover.
 
+A further whole-PR pass closed the remaining presentation edge at the zero
+boundary. An incomplete scan that found no eligible rows previously entered the
+exact-empty branch and claimed that no rows matched, even though the list was
+not exhausted. It now reports that zero matches were found in the scanned pages, says
+the total is unknown, keeps Confirm disabled, and directs the operator to narrow
+the filter. Webhook Preview also forwards its action-derived ACTIVE/PAUSED
+status to the list endpoint, which already supports that predicate, so bounded
+walks do not waste pages scanning statuses the bulk request cannot target. The
+client-side status predicate remains as a defensive mirror of the mutation.
+
+The same dialog pass fixes its last count-copy inconsistencies: exact one-row
+results use the singular noun, while the match-capped state says that 500+ rows
+match the filter rather than promising they “will be affected” immediately
+above a disabled confirmation and the server-limit warning. Component and
+composable tests pin exact-empty versus partial-zero copy, singular labels,
+over-limit wording, and ACTIVE/PAUSED list request shapes.
+
 The two views retain URL/filter refs, polling and page-one data, Load more,
 export, row-select batches, mutations outside this filter-wide path, dialogs,
 virtualization, and list presentation. `TenantsView.vue` drops from 1,122 to
@@ -124,7 +141,7 @@ count/limit error recovery, result capture, read-only action ownership, and
 the live failing-only URL integration. No
 governance-spec, server-fleet, endpoint, successful wire shape, polling
 cadence, or list/table/dialog layout change. Final validation:
-1,362/1,362 tests across 116 files; 97.45% line coverage; lint, strict
+1,364/1,364 tests across 116 files; 97.45% line coverage; lint, strict
 typecheck, production build, and development/production Compose validation
 pass.
 

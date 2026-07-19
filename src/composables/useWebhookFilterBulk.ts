@@ -122,9 +122,13 @@ export function useWebhookFilterBulk(options: UseWebhookFilterBulkOptions) {
 
   const preview = useBulkActionPreview<WebhookSubscription>({
     fetchPage: async (cursor) => {
-      const snapshot = selection.value?.filters
-      if (!snapshot) return { items: [], hasMore: false, nextCursor: '' }
-      const params: Record<string, string> = {}
+      const ownedSelection = selection.value
+      if (!ownedSelection) return { items: [], hasMore: false, nextCursor: '' }
+      const snapshot = ownedSelection.filters
+      // Webhook lists natively accept status. Push the action-derived source
+      // status server-side so the bounded preview does not spend its page
+      // budget scanning rows the bulk endpoint can never target.
+      const params: Record<string, string> = { status: requiredStatus(ownedSelection.action) }
       if (snapshot.search) params.search = snapshot.search
       if (cursor) params.cursor = cursor
       const response = await (options.list ?? listWebhooksDefault)(params)
