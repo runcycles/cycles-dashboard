@@ -33,8 +33,9 @@ UX work that does not advance spec alignment.
   and routine polling cannot publish through those mutation-owned refreshes.
 - Direct permanent-close execution enforces the typed tenant name in the
   lifecycle owner, not only through the template's disabled button.
-- Only one tenant lifecycle dialog can be armed at a time, and cascade recovery
-  rejects direct invocation for a tenant that is not already CLOSED.
+- Only one tenant lifecycle dialog can be armed at a time. Direct status
+  requests reject transitions that are not legal from the current tenant
+  state, and cascade recovery rejects a tenant that is not already CLOSED.
 - Tenant status and Emergency Freeze triggers visibly disable while an
   Emergency Freeze scan or post-write refresh owns the lifecycle. Guarded
   clicks no longer appear to be accepted and then silently do nothing.

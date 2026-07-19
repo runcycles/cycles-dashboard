@@ -1,4 +1,4 @@
-import { computed, ref, type Ref } from 'vue'
+import { computed, readonly, ref, type Ref } from 'vue'
 import {
   freezeBudget as freezeBudgetDefault,
   updateTenantStatus as updateTenantStatusDefault,
@@ -50,13 +50,13 @@ type TenantLifecycleBatchFn = (
 
 export interface UseTenantLifecycleOptions {
   tenantId: string
-  tenant: Ref<Tenant | null>
-  budgets: Ref<BudgetLedger[]>
-  apiKeys: Ref<ApiKey[]>
-  webhooks: Ref<WebhookSubscription[]>
-  budgetsPartial: Ref<boolean>
+  tenant: Readonly<Ref<Tenant | null>>
+  budgets: Readonly<Ref<BudgetLedger[]>>
+  apiKeys: Readonly<Ref<ApiKey[]>>
+  webhooks: Readonly<Ref<WebhookSubscription[]>>
+  budgetsPartial: Readonly<Ref<boolean>>
   cascadePartial: Readonly<Ref<boolean>>
-  error: Ref<string>
+  error: Readonly<Ref<string>>
   refreshTenant: () => Promise<TenantDetailRefreshResult>
   refreshBudgets: () => Promise<TenantDetailRefreshResult>
   refreshCascadeState: () => Promise<TenantDetailRefreshResult>
@@ -154,6 +154,13 @@ export function useTenantLifecycle(options: UseTenantLifecycleOptions) {
 
   function requestTenantAction(action: TenantLifecycleAction): void {
     if (isMutationRunning.value || hasPendingLifecycleAction()) return
+    const status = options.tenant.value?.status
+    const isLegalTransition = action === 'SUSPENDED'
+      ? status === 'ACTIVE'
+      : action === 'ACTIVE'
+        ? status === 'SUSPENDED'
+        : !!status && status !== 'CLOSED'
+    if (!isLegalTransition) return
     pendingTenantActionState.value = action
   }
 
@@ -332,8 +339,6 @@ export function useTenantLifecycle(options: UseTenantLifecycleOptions) {
     emergencyFreezeProgress.value = { done: 0, total: targets.length, failed: 0 }
     emergencyFreezeRunning.value = true
     emergencyFreezeAbort = new AbortController()
-    // Keep the structured tag stable: operators can grep one token across the
-    // audit stream, while the suffix identifies this dashboard incident flow.
     const settledSucceeded: number[] = []
 
     let result: BatchResult
@@ -341,6 +346,8 @@ export function useTenantLifecycle(options: UseTenantLifecycleOptions) {
       result = await (options.runBatch ?? rateLimitedBatchDefault)(
         targets,
         async (budget, index) => {
+          // Keep the structured tag stable: operators can grep one token
+          // across the audit stream; the suffix identifies this dashboard flow.
           await (options.freeze ?? freezeBudgetDefault)(
             budget.scope,
             budget.unit,
@@ -444,20 +451,20 @@ export function useTenantLifecycle(options: UseTenantLifecycleOptions) {
     isMutationRunning,
     pendingTenantAction,
     closeConfirmInput,
-    tenantActionLoading,
+    tenantActionLoading: readonly(tenantActionLoading),
     requestTenantAction,
     cancelTenantAction,
     executeTenantAction,
     pendingRerunCascade,
-    rerunCascadeLoading,
-    rerunCascadeError,
+    rerunCascadeLoading: readonly(rerunCascadeLoading),
+    rerunCascadeError: readonly(rerunCascadeError),
     openRerunCascade,
     cancelRerunCascade,
     rerunCascade,
     pendingEmergencyFreeze,
-    emergencyFreezePreparing,
-    emergencyFreezeRunning,
-    emergencyFreezeProgress,
+    emergencyFreezePreparing: readonly(emergencyFreezePreparing),
+    emergencyFreezeRunning: readonly(emergencyFreezeRunning),
+    emergencyFreezeProgress: readonly(emergencyFreezeProgress),
     emergencyFreezeTargets,
     emergencyFreezeResult,
     openEmergencyFreeze,

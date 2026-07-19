@@ -227,15 +227,29 @@ describe('useTenantLifecycle', () => {
     )
   })
 
-  it('allows only one lifecycle dialog and refuses cascade recovery on a live tenant', async () => {
+  it('allows only one lifecycle dialog and refuses illegal direct lifecycle actions', async () => {
     const state = setup()
     state.lifecycle.openRerunCascade()
     expect(state.lifecycle.pendingRerunCascade.value).toBe(false)
+
+    state.lifecycle.requestTenantAction('ACTIVE')
+    expect(state.lifecycle.pendingTenantAction.value).toBeNull()
 
     state.lifecycle.requestTenantAction('SUSPENDED')
     await expect(state.lifecycle.openEmergencyFreeze()).resolves.toBe(false)
     expect(state.lifecycle.pendingTenantAction.value).toBe('SUSPENDED')
     expect(state.lifecycle.pendingEmergencyFreeze.value).toBe(false)
+
+    state.lifecycle.cancelTenantAction()
+    state.tenantRef.value = tenant('SUSPENDED')
+    state.lifecycle.requestTenantAction('SUSPENDED')
+    expect(state.lifecycle.pendingTenantAction.value).toBeNull()
+    state.tenantRef.value = tenant('CLOSED')
+    state.lifecycle.requestTenantAction('CLOSED')
+    expect(state.lifecycle.pendingTenantAction.value).toBeNull()
+    state.tenantRef.value = null
+    state.lifecycle.requestTenantAction('CLOSED')
+    expect(state.lifecycle.pendingTenantAction.value).toBeNull()
   })
 
   it('uses the full cascade refresh for close and keeps the committed CLOSED state on refresh failure', async () => {
@@ -264,6 +278,7 @@ describe('useTenantLifecycle', () => {
   it('reports a failed status mutation without refreshing', async () => {
     const updateStatus = vi.fn(async () => { throw new Error('status writer unavailable') })
     const state = setup({ updateStatus })
+    state.tenantRef.value = tenant('SUSPENDED')
     state.lifecycle.requestTenantAction('ACTIVE')
 
     await expect(state.lifecycle.executeTenantAction()).resolves.toBe(false)
