@@ -1076,14 +1076,16 @@ watch(exportError, (v) => { if (v) reportError(v) })
            view — "CSV" / "JSON" was a lone abbreviation. Status filter
            applied server-side so pagination stays consistent;
            Load-more appends. -->
-      <div class="bg-white rounded-lg shadow overflow-hidden text-sm" role="table" :aria-rowcount="filteredDeliveries.length + 1" :aria-colcount="7">
+      <div class="bg-white rounded-lg shadow overflow-hidden text-sm" role="table" :aria-rowcount="filteredDeliveries.length + 1" :aria-colcount="7" :aria-busy="deliveryFilterLoading">
         <div class="table-cell border-b border-gray-100 space-y-2">
           <h3 class="text-sm font-medium text-gray-700">Delivery History</h3>
           <div class="flex items-center gap-x-3 gap-y-2 flex-wrap">
-            <span v-if="deliveryFilterLoading" class="muted-sm" role="status">Updating delivery history…</span>
-            <span v-else class="muted-sm tabular-nums">
-              {{ filteredDeliveries.length.toLocaleString() }} loaded
-              <span v-if="deliveriesHasMore" class="text-amber-600 ml-1">(more available)</span>
+            <span class="muted-sm tabular-nums" role="status" aria-live="polite" aria-atomic="true">
+              <template v-if="deliveryFilterLoading">Updating delivery history…</template>
+              <template v-else>
+                {{ filteredDeliveries.length.toLocaleString() }} loaded
+                <span v-if="deliveriesHasMore" class="text-amber-600 ml-1">(more available)</span>
+              </template>
             </span>
             <span class="flex-1" />
             <select v-model="deliveryStatusFilter" aria-label="Filter deliveries by status" class="form-select">
