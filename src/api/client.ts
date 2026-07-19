@@ -272,11 +272,11 @@ export const listEvents = (params: Record<string, string>) =>
 export const listWebhooks = (params?: Record<string, string>, signal?: AbortSignal) =>
   get<import('../types').WebhookListResponse>(`${BASE}/admin/webhooks`, params, signal)
 
-export const getWebhook = (id: string) =>
-  get<import('../types').WebhookSubscription>(`${BASE}/admin/webhooks/${id}`)
+export const getWebhook = (id: string, signal?: AbortSignal) =>
+  get<import('../types').WebhookSubscription>(`${BASE}/admin/webhooks/${id}`, undefined, signal)
 
-export const listDeliveries = (id: string, params?: Record<string, string>) =>
-  get<import('../types').WebhookDeliveryListResponse>(`${BASE}/admin/webhooks/${id}/deliveries`, params)
+export const listDeliveries = (id: string, params?: Record<string, string>, signal?: AbortSignal) =>
+  get<import('../types').WebhookDeliveryListResponse>(`${BASE}/admin/webhooks/${id}/deliveries`, params, signal)
 
 // Audit
 export const listAuditLogs = (params: Record<string, string>) =>

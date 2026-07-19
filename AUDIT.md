@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.78 (2026-07-19)
+**Current release:** v0.1.25.79 (2026-07-19)
 
 ## Baseline requirements
 
@@ -16,6 +16,48 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-07-19 — v0.1.25.79: truthful Webhook Detail acquisition
+
+`WebhookDetailView` previously interleaved subscription acquisition, delivery
+page ownership, polling, Load more, and export with mutation forms and charts.
+Its polling callback also claimed abort propagation without passing a signal to
+either request, and every routine poll discarded delivery pages the operator
+had explicitly loaded.
+
+| Owner | Responsibilities |
+|---|---|
+| `useWebhookDetailData` | Abort-aware subscription/delivery reads, publication generations, applied delivery-filter ownership, polling, pagination, and refresh settlement. |
+| `WebhookDetailView` | Route intent, mutations, charts, filtering controls, export presentation, dialogs, and the virtualized table. |
+
+**Confirmed fixes and hardening:**
+
+- `getWebhook` and `listDeliveries` now accept the poll/export abort signal.
+  A subscription generation prevents a late poll from overwriting a newer
+  mutation response, and page-one sequence ownership discards stale results.
+- Delivery status is captured as one immutable applied tuple. Page one, Load
+  more, and every export page reuse it; a changed filter invalidates older
+  cursors and an in-flight poll cannot swallow the new filter refresh.
+- Routine polls merge their fresh page-one head into an operator-loaded tail
+  by `delivery_id`, preferring the newest representation of an overlapping
+  delivery. When the head overlaps, the oldest page's continuation stays
+  authoritative; a burst with no safe overlap resets to the fresh head so
+  Load more and export bridge the gap without skipping or duplicating rows.
+- A response with `has_more=true` but no continuation cursor is now a visible
+  protocol error. Load more and export remain disabled, avoiding a silently
+  incomplete download.
+- A later authoritative 404 clears stale subscription and delivery content.
+  Filter refreshes expose an updating status, and export stays disabled until
+  the visible rows belong to the applied tuple.
+
+**Preserved contracts:** successful endpoint paths and request shapes, the
+30-second cadence, server-side status filtering, chart calculations, mutation
+forms, capability gates, route-driven Edit intent, virtualization, and dialog
+layout are unchanged. No governance-spec or server-fleet bump is required.
+
+**Validation.** 1,414/1,414 tests pass across 118 files with 97.56% line
+coverage; `useWebhookDetailData` is 96.13% lines and 100% functions. ESLint,
+strict typecheck, production build, and both Compose validations pass.
 
 ### 2026-07-19 — v0.1.25.78: Tenant Detail lifecycle ownership
 

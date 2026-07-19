@@ -15,6 +15,37 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.79] — 2026-07-19
+
+### Changed
+
+- Webhook Detail subscription and delivery acquisition now run through the
+  focused `useWebhookDetailData` composable. Mutation forms, charts, route
+  intent, dialogs, and virtualized presentation remain in the view.
+- Routine polling preserves delivery pages loaded by the operator. A fresh
+  page-one head is merged by delivery ID; overlapping heads retain the tail
+  continuation, while a burst with no safe overlap resets to the fresh head so
+  Load more and export bridge the gap without skipping or duplicating rows.
+
+### Fixed
+
+- Webhook and delivery requests now receive real abort signals. Publication
+  generations prevent cancelled or superseded reads from replacing newer
+  subscription or filter state.
+- Delivery page one, Load more, and export reuse one immutable applied status
+  filter. Mid-request filter changes can no longer pair a new filter with an
+  old cursor, and a filter refresh requested during a poll is replayed after
+  the in-flight request settles.
+- A later 404 clears stale detail content. A malformed paginated response that
+  reports more rows without a continuation cursor now blocks Load more and
+  export with an actionable error instead of producing an incomplete file.
+- The delivery toolbar reports its updating state, and export remains disabled
+  until visible rows belong to the applied filter.
+
+No endpoint, successful request shape, capability gate, server/spec minimum,
+or dialog/table layout changes. Validation: 1,414 tests, 97.56% line coverage,
+lint, strict typecheck, production build, and both Compose configurations pass.
+
 ## [0.1.25.78] — 2026-07-19
 
 ### Changed
