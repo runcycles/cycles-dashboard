@@ -86,17 +86,45 @@ This keeps disabled-state copy truthful during settlement without permitting a
 second Preview. The shared `cappedAtPages` contract also documents both bounded
 page walks and missing continuation cursors.
 
+Final self-review closed four further truthfulness and usability edges. First,
+the toolbar used `statusFilter` to advertise filter-wide controls but omitted
+that status from both composable inputs. On a status-only CLOSED/DISABLED view,
+an action could therefore preview eligible rows from the whole fleet instead
+of the rows visible underneath it. Status is now part of the frozen selection,
+and representability is action-specific: SUSPEND/PAUSE only arms for an empty
+or ACTIVE status filter, while REACTIVATE/RESUME only arms for an empty or
+SUSPENDED/PAUSED filter. Incompatible actions remain visible but disabled with
+an exact explanation, preserving discoverability without misrepresenting the
+target.
+
+Second, an aborted cursor walk still wrote `Preview cancelled.` after its
+in-flight request resolved. A cancel-and-reopen or direct supersession could
+therefore poison a newer, otherwise-valid Preview and leave Confirm disabled.
+Cancellation now revokes the old controller's ownership immediately, and both
+pre/post-fetch abort checks mutate shared error state only when that controller
+still owns the walk. Tests cover direct supersession and cancel/reset/reopen.
+
+Third, partial page-bound previews previously paired their lower-bound note
+with exact language elsewhere (`N will be affected`, `Action N`). Every count
+surface now uses `N+`, “known to match,” and “Action at least N,” while retaining
+the existing ability to proceed without `expected_count`. Finally, the tenant
+root-filter gate now mirrors Webhooks' accessible treatment: the action group
+owns visible `role=status` help via `aria-describedby`; disabled native buttons
+no longer hide the only explanation behind hover.
+
 The two views retain URL/filter refs, polling and page-one data, Load more,
 export, row-select batches, mutations outside this filter-wide path, dialogs,
 virtualization, and list presentation. `TenantsView.vue` drops from 1,122 to
-985 lines and `WebhooksView.vue` from 1,102 to 996. Focused tests cover immutable
+998 lines and `WebhooksView.vue` from 1,102 to 1,002. Focused tests cover immutable
 multi-page tuples, action-derived status, exact and malformed-continuation
 counts, unsupported filter gates, direct-call defense, duplicate submission,
-partial-walk error blocking, count/limit error recovery, result capture,
-read-only action ownership, and the live failing-only URL integration. No
+partial-walk error blocking and lower-bound copy, supersession ownership,
+status/action compatibility, accessible disabled-state explanations,
+count/limit error recovery, result capture, read-only action ownership, and
+the live failing-only URL integration. No
 governance-spec, server-fleet, endpoint, successful wire shape, polling
 cadence, or list/table/dialog layout change. Final validation:
-1,356/1,356 tests across 116 files; 97.43% line coverage; lint, strict
+1,362/1,362 tests across 116 files; 97.45% line coverage; lint, strict
 typecheck, production build, and development/production Compose validation
 pass.
 

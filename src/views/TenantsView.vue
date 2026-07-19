@@ -343,13 +343,14 @@ function cancelBulk() {
   }
 }
 
-// Filter-apply bulk protocol. The composable captures search + parent once
+// Filter-apply bulk protocol. The composable captures search + parent + status once
 // when Preview opens and owns every cursor page plus the final POST. CLOSE
 // remains a per-tenant terminal action and is intentionally not offered here.
 const tenantFilterBulk = useTenantFilterBulk({
   getFilters: () => ({
     search: debouncedSearch.value,
     parentTenantId: parentFilter.value,
+    status: statusFilter.value,
   }),
   refresh: async () => refresh(),
   onResult: (result) => { bulkResult.value = result },
@@ -361,12 +362,17 @@ const {
   running: filterBulkRunning,
   submitError: filterBulkSubmitError,
   summary: filterBulkSummary,
+  unsupportedReason: tenantFilterBulkUnsupportedReason,
   canOpen: canApplyFilterBulk,
   open: openFilterBulk,
   cancel: cancelFilterBulk,
   execute: executeFilterBulk,
 } = tenantFilterBulk
 const filterBulkPreview = tenantFilterBulk.preview
+const filterBulkUnsupportedReason = computed(() => [...new Set([
+  tenantFilterBulkUnsupportedReason('SUSPEND'),
+  tenantFilterBulkUnsupportedReason('REACTIVATE'),
+].filter(Boolean))].join(' '))
 
 // ─── Create tenant (existing) ─────────────────────────────────────────
 const showCreate = ref(false)
@@ -682,34 +688,41 @@ const gridTemplate = computed(() =>
         <!-- Filter-apply bulk actions. Appears when the operator has a
              non-empty filter (so the action targets an explicit subset,
              not "all tenants") AND no row-select is active (keeps the
-             two paths visually distinct). Disabled when parentFilter
-             is '__root__' — server bulk endpoint has no null-parent
-             filter, so the '(root-level only)' pseudo-option isn't
-             applicable on this path.
+             two paths visually distinct). Root-level selection disables
+             both actions because the server has no null-parent filter;
+             an explicit status disables the action whose required source
+             status would fall outside the visible rows.
              Grouped in an inline-flex sub-container so label + buttons
              wrap together on narrow viewports instead of fragmenting
-             into one element per line. role="group" + aria-label
-             announces the cluster's purpose to screen readers. -->
+             into one element per line. The group owns the visible status
+             explanation through aria-describedby. -->
         <div
           v-if="canManage && (debouncedSearch.trim() || parentFilter || statusFilter) && selectedVisibleCount === 0"
           role="group"
           aria-label="Apply action to all tenants matching the current filter"
+          :aria-describedby="filterBulkUnsupportedReason ? 'tenant-filter-bulk-unavailable' : undefined"
           class="inline-flex items-center gap-2 flex-wrap"
         >
           <div class="hidden sm:block w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
           <span class="muted-sm whitespace-nowrap">Apply to all matching filter:</span>
           <button
             @click="openFilterBulk('SUSPEND')"
-            :disabled="!canApplyFilterBulk() || filterBulkRunning"
+            :disabled="!canApplyFilterBulk('SUSPEND') || filterBulkRunning"
             class="text-xs text-red-700 dark:text-red-300 hover:text-red-900 dark:hover:text-red-200 border border-red-300 dark:border-red-700 bg-white dark:bg-gray-800 rounded px-2.5 py-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-            :title="canApplyFilterBulk() ? 'Suspend all ACTIVE tenants matching filter' : 'Root-level filter is not supported by server bulk-action'"
+            :title="canApplyFilterBulk('SUSPEND') ? 'Suspend all ACTIVE tenants matching filter' : undefined"
           >Suspend all</button>
           <button
             @click="openFilterBulk('REACTIVATE')"
-            :disabled="!canApplyFilterBulk() || filterBulkRunning"
+            :disabled="!canApplyFilterBulk('REACTIVATE') || filterBulkRunning"
             class="text-xs text-green-700 dark:text-green-300 hover:text-green-900 dark:hover:text-green-200 border border-green-300 dark:border-green-700 bg-white dark:bg-gray-800 rounded px-2.5 py-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-            :title="canApplyFilterBulk() ? 'Reactivate all SUSPENDED tenants matching filter' : 'Root-level filter is not supported by server bulk-action'"
+            :title="canApplyFilterBulk('REACTIVATE') ? 'Reactivate all SUSPENDED tenants matching filter' : undefined"
           >Reactivate all</button>
+          <p
+            v-if="filterBulkUnsupportedReason"
+            id="tenant-filter-bulk-unavailable"
+            role="status"
+            class="basis-full muted-sm"
+          >{{ filterBulkUnsupportedReason }}</p>
         </div>
       </div>
     </div>
@@ -915,7 +928,7 @@ const gridTemplate = computed(() =>
       @cancel="cancelBulk"
     />
 
-    <!-- Filter-apply preview. One immutable search/parent/action snapshot
+    <!-- Filter-apply preview. One immutable search/parent/status/action snapshot
          drives every cursor page, this summary, and the final request. -->
     <BulkActionPreviewDialog
       v-if="filterBulkAction"

@@ -726,7 +726,7 @@ describe('BudgetsView — bulk-action (Slice C, v0.1.25.26)', () => {
     await clickPreview(w)
 
     // Confirm with partial count.
-    await w.findAll('button').find(b => b.text().includes('Credit 200 budgets'))!.trigger('click')
+    await w.findAll('button').find(b => b.text().includes('Credit at least 200 budgets'))!.trigger('click')
     await flushPromises()
 
     const body = bulkActionBudgetsMock.mock.calls[0][0]

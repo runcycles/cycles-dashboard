@@ -22,8 +22,8 @@ UX work that does not advance spec alignment.
 - Tenant and webhook filter-wide suspend/pause protocols now run through
   focused `useTenantFilterBulk` and `useWebhookFilterBulk` composables. The
   views retain filters, row selection, polling, dialogs, and presentation.
-- `TenantsView` drops from 1,122 to 985 lines and `WebhooksView` from 1,102 to
-  996 lines without changing the existing preview or result-dialog layout.
+- `TenantsView` drops from 1,122 to 998 lines and `WebhooksView` from 1,102 to
+  1,002 lines without changing the existing preview or result-dialog layout.
 
 ### Fixed
 
@@ -37,12 +37,23 @@ UX work that does not advance spec alignment.
   broader set than the visible table implied. Each unsupported state now has a
   visible, predicate-specific explanation instead of relying on a disabled
   control's tooltip.
+- Tenant and webhook status filters are now captured with the destructive
+  selection. An action whose required source status falls outside the visible
+  filter is disabled, so a status-only view cannot arm a global mutation
+  against rows the operator is not looking at.
+- Root-level tenant and unsupported webhook filters now expose visible,
+  screen-reader-linked explanations instead of relying on disabled-button
+  tooltips.
 - A list response that reports `has_more=true` without a continuation cursor is
   now classified as a partial preview. The dashboard omits `expected_count`
-  instead of treating the lower bound as exact.
+  instead of treating the lower bound as exact, and the dialog consistently
+  says “N+” / “at least N” wherever that partial count appears.
 - A preview-page failure after earlier pages found matches now disables Confirm
-  and is rejected by every filter-bulk composable. An incomplete count can no
-  longer be submitted without the server's exact-count drift guard.
+  and is rejected by every filter-bulk composable. A failed walk's incomplete
+  count can no longer be submitted without the server's exact-count drift guard.
+- Superseded or reset preview walks lose write authority immediately. A late
+  response from an aborted request can no longer overwrite a newer Preview
+  with a stale “Preview cancelled” error.
 - Tenant and webhook Preview ownership now stores the action and filters in one
   frozen selection and exposes the action read-only. Consumers cannot change
   the mutation after the operator reviews its target set.
@@ -51,7 +62,7 @@ UX work that does not advance spec alignment.
   refused.
 
 No API endpoint, successful request shape, server/spec requirement, or polling
-cadence changes. Validation: 1,356 tests; 97.43% line coverage; lint,
+cadence changes. Validation: 1,362 tests; 97.45% line coverage; lint,
 typecheck, production build, and both Compose configurations pass.
 
 ## [0.1.25.76] — 2026-07-18

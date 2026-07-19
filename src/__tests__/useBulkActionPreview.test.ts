@@ -195,5 +195,26 @@ describe('useBulkActionPreview', () => {
     // Final state reflects the second walk only.
     expect(p.previewCount.value).toBe(1)
     expect(p.previewSamples.value[0].id).toBe('z')
+    expect(p.previewError.value).toBe('')
+    expect(p.previewLoading.value).toBe(false)
+  })
+
+  it('cancel + reset cannot let the old request poison a replacement preview', async () => {
+    let resolveFirst: (v: { items: Row[]; hasMore: boolean; nextCursor: string }) => void = () => {}
+    const fetchPage = vi.fn()
+      .mockImplementationOnce(() => new Promise<{ items: Row[]; hasMore: boolean; nextCursor: string }>(r => { resolveFirst = r }))
+      .mockResolvedValueOnce({ items: [row('fresh')], hasMore: false, nextCursor: '' })
+    const p = useBulkActionPreview<Row>({ fetchPage, filterFn: acceptAll, toSample })
+
+    const first = p.startPreview()
+    p.resetPreview()
+    const second = p.startPreview()
+    resolveFirst({ items: [row('stale')], hasMore: false, nextCursor: '' })
+    await Promise.all([first, second])
+
+    expect(p.previewCount.value).toBe(1)
+    expect(p.previewSamples.value[0].id).toBe('fresh')
+    expect(p.previewError.value).toBe('')
+    expect(p.previewLoading.value).toBe(false)
   })
 })

@@ -22,6 +22,7 @@ export interface WebhookFilterBulkFilters {
   tenantId: string
   search: string
   failingOnly: boolean
+  status: string
 }
 
 export interface WebhookFilterBulkResult {
@@ -49,6 +50,7 @@ export interface UseWebhookFilterBulkOptions {
 interface WebhookFilterSnapshot {
   tenantId: string
   search: string
+  status: string
 }
 
 interface WebhookFilterBulkSelection {
@@ -68,14 +70,14 @@ function normalizedSnapshot(filters: WebhookFilterBulkFilters): WebhookFilterSna
   return Object.freeze({
     tenantId: filters.tenantId,
     search: filters.search.trim(),
+    status: filters.status,
   })
 }
 
-function isRepresentable(filters: WebhookFilterBulkFilters): boolean {
-  return filters.tenantId !== SYSTEM_TENANT_ID && !filters.search.includes('*') && !filters.failingOnly
-}
-
-function representabilityError(filters: WebhookFilterBulkFilters): string {
+function representabilityError(
+  filters: WebhookFilterBulkFilters,
+  action: WebhookFilterBulkAction,
+): string {
   if (filters.tenantId === SYSTEM_TENANT_ID) {
     return 'Bulk actions are unavailable for the system-wide filter because the server has no equivalent tenant selector.'
   }
@@ -84,6 +86,10 @@ function representabilityError(filters: WebhookFilterBulkFilters): string {
   }
   if (filters.failingOnly) {
     return 'Bulk actions are unavailable for the failing-only filter because the server has no failure-state selector.'
+  }
+  const required = requiredStatus(action)
+  if (filters.status && filters.status !== required) {
+    return `${formatActionVerb(action)} only applies to ${required} webhooks, but the current status filter is ${filters.status}.`
   }
   return ''
 }
@@ -111,7 +117,6 @@ export function useWebhookFilterBulk(options: UseWebhookFilterBulkOptions) {
   const action = computed(() => selection.value?.action ?? null)
   const running = ref(false)
   const submitError = ref('')
-  const unsupportedReason = computed(() => representabilityError(options.getFilters()))
 
   const createKey = options.createIdempotencyKey ?? generateIdempotencyKey
 
@@ -154,14 +159,18 @@ export function useWebhookFilterBulk(options: UseWebhookFilterBulkOptions) {
     return parts.join(' AND ')
   })
 
-  function canOpen(): boolean {
-    return isRepresentable(options.getFilters())
+  function unsupportedReason(nextAction: WebhookFilterBulkAction): string {
+    return representabilityError(options.getFilters(), nextAction)
+  }
+
+  function canOpen(nextAction: WebhookFilterBulkAction): boolean {
+    return !unsupportedReason(nextAction)
   }
 
   function open(nextAction: WebhookFilterBulkAction): void {
-    if (running.value || !canOpen()) return
+    if (running.value) return
     const currentFilters = options.getFilters()
-    if (!isRepresentable(currentFilters)) return
+    if (representabilityError(currentFilters, nextAction)) return
     selection.value = Object.freeze({
       action: nextAction,
       filters: normalizedSnapshot(currentFilters),

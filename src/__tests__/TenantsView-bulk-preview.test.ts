@@ -124,6 +124,39 @@ describe('TenantsView — bulk-action preview (O1)', () => {
     expect(buttonTexts).toContain('Reactivate all')
   })
 
+  it('disables actions that conflict with the visible status filter', async () => {
+    routeRef.query = { status: 'SUSPENDED' }
+    listTenantsMock.mockResolvedValue({ tenants: [tenant('a'), tenant('b', 'SUSPENDED')], has_more: false })
+    const { default: TenantsView } = await import('../views/TenantsView.vue')
+    const w = mount(TenantsView, { global: stdMounts() })
+    await flushPromises()
+
+    const suspendAll = w.findAll('button').find(button => button.text() === 'Suspend all')
+    const reactivateAll = w.findAll('button').find(button => button.text() === 'Reactivate all')
+    expect(suspendAll?.attributes('disabled')).toBeDefined()
+    expect(reactivateAll?.attributes('disabled')).toBeUndefined()
+    const group = w.get('[aria-label="Apply action to all tenants matching the current filter"]')
+    expect(group.attributes('aria-describedby')).toBe('tenant-filter-bulk-unavailable')
+    expect(w.get('#tenant-filter-bulk-unavailable').text()).toContain('only applies to ACTIVE tenants')
+  })
+
+  it('explains the disabled root-level filter without relying on button tooltips', async () => {
+    routeRef.query = { parent: '__root__' }
+    listTenantsMock.mockResolvedValue({ tenants: [tenant('a')], has_more: false })
+    const { default: TenantsView } = await import('../views/TenantsView.vue')
+    const w = mount(TenantsView, { global: stdMounts() })
+    await flushPromises()
+
+    const suspendAll = w.findAll('button').find(button => button.text() === 'Suspend all')
+    const reactivateAll = w.findAll('button').find(button => button.text() === 'Reactivate all')
+    expect(suspendAll?.attributes('disabled')).toBeDefined()
+    expect(reactivateAll?.attributes('disabled')).toBeDefined()
+    expect(suspendAll?.attributes('title')).toBeUndefined()
+    const reason = w.get('#tenant-filter-bulk-unavailable')
+    expect(reason.attributes('role')).toBe('status')
+    expect(reason.text()).toContain('root-level filter')
+  })
+
   it('opens the preview dialog and walks listTenants when "Suspend all" is clicked', async () => {
     // Every listTenants call (initial load + debouncedSearch watcher refreshes
     // + preview walk) returns the same page: 3 ACTIVE + 1 SUSPENDED.

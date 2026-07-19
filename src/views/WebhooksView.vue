@@ -328,7 +328,7 @@ function cancelBulk() {
   }
 }
 
-// Filter-apply bulk protocol. One immutable tenant/search tuple owns Preview
+// Filter-apply bulk protocol. One immutable tenant/search/status tuple owns Preview
 // and submit. Derived failing-only, wildcard, and system-pseudo filters cannot
 // be represented by the server endpoint and therefore refuse to arm.
 const webhookFilterBulk = useWebhookFilterBulk({
@@ -336,6 +336,7 @@ const webhookFilterBulk = useWebhookFilterBulk({
     tenantId: tenantFilter.value,
     search: debouncedUrlFilter.value,
     failingOnly: failingFilter.value,
+    status: statusFilter.value,
   }),
   refresh: async () => refresh(),
   onResult: (result) => { bulkResult.value = result },
@@ -347,13 +348,17 @@ const {
   running: filterBulkRunning,
   submitError: filterBulkSubmitError,
   summary: filterBulkSummary,
-  unsupportedReason: filterBulkUnsupportedReason,
+  unsupportedReason: webhookFilterBulkUnsupportedReason,
   canOpen: canApplyWebhookFilterBulk,
   open: openFilterBulk,
   cancel: cancelFilterBulk,
   execute: executeFilterBulk,
 } = webhookFilterBulk
 const filterBulkPreview = webhookFilterBulk.preview
+const filterBulkUnsupportedReason = computed(() => [...new Set([
+  webhookFilterBulkUnsupportedReason('PAUSE'),
+  webhookFilterBulkUnsupportedReason('RESUME'),
+].filter(Boolean))].join(' '))
 
 function healthColor(w: WebhookSubscription): string {
   if (w.status === 'DISABLED') return 'bg-red-500'
@@ -713,35 +718,36 @@ const gridTemplate = computed(() =>
         </label>
         <!-- Filter-apply bulk actions (see TenantsView for rationale).
              Appears when a filter is set AND no row-select is active.
-             System-wide, wildcard, and derived failing-only filters are
-             disabled because the server cannot represent those predicates.
+             System-wide, wildcard, and derived failing-only filters disable
+             both actions because the server cannot represent those predicates;
+             an explicit status disables the incompatible action.
              Grouped in inline-flex so label + buttons wrap together
              on narrow viewports. -->
         <div
           v-if="canManage && (tenantFilter || debouncedUrlFilter.trim() || statusFilter || failingFilter) && selectedVisibleCount === 0"
           role="group"
           aria-label="Apply action to all webhooks matching the current filter"
+          :aria-describedby="filterBulkUnsupportedReason ? 'webhook-filter-bulk-unavailable' : undefined"
           class="inline-flex items-center gap-2 flex-wrap"
         >
           <div class="hidden sm:block w-px h-5 bg-gray-200 dark:bg-gray-700" aria-hidden="true"></div>
           <span class="muted-sm whitespace-nowrap">Apply to all matching filter:</span>
           <button
             @click="openFilterBulk('PAUSE')"
-            :disabled="!canApplyWebhookFilterBulk() || filterBulkRunning"
-            :aria-describedby="filterBulkUnsupportedReason ? 'webhook-filter-bulk-unavailable' : undefined"
+            :disabled="!canApplyWebhookFilterBulk('PAUSE') || filterBulkRunning"
             class="text-xs text-red-700 dark:text-red-300 hover:text-red-900 dark:hover:text-red-200 border border-red-300 dark:border-red-700 bg-white dark:bg-gray-800 rounded px-2.5 py-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-            :title="canApplyWebhookFilterBulk() ? 'Pause all ACTIVE webhooks matching filter' : undefined"
+            :title="canApplyWebhookFilterBulk('PAUSE') ? 'Pause all ACTIVE webhooks matching filter' : undefined"
           >Pause all</button>
           <button
             @click="openFilterBulk('RESUME')"
-            :disabled="!canApplyWebhookFilterBulk() || filterBulkRunning"
-            :aria-describedby="filterBulkUnsupportedReason ? 'webhook-filter-bulk-unavailable' : undefined"
+            :disabled="!canApplyWebhookFilterBulk('RESUME') || filterBulkRunning"
             class="text-xs text-green-700 dark:text-green-300 hover:text-green-900 dark:hover:text-green-200 border border-green-300 dark:border-green-700 bg-white dark:bg-gray-800 rounded px-2.5 py-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-            :title="canApplyWebhookFilterBulk() ? 'Resume all PAUSED webhooks matching filter' : undefined"
+            :title="canApplyWebhookFilterBulk('RESUME') ? 'Resume all PAUSED webhooks matching filter' : undefined"
           >Resume all</button>
           <p
             v-if="filterBulkUnsupportedReason"
             id="webhook-filter-bulk-unavailable"
+            role="status"
             class="basis-full muted-sm"
           >{{ filterBulkUnsupportedReason }}</p>
         </div>
@@ -934,7 +940,7 @@ const gridTemplate = computed(() =>
       @cancel="cancelBulk"
     />
 
-    <!-- Filter-apply preview. One immutable tenant/search/action snapshot
+    <!-- Filter-apply preview. One immutable tenant/search/status/action snapshot
          drives every cursor page, this summary, and the final request.
          DISABLED subscriptions remain an explicit per-row decision. -->
     <BulkActionPreviewDialog

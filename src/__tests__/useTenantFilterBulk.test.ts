@@ -36,6 +36,7 @@ function response(overrides: Partial<TenantBulkActionResponse> = {}): TenantBulk
 function createHarness(initialFilters: TenantFilterBulkFilters = {
   search: '',
   parentTenantId: '',
+  status: '',
 }) {
   let filters = initialFilters
   const list = vi.fn<ListFn>().mockResolvedValue({ tenants: [tenant('one')], has_more: false })
@@ -76,7 +77,7 @@ function createHarness(initialFilters: TenantFilterBulkFilters = {
 describe('useTenantFilterBulk', () => {
   it('does not resolve preview or mutation callables until used', () => {
     const options: UseTenantFilterBulkOptions = {
-      getFilters: () => ({ search: '', parentTenantId: '' }),
+      getFilters: () => ({ search: '', parentTenantId: '', status: '' }),
       refresh: async () => true,
       onResult: vi.fn(),
     }
@@ -89,9 +90,10 @@ describe('useTenantFilterBulk', () => {
   })
 
   it('refuses the root-level pseudo-filter because the server cannot represent it', () => {
-    const h = createHarness({ search: '', parentTenantId: '__root__' })
+    const h = createHarness({ search: '', parentTenantId: '__root__', status: '' })
 
-    expect(h.bulk.canOpen()).toBe(false)
+    expect(h.bulk.canOpen('SUSPEND')).toBe(false)
+    expect(h.bulk.unsupportedReason('SUSPEND')).toContain('root-level filter')
     h.bulk.open('SUSPEND')
 
     expect(h.bulk.action.value).toBeNull()
@@ -99,10 +101,10 @@ describe('useTenantFilterBulk', () => {
   })
 
   it('reuses one immutable search/parent tuple across cursor pages and submit', async () => {
-    const h = createHarness({ search: ' old ', parentTenantId: 'parent-a' })
+    const h = createHarness({ search: ' old ', parentTenantId: 'parent-a', status: 'ACTIVE' })
     h.list
       .mockImplementationOnce(async () => {
-        h.setFilters({ search: 'new', parentTenantId: 'parent-b' })
+        h.setFilters({ search: 'new', parentTenantId: 'parent-b', status: 'SUSPENDED' })
         return {
           tenants: [tenant('one', 'ACTIVE', 'parent-a')],
           has_more: true,
@@ -138,7 +140,7 @@ describe('useTenantFilterBulk', () => {
   })
 
   it('derives SUSPENDED for REACTIVATE and reports skipped rows for triage', async () => {
-    const h = createHarness({ search: '', parentTenantId: '' })
+    const h = createHarness({ search: '', parentTenantId: '', status: 'SUSPENDED' })
     h.list.mockResolvedValue({ tenants: [tenant('one', 'SUSPENDED')], has_more: false })
     h.submit.mockResolvedValue(response({
       action: 'REACTIVATE',
@@ -167,6 +169,18 @@ describe('useTenantFilterBulk', () => {
 
     await h.bulk.execute()
     expect(h.submit.mock.calls[0]?.[0]).not.toHaveProperty('expected_count')
+  })
+
+  it('rejects actions that conflict with the visible status filter', () => {
+    const h = createHarness({ search: '', parentTenantId: '', status: 'SUSPENDED' })
+
+    expect(h.bulk.canOpen('SUSPEND')).toBe(false)
+    expect(h.bulk.unsupportedReason('SUSPEND')).toContain('only applies to ACTIVE tenants')
+    expect(h.bulk.canOpen('REACTIVATE')).toBe(true)
+
+    h.bulk.open('SUSPEND')
+    expect(h.bulk.action.value).toBeNull()
+    expect(h.list).not.toHaveBeenCalled()
   })
 
   it('exposes the captured action as readonly and rejects execution before Preview', async () => {
@@ -229,7 +243,7 @@ describe('useTenantFilterBulk', () => {
 
     const first = h.bulk.execute()
     await vi.waitFor(() => expect(h.bulk.running.value).toBe(true))
-    expect(h.bulk.canOpen()).toBe(true)
+    expect(h.bulk.canOpen('SUSPEND')).toBe(true)
     h.bulk.open('REACTIVATE')
     expect(h.bulk.action.value).toBe('SUSPEND')
     await expect(h.bulk.execute()).resolves.toBe(false)

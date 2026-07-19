@@ -121,11 +121,15 @@ describe('BulkActionPreviewDialog', () => {
   })
 
   describe('capped at max-pages state (partial count)', () => {
-    it('annotates the count as a partial total', () => {
+    it('uses lower-bound language in the count, sample hint, and Confirm label', () => {
       const w = mount(BulkActionPreviewDialog, {
         props: { ...baseProps, count: 12, samples: [sample('a'), sample('b')], cappedAtPages: true },
       })
-      expect(w.text()).toContain('partial count')
+      expect(w.text()).toContain('12+ tenants are known to match')
+      expect(w.text()).toContain('Showing first 2 of 12+')
+      expect(w.findAll('button').at(-1)?.text()).toContain('Suspend at least 12 tenants')
+      expect(w.findAll('button').at(-1)?.attributes('disabled')).toBeUndefined()
+      expect(w.text()).toContain('lower bound')
       expect(w.text()).toContain('narrow the filter')
     })
   })

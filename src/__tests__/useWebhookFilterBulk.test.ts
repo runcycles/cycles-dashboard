@@ -42,6 +42,7 @@ function createHarness(initialFilters: WebhookFilterBulkFilters = {
   tenantId: '',
   search: '',
   failingOnly: false,
+  status: '',
 }) {
   let filters = initialFilters
   const list = vi.fn<ListFn>().mockResolvedValue({ subscriptions: [webhook('one')], has_more: false })
@@ -81,14 +82,14 @@ function createHarness(initialFilters: WebhookFilterBulkFilters = {
 
 describe('useWebhookFilterBulk', () => {
   it.each([
-    { filters: { tenantId: '__system__', search: '', failingOnly: false }, label: 'system pseudo-tenant', reason: 'system-wide filter' },
-    { filters: { tenantId: '', search: '*.internal', failingOnly: false }, label: 'wildcard search', reason: 'wildcard URL filters' },
-    { filters: { tenantId: '', search: '', failingOnly: true }, label: 'failing-only predicate', reason: 'failing-only filter' },
+    { filters: { tenantId: '__system__', search: '', failingOnly: false, status: '' }, label: 'system pseudo-tenant', reason: 'system-wide filter' },
+    { filters: { tenantId: '', search: '*.internal', failingOnly: false, status: '' }, label: 'wildcard search', reason: 'wildcard URL filters' },
+    { filters: { tenantId: '', search: '', failingOnly: true, status: '' }, label: 'failing-only predicate', reason: 'failing-only filter' },
   ] satisfies Array<{ filters: WebhookFilterBulkFilters; label: string; reason: string }>)('refuses an unrepresentable $label filter', ({ filters, reason }) => {
     const h = createHarness(filters)
 
-    expect(h.bulk.canOpen()).toBe(false)
-    expect(h.bulk.unsupportedReason.value).toContain(reason)
+    expect(h.bulk.canOpen('PAUSE')).toBe(false)
+    expect(h.bulk.unsupportedReason('PAUSE')).toContain(reason)
     h.bulk.open('PAUSE')
 
     expect(h.bulk.action.value).toBeNull()
@@ -96,10 +97,10 @@ describe('useWebhookFilterBulk', () => {
   })
 
   it('reuses one immutable tenant/search tuple across cursor pages and submit', async () => {
-    const h = createHarness({ tenantId: 'acme', search: ' old ', failingOnly: false })
+    const h = createHarness({ tenantId: 'acme', search: ' old ', failingOnly: false, status: 'ACTIVE' })
     h.list
       .mockImplementationOnce(async () => {
-        h.setFilters({ tenantId: 'beta', search: 'new', failingOnly: false })
+        h.setFilters({ tenantId: 'beta', search: 'new', failingOnly: false, status: 'PAUSED' })
         return {
           subscriptions: [webhook('one', 'ACTIVE', 'acme')],
           has_more: true,
@@ -134,7 +135,7 @@ describe('useWebhookFilterBulk', () => {
   })
 
   it('derives PAUSED for RESUME and exposes failed rows for triage', async () => {
-    const h = createHarness({ tenantId: 'acme', search: '', failingOnly: false })
+    const h = createHarness({ tenantId: 'acme', search: '', failingOnly: false, status: 'PAUSED' })
     h.list.mockResolvedValue({ subscriptions: [webhook('one', 'PAUSED')], has_more: false })
     h.submit.mockResolvedValue(response({
       action: 'RESUME',
@@ -164,6 +165,18 @@ describe('useWebhookFilterBulk', () => {
 
     expect(h.submit).not.toHaveBeenCalled()
     expect(h.refresh).not.toHaveBeenCalled()
+  })
+
+  it('rejects actions that conflict with the visible status filter', () => {
+    const h = createHarness({ tenantId: '', search: '', failingOnly: false, status: 'PAUSED' })
+
+    expect(h.bulk.canOpen('PAUSE')).toBe(false)
+    expect(h.bulk.unsupportedReason('PAUSE')).toContain('only applies to ACTIVE webhooks')
+    expect(h.bulk.canOpen('RESUME')).toBe(true)
+
+    h.bulk.open('PAUSE')
+    expect(h.bulk.action.value).toBeNull()
+    expect(h.list).not.toHaveBeenCalled()
   })
 
   it('blocks submission when a later preview page fails after finding matches', async () => {
@@ -223,7 +236,7 @@ describe('useWebhookFilterBulk', () => {
 
     const first = h.bulk.execute()
     await vi.waitFor(() => expect(h.bulk.running.value).toBe(true))
-    expect(h.bulk.canOpen()).toBe(true)
+    expect(h.bulk.canOpen('PAUSE')).toBe(true)
     h.bulk.open('RESUME')
     expect(h.bulk.action.value).toBe('PAUSE')
     await expect(h.bulk.execute()).resolves.toBe(false)

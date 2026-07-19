@@ -130,7 +130,7 @@ export function useBulkActionPreview<T>(options: UseBulkActionPreviewOptions<T>)
     try {
       while (hasMore && pages < maxPages && count < maxMatches) {
         if (myAbort.signal.aborted) {
-          previewError.value = 'Preview cancelled.'
+          if (abort === myAbort) previewError.value = 'Preview cancelled.'
           return
         }
         const page = await options.fetchPage(cursor)
@@ -139,7 +139,7 @@ export function useBulkActionPreview<T>(options: UseBulkActionPreviewOptions<T>)
         // Without this check, the in-flight resolution would overwrite
         // the newer walk's count/samples on the shared refs.
         if (myAbort.signal.aborted) {
-          previewError.value = 'Preview cancelled.'
+          if (abort === myAbort) previewError.value = 'Preview cancelled.'
           return
         }
         pages++
@@ -179,7 +179,10 @@ export function useBulkActionPreview<T>(options: UseBulkActionPreviewOptions<T>)
   }
 
   function cancelPreview() {
-    abort?.abort()
+    const current = abort
+    abort = null
+    current?.abort()
+    if (current) previewError.value = 'Preview cancelled.'
     previewLoading.value = false
   }
 

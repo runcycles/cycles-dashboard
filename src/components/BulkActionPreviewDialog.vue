@@ -137,10 +137,14 @@ const SERVER_MAX = props.serverMaxPerRequest ?? 500
         <p class="text-sm text-gray-800 dark:text-gray-100 mb-2">
           <strong class="tabular-nums">
             <template v-if="cappedAtMax">{{ SERVER_MAX }}+</template>
+            <template v-else-if="cappedAtPages">{{ count.toLocaleString() }}+</template>
             <template v-else>{{ count.toLocaleString() }}</template>
           </strong>
-          {{ itemNounPlural }} will be affected.
-          <span v-if="cappedAtPages" class="muted-sm">(partial count — narrow the filter for an exact total)</span>
+          <template v-if="cappedAtPages">
+            {{ ` ${itemNounPlural} are known to match.` }}
+            <span class="muted-sm">(lower bound — narrow the filter for an exact total)</span>
+          </template>
+          <template v-else>{{ ` ${itemNounPlural} will be affected.` }}</template>
         </p>
 
         <ul
@@ -158,7 +162,7 @@ const SERVER_MAX = props.serverMaxPerRequest ?? 500
           </li>
         </ul>
         <p v-if="count > samples.length" class="mt-1 muted-sm">
-          Showing first {{ samples.length }} of {{ cappedAtMax ? `${SERVER_MAX}+` : count.toLocaleString() }} matching {{ itemNounPlural }}.
+          Showing first {{ samples.length }} of {{ cappedAtMax ? `${SERVER_MAX}+` : cappedAtPages ? `${count.toLocaleString()}+` : count.toLocaleString() }} matching {{ itemNounPlural }}.
         </p>
       </div>
 
@@ -222,6 +226,7 @@ const SERVER_MAX = props.serverMaxPerRequest ?? 500
           <template v-else-if="loading">Counting…</template>
           <template v-else-if="count === 0">{{ actionVerb }}</template>
           <template v-else-if="cappedAtMax">Too many matches</template>
+          <template v-else-if="cappedAtPages">{{ actionVerb }} at least {{ count.toLocaleString() }} {{ itemNounPlural }}</template>
           <template v-else>{{ actionVerb }} {{ count.toLocaleString() }} {{ itemNounPlural }}</template>
         </button>
       </div>

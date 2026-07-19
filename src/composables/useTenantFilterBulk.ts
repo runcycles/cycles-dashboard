@@ -19,6 +19,7 @@ import { useBulkActionPreview } from './useBulkActionPreview'
 export interface TenantFilterBulkFilters {
   search: string
   parentTenantId: string
+  status: string
 }
 
 export interface TenantFilterBulkResult {
@@ -46,6 +47,7 @@ export interface UseTenantFilterBulkOptions {
 interface TenantFilterSnapshot {
   search: string
   parentTenantId: string
+  status: string
 }
 
 interface TenantFilterBulkSelection {
@@ -65,7 +67,22 @@ function normalizedSnapshot(filters: TenantFilterBulkFilters): TenantFilterSnaps
   return Object.freeze({
     search: filters.search.trim(),
     parentTenantId: filters.parentTenantId,
+    status: filters.status,
   })
+}
+
+function representabilityError(
+  filters: TenantFilterBulkFilters,
+  action: TenantFilterBulkAction,
+): string {
+  if (filters.parentTenantId === '__root__') {
+    return 'Bulk actions are unavailable for the root-level filter because the server has no equivalent parent selector.'
+  }
+  const required = requiredStatus(action)
+  if (filters.status && filters.status !== required) {
+    return `${formatActionVerb(action)} only applies to ${required} tenants, but the current status filter is ${filters.status}.`
+  }
+  return ''
 }
 
 function buildFilter(
@@ -133,14 +150,19 @@ export function useTenantFilterBulk(options: UseTenantFilterBulkOptions) {
     return parts.join(' AND ')
   })
 
-  function canOpen(): boolean {
-    return options.getFilters().parentTenantId !== '__root__'
+  function unsupportedReason(nextAction: TenantFilterBulkAction): string {
+    return representabilityError(options.getFilters(), nextAction)
+  }
+
+  function canOpen(nextAction: TenantFilterBulkAction): boolean {
+    return !unsupportedReason(nextAction)
   }
 
   function open(nextAction: TenantFilterBulkAction): void {
-    if (running.value || !canOpen()) return
-    const snapshot = normalizedSnapshot(options.getFilters())
-    if (snapshot.parentTenantId === '__root__') return
+    if (running.value) return
+    const currentFilters = options.getFilters()
+    if (representabilityError(currentFilters, nextAction)) return
+    const snapshot = normalizedSnapshot(currentFilters)
     selection.value = Object.freeze({ action: nextAction, filters: snapshot })
     submitError.value = ''
     void preview.startPreview()
@@ -220,6 +242,7 @@ export function useTenantFilterBulk(options: UseTenantFilterBulkOptions) {
     running,
     submitError,
     summary,
+    unsupportedReason,
     preview,
     canOpen,
     open,
