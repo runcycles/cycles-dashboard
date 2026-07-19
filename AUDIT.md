@@ -64,9 +64,10 @@ available to keyboard and touch operators.
 The shared preview walker had one related truthfulness edge: `has_more=true`
 with an empty continuation cursor broke the loop but marked `reachedEnd=true`.
 Callers could then send a lower-bound count as exact. A missing continuation is
-now reported through the existing partial-preview state, which keeps the count
-visible but omits `expected_count`. This matches the defensive cursor contract
-already used by Overview and Tenant Detail.
+now a blocking protocol error: the dialog explains that the server omitted its
+cursor, and all three composables reject direct execution. Intentional 20-page
+caps remain a separately confirmable lower-bound state; malformed pagination
+cannot be submitted.
 
 Self-review found a second incomplete-walk boundary: when an early page found
 matches and a later page threw, the walker correctly displayed the error but
@@ -83,8 +84,9 @@ a read-only computed projection, preventing a caller from changing PAUSE to
 RESUME (or SUSPEND to REACTIVATE) after Preview. `canOpen` now reports only
 whether the live filter is representable; `open` retains the in-flight guard.
 This keeps disabled-state copy truthful during settlement without permitting a
-second Preview. The shared `cappedAtPages` contract also documents both bounded
-page walks and missing continuation cursors.
+second Preview. The shared `cappedAtPages` contract now represents only an
+intentional bounded page walk; missing continuations use `previewError` and
+cannot share its confirmable state.
 
 Final self-review closed four further truthfulness and usability edges. First,
 the toolbar used `statusFilter` to advertise filter-wide controls but omitted
@@ -115,33 +117,37 @@ no longer hide the only explanation behind hover.
 A further whole-PR pass closed the remaining presentation edge at the zero
 boundary. An incomplete scan that found no eligible rows previously entered the
 exact-empty branch and claimed that no rows matched, even though the list was
-not exhausted. It now reports that zero matches were found in the scanned pages, says
-the total is unknown, keeps Confirm disabled, and directs the operator to narrow
-the filter. Webhook Preview also forwards its action-derived ACTIVE/PAUSED
-status to the list endpoint, which already supports that predicate, so bounded
-walks do not waste pages scanning statuses the bulk request cannot target. The
-client-side status predicate remains as a defensive mirror of the mutation.
+not exhausted. It now reports that zero matches were found in the scanned
+pages, says the total is unknown, keeps Confirm disabled, and directs the
+operator to narrow the filter. Tenant and Webhook Preview now forward every
+list-native predicate
+from the frozen mutation tuple: action-derived status, tenant parent/ownership,
+literal search, and an explicit `limit=100`. The bounded 20-page walk therefore
+inspects up to the documented 2,000 relevant rows instead of accepting the
+server's 50-row default and scanning unrelated ownership/status slices. The
+client-side predicates remain as defensive mirrors of the mutation.
 
-The same dialog pass fixes its last count-copy inconsistencies: exact one-row
-results use the singular noun, while the match-capped state says that 500+ rows
-match the filter rather than promising they “will be affected” immediately
-above a disabled confirmation and the server-limit warning. Component and
-composable tests pin exact-empty versus partial-zero copy, singular labels,
-over-limit wording, and ACTIVE/PAUSED list request shapes.
+The same dialog pass fixes its last count-copy inconsistencies: exact and
+lower-bound one-row results use the singular noun, while the match-capped state
+says that 500+ rows match the filter rather than promising they “will be
+affected” immediately above a disabled confirmation and the server-limit
+warning. Component and composable tests pin exact-empty versus partial-zero
+copy, singular labels, over-limit wording, complete native-filter list request
+shapes, and malformed-continuation submission blocking.
 
 The two views retain URL/filter refs, polling and page-one data, Load more,
 export, row-select batches, mutations outside this filter-wide path, dialogs,
 virtualization, and list presentation. `TenantsView.vue` drops from 1,122 to
 998 lines and `WebhooksView.vue` from 1,102 to 1,002. Focused tests cover immutable
-multi-page tuples, action-derived status, exact and malformed-continuation
-counts, unsupported filter gates, direct-call defense, duplicate submission,
+multi-page tuples, action-derived status, exact counts and malformed-
+continuation blocking, unsupported filter gates, direct-call defense, duplicate submission,
 partial-walk error blocking and lower-bound copy, supersession ownership,
 status/action compatibility, accessible disabled-state explanations,
 count/limit error recovery, result capture, read-only action ownership, and
 the live failing-only URL integration. No
-governance-spec, server-fleet, endpoint, successful wire shape, polling
+governance-spec, server-fleet, endpoint, successful mutation shape, polling
 cadence, or list/table/dialog layout change. Final validation:
-1,364/1,364 tests across 116 files; 97.45% line coverage; lint, strict
+1,365/1,365 tests across 116 files; 97.46% line coverage; lint, strict
 typecheck, production build, and development/production Compose validation
 pass.
 
@@ -2913,11 +2919,18 @@ Each spec mounts the view with a specified `route.query` shape and asserts the `
 
 **What shipped.** A dashboard-side cursor-walk preview that armies the Confirm button only after the operator sees the resolved count + sample rows.
 
-1. **`src/composables/useBulkActionPreview.ts`** — generic cursor-walking preview composable. Walks `fetchPage(cursor)` up to `maxMatches=501` (one above the server's 500-row cap) and `maxPages=20`. Applies a caller-supplied `filterFn` client-side so the action-derived dimensions the list endpoints don't accept server-side (status, parent_tenant_id, wildcard URL match) mirror what the server re-applies inside the bulk endpoint. Surfaces `previewCount`, first 10 `previewSamples`, `cappedAtMax` / `cappedAtPages` / `reachedEnd` flags, and a `previewError` string. `AbortController`-based cancel — a fresh `startPreview()` supersedes an in-flight earlier one and re-checks the abort flag *after* the `await` to drop stale page resolutions.
+1. **`src/composables/useBulkActionPreview.ts`** — generic cursor-walking preview composable. Walks `fetchPage(cursor)` up to `maxMatches=501` (one above the server's 500-row cap) and `maxPages=20`. Applies a caller-supplied `filterFn` client-side as a full defensive mirror of what the server re-applies inside the bulk endpoint; v0.1.25.77 also pushes every list-native predicate into `fetchPage` (see the correction below). Surfaces `previewCount`, first 10 `previewSamples`, `cappedAtMax` / `cappedAtPages` / `reachedEnd` flags, and a `previewError` string. `AbortController`-based cancel — a fresh `startPreview()` supersedes an in-flight earlier one and re-checks the abort flag *after* the `await` to drop stale page resolutions.
 2. **`src/components/BulkActionPreviewDialog.vue`** — operator-facing preview modal. Four user-visible states: loading ("Counting matches — N found so far" + spinner, Confirm label reads `Counting…` disabled), empty ("No {noun} match the current filter", Confirm disabled), ready ("{count} {noun} will be affected" + first 10 samples as a monospace ID list with status pill, Confirm reads `{Verb} {count} {noun}` enabled), capped-at-max ("500+ matches — narrow the filter", Confirm reads `Too many matches` disabled). A fifth `cappedAtPages` state annotates a partial count when the walk halts on page budget. Mirrors `ConfirmAction`'s a11y pattern: `useFocusTrap`, sr-only focus sink, `aria-live="polite"` announcement while submitting, `aria-busy="true"` on the dialog root, Cancel disabled while a submit is in flight (no abandoning an in-flight POST).
 3. **`TenantsView.vue` + `WebhooksView.vue`** — swap the pre-commit `ConfirmAction` summary for the preview dialog. Filter predicate captures the action-derived status (`ACTIVE` for SUSPEND/PAUSE, `SUSPENDED`/`PAUSED` for REACTIVATE/RESUME) plus `parent_tenant_id` / `tenant_id` filters and the wildcard `url` matcher on `WebhooksView`. On submit, `expected_count` is only sent when `reachedEnd` is true (exact count) — when capped, passing `expected_count` would guarantee a `COUNT_MISMATCH` at the server, so the dashboard omits the hint and lets the 500-row cap handle the guard. Submit errors stay inline in the dialog instead of toasting so the operator can adjust and retry without losing dialog state.
 
-**Why dashboard-side and not a server preview endpoint.** The AUDIT log previously noted that a server-side count endpoint is deferred to a future spec bump. Walking `listTenants` / `listWebhooks` with the same server-side `search` filter and applying the action predicate client-side is bounded (page size × maxPages = 2000 items inspected in the worst case) and avoids a round-trip spec change. The 500-row `LIMIT_EXCEEDED` + `COUNT_MISMATCH` semantics at the server remain the authoritative guard.
+**Why dashboard-side and not a server preview endpoint.** The AUDIT log previously noted that a server-side count endpoint is deferred to a future spec bump. The original O1 implementation walked `listTenants` / `listWebhooks` with the same server-side `search` filter and applied the action predicate client-side; the walk was bounded and avoided a round-trip spec change. The 500-row `LIMIT_EXCEEDED` + `COUNT_MISMATCH` semantics at the server remain the authoritative guard.
+
+**2026-07-18 correction (v0.1.25.77).** The list endpoints also accept the
+mutation's status and tenant parent/ownership predicates. The current preview
+owners push every representable predicate plus `limit=100` into each page read,
+while retaining the client predicate as a defensive mirror. A missing
+continuation cursor is a blocking protocol error; only the intentional page cap
+produces a confirmable lower bound.
 
 **Validation gates (CLAUDE.md).**
 

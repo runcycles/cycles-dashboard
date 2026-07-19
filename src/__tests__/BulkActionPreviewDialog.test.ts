@@ -145,6 +145,15 @@ describe('BulkActionPreviewDialog', () => {
       expect(w.text()).toContain('narrow the filter')
     })
 
+    it('uses singular grammar for a one-row lower bound', () => {
+      const w = mount(BulkActionPreviewDialog, {
+        props: { ...baseProps, count: 1, samples: [sample('a')], cappedAtPages: true },
+      })
+      expect(w.text()).toContain('1+ tenant is known to match')
+      expect(w.findAll('button').at(-1)?.text()).toContain('Suspend at least 1 tenant')
+      expect(w.findAll('button').at(-1)?.text()).not.toContain('1 tenants')
+    })
+
     it('does not claim an exact empty result when the bounded scan found zero', () => {
       const w = mount(BulkActionPreviewDialog, {
         props: { ...baseProps, count: 0, cappedAtPages: true },

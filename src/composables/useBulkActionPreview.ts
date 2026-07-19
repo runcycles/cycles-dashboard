@@ -4,11 +4,10 @@ import { ref } from 'vue'
 // previously sent a single POST to /v1/admin/.../bulk-action with no
 // preview — the operator typed a filter and committed it sight-unseen.
 // A mistyped filter could suspend hundreds of tenants. This composable
-// is the dashboard-side preview: walk listTenants/listWebhooks with the
-// SAME server-side filter as the bulk action, then apply the action's
-// derived predicate (status, parent, etc. that the list endpoints don't
-// accept server-side) client-side. Surface a count + first 10 sample
-// rows for operator review BEFORE the confirm button arms.
+// is the dashboard-side preview: walk listTenants/listWebhooks with every
+// bulk predicate those list endpoints can evaluate, then mirror the full
+// mutation predicate client-side as defense in depth. Surface a count +
+// first 10 sample rows for operator review BEFORE the confirm button arms.
 //
 // Why dashboard-side and not a server preview endpoint:
 //   - Server has no count-only endpoint today. AUDIT.md flagged this as
@@ -42,10 +41,10 @@ export interface UseBulkActionPreviewOptions<T> {
   fetchPage: (cursor: string) => Promise<{ items: readonly T[]; hasMore: boolean; nextCursor: string }>
   /**
    * Filter each page client-side to match the bulk action's full filter set.
-   * Captures the dimensions the list endpoint doesn't accept server-side
-   * (action-derived status, parent_tenant_id, etc.). Should mirror what the
-   * server applies inside the bulk endpoint exactly — drift here means
-   * the preview lies.
+   * Callers should also push every representable predicate into fetchPage so
+   * the bounded walk does not spend pages on irrelevant rows. This function
+   * remains the defensive mirror of what the bulk endpoint applies — drift
+   * here means the preview lies.
    */
   filterFn: (item: T) => boolean
   /** Map a matching item to a sample row for the preview UI. */
@@ -93,9 +92,9 @@ export function useBulkActionPreview<T>(options: UseBulkActionPreviewOptions<T>)
   // When the walk hits maxMatches: count is a lower bound; bulk submit
   // must not pass expected_count.
   const cappedAtMax = ref(false)
-  // When the walk cannot finish (page cap or a malformed missing
-  // continuation cursor) without hitting maxMatches: count is a partial
-  // sample, not a true total.
+  // When the walk hits the intentional page cap without maxMatches: count is
+  // a lower bound, not a true total. Malformed pagination is an error instead
+  // and must never share this confirmable state.
   const cappedAtPages = ref(false)
   // When the walk completed naturally (hasMore=false) without either cap:
   // count is exact and bulk submit can pass expected_count for tighter
@@ -126,7 +125,6 @@ export function useBulkActionPreview<T>(options: UseBulkActionPreviewOptions<T>)
     const labels: Record<string, string> = {}
     let hasMore = true
     let missingContinuation = false
-
     try {
       while (hasMore && pages < maxPages && count < maxMatches) {
         if (myAbort.signal.aborted) {
@@ -161,12 +159,13 @@ export function useBulkActionPreview<T>(options: UseBulkActionPreviewOptions<T>)
         cursor = page.nextCursor
         if (hasMore && !cursor) {
           missingContinuation = true
+          previewError.value = 'Preview could not continue because the server omitted a continuation cursor. Close and retry.'
           break
         }
       }
       cappedAtMax.value = count >= maxMatches
-      cappedAtPages.value = !cappedAtMax.value && hasMore && (pages >= maxPages || missingContinuation)
-      reachedEnd.value = !cappedAtMax.value && !cappedAtPages.value
+      cappedAtPages.value = !cappedAtMax.value && !missingContinuation && hasMore && pages >= maxPages
+      reachedEnd.value = !cappedAtMax.value && !cappedAtPages.value && !hasMore
     } catch (e) {
       if (myAbort.signal.aborted) return
       previewError.value = e instanceof Error ? e.message : String(e)

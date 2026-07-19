@@ -27,7 +27,7 @@ const props = defineProps<{
   samples: PreviewSample[]
   /** True iff the walk hit the maxMatches cap (count is a lower bound; submit would LIMIT_EXCEEDED). */
   cappedAtMax: boolean
-  /** True iff a page bound or missing continuation stops the walk before exhaustion (count is partial). */
+  /** True iff the intentional page bound stops the walk before exhaustion (count is partial). */
   cappedAtPages: boolean
   /**
    * True iff the walk completed naturally (count is exact). Callers
@@ -83,7 +83,7 @@ onMounted(() => document.addEventListener('keydown', onKeydown))
 onUnmounted(() => document.removeEventListener('keydown', onKeydown))
 
 const SERVER_MAX = props.serverMaxPerRequest ?? 500
-const exactCountNoun = computed(() => props.count === 1 ? props.itemNounSingular : props.itemNounPlural)
+const countNoun = computed(() => props.count === 1 ? props.itemNounSingular : props.itemNounPlural)
 </script>
 
 <template>
@@ -157,10 +157,10 @@ const exactCountNoun = computed(() => props.count === 1 ? props.itemNounSingular
             {{ ` ${itemNounPlural} match the current filter.` }}
           </template>
           <template v-else-if="cappedAtPages">
-            {{ ` ${itemNounPlural} are known to match.` }}
+            {{ ` ${countNoun} ${count === 1 ? 'is' : 'are'} known to match.` }}
             <span class="muted-sm">(lower bound — narrow the filter for an exact total)</span>
           </template>
-          <template v-else>{{ ` ${exactCountNoun} will be affected.` }}</template>
+          <template v-else>{{ ` ${countNoun} will be affected.` }}</template>
         </p>
 
         <ul
@@ -242,8 +242,8 @@ const exactCountNoun = computed(() => props.count === 1 ? props.itemNounSingular
           <template v-else-if="loading">Counting…</template>
           <template v-else-if="count === 0">{{ actionVerb }}</template>
           <template v-else-if="cappedAtMax">Too many matches</template>
-          <template v-else-if="cappedAtPages">{{ actionVerb }} at least {{ count.toLocaleString() }} {{ itemNounPlural }}</template>
-          <template v-else>{{ actionVerb }} {{ count.toLocaleString() }} {{ exactCountNoun }}</template>
+          <template v-else-if="cappedAtPages">{{ actionVerb }} at least {{ count.toLocaleString() }} {{ countNoun }}</template>
+          <template v-else>{{ actionVerb }} {{ count.toLocaleString() }} {{ countNoun }}</template>
         </button>
       </div>
     </div>

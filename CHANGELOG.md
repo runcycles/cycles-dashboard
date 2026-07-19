@@ -45,20 +45,21 @@ UX work that does not advance spec alignment.
   screen-reader-linked explanations instead of relying on disabled-button
   tooltips.
 - A list response that reports `has_more=true` without a continuation cursor is
-  now classified as a partial preview. The dashboard omits `expected_count`
-  instead of treating the lower bound as exact, and the dialog consistently
-  says “N+” / “at least N” wherever that partial count appears.
+  now a blocking protocol error instead of a confirmable partial preview. The
+  dashboard retains lower-bound confirmation only for the intentional 20-page
+  safety cap; malformed pagination cannot be submitted.
 - A bounded Preview that finds zero matches before exhausting the list no
   longer claims the complete filter is empty. It discloses that only the
   scanned pages are known, keeps confirmation disabled, and asks the operator
   to narrow the filter for an exact result.
-- Webhook Preview forwards the action-derived ACTIVE/PAUSED status to the list
-  endpoint as well as retaining the client-side predicate. This avoids
-  needlessly spending the bounded page budget on statuses the bulk request
-  cannot target.
-- Exact one-row Preview copy now uses singular nouns, and the over-limit state
-  says that 500+ rows match the filter instead of saying they “will be
-  affected” beside a disabled confirmation.
+- Tenant and webhook Preview now forward every natively representable mutation
+  predicate to their list endpoints (`status`, parent/tenant ownership, and
+  literal search) with the server's 100-row page limit. Defensive client-side
+  predicates remain, but the 20-page walk no longer spends its 2,000-row budget
+  scanning rows the mutation cannot target.
+- Exact and lower-bound one-row Preview copy now uses singular nouns, and the
+  over-limit state says that 500+ rows match the filter instead of saying they
+  “will be affected” beside a disabled confirmation.
 - A preview-page failure after earlier pages found matches now disables Confirm
   and is rejected by every filter-bulk composable. A failed walk's incomplete
   count can no longer be submitted without the server's exact-count drift guard.
@@ -72,8 +73,8 @@ UX work that does not advance spec alignment.
   can be changed; direct execution without an owned Preview snapshot is also
   refused.
 
-No API endpoint, successful request shape, server/spec requirement, or polling
-cadence changes. Validation: 1,364 tests; 97.45% line coverage; lint,
+No API endpoint, successful mutation shape, server/spec requirement, or polling
+cadence changes. Validation: 1,365 tests; 97.46% line coverage; lint,
 typecheck, production build, and both Compose configurations pass.
 
 ## [0.1.25.76] — 2026-07-18

@@ -12,6 +12,7 @@ import type {
   TenantBulkFilter,
 } from '../types'
 import { formatBulkRequestError } from '../utils/errorCodeMessages'
+import { LIST_PAGE_LIMIT } from '../utils/cursorWalk'
 import { toMessage } from '../utils/errors'
 import { generateIdempotencyKey } from '../utils/idempotencyKey'
 import { useBulkActionPreview } from './useBulkActionPreview'
@@ -113,9 +114,17 @@ export function useTenantFilterBulk(options: UseTenantFilterBulkOptions) {
 
   const preview = useBulkActionPreview<Tenant>({
     fetchPage: async (cursor) => {
-      const snapshot = selection.value?.filters
-      if (!snapshot) return { items: [], hasMore: false, nextCursor: '' }
-      const params: Record<string, string> = {}
+      const ownedSelection = selection.value
+      if (!ownedSelection) return { items: [], hasMore: false, nextCursor: '' }
+      const snapshot = ownedSelection.filters
+      // Tenant lists natively accept every representable bulk predicate. Push
+      // them server-side so the bounded walk spends its 20-page budget only on
+      // rows the mutation can target; filterFn remains the defensive mirror.
+      const params: Record<string, string> = {
+        status: requiredStatus(ownedSelection.action),
+        limit: String(LIST_PAGE_LIMIT),
+      }
+      if (snapshot.parentTenantId) params.parent_tenant_id = snapshot.parentTenantId
       if (snapshot.search) params.search = snapshot.search
       if (cursor) params.cursor = cursor
       const response = await (options.list ?? listTenantsDefault)(params)

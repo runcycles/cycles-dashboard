@@ -12,6 +12,7 @@ import type {
   WebhookSubscription,
 } from '../types'
 import { formatBulkRequestError } from '../utils/errorCodeMessages'
+import { LIST_PAGE_LIMIT } from '../utils/cursorWalk'
 import { toMessage } from '../utils/errors'
 import { generateIdempotencyKey } from '../utils/idempotencyKey'
 import { useBulkActionPreview } from './useBulkActionPreview'
@@ -125,10 +126,14 @@ export function useWebhookFilterBulk(options: UseWebhookFilterBulkOptions) {
       const ownedSelection = selection.value
       if (!ownedSelection) return { items: [], hasMore: false, nextCursor: '' }
       const snapshot = ownedSelection.filters
-      // Webhook lists natively accept status. Push the action-derived source
-      // status server-side so the bounded preview does not spend its page
-      // budget scanning rows the bulk endpoint can never target.
-      const params: Record<string, string> = { status: requiredStatus(ownedSelection.action) }
+      // Webhook lists natively accept every representable bulk predicate. Push
+      // them server-side so the bounded preview spends its page budget only on
+      // rows the mutation can target; filterFn remains the defensive mirror.
+      const params: Record<string, string> = {
+        status: requiredStatus(ownedSelection.action),
+        limit: String(LIST_PAGE_LIMIT),
+      }
+      if (snapshot.tenantId) params.tenant_id = snapshot.tenantId
       if (snapshot.search) params.search = snapshot.search
       if (cursor) params.cursor = cursor
       const response = await (options.list ?? listWebhooksDefault)(params)

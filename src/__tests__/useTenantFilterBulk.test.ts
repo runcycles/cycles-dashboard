@@ -123,8 +123,8 @@ describe('useTenantFilterBulk', () => {
     await h.preview()
 
     expect(h.list.mock.calls).toEqual([
-      [{ search: 'old' }],
-      [{ search: 'old', cursor: 'cursor-1' }],
+      [{ status: 'ACTIVE', limit: '100', parent_tenant_id: 'parent-a', search: 'old' }],
+      [{ status: 'ACTIVE', limit: '100', parent_tenant_id: 'parent-a', search: 'old', cursor: 'cursor-1' }],
     ])
     expect(h.bulk.summary.value).toBe('status=ACTIVE AND parent_tenant_id=parent-a AND search="old"')
 
@@ -151,6 +151,7 @@ describe('useTenantFilterBulk', () => {
     await h.preview('REACTIVATE')
     await h.bulk.execute()
 
+    expect(h.list).toHaveBeenCalledWith({ status: 'SUSPENDED', limit: '100' })
     expect(h.submit.mock.calls[0]?.[0]).toMatchObject({
       filter: { status: 'SUSPENDED' },
       action: 'REACTIVATE',
@@ -159,16 +160,18 @@ describe('useTenantFilterBulk', () => {
     expect(h.onResult).toHaveBeenCalledWith(expect.objectContaining({ actionVerb: 'Reactivate' }))
   })
 
-  it('omits expected_count when has_more lacks a usable continuation cursor', async () => {
+  it('blocks submission when has_more lacks a usable continuation cursor', async () => {
     const h = createHarness()
     h.list.mockResolvedValue({ tenants: [tenant('one')], has_more: true })
 
     await h.preview()
-    expect(h.bulk.preview.cappedAtPages.value).toBe(true)
+    expect(h.bulk.preview.previewError.value).toContain('omitted a continuation cursor')
+    expect(h.bulk.preview.cappedAtPages.value).toBe(false)
     expect(h.bulk.preview.reachedEnd.value).toBe(false)
 
-    await h.bulk.execute()
-    expect(h.submit.mock.calls[0]?.[0]).not.toHaveProperty('expected_count')
+    await expect(h.bulk.execute()).resolves.toBe(false)
+    expect(h.submit).not.toHaveBeenCalled()
+    expect(h.refresh).not.toHaveBeenCalled()
   })
 
   it('rejects actions that conflict with the visible status filter', () => {

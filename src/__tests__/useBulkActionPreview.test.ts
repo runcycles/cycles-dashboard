@@ -105,18 +105,21 @@ describe('useBulkActionPreview', () => {
     expect(p.reachedEnd.value).toBe(false)
   })
 
-  it('treats has_more without a continuation cursor as partial, never exact', async () => {
+  it('treats has_more without a continuation cursor as a blocking protocol error', async () => {
     const fetchPage = pages({
       items: [row('a')],
       hasMore: true,
       nextCursor: '',
     })
-    const p = useBulkActionPreview<Row>({ fetchPage, filterFn: acceptAll, toSample })
+    // maxPages=1 proves the malformed response cannot also fall into the
+    // confirmable page-cap state when both boundaries occur on the same page.
+    const p = useBulkActionPreview<Row>({ fetchPage, filterFn: acceptAll, toSample, maxPages: 1 })
 
     await p.startPreview()
 
     expect(p.previewCount.value).toBe(1)
-    expect(p.cappedAtPages.value).toBe(true)
+    expect(p.previewError.value).toContain('omitted a continuation cursor')
+    expect(p.cappedAtPages.value).toBe(false)
     expect(p.reachedEnd.value).toBe(false)
     expect(fetchPage).toHaveBeenCalledTimes(1)
   })

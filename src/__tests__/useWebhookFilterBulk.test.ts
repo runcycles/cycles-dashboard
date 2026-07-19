@@ -119,8 +119,8 @@ describe('useWebhookFilterBulk', () => {
     await h.preview()
 
     expect(h.list.mock.calls).toEqual([
-      [{ status: 'ACTIVE', search: 'old' }],
-      [{ status: 'ACTIVE', search: 'old', cursor: 'cursor-1' }],
+      [{ status: 'ACTIVE', limit: '100', tenant_id: 'acme', search: 'old' }],
+      [{ status: 'ACTIVE', limit: '100', tenant_id: 'acme', search: 'old', cursor: 'cursor-1' }],
     ])
     expect(h.bulk.summary.value).toBe('status=ACTIVE AND tenant_id=acme AND search="old"')
 
@@ -146,7 +146,7 @@ describe('useWebhookFilterBulk', () => {
     await h.preview('RESUME')
     await h.bulk.execute()
 
-    expect(h.list).toHaveBeenCalledWith({ status: 'PAUSED' })
+    expect(h.list).toHaveBeenCalledWith({ status: 'PAUSED', limit: '100', tenant_id: 'acme' })
     expect(h.submit.mock.calls[0]?.[0]).toMatchObject({
       filter: { status: 'PAUSED', tenant_id: 'acme' },
       action: 'RESUME',
