@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.77 (2026-07-18)
+**Current release:** v0.1.25.77 (2026-07-19)
 
 ## Baseline requirements
 
@@ -17,7 +17,7 @@
 
 Newest at the top. Older entries preserved verbatim.
 
-### 2026-07-18 — v0.1.25.77: tenant/webhook filter-bulk snapshot ownership
+### 2026-07-19 — v0.1.25.77: tenant/webhook filter-bulk snapshot ownership
 
 `TenantsView` and `WebhooksView` still owned their complete filter-wide
 mutation protocols inline: action-derived eligibility, bounded cursor Preview,
@@ -165,10 +165,25 @@ status/action compatibility, accessible disabled-state explanations,
 count/limit error recovery, result capture, read-only action ownership, and
 the live failing-only URL integration. No
 governance-spec, server-fleet, endpoint, successful mutation shape, polling
-cadence, or list/table/dialog layout change. Final validation:
+cadence, or list/table/dialog layout change. Feature-branch validation:
 1,371/1,371 tests across 116 files; 97.47% line coverage; lint, strict
 typecheck, production build, and development/production Compose validation
 pass.
+
+Before release, all outstanding Dependabot updates were reviewed and merged:
+`actions/setup-node` v7.0.0 and CodeQL `upload-sarif` v4.37.1 remain pinned to
+verified full commit SHAs; the reusable `runcycles/.github` TypeScript workflow
+pin advanced after its input/job contract and same-organization diff were
+checked; and Tailwind's Vite plugin, Vite's Vue plugin, Vitest, `vue-tsc`, and
+ESLint advanced to their green patch/major updates. ESLint 10's Node floor
+matches this repository's `>=20.19.0` contract, every installed parser/config
+peer range includes v10, and the directly consumed `@eslint/js` recommended
+preset is aligned to its v10-compatible 10.0.1 release rather than leaving the
+rule set on major 9. The E2E workflow's setup-node annotation now identifies
+the pinned v7 action accurately. `npm audit` reports zero vulnerabilities.
+Post-rollup release validation reproduced a clean `npm ci`; 1,371/1,371 tests
+pass across 116 files with 97.47% line coverage; ESLint 10, strict typecheck,
+the production build, and development/production Compose validation are clean.
 
 ### 2026-07-18 — v0.1.25.76: truthful Tenant Detail acquisition
 

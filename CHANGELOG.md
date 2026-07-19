@@ -15,7 +15,7 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
-## [0.1.25.77] — 2026-07-18
+## [0.1.25.77] — 2026-07-19
 
 ### Changed
 
@@ -24,6 +24,9 @@ UX work that does not advance spec alignment.
   views retain filters, row selection, polling, dialogs, and presentation.
 - `TenantsView` drops from 1,174 to 1,048 lines and `WebhooksView` from 1,155 to
   1,053 lines without changing the existing preview or result-dialog layout.
+- Build, test, lint, and CI dependencies are current through the pre-release
+  Dependabot rollup, including ESLint 10 with its matching `@eslint/js` preset
+  and SHA-pinned setup-node v7, CodeQL, and shared TypeScript CI workflows.
 
 ### Fixed
 
