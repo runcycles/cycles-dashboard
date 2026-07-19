@@ -120,11 +120,11 @@ exact-empty branch and claimed that no rows matched, even though the list was
 not exhausted. It now reports that zero matches were found in the scanned
 pages, says the total is unknown, keeps Confirm disabled, and directs the
 operator to narrow the filter. Tenant and Webhook Preview now forward every
-list-native predicate
-from the frozen mutation tuple: action-derived status, tenant parent/ownership,
-literal search, and an explicit `limit=100`. The bounded 20-page walk therefore
-inspects up to the documented 2,000 relevant rows instead of accepting the
-server's 50-row default and scanning unrelated ownership/status slices. The
+list-native predicate from the frozen mutation tuple: action-derived status,
+tenant parent/ownership, literal search, and an explicit `limit=100`. The
+bounded 20-page walk therefore inspects up to 2,000 candidate rows instead of
+accepting the server's 50-row default and scanning unrelated ownership/status
+slices; `maxMatches=501` remains the earlier stop when candidates match. The
 client-side predicates remain as defensive mirrors of the mutation.
 
 The same dialog pass fixes its last count-copy inconsistencies: exact and
@@ -135,10 +135,19 @@ warning. Component and composable tests pin exact-empty versus partial-zero
 copy, singular labels, over-limit wording, complete native-filter list request
 shapes, and malformed-continuation submission blocking.
 
+The last contract pass made the dialog's terminal-state input load-bearing.
+Previously a positive count enabled Confirm whenever the walk was not loading,
+errored, empty, or match-capped, even if neither `reachedEnd` nor
+`cappedAtPages` was true. That state is not produced by the current walker, but
+the shared destructive component did not enforce its own documented contract.
+Confirm and all three mutation owners now require an exact end or the explicit
+page-cap lower-bound state. Focused tests pin the same direct-call defense for
+budgets, tenants, and webhooks.
+
 The two views retain URL/filter refs, polling and page-one data, Load more,
 export, row-select batches, mutations outside this filter-wide path, dialogs,
-virtualization, and list presentation. `TenantsView.vue` drops from 1,122 to
-998 lines and `WebhooksView.vue` from 1,102 to 1,002. Focused tests cover immutable
+virtualization, and list presentation. `TenantsView.vue` drops from 1,174 to
+1,048 lines and `WebhooksView.vue` from 1,155 to 1,053. Focused tests cover immutable
 multi-page tuples, action-derived status, exact counts and malformed-
 continuation blocking, unsupported filter gates, direct-call defense, duplicate submission,
 partial-walk error blocking and lower-bound copy, supersession ownership,
@@ -147,7 +156,7 @@ count/limit error recovery, result capture, read-only action ownership, and
 the live failing-only URL integration. No
 governance-spec, server-fleet, endpoint, successful mutation shape, polling
 cadence, or list/table/dialog layout change. Final validation:
-1,365/1,365 tests across 116 files; 97.46% line coverage; lint, strict
+1,369/1,369 tests across 116 files; 97.46% line coverage; lint, strict
 typecheck, production build, and development/production Compose validation
 pass.
 

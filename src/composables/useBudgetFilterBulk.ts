@@ -291,6 +291,7 @@ export function useBudgetFilterBulk(options: UseBudgetFilterBulkOptions) {
       || preview.previewError.value
       || preview.previewCount.value === 0
       || preview.cappedAtMax.value
+      || (!preview.reachedEnd.value && !preview.cappedAtPages.value)
     ) return false
 
     const snapshot = listParamsSnapshot.value

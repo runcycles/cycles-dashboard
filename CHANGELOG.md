@@ -22,8 +22,8 @@ UX work that does not advance spec alignment.
 - Tenant and webhook filter-wide suspend/pause protocols now run through
   focused `useTenantFilterBulk` and `useWebhookFilterBulk` composables. The
   views retain filters, row selection, polling, dialogs, and presentation.
-- `TenantsView` drops from 1,122 to 998 lines and `WebhooksView` from 1,102 to
-  1,002 lines without changing the existing preview or result-dialog layout.
+- `TenantsView` drops from 1,174 to 1,048 lines and `WebhooksView` from 1,155 to
+  1,053 lines without changing the existing preview or result-dialog layout.
 
 ### Fixed
 
@@ -63,6 +63,9 @@ UX work that does not advance spec alignment.
 - A preview-page failure after earlier pages found matches now disables Confirm
   and is rejected by every filter-bulk composable. A failed walk's incomplete
   count can no longer be submitted without the server's exact-count drift guard.
+- Positive counts can only be confirmed after the Preview reaches either an
+  exact end or the intentional page cap. The shared dialog and all three
+  mutation owners independently reject unresolved state.
 - Superseded or reset preview walks lose write authority immediately. A late
   response from an aborted request can no longer overwrite a newer Preview
   with a stale “Preview cancelled” error.
@@ -74,7 +77,7 @@ UX work that does not advance spec alignment.
   refused.
 
 No API endpoint, successful mutation shape, server/spec requirement, or polling
-cadence changes. Validation: 1,365 tests; 97.46% line coverage; lint,
+cadence changes. Validation: 1,369 tests; 97.46% line coverage; lint,
 typecheck, production build, and both Compose configurations pass.
 
 ## [0.1.25.76] — 2026-07-18

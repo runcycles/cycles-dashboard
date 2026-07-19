@@ -280,10 +280,21 @@ describe('useBudgetFilterBulk', () => {
     const h = createHarness()
     h.bulk.action.value = 'CREDIT'
     h.bulk.preview.previewCount.value = 1
+    h.bulk.preview.reachedEnd.value = true
 
     await expect(h.bulk.execute()).resolves.toBe(false)
 
     expect(h.bulk.submitError.value).toBe('Select a tenant before submitting a bulk action.')
+    expect(h.submit).not.toHaveBeenCalled()
+    expect(h.refresh).not.toHaveBeenCalled()
+  })
+
+  it('rejects a positive count without an exact or intentional page-capped terminal state', async () => {
+    const h = createHarness()
+    await h.preview()
+    h.bulk.preview.reachedEnd.value = false
+
+    await expect(h.bulk.execute()).resolves.toBe(false)
     expect(h.submit).not.toHaveBeenCalled()
     expect(h.refresh).not.toHaveBeenCalled()
   })

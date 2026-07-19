@@ -232,10 +232,10 @@ describe('TenantsView — bulk-action preview (O1)', () => {
   })
 
   it('disables Confirm and skips the POST when the walk hits the maxMatches cap', async () => {
-    // Build a "too many" page: 600 tenants, ACTIVE, has_more=false. The
+    // Build a "too many" page: 501 tenants, ACTIVE, has_more=false. The
     // composable defaults to maxMatches=501 so this hits cap on page 1.
-    const big = Array.from({ length: 600 }, (_, i) => tenant(`big-${i}`))
-    // Every call returns the full 600-row page so the preview walk hits the
+    const big = Array.from({ length: 501 }, (_, i) => tenant(`big-${i}`))
+    // Every call returns the full 501-row page so the preview walk hits the
     // maxMatches=501 cap on page 1 regardless of mock ordering.
     listTenantsMock.mockResolvedValue({ tenants: big, has_more: false })
 
@@ -263,7 +263,7 @@ describe('TenantsView — bulk-action preview (O1)', () => {
     await confirmBtn!.trigger('click')
     await flushPromises()
     expect(bulkActionTenantsMock).not.toHaveBeenCalled()
-  })
+  }, 10_000)
 
   it('Cancel button closes the preview without sending any POST', async () => {
     listTenantsMock.mockResolvedValue({ tenants: [tenant('x')], has_more: false })

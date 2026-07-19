@@ -15,7 +15,7 @@ const props = defineProps<{
   actionVerb: string
   /** Plural noun for the rows: "tenants", "webhooks". */
   itemNounPlural: string
-  /** Singular noun for exact one-row copy: "tenant", "webhook". */
+  /** Singular noun for exact or lower-bound one-row copy: "tenant", "webhook". */
   itemNounSingular: string
   /** Plain-language filter summary, e.g. "status=ACTIVE AND parent_tenant_id=acme". */
   filterDescription: string
@@ -231,7 +231,7 @@ const countNoun = computed(() => props.count === 1 ? props.itemNounSingular : pr
           ref="confirmBtn"
           type="button"
           @click="$emit('confirm')"
-          :disabled="loading || submitting || Boolean(error) || count === 0 || cappedAtMax"
+          :disabled="loading || submitting || Boolean(error) || count === 0 || cappedAtMax || (!reachedEnd && !cappedAtPages)"
           :class="confirmDanger
             ? 'bg-red-600 hover:bg-red-700 text-white'
             : 'bg-gray-900 hover:bg-gray-800 text-white dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-300'"

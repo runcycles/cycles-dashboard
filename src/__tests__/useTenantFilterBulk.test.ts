@@ -213,6 +213,16 @@ describe('useTenantFilterBulk', () => {
     expect(h.refresh).not.toHaveBeenCalled()
   })
 
+  it('rejects a positive count without an exact or intentional page-capped terminal state', async () => {
+    const h = createHarness()
+    await h.preview()
+    h.bulk.preview.reachedEnd.value = false
+
+    await expect(h.bulk.execute()).resolves.toBe(false)
+    expect(h.submit).not.toHaveBeenCalled()
+    expect(h.refresh).not.toHaveBeenCalled()
+  })
+
   it('humanizes count drift and keeps the captured preview retryable', async () => {
     const h = createHarness()
     h.submit.mockRejectedValue(new ApiError(409, 'changed', 'COUNT_MISMATCH', 'req-1'))

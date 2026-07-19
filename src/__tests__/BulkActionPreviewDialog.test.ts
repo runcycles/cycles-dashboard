@@ -100,6 +100,13 @@ describe('BulkActionPreviewDialog', () => {
       expect(w.emitted('confirm')).toHaveLength(1)
     })
 
+    it('disables Confirm until the positive count owns a terminal preview state', () => {
+      const w = mount(BulkActionPreviewDialog, {
+        props: { ...baseProps, count: 3, samples, reachedEnd: false, cappedAtPages: false },
+      })
+      expect(w.findAll('button').at(-1)?.attributes('disabled')).toBeDefined()
+    })
+
     it('shows "Showing first N of M" hint when count > samples.length', () => {
       const w = mount(BulkActionPreviewDialog, { props: { ...props, count: 247 } })
       expect(w.text()).toContain('Showing first 3 of 247')
