@@ -15,6 +15,35 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.78] — 2026-07-19
+
+### Changed
+
+- Tenant Detail's suspend/reactivate/close, cascade recovery, and Emergency
+  Freeze protocols now run through the focused `useTenantLifecycle`
+  composable. The view retains acquisition, tabs, forms, routing, tables, and
+  dialog presentation, dropping from 1,490 to 1,276 lines.
+- Emergency Freeze keeps polling excluded through its post-write refresh while
+  still closing the progress dialog as soon as the cancellable batch settles.
+
+### Fixed
+
+- Suspend and reactivate now share permanent close's pre-mutation loading
+  guard. Re-entrant confirmation can no longer send duplicate status PATCHes,
+  and routine polling cannot publish through those mutation-owned refreshes.
+- Direct permanent-close execution enforces the typed tenant name in the
+  lifecycle owner, not only through the template's disabled button.
+- Only one tenant lifecycle dialog can be armed at a time. Direct status
+  requests reject transitions that are not legal from the current tenant
+  state, and cascade recovery rejects a tenant that is not already CLOSED.
+- Tenant status and Emergency Freeze triggers visibly disable while an
+  Emergency Freeze scan or post-write refresh owns the lifecycle. Guarded
+  clicks no longer appear to be accepted and then silently do nothing.
+
+No endpoint, successful request shape, capability gate, server/spec minimum,
+or dialog/table layout changes. Validation: 1,398 tests, 97.69% line coverage,
+lint, strict typecheck, production build, and both Compose configurations pass.
+
 ## [0.1.25.77] — 2026-07-19
 
 ### Changed

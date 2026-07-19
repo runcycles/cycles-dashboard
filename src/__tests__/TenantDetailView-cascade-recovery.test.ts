@@ -108,6 +108,12 @@ function apiKey(status: string): ApiKey {
   }
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => { resolve = res })
+  return { promise, resolve }
+}
+
 async function mountView() {
   const { default: TenantDetailView } = await import('../views/TenantDetailView.vue')
   const w = mount(TenantDetailView, {
@@ -230,6 +236,59 @@ describe('TenantDetailView — cascade-recovery banner (v0.1.25.44)', () => {
   })
 
   describe('cursor-truthful emergency freeze', () => {
+    it('visibly disables lifecycle actions while the action-time scan is running', async () => {
+      getTenantMock.mockResolvedValue(tenant('ACTIVE'))
+      listBudgetsMock.mockResolvedValue({ ledgers: [budget('ACTIVE')], has_more: false })
+      const w = await mountView()
+      const scan = deferred<{ ledgers: BudgetLedger[]; has_more: boolean }>()
+      listBudgetsMock.mockReturnValueOnce(scan.promise)
+
+      const openButton = w.findAll('button').find(button => button.text() === 'Emergency Freeze (1)')
+      expect(openButton).toBeDefined()
+      await openButton!.trigger('click')
+      await vi.waitFor(() => expect(openButton!.text()).toBe('Scanning budgets…'))
+
+      for (const label of ['Scanning budgets…', 'Suspend', 'Close']) {
+        const button = w.findAll('button').find(item => item.text() === label)
+        expect(button, `${label} should expose the lifecycle guard`).toBeDefined()
+        expect(button!.attributes('disabled')).toBeDefined()
+      }
+
+      scan.resolve({ ledgers: [budget('ACTIVE')], has_more: false })
+      await flushPromises()
+    })
+
+    it('keeps lifecycle actions visibly disabled through the post-freeze refresh', async () => {
+      getTenantMock.mockResolvedValue(tenant('ACTIVE'))
+      listBudgetsMock.mockResolvedValue({ ledgers: [budget('ACTIVE')], has_more: false })
+      const w = await mountView()
+      const openButton = w.findAll('button').find(button => button.text() === 'Emergency Freeze (1)')
+      await openButton!.trigger('click')
+      await flushPromises()
+
+      const settlement = deferred<{ ledgers: BudgetLedger[]; has_more: boolean }>()
+      listBudgetsMock.mockReturnValueOnce(settlement.promise)
+      const callsBeforeSettlement = listBudgetsMock.mock.calls.length
+      const confirmButton = w.findAll('button').find(button => button.text() === 'Freeze 1 budgets')
+      await confirmButton!.trigger('click')
+      await vi.waitFor(() => {
+        expect(listBudgetsMock).toHaveBeenCalledTimes(callsBeforeSettlement + 1)
+      })
+
+      for (const label of ['Emergency Freeze (1)', 'Suspend', 'Close']) {
+        const button = w.findAll('button').find(item => item.text() === label)
+        expect(button, `${label} should expose settlement ownership`).toBeDefined()
+        expect(button!.attributes('disabled')).toBeDefined()
+      }
+
+      settlement.resolve({ ledgers: [budget('FROZEN')], has_more: false })
+      await flushPromises()
+      for (const label of ['Suspend', 'Close']) {
+        const button = w.findAll('button').find(item => item.text() === label)
+        expect(button!.attributes('disabled')).toBeUndefined()
+      }
+    })
+
     it('includes an ACTIVE budget found after page one in the immutable target set', async () => {
       getTenantMock.mockResolvedValue(tenant('ACTIVE'))
       listBudgetsMock.mockImplementation(async (params: Record<string, string>) => params.cursor

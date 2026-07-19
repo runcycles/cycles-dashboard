@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.77 (2026-07-19)
+**Current release:** v0.1.25.78 (2026-07-19)
 
 ## Baseline requirements
 
@@ -16,6 +16,47 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-07-19 — v0.1.25.78: Tenant Detail lifecycle ownership
+
+After v0.1.25.76 extracted cursor-aware acquisition, `TenantDetailView` still
+interleaved every destructive tenant protocol with tabs, forms, routing, and
+tables. `useTenantLifecycle` now owns those protocols while the view retains
+presentation and non-lifecycle mutations, reducing it from 1,490 to 1,276 lines.
+
+| Owner | Responsibilities |
+|---|---|
+| `useTenantDetailData` | Authoritative tenant/child reads, publication generations, partial-state truth, and mutation refreshes. |
+| `useTenantLifecycle` | Status transitions, commit-before-refresh settlement, cascade recovery, Emergency Freeze snapshot/batch/result state, and polling exclusion. |
+| `TenantDetailView` | Capability gates, dialogs, focus handling, tabs, forms, tables, and operator copy. |
+
+**Confirmed fixes and hardening:**
+
+- One pre-mutation loading guard now covers suspend, reactivate, and permanent
+  close. Suspend/reactivate can no longer duplicate PATCHes or allow polling to
+  publish through their settlement refresh.
+- Direct calls enforce the typed CLOSE confirmation and legal source status;
+  only one lifecycle dialog can arm, and cascade recovery requires CLOSED.
+- Emergency Freeze excludes polling during its fresh action-time scan and from
+  batch settlement through the mutation-owned refresh. Its triggers visibly
+  disable during both no-dialog busy windows instead of silently rejecting clicks.
+- The composable accepts readonly source refs and exposes internal loading,
+  progress, preparation, and error refs as readonly; only the CLOSE confirmation
+  input remains writable for `v-model`.
+
+**Preserved contracts:**
+
+- Status responses commit before refresh; CLOSE verifies all cascade axes and
+  recovery re-issues idempotent `status=CLOSED`.
+- Emergency Freeze still owns a complete scan, an immutable ACTIVE-row target
+  snapshot, bounded concurrency/backoff, explicit cancellation, failed/skipped
+  synthesis, and the grep-friendly `[EMERGENCY_FREEZE]` audit reason.
+- Wire paths, successful request shapes, capability gates, dialog layout,
+  operator copy, spec alignment, and server minimums are unchanged.
+
+**Validation.** 1,398/1,398 tests pass across 117 files with 97.69% line
+coverage; `useTenantLifecycle` is 100% lines/functions and 92.85% branches.
+ESLint, strict typecheck, production build, and both Compose validations pass.
 
 ### 2026-07-19 — v0.1.25.77: tenant/webhook filter-bulk snapshot ownership
 
