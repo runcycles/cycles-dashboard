@@ -144,6 +144,16 @@ Confirm and all three mutation owners now require an exact end or the explicit
 page-cap lower-bound state. Focused tests pin the same direct-call defense for
 budgets, tenants, and webhooks.
 
+The final defensive-mirror pass closed the last discrepancy between the
+documented preview contract and its tenant/webhook callers. Both list requests
+already sent the frozen literal `search`, but their client predicates only
+rechecked action status and ownership. They now independently reapply the
+server's case-insensitive substring fields (`tenant_id` + tenant `name`, and
+webhook `subscription_id` + `url`). Deliberately over-broad list-response tests
+prove that an out-of-filter row cannot enter the count or operator sample,
+including on the lower-bound path where `expected_count` is intentionally
+omitted.
+
 The two views retain URL/filter refs, polling and page-one data, Load more,
 export, row-select batches, mutations outside this filter-wide path, dialogs,
 virtualization, and list presentation. `TenantsView.vue` drops from 1,174 to
@@ -156,7 +166,7 @@ count/limit error recovery, result capture, read-only action ownership, and
 the live failing-only URL integration. No
 governance-spec, server-fleet, endpoint, successful mutation shape, polling
 cadence, or list/table/dialog layout change. Final validation:
-1,369/1,369 tests across 116 files; 97.46% line coverage; lint, strict
+1,371/1,371 tests across 116 files; 97.47% line coverage; lint, strict
 typecheck, production build, and development/production Compose validation
 pass.
 

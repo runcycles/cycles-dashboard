@@ -102,18 +102,18 @@ describe('useWebhookFilterBulk', () => {
       .mockImplementationOnce(async () => {
         h.setFilters({ tenantId: 'beta', search: 'new', failingOnly: false, status: 'PAUSED' })
         return {
-          subscriptions: [webhook('one', 'ACTIVE', 'acme')],
+          subscriptions: [webhook('old-one', 'ACTIVE', 'acme')],
           has_more: true,
           next_cursor: 'cursor-1',
         }
       })
       .mockResolvedValueOnce({
-        subscriptions: [webhook('two', 'ACTIVE', 'acme')],
+        subscriptions: [webhook('old-two', 'ACTIVE', 'acme')],
         has_more: false,
       })
     h.submit.mockResolvedValue(response({
       total_matched: 2,
-      succeeded: [{ id: 'one' }, { id: 'two' }],
+      succeeded: [{ id: 'old-one' }, { id: 'old-two' }],
     }))
 
     await h.preview()
@@ -132,6 +132,24 @@ describe('useWebhookFilterBulk', () => {
       idempotency_key: 'idem-fixed',
     })
     expect(h.onSuccess).toHaveBeenCalledWith('2/2 webhooks paused')
+  })
+
+  it('defensively prunes rows that violate the frozen literal-search predicate', async () => {
+    const h = createHarness({ tenantId: '', search: 'needle', failingOnly: false, status: 'ACTIVE' })
+    h.list.mockResolvedValue({
+      subscriptions: [
+        { ...webhook('needle-id'), url: 'https://example.test/unrelated' },
+        { ...webhook('url-only'), url: 'https://Needle.example/hook' },
+        webhook('unrelated'),
+      ],
+      has_more: false,
+    })
+
+    await h.preview()
+
+    expect(h.bulk.preview.previewCount.value).toBe(2)
+    expect(h.bulk.preview.previewSamples.value.map(sample => sample.id)).toEqual(['needle-id', 'url-only'])
+    expect(h.bulk.preview.reachedEnd.value).toBe(true)
   })
 
   it('derives PAUSED for RESUME and exposes failed rows for triage', async () => {

@@ -140,6 +140,13 @@ export function useTenantFilterBulk(options: UseTenantFilterBulkOptions) {
       if (tenant.status !== requiredStatus(ownedSelection.action)) return false
       const snapshot = ownedSelection.filters
       if (snapshot.parentTenantId && tenant.parent_tenant_id !== snapshot.parentTenantId) return false
+      if (snapshot.search) {
+        const query = snapshot.search.toLowerCase()
+        if (
+          !tenant.tenant_id.toLowerCase().includes(query)
+          && !tenant.name.toLowerCase().includes(query)
+        ) return false
+      }
       return true
     },
     toSample: (tenant) => ({

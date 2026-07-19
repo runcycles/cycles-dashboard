@@ -106,18 +106,18 @@ describe('useTenantFilterBulk', () => {
       .mockImplementationOnce(async () => {
         h.setFilters({ search: 'new', parentTenantId: 'parent-b', status: 'SUSPENDED' })
         return {
-          tenants: [tenant('one', 'ACTIVE', 'parent-a')],
+          tenants: [tenant('old-one', 'ACTIVE', 'parent-a')],
           has_more: true,
           next_cursor: 'cursor-1',
         }
       })
       .mockResolvedValueOnce({
-        tenants: [tenant('two', 'ACTIVE', 'parent-a')],
+        tenants: [tenant('old-two', 'ACTIVE', 'parent-a')],
         has_more: false,
       })
     h.submit.mockResolvedValue(response({
       total_matched: 2,
-      succeeded: [{ id: 'one' }, { id: 'two' }],
+      succeeded: [{ id: 'old-one' }, { id: 'old-two' }],
     }))
 
     await h.preview()
@@ -137,6 +137,24 @@ describe('useTenantFilterBulk', () => {
     })
     expect(h.onSuccess).toHaveBeenCalledWith('2/2 tenants suspended')
     expect(h.refresh).toHaveBeenCalledOnce()
+  })
+
+  it('defensively prunes rows that violate the frozen literal-search predicate', async () => {
+    const h = createHarness({ search: 'needle', parentTenantId: '', status: 'ACTIVE' })
+    h.list.mockResolvedValue({
+      tenants: [
+        { ...tenant('needle-id'), name: 'Unrelated' },
+        { ...tenant('name-only'), name: 'Needle tenant' },
+        tenant('unrelated'),
+      ],
+      has_more: false,
+    })
+
+    await h.preview()
+
+    expect(h.bulk.preview.previewCount.value).toBe(2)
+    expect(h.bulk.preview.previewSamples.value.map(sample => sample.id)).toEqual(['needle-id', 'name-only'])
+    expect(h.bulk.preview.reachedEnd.value).toBe(true)
   })
 
   it('derives SUSPENDED for REACTIVATE and reports skipped rows for triage', async () => {

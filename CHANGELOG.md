@@ -54,9 +54,10 @@ UX work that does not advance spec alignment.
   to narrow the filter for an exact result.
 - Tenant and webhook Preview now forward every natively representable mutation
   predicate to their list endpoints (`status`, parent/tenant ownership, and
-  literal search) with the server's 100-row page limit. Defensive client-side
-  predicates remain, but the 20-page walk no longer spends its 2,000-row budget
-  scanning rows the mutation cannot target.
+  literal search) with the server's 100-row page limit. The client-side mirror
+  independently reapplies literal-search semantics across tenant ID/name and
+  webhook subscription ID/URL, while the 20-page walk no longer spends its
+  2,000-row budget scanning rows the mutation cannot target.
 - Exact and lower-bound one-row Preview copy now uses singular nouns, and the
   over-limit state says that 500+ rows match the filter instead of saying they
   “will be affected” beside a disabled confirmation.
@@ -77,7 +78,7 @@ UX work that does not advance spec alignment.
   refused.
 
 No API endpoint, successful mutation shape, server/spec requirement, or polling
-cadence changes. Validation: 1,369 tests; 97.46% line coverage; lint,
+cadence changes. Validation: 1,371 tests; 97.47% line coverage; lint,
 typecheck, production build, and both Compose configurations pass.
 
 ## [0.1.25.76] — 2026-07-18

@@ -149,6 +149,13 @@ export function useWebhookFilterBulk(options: UseWebhookFilterBulkOptions) {
       if (webhook.status !== requiredStatus(ownedSelection.action)) return false
       const snapshot = ownedSelection.filters
       if (snapshot.tenantId && webhook.tenant_id !== snapshot.tenantId) return false
+      if (snapshot.search) {
+        const query = snapshot.search.toLowerCase()
+        if (
+          !webhook.subscription_id.toLowerCase().includes(query)
+          && !webhook.url.toLowerCase().includes(query)
+        ) return false
+      }
       return true
     },
     toSample: (webhook) => ({
