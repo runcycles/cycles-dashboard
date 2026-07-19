@@ -130,7 +130,6 @@ const tenantLifecycle = useTenantLifecycle({
   apiKeys,
   webhooks,
   budgetsPartial,
-  apiKeysPartial,
   cascadePartial,
   error,
   refreshTenant,
@@ -148,6 +147,7 @@ const {
   cascadePending,
   cascadePreview,
   showRecoveryBanner,
+  isMutationRunning: lifecycleBusy,
   pendingTenantAction,
   closeConfirmInput,
   tenantActionLoading,
@@ -809,13 +809,13 @@ async function submitEditPolicy() {
               <button
                 v-if="canManageBudgets && !isTerminalTenant(tenant) && (activeBudgets.length > 0 || budgetsPartial)"
                 @click="openEmergencyFreeze"
-                :disabled="emergencyFreezePreparing"
+                :disabled="lifecycleBusy"
                 :title="budgetsPartial ? `Re-scan required because the last budget scan could not complete within ${TENANT_DETAIL_SCAN_MAX_ROWS.toLocaleString()} rows` : 'Scan ACTIVE budgets and review the immutable target count'"
                 class="btn-pill-danger disabled:opacity-50 disabled:cursor-not-allowed"
               >{{ emergencyFreezePreparing ? 'Scanning budgets…' : budgetsPartial ? 'Emergency Freeze (re-scan)' : `Emergency Freeze (${activeBudgets.length})` }}</button>
-              <button v-if="tenant.status === 'ACTIVE'" @click="requestTenantAction('SUSPENDED')" class="btn-pill-danger">Suspend</button>
-              <button v-if="tenant.status === 'SUSPENDED'" @click="requestTenantAction('ACTIVE')" class="btn-pill-success">Reactivate</button>
-              <button v-if="tenant.status !== 'CLOSED'" @click="requestTenantAction('CLOSED')" class="btn-pill-danger">Close</button>
+              <button v-if="tenant.status === 'ACTIVE'" @click="requestTenantAction('SUSPENDED')" :disabled="lifecycleBusy" class="btn-pill-danger disabled:opacity-50 disabled:cursor-not-allowed">Suspend</button>
+              <button v-if="tenant.status === 'SUSPENDED'" @click="requestTenantAction('ACTIVE')" :disabled="lifecycleBusy" class="btn-pill-success disabled:opacity-50 disabled:cursor-not-allowed">Reactivate</button>
+              <button v-if="tenant.status !== 'CLOSED'" @click="requestTenantAction('CLOSED')" :disabled="lifecycleBusy" class="btn-pill-danger disabled:opacity-50 disabled:cursor-not-allowed">Close</button>
             </template>
           </div>
         </div>

@@ -55,7 +55,6 @@ export interface UseTenantLifecycleOptions {
   apiKeys: Ref<ApiKey[]>
   webhooks: Ref<WebhookSubscription[]>
   budgetsPartial: Ref<boolean>
-  apiKeysPartial: Ref<boolean>
   cascadePartial: Readonly<Ref<boolean>>
   error: Ref<string>
   refreshTenant: () => Promise<TenantDetailRefreshResult>
@@ -333,6 +332,8 @@ export function useTenantLifecycle(options: UseTenantLifecycleOptions) {
     emergencyFreezeProgress.value = { done: 0, total: targets.length, failed: 0 }
     emergencyFreezeRunning.value = true
     emergencyFreezeAbort = new AbortController()
+    // Keep the structured tag stable: operators can grep one token across the
+    // audit stream, while the suffix identifies this dashboard incident flow.
     const settledSucceeded: number[] = []
 
     let result: BatchResult

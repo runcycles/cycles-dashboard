@@ -35,9 +35,12 @@ UX work that does not advance spec alignment.
   lifecycle owner, not only through the template's disabled button.
 - Only one tenant lifecycle dialog can be armed at a time, and cascade recovery
   rejects direct invocation for a tenant that is not already CLOSED.
+- Tenant status and Emergency Freeze triggers visibly disable while an
+  Emergency Freeze scan or post-write refresh owns the lifecycle. Guarded
+  clicks no longer appear to be accepted and then silently do nothing.
 
 No endpoint, successful request shape, capability gate, server/spec minimum,
-or dialog/table layout changes. Validation: 1,396 tests, 97.69% line coverage,
+or dialog/table layout changes. Validation: 1,398 tests, 97.69% line coverage,
 lint, strict typecheck, production build, and both Compose configurations pass.
 
 ## [0.1.25.77] — 2026-07-19

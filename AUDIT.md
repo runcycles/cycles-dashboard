@@ -50,6 +50,14 @@ also independently enforces the typed tenant name, only one lifecycle dialog
 can be armed at a time, and cascade recovery refuses a non-CLOSED tenant even
 when invoked outside the template.
 
+The PR self-review closed the presentation side of that guard as well. During
+the action-time Emergency Freeze scan and the post-write settlement refresh,
+the status and Emergency Freeze triggers now render disabled instead of
+looking actionable while the lifecycle owner correctly rejects their clicks.
+Two view-level tests pin both busy windows. The review also removed the unused
+`apiKeysPartial` lifecycle option and restored the rationale for retaining the
+grep-friendly `[EMERGENCY_FREEZE]` audit tag.
+
 Emergency Freeze now keeps a private settlement bit after the batch dialog
 closes and until its mutation-owned refresh finishes. This preserves the
 existing responsive dialog settlement while preventing a scheduled poll from
@@ -57,9 +65,10 @@ starting in that narrow post-write read window. Focused composable tests pin
 duplicate status submission, typed CLOSE confirmation, committed-close refresh
 failure, cascade convergence/retry state, partial-scan refusal, frozen target
 ownership, cancellation/skipped rows, and post-batch polling exclusion. The 17
-existing Tenant Detail cascade/recovery integration tests remain unchanged.
+pre-existing Tenant Detail cascade/recovery integration tests remain green;
+two additional cases cover visible lifecycle guards during scan and settlement.
 `TenantDetailView.vue` drops from 1,490 to 1,276 lines while retaining all
-presentation and non-lifecycle forms. Final validation: 1,396/1,396 tests pass
+presentation and non-lifecycle forms. Final validation: 1,398/1,398 tests pass
 across 117 files with 97.69% line coverage; `useTenantLifecycle` is 100% lines
 and functions with 92.30% branch coverage. ESLint, strict typecheck, production
 build, and development/production Compose validation are clean.

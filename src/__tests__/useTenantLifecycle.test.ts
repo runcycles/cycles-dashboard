@@ -67,7 +67,6 @@ function setup(overrides: Partial<UseTenantLifecycleOptions> = {}) {
   const apiKeys = ref<ApiKey[]>([])
   const webhooks = ref<WebhookSubscription[]>([])
   const budgetsPartial = ref(false)
-  const apiKeysPartial = ref(false)
   const cascadePartial = ref(false)
   const error = ref('')
 
@@ -95,7 +94,6 @@ function setup(overrides: Partial<UseTenantLifecycleOptions> = {}) {
     apiKeys,
     webhooks,
     budgetsPartial,
-    apiKeysPartial,
     cascadePartial,
     error,
     refreshTenant,
@@ -117,7 +115,6 @@ function setup(overrides: Partial<UseTenantLifecycleOptions> = {}) {
     apiKeys,
     webhooks,
     budgetsPartial,
-    apiKeysPartial,
     cascadePartial,
     error,
     updateStatus,
