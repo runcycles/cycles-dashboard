@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.77 (2026-07-19)
+**Current release:** v0.1.25.78 (2026-07-19)
 
 ## Baseline requirements
 
@@ -16,6 +16,53 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-07-19 — v0.1.25.78: Tenant Detail lifecycle ownership
+
+`TenantDetailView` still owned its complete destructive lifecycle inline after
+v0.1.25.76 moved cursor-aware acquisition into `useTenantDetailData`: tenant
+suspend/reactivate/permanent-close, committed-write refresh settlement,
+close-cascade recovery, the action-time Emergency Freeze scan and immutable
+target snapshot, cancellable bounded execution, and per-row result synthesis.
+Those safety-critical protocols were interleaved with tabs, seven mutation
+forms, routing, rollups, tables, and dialog markup in the repository's largest
+view.
+
+`useTenantLifecycle` now owns that mutation state machine. The view supplies
+the authoritative tenant/child refs and the read owner's dedicated refresh
+functions; the composable publishes one `isMutationRunning` boundary back to
+polling. Status PATCH responses are still committed before their best-effort
+refresh, CLOSE still verifies the complete cascade axes, recovery still
+re-issues idempotent `status=CLOSED`, and Emergency Freeze still captures a
+fresh completed budget scan, freezes only its immutable ACTIVE-row snapshot
+with concurrency/backoff and explicit cancellation, synthesizes failed/skipped
+results, and refreshes budgets after settlement. Wire paths, audit reasons,
+success/error copy, capability gates, dialog layout, and server minimums are
+unchanged.
+
+The extraction exposed one real duplicate-write gap: only permanent CLOSE set
+the old `closeTenantLoading` flag. Suspend and reactivate left their Confirm
+button enabled and did not pause polling, so a re-entrant confirm could issue a
+second PATCH. One tenant-action loading guard now covers all three statuses,
+runs before visible state mutation, drives ConfirmAction's loading/focus state,
+and participates in the polling exclusion boundary. Direct CLOSE execution
+also independently enforces the typed tenant name, only one lifecycle dialog
+can be armed at a time, and cascade recovery refuses a non-CLOSED tenant even
+when invoked outside the template.
+
+Emergency Freeze now keeps a private settlement bit after the batch dialog
+closes and until its mutation-owned refresh finishes. This preserves the
+existing responsive dialog settlement while preventing a scheduled poll from
+starting in that narrow post-write read window. Focused composable tests pin
+duplicate status submission, typed CLOSE confirmation, committed-close refresh
+failure, cascade convergence/retry state, partial-scan refusal, frozen target
+ownership, cancellation/skipped rows, and post-batch polling exclusion. The 17
+existing Tenant Detail cascade/recovery integration tests remain unchanged.
+`TenantDetailView.vue` drops from 1,490 to 1,276 lines while retaining all
+presentation and non-lifecycle forms. Final validation: 1,396/1,396 tests pass
+across 117 files with 97.69% line coverage; `useTenantLifecycle` is 100% lines
+and functions with 92.30% branch coverage. ESLint, strict typecheck, production
+build, and development/production Compose validation are clean.
 
 ### 2026-07-19 — v0.1.25.77: tenant/webhook filter-bulk snapshot ownership
 
