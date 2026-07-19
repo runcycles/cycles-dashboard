@@ -14,6 +14,7 @@ function sample(id: string, primary = `name-${id}`, status = 'ACTIVE'): PreviewS
 
 const baseProps = {
   actionVerb: 'Suspend',
+  itemNounSingular: 'tenant',
   itemNounPlural: 'tenants',
   filterDescription: 'status=ACTIVE AND parent_tenant_id=acme',
   loading: false,
@@ -81,6 +82,15 @@ describe('BulkActionPreviewDialog', () => {
       expect(buttons[buttons.length - 1].text()).toContain('Suspend 3 tenants')
     })
 
+    it('uses singular grammar for an exact one-row preview', () => {
+      const w = mount(BulkActionPreviewDialog, {
+        props: { ...baseProps, count: 1, samples: [sample('a-1')], reachedEnd: true },
+      })
+      expect(w.text()).toContain('1 tenant will be affected')
+      expect(w.text()).not.toContain('1 tenants will be affected')
+      expect(w.findAll('button').at(-1)?.text()).toContain('Suspend 1 tenant')
+    })
+
     it('Confirm is enabled and emits confirm when clicked', async () => {
       const w = mount(BulkActionPreviewDialog, { props })
       const buttons = w.findAll('button')
@@ -88,6 +98,13 @@ describe('BulkActionPreviewDialog', () => {
       expect(confirmBtn.attributes('disabled')).toBeUndefined()
       await confirmBtn.trigger('click')
       expect(w.emitted('confirm')).toHaveLength(1)
+    })
+
+    it('disables Confirm until the positive count owns a terminal preview state', () => {
+      const w = mount(BulkActionPreviewDialog, {
+        props: { ...baseProps, count: 3, samples, reachedEnd: false, cappedAtPages: false },
+      })
+      expect(w.findAll('button').at(-1)?.attributes('disabled')).toBeDefined()
     })
 
     it('shows "Showing first N of M" hint when count > samples.length', () => {
@@ -107,6 +124,8 @@ describe('BulkActionPreviewDialog', () => {
 
     it('renders the cap warning and disables Confirm', () => {
       const w = mount(BulkActionPreviewDialog, { props })
+      expect(w.text()).toContain('500+ tenants match the current filter')
+      expect(w.text()).not.toContain('500+ tenants will be affected')
       expect(w.text()).toContain('maximum of 500')
       expect(w.text()).toContain('Narrow the filter')
       const buttons = w.findAll('button')
@@ -121,12 +140,35 @@ describe('BulkActionPreviewDialog', () => {
   })
 
   describe('capped at max-pages state (partial count)', () => {
-    it('annotates the count as a partial total', () => {
+    it('uses lower-bound language in the count, sample hint, and Confirm label', () => {
       const w = mount(BulkActionPreviewDialog, {
         props: { ...baseProps, count: 12, samples: [sample('a'), sample('b')], cappedAtPages: true },
       })
-      expect(w.text()).toContain('partial count')
+      expect(w.text()).toContain('12+ tenants are known to match')
+      expect(w.text()).toContain('Showing first 2 of 12+')
+      expect(w.findAll('button').at(-1)?.text()).toContain('Suspend at least 12 tenants')
+      expect(w.findAll('button').at(-1)?.attributes('disabled')).toBeUndefined()
+      expect(w.text()).toContain('lower bound')
       expect(w.text()).toContain('narrow the filter')
+    })
+
+    it('uses singular grammar for a one-row lower bound', () => {
+      const w = mount(BulkActionPreviewDialog, {
+        props: { ...baseProps, count: 1, samples: [sample('a')], cappedAtPages: true },
+      })
+      expect(w.text()).toContain('1+ tenant is known to match')
+      expect(w.findAll('button').at(-1)?.text()).toContain('Suspend at least 1 tenant')
+      expect(w.findAll('button').at(-1)?.text()).not.toContain('1 tenants')
+    })
+
+    it('does not claim an exact empty result when the bounded scan found zero', () => {
+      const w = mount(BulkActionPreviewDialog, {
+        props: { ...baseProps, count: 0, cappedAtPages: true },
+      })
+      expect(w.text()).toContain('No matching tenants were found in the pages scanned')
+      expect(w.text()).toContain('ended before reaching an exact total')
+      expect(w.text()).not.toContain('No tenants match the current filter')
+      expect(w.findAll('button').at(-1)?.attributes('disabled')).toBeDefined()
     })
   })
 
@@ -158,9 +200,13 @@ describe('BulkActionPreviewDialog', () => {
   })
 
   describe('error surfaces', () => {
-    it('renders walk-error inline (network-during-count)', () => {
-      const w = mount(BulkActionPreviewDialog, { props: { ...baseProps, error: 'network down' } })
+    it('renders walk-error inline and disables Confirm even when earlier pages found matches', () => {
+      const w = mount(BulkActionPreviewDialog, {
+        props: { ...baseProps, count: 3, samples: [sample('a')], error: 'network down' },
+      })
       expect(w.find('[role="alert"]').text()).toContain('network down')
+      const buttons = w.findAll('button')
+      expect(buttons[buttons.length - 1].attributes('disabled')).toBeDefined()
     })
 
     it('renders submit-error inline (LIMIT_EXCEEDED / COUNT_MISMATCH)', () => {

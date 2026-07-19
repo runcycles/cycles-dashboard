@@ -15,6 +15,72 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.77] — 2026-07-18
+
+### Changed
+
+- Tenant and webhook filter-wide suspend/pause protocols now run through
+  focused `useTenantFilterBulk` and `useWebhookFilterBulk` composables. The
+  views retain filters, row selection, polling, dialogs, and presentation.
+- `TenantsView` drops from 1,174 to 1,048 lines and `WebhooksView` from 1,155 to
+  1,053 lines without changing the existing preview or result-dialog layout.
+
+### Fixed
+
+- Bulk Preview now captures one immutable action/filter snapshot and reuses it
+  for every cursor page, the visible summary, `expected_count`, and the final
+  request. Mid-preview filter or route changes can no longer mutate a tenant or
+  webhook set different from the one the operator reviewed.
+- Webhook filter-bulk controls refuse the derived **failing only** filter,
+  matching the existing system-wide and wildcard guards. The server bulk
+  schema cannot represent that predicate, so enabling it previously applied a
+  broader set than the visible table implied. Each unsupported state now has a
+  visible, predicate-specific explanation instead of relying on a disabled
+  control's tooltip.
+- Tenant and webhook status filters are now captured with the destructive
+  selection. An action whose required source status falls outside the visible
+  filter is disabled, so a status-only view cannot arm a global mutation
+  against rows the operator is not looking at.
+- Root-level tenant and unsupported webhook filters now expose visible,
+  screen-reader-linked explanations instead of relying on disabled-button
+  tooltips.
+- A list response that reports `has_more=true` without a continuation cursor is
+  now a blocking protocol error instead of a confirmable partial preview. The
+  dashboard retains lower-bound confirmation only for the intentional 20-page
+  safety cap; malformed pagination cannot be submitted.
+- A bounded Preview that finds zero matches before exhausting the list no
+  longer claims the complete filter is empty. It discloses that only the
+  scanned pages are known, keeps confirmation disabled, and asks the operator
+  to narrow the filter for an exact result.
+- Tenant and webhook Preview now forward every natively representable mutation
+  predicate to their list endpoints (`status`, parent/tenant ownership, and
+  literal search) with the server's 100-row page limit. The client-side mirror
+  independently reapplies literal-search semantics across tenant ID/name and
+  webhook subscription ID/URL, while the 20-page walk no longer spends its
+  2,000-row budget scanning rows the mutation cannot target.
+- Exact and lower-bound one-row Preview copy now uses singular nouns, and the
+  over-limit state says that 500+ rows match the filter instead of saying they
+  “will be affected” beside a disabled confirmation.
+- A preview-page failure after earlier pages found matches now disables Confirm
+  and is rejected by every filter-bulk composable. A failed walk's incomplete
+  count can no longer be submitted without the server's exact-count drift guard.
+- Positive counts can only be confirmed after the Preview reaches either an
+  exact end or the intentional page cap. The shared dialog and all three
+  mutation owners independently reject unresolved state.
+- Superseded or reset preview walks lose write authority immediately. A late
+  response from an aborted request can no longer overwrite a newer Preview
+  with a stale “Preview cancelled” error.
+- Tenant and webhook Preview ownership now stores the action and filters in one
+  frozen selection and exposes the action read-only. Consumers cannot change
+  the mutation after the operator reviews its target set.
+- Re-entrant filter-bulk confirmation is rejected before error or loading state
+  can be changed; direct execution without an owned Preview snapshot is also
+  refused.
+
+No API endpoint, successful mutation shape, server/spec requirement, or polling
+cadence changes. Validation: 1,371 tests; 97.47% line coverage; lint,
+typecheck, production build, and both Compose configurations pass.
+
 ## [0.1.25.76] — 2026-07-18
 
 ### Changed

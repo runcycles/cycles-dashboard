@@ -1281,6 +1281,7 @@ function rowTenantId(b: BudgetLedger): string {
     <BulkActionPreviewDialog
       v-if="filterBulkAction"
       :action-verb="actionVerb(filterBulkAction)"
+      item-noun-singular="budget"
       item-noun-plural="budgets"
       :filter-description="filterBulkSummary"
       :loading="filterBulkPreview.previewLoading.value"

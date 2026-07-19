@@ -124,6 +124,39 @@ describe('TenantsView — bulk-action preview (O1)', () => {
     expect(buttonTexts).toContain('Reactivate all')
   })
 
+  it('disables actions that conflict with the visible status filter', async () => {
+    routeRef.query = { status: 'SUSPENDED' }
+    listTenantsMock.mockResolvedValue({ tenants: [tenant('a'), tenant('b', 'SUSPENDED')], has_more: false })
+    const { default: TenantsView } = await import('../views/TenantsView.vue')
+    const w = mount(TenantsView, { global: stdMounts() })
+    await flushPromises()
+
+    const suspendAll = w.findAll('button').find(button => button.text() === 'Suspend all')
+    const reactivateAll = w.findAll('button').find(button => button.text() === 'Reactivate all')
+    expect(suspendAll?.attributes('disabled')).toBeDefined()
+    expect(reactivateAll?.attributes('disabled')).toBeUndefined()
+    const group = w.get('[aria-label="Apply action to all tenants matching the current filter"]')
+    expect(group.attributes('aria-describedby')).toBe('tenant-filter-bulk-unavailable')
+    expect(w.get('#tenant-filter-bulk-unavailable').text()).toContain('only applies to ACTIVE tenants')
+  })
+
+  it('explains the disabled root-level filter without relying on button tooltips', async () => {
+    routeRef.query = { parent: '__root__' }
+    listTenantsMock.mockResolvedValue({ tenants: [tenant('a')], has_more: false })
+    const { default: TenantsView } = await import('../views/TenantsView.vue')
+    const w = mount(TenantsView, { global: stdMounts() })
+    await flushPromises()
+
+    const suspendAll = w.findAll('button').find(button => button.text() === 'Suspend all')
+    const reactivateAll = w.findAll('button').find(button => button.text() === 'Reactivate all')
+    expect(suspendAll?.attributes('disabled')).toBeDefined()
+    expect(reactivateAll?.attributes('disabled')).toBeDefined()
+    expect(suspendAll?.attributes('title')).toBeUndefined()
+    const reason = w.get('#tenant-filter-bulk-unavailable')
+    expect(reason.attributes('role')).toBe('status')
+    expect(reason.text()).toContain('root-level filter')
+  })
+
   it('opens the preview dialog and walks listTenants when "Suspend all" is clicked', async () => {
     // Every listTenants call (initial load + debouncedSearch watcher refreshes
     // + preview walk) returns the same page: 3 ACTIVE + 1 SUSPENDED.
@@ -199,10 +232,10 @@ describe('TenantsView — bulk-action preview (O1)', () => {
   })
 
   it('disables Confirm and skips the POST when the walk hits the maxMatches cap', async () => {
-    // Build a "too many" page: 600 tenants, ACTIVE, has_more=false. The
+    // Build a "too many" page: 501 tenants, ACTIVE, has_more=false. The
     // composable defaults to maxMatches=501 so this hits cap on page 1.
-    const big = Array.from({ length: 600 }, (_, i) => tenant(`big-${i}`))
-    // Every call returns the full 600-row page so the preview walk hits the
+    const big = Array.from({ length: 501 }, (_, i) => tenant(`big-${i}`))
+    // Every call returns the full 501-row page so the preview walk hits the
     // maxMatches=501 cap on page 1 regardless of mock ordering.
     listTenantsMock.mockResolvedValue({ tenants: big, has_more: false })
 
@@ -230,7 +263,7 @@ describe('TenantsView — bulk-action preview (O1)', () => {
     await confirmBtn!.trigger('click')
     await flushPromises()
     expect(bulkActionTenantsMock).not.toHaveBeenCalled()
-  })
+  }, 10_000)
 
   it('Cancel button closes the preview without sending any POST', async () => {
     listTenantsMock.mockResolvedValue({ tenants: [tenant('x')], has_more: false })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useFocusTrap } from '../composables/useFocusTrap'
 import type { PreviewSample } from '../composables/useBulkActionPreview'
 import Spinner from './icons/Spinner.vue'
@@ -15,6 +15,8 @@ const props = defineProps<{
   actionVerb: string
   /** Plural noun for the rows: "tenants", "webhooks". */
   itemNounPlural: string
+  /** Singular noun for exact or lower-bound one-row copy: "tenant", "webhook". */
+  itemNounSingular: string
   /** Plain-language filter summary, e.g. "status=ACTIVE AND parent_tenant_id=acme". */
   filterDescription: string
   /** True while the cursor walk is in progress. Confirm is disabled. */
@@ -25,7 +27,7 @@ const props = defineProps<{
   samples: PreviewSample[]
   /** True iff the walk hit the maxMatches cap (count is a lower bound; submit would LIMIT_EXCEEDED). */
   cappedAtMax: boolean
-  /** True iff the walk hit maxPages without finishing (count is partial; do not send expected_count). */
+  /** True iff the intentional page bound stops the walk before exhaustion (count is partial). */
   cappedAtPages: boolean
   /**
    * True iff the walk completed naturally (count is exact). Callers
@@ -81,6 +83,7 @@ onMounted(() => document.addEventListener('keydown', onKeydown))
 onUnmounted(() => document.removeEventListener('keydown', onKeydown))
 
 const SERVER_MAX = props.serverMaxPerRequest ?? 500
+const countNoun = computed(() => props.count === 1 ? props.itemNounSingular : props.itemNounPlural)
 </script>
 
 <template>
@@ -124,7 +127,17 @@ const SERVER_MAX = props.serverMaxPerRequest ?? 500
         <span>Counting matches… {{ count }} found so far</span>
       </div>
 
-      <!-- Done: empty -->
+      <!-- Done: bounded scan found no matches, but did not exhaust the list. -->
+      <div
+        v-else-if="!error && count === 0 && cappedAtPages"
+        role="status"
+        class="mb-3 px-3 py-2 rounded text-sm bg-amber-50 border border-amber-200 text-amber-800 dark:bg-amber-950 dark:border-amber-800 dark:text-amber-200"
+      >
+        No matching {{ itemNounPlural }} were found in the pages scanned, but the preview ended before reaching an exact total.
+        Narrow the filter and retry.
+      </div>
+
+      <!-- Done: exact empty result. -->
       <div
         v-else-if="!error && count === 0"
         class="mb-3 px-3 py-2 rounded text-sm bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-200"
@@ -137,10 +150,17 @@ const SERVER_MAX = props.serverMaxPerRequest ?? 500
         <p class="text-sm text-gray-800 dark:text-gray-100 mb-2">
           <strong class="tabular-nums">
             <template v-if="cappedAtMax">{{ SERVER_MAX }}+</template>
+            <template v-else-if="cappedAtPages">{{ count.toLocaleString() }}+</template>
             <template v-else>{{ count.toLocaleString() }}</template>
           </strong>
-          {{ itemNounPlural }} will be affected.
-          <span v-if="cappedAtPages" class="muted-sm">(partial count — narrow the filter for an exact total)</span>
+          <template v-if="cappedAtMax">
+            {{ ` ${itemNounPlural} match the current filter.` }}
+          </template>
+          <template v-else-if="cappedAtPages">
+            {{ ` ${countNoun} ${count === 1 ? 'is' : 'are'} known to match.` }}
+            <span class="muted-sm">(lower bound — narrow the filter for an exact total)</span>
+          </template>
+          <template v-else>{{ ` ${countNoun} will be affected.` }}</template>
         </p>
 
         <ul
@@ -158,7 +178,7 @@ const SERVER_MAX = props.serverMaxPerRequest ?? 500
           </li>
         </ul>
         <p v-if="count > samples.length" class="mt-1 muted-sm">
-          Showing first {{ samples.length }} of {{ cappedAtMax ? `${SERVER_MAX}+` : count.toLocaleString() }} matching {{ itemNounPlural }}.
+          Showing first {{ samples.length }} of {{ cappedAtMax ? `${SERVER_MAX}+` : cappedAtPages ? `${count.toLocaleString()}+` : count.toLocaleString() }} matching {{ itemNounPlural }}.
         </p>
       </div>
 
@@ -211,7 +231,7 @@ const SERVER_MAX = props.serverMaxPerRequest ?? 500
           ref="confirmBtn"
           type="button"
           @click="$emit('confirm')"
-          :disabled="loading || submitting || count === 0 || cappedAtMax"
+          :disabled="loading || submitting || Boolean(error) || count === 0 || cappedAtMax || (!reachedEnd && !cappedAtPages)"
           :class="confirmDanger
             ? 'bg-red-600 hover:bg-red-700 text-white'
             : 'bg-gray-900 hover:bg-gray-800 text-white dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-300'"
@@ -222,7 +242,8 @@ const SERVER_MAX = props.serverMaxPerRequest ?? 500
           <template v-else-if="loading">Counting…</template>
           <template v-else-if="count === 0">{{ actionVerb }}</template>
           <template v-else-if="cappedAtMax">Too many matches</template>
-          <template v-else>{{ actionVerb }} {{ count.toLocaleString() }} {{ itemNounPlural }}</template>
+          <template v-else-if="cappedAtPages">{{ actionVerb }} at least {{ count.toLocaleString() }} {{ countNoun }}</template>
+          <template v-else>{{ actionVerb }} {{ count.toLocaleString() }} {{ countNoun }}</template>
         </button>
       </div>
     </div>

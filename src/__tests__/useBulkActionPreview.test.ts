@@ -105,6 +105,25 @@ describe('useBulkActionPreview', () => {
     expect(p.reachedEnd.value).toBe(false)
   })
 
+  it('treats has_more without a continuation cursor as a blocking protocol error', async () => {
+    const fetchPage = pages({
+      items: [row('a')],
+      hasMore: true,
+      nextCursor: '',
+    })
+    // maxPages=1 proves the malformed response cannot also fall into the
+    // confirmable page-cap state when both boundaries occur on the same page.
+    const p = useBulkActionPreview<Row>({ fetchPage, filterFn: acceptAll, toSample, maxPages: 1 })
+
+    await p.startPreview()
+
+    expect(p.previewCount.value).toBe(1)
+    expect(p.previewError.value).toContain('omitted a continuation cursor')
+    expect(p.cappedAtPages.value).toBe(false)
+    expect(p.reachedEnd.value).toBe(false)
+    expect(fetchPage).toHaveBeenCalledTimes(1)
+  })
+
   it('reports zero matches when no items pass the filter', async () => {
     const fetchPage = pages({
       items: [row('a', 'CLOSED'), row('b', 'CLOSED')],
@@ -179,5 +198,26 @@ describe('useBulkActionPreview', () => {
     // Final state reflects the second walk only.
     expect(p.previewCount.value).toBe(1)
     expect(p.previewSamples.value[0].id).toBe('z')
+    expect(p.previewError.value).toBe('')
+    expect(p.previewLoading.value).toBe(false)
+  })
+
+  it('cancel + reset cannot let the old request poison a replacement preview', async () => {
+    let resolveFirst: (v: { items: Row[]; hasMore: boolean; nextCursor: string }) => void = () => {}
+    const fetchPage = vi.fn()
+      .mockImplementationOnce(() => new Promise<{ items: Row[]; hasMore: boolean; nextCursor: string }>(r => { resolveFirst = r }))
+      .mockResolvedValueOnce({ items: [row('fresh')], hasMore: false, nextCursor: '' })
+    const p = useBulkActionPreview<Row>({ fetchPage, filterFn: acceptAll, toSample })
+
+    const first = p.startPreview()
+    p.resetPreview()
+    const second = p.startPreview()
+    resolveFirst({ items: [row('stale')], hasMore: false, nextCursor: '' })
+    await Promise.all([first, second])
+
+    expect(p.previewCount.value).toBe(1)
+    expect(p.previewSamples.value[0].id).toBe('fresh')
+    expect(p.previewError.value).toBe('')
+    expect(p.previewLoading.value).toBe(false)
   })
 })
