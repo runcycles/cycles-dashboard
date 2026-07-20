@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.79 (2026-07-19)
+**Current release:** v0.1.25.80 (2026-07-20)
 
 ## Baseline requirements
 
@@ -16,6 +16,51 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-07-20 — v0.1.25.80: Webhook Detail operation ownership
+
+After `.79` extracted truthful acquisition, `WebhookDetailView` still owned
+status changes, deletion, secret rotation, endpoint tests, and replay alongside
+charts, delivery presentation, routing, and its security-sensitive editor.
+`useWebhookOperations` now owns those non-editor protocols, reducing the view
+from 1,355 to 1,268 lines while leaving selector editing unchanged for its own
+review-sized follow-up.
+
+| Owner | Responsibilities |
+|---|---|
+| `useWebhookDetailData` | Subscription/delivery acquisition, polling, filters, pagination, export ownership, and mutation publication. |
+| `useWebhookOperations` | Status/delete/rotate/test/replay validation, dialog state, duplicate-submit guards, settlement, one-time secret reveal, and notifications. |
+| `WebhookDetailView` | Route intent, editor, charts, delivery controls/table, export presentation, and dialog markup. |
+
+**Confirmed fixes and hardening:**
+
+- Status confirmation now exposes loading/error state and rejects re-entrant
+  submits or cancellation while its PATCH owns settlement. It revalidates the
+  live transition immediately before the write, so an external status change
+  cannot leave a stale confirmation actionable. All non-editor operations
+  share one arming/request gate, and busy header actions expose pointer and
+  assistive-technology context for why they are unavailable.
+- Status PATCH responses are authoritative and publish directly. The previous
+  PATCH-then-GET sequence could commit successfully, lose the follow-up read,
+  report the whole action as failed, and invite a duplicate retry.
+- Subscription writes invalidate an older poll read before starting; new poll
+  ticks remain excluded until operation settlement. Delete remains committed
+  if post-delete navigation fails, immediately clears the dead action surface,
+  and reports that narrower warning instead of falsely labelling the DELETE
+  unsuccessful.
+- Replay keeps its typed request and range/limit gates, adds explicit invalid-
+  date handling, blocks duplicate submits and mid-request cancellation, and
+  retains the success result until dismissal. Rotate retains its one-time
+  secret contract; endpoint tests now have a protocol-level duplicate guard.
+
+**Preserved contracts:** endpoint paths and successful request bodies, status
+labels, delete navigation, rotate/test/replay copy, capability gates, charts,
+delivery acquisition/export, and the complete edit-selector protocol are
+unchanged. No governance-spec or server-fleet bump is required.
+
+**Validation.** 1,439/1,439 tests pass across 120 files with 97.76% line
+coverage; `useWebhookOperations` is 100% lines/functions and 92.79% branches.
+ESLint, strict typecheck, production build, and both Compose validations pass.
 
 ### 2026-07-19 — v0.1.25.79: truthful Webhook Detail acquisition
 

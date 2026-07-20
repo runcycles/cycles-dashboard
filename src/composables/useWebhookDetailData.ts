@@ -27,6 +27,8 @@ export interface UseWebhookDetailDataOptions {
   webhookId: string
   /** Current server-visible delivery filter tuple, without a cursor. */
   getDeliveryParams: () => Record<string, string>
+  /** Operation-owned writes publish directly; ambient polls must stay out. */
+  isMutationRunning?: () => boolean
   /** Focused dependency seams for deterministic protocol tests. */
   dependencies?: Partial<WebhookDetailDataDependencies>
 }
@@ -241,6 +243,7 @@ export function useWebhookDetailData(options: UseWebhookDetailDataOptions) {
   }
 
   async function tick(signal: AbortSignal = new AbortController().signal) {
+    if (options.isMutationRunning?.()) return POLLING_STALE
     const generation = ++webhookGeneration
     const webhookResult = await readWebhook(generation, signal)
     if (webhookResult !== true) return webhookResult
@@ -375,10 +378,22 @@ export function useWebhookDetailData(options: UseWebhookDetailDataOptions) {
   }
 
   /** Mutation responses can publish authoritative subscription state directly. */
-  function publishWebhook(value: WebhookSubscription): void {
+  function beginSubscriptionMutation(): void {
+    // Invalidate an already-running subscription GET before the write begins.
+    // The operation owner will publish the authoritative mutation response.
     webhookGeneration++
+  }
+
+  function publishWebhook(value: WebhookSubscription): void {
+    beginSubscriptionMutation()
     webhook.value = value
     notFound.value = false
+  }
+
+  /** A committed DELETE owns the terminal detail state before navigation. */
+  function publishDeletedWebhook(): void {
+    beginSubscriptionMutation()
+    publishNotFound()
   }
 
   function reportError(message: string): void {
@@ -446,7 +461,9 @@ export function useWebhookDetailData(options: UseWebhookDetailDataOptions) {
     applyDeliveryParams,
     loadMoreDeliveries,
     fetchDeliveryPage,
+    beginSubscriptionMutation,
     publishWebhook,
+    publishDeletedWebhook,
     reportError,
     dismissError,
     refreshAll,
