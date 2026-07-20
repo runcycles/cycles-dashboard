@@ -15,6 +15,29 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.82] — 2026-07-20
+
+### Changed
+
+- Webhook Detail's loaded-page outcome, retry, response-time, and health
+  summaries now run through focused calculation and presentation owners. Data
+  acquisition, filters/pagination, virtualization, export, routing, and
+  mutations remain in the detail view; chart dependencies remain lazy-loaded.
+- The attempts histogram now exposes its bucket/value rows to screen readers.
+
+### Fixed
+
+- Sparse attempts histograms color bars from the actual retry bucket, so a
+  high-severity `5+` bucket cannot appear green merely because it is first.
+- Response-time summaries ignore negative and non-finite values and render the
+  correct singular/plural delivery count.
+- Webhook health now turns red when the configured consecutive-failure disable
+  threshold is reached, matching the documented traffic-light semantics.
+
+No endpoint, request shape, polling cadence, loaded-page metric scope,
+capability gate, server/spec minimum, or server-fleet pin changes. Validation:
+1,465 tests, 97.91% line coverage, lint, strict typecheck, and production build.
+
 ## [0.1.25.81] — 2026-07-20
 
 ### Changed

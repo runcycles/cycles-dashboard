@@ -126,7 +126,7 @@ vi.mock('echarts/components', () => ({
 // synthetic `slice-click` events off it.
 const BaseChartStub = defineComponent({
   name: 'BaseChart',
-  props: ['option', 'label', 'height'],
+  props: ['option', 'label', 'height', 'srData'],
   emits: ['slice-click'],
   template: '<div data-testid="base-chart-stub" :aria-label="label" />',
 })

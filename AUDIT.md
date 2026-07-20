@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.81 (2026-07-20)
+**Current release:** v0.1.25.82 (2026-07-20)
 
 ## Baseline requirements
 
@@ -16,6 +16,41 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-07-20 — v0.1.25.82: Webhook delivery-insight ownership
+
+Webhook Detail's loaded-page health summaries now have a focused calculation
+and presentation boundary. `useWebhookDeliveryInsights` owns outcome, retry,
+response-time, and health-band derivation; `WebhookDeliveryInsights` owns the
+responsive cards and lazy chart boundary. The parent retains acquisition,
+filter/pagination, virtualization, export, routing, and all mutations, dropping
+from 1,042 to 761 lines.
+
+| Owner | Responsibilities |
+|---|---|
+| `useWebhookDeliveryInsights` | Loaded-page reductions, chart options, percentile/health boundaries, and safe slice mapping. |
+| `WebhookDeliveryInsights` | Responsive cards, lazy `BaseChart` loading, accessible histogram data, and filter-status emission. |
+| `WebhookDetailView` | Authoritative data ownership and all query, table, export, route, and mutation coordination. |
+
+**Confirmed fixes and hardening:**
+
+- Attempt bars are colored by their actual count bucket instead of sparse-array
+  position, so a lone `5+` bucket can no longer appear success-green.
+- Response summaries ignore negative and non-finite timings; `Infinity` can no
+  longer poison p95/max. The response count also renders the correct
+  `delivery`/`deliveries` plural.
+- The health band now implements its documented server-controlled
+  `disable_after_failures` boundary, showing red when consecutive failures
+  reach the threshold even if an older successful delivery is recent.
+- The attempts chart supplies the same bucket/value rows to `BaseChart`'s
+  screen-reader table. Unknown chart slices remain inert; known outcomes keep
+  the existing local status-filter interaction without route changes.
+
+No endpoint, request shape, acquisition cadence, loaded-page scope, route,
+server/spec minimum, or server-fleet pin changes. Validation: 1,465/1,465 tests
+across 124 files with 97.91% line coverage; the new insights composable is 100%
+lines/functions and 92.42% branches. Lint, strict typecheck, and the production
+build pass; the build retains `BaseChart` as its own lazy chunk.
 
 ### 2026-07-20 — v0.1.25.81: Webhook Detail editor ownership
 
