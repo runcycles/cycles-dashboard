@@ -63,7 +63,7 @@ function isKnownCommitOveragePolicy(value: string | undefined): boolean {
     </div>
     <div>
       <label for="cp-priority" class="form-label">Priority (higher wins on overlap)</label>
-      <input id="cp-priority" v-model="createForm.priority" type="number" step="1" class="form-input-mono" placeholder="0" />
+      <input id="cp-priority" v-model="createForm.priority" type="number" min="0" step="1" class="form-input-mono" placeholder="0" />
     </div>
     <div>
       <label for="cp-cop" class="form-label">Commit overage policy (optional)</label>
@@ -103,7 +103,7 @@ function isKnownCommitOveragePolicy(value: string | undefined): boolean {
     </div>
     <div>
       <label for="ep-priority" class="form-label">Priority</label>
-      <input id="ep-priority" v-model="editForm.priority" type="number" step="1" class="form-input-mono" />
+      <input id="ep-priority" v-model="editForm.priority" type="number" min="0" step="1" class="form-input-mono" />
     </div>
     <div>
       <label for="ep-cop" class="form-label">Commit overage policy</label>

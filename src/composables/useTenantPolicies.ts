@@ -95,8 +95,31 @@ function fieldsChanged(
   return fields.some(field => next[field] !== initial[field])
 }
 
+function copyFields(
+  target: PolicyAdvancedForm,
+  source: PolicyAdvancedForm,
+  fields: readonly (keyof PolicyAdvancedForm)[],
+): void {
+  for (const field of fields) target[field] = source[field]
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (value && typeof value === 'object') {
+    const object = value as Record<string, unknown>
+    return `{${Object.keys(object).sort().map(key => (
+      `${JSON.stringify(key)}:${canonicalJson(object[key])}`
+    )).join(',')}}`
+  }
+  return JSON.stringify(value) ?? 'undefined'
+}
+
+function replacementChanged(next: object | undefined, current: object | undefined): boolean {
+  return canonicalJson(next ?? {}) !== canonicalJson(current ?? {})
+}
+
 function policyFingerprint(policy: Policy): string {
-  return JSON.stringify({
+  return canonicalJson({
     name: policy.name,
     description: policy.description ?? '',
     priority: policy.priority,
@@ -211,8 +234,8 @@ export function useTenantPolicies(options: UseTenantPoliciesOptions) {
     }
     const priorityText = String(createForm.value.priority).trim()
     const priority = Number(priorityText)
-    if (priorityText && (!Number.isFinite(priority) || !Number.isInteger(priority))) {
-      createError.value = 'Priority must be a whole number.'
+    if (priorityText && (!Number.isFinite(priority) || !Number.isInteger(priority) || priority < 0)) {
+      createError.value = 'Priority must be a non-negative whole number.'
       return null
     }
     if (!validCommitOveragePolicy(createForm.value.commit_overage_policy)) {
@@ -310,7 +333,7 @@ export function useTenantPolicies(options: UseTenantPoliciesOptions) {
       editError.value = 'Name must be 256 characters or fewer.'
       return null
     }
-    if (rawName !== target.name) body.name = name
+    if (rawName !== target.name && name !== target.name) body.name = name
 
     const rawDescription = editForm.value.description
     const description = rawDescription.trim()
@@ -318,7 +341,10 @@ export function useTenantPolicies(options: UseTenantPoliciesOptions) {
       editError.value = 'Description must be 1,024 characters or fewer.'
       return null
     }
-    if (rawDescription !== (target.description ?? '')) body.description = description
+    const targetDescription = target.description ?? ''
+    if (rawDescription !== targetDescription && description !== targetDescription) {
+      body.description = description
+    }
 
     const priorityText = String(editForm.value.priority).trim()
     const priorityChanged = priorityText !== String(target.priority ?? '')
@@ -328,11 +354,11 @@ export function useTenantPolicies(options: UseTenantPoliciesOptions) {
         return null
       }
       const priority = Number(priorityText)
-      if (!Number.isFinite(priority) || !Number.isInteger(priority)) {
-        editError.value = 'Priority must be a whole number.'
+      if (!Number.isFinite(priority) || !Number.isInteger(priority) || priority < 0) {
+        editError.value = 'Priority must be a non-negative whole number.'
         return null
       }
-      body.priority = priority
+      if (priority !== target.priority) body.priority = priority
     }
 
     const commitOverage = editForm.value.commit_overage_policy
@@ -348,27 +374,58 @@ export function useTenantPolicies(options: UseTenantPoliciesOptions) {
       body.commit_overage_policy = commitOverage
     }
 
-    const advancedChanged = Object.keys(editAdvanced.value).some(field => {
-      const key = field as keyof PolicyAdvancedForm
-      return editAdvanced.value[key] !== editAdvancedInitial.value[key]
-    })
+    const parsed = policyAdvancedToRequest(editAdvanced.value)
+    const capsChanged = fieldsChanged(editAdvanced.value, editAdvancedInitial.value, CAPS_FIELDS)
+      && replacementChanged(parsed.caps, target.caps)
+    const rateLimitsChanged = fieldsChanged(
+      editAdvanced.value,
+      editAdvancedInitial.value,
+      RATE_LIMIT_FIELDS,
+    ) && replacementChanged(parsed.rate_limits, target.rate_limits)
+    const ttlChanged = fieldsChanged(editAdvanced.value, editAdvancedInitial.value, TTL_FIELDS)
+      && replacementChanged(parsed.reservation_ttl_override, target.reservation_ttl_override)
+    const effectiveFromChanged = editAdvanced.value.effective_from
+      !== editAdvancedInitial.value.effective_from
+    const effectiveUntilChanged = editAdvanced.value.effective_until
+      !== editAdvancedInitial.value.effective_until
+    const advancedChanged = capsChanged
+      || rateLimitsChanged
+      || ttlChanged
+      || effectiveFromChanged
+      || effectiveUntilChanged
     if (advancedChanged) {
-      const advancedError = validatePolicyAdvancedForm(editAdvanced.value)
+      // Validate only replacement groups entering this PATCH. Unchanged
+      // forward-compatible server values must not block an unrelated edit.
+      const changedAdvanced = emptyPolicyAdvancedForm()
+      if (capsChanged) copyFields(changedAdvanced, editAdvanced.value, CAPS_FIELDS)
+      if (rateLimitsChanged) copyFields(changedAdvanced, editAdvanced.value, RATE_LIMIT_FIELDS)
+      if (ttlChanged) copyFields(changedAdvanced, editAdvanced.value, TTL_FIELDS)
+      if (effectiveFromChanged || effectiveUntilChanged) {
+        // datetime-local displays minute precision. Compare a changed boundary
+        // with the exact stored counterpart so hidden seconds cannot create a
+        // false equal/reversed-window rejection.
+        changedAdvanced.effective_from = effectiveFromChanged
+          ? editAdvanced.value.effective_from
+          : (target.effective_from ?? '')
+        changedAdvanced.effective_until = effectiveUntilChanged
+          ? editAdvanced.value.effective_until
+          : (target.effective_until ?? '')
+      }
+      const advancedError = validatePolicyAdvancedForm(changedAdvanced)
       if (advancedError) {
         editError.value = advancedError
         return null
       }
     }
-    const parsed = policyAdvancedToRequest(editAdvanced.value)
     // These schemas have no required properties. A present empty object is
     // therefore the spec-defined way to remove an existing override group.
-    if (fieldsChanged(editAdvanced.value, editAdvancedInitial.value, CAPS_FIELDS)) {
+    if (capsChanged) {
       body.caps = parsed.caps ?? {}
     }
-    if (fieldsChanged(editAdvanced.value, editAdvancedInitial.value, RATE_LIMIT_FIELDS)) {
+    if (rateLimitsChanged) {
       body.rate_limits = parsed.rate_limits ?? {}
     }
-    if (fieldsChanged(editAdvanced.value, editAdvancedInitial.value, TTL_FIELDS)) {
+    if (ttlChanged) {
       body.reservation_ttl_override = parsed.reservation_ttl_override ?? {}
     }
     for (const field of ['effective_from', 'effective_until'] as const) {

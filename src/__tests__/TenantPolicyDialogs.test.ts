@@ -68,6 +68,7 @@ describe('TenantPolicyDialogs', () => {
 
     expect(wrapper.get('[role="dialog"]').attributes('aria-label')).toBe('Create Policy')
     expect(wrapper.get('#cp-name').attributes('maxlength')).toBe('256')
+    expect(wrapper.get('#cp-priority').attributes('min')).toBe('0')
     expect(wrapper.get('fieldset legend').text()).toBe('Scope pattern')
     expect(wrapper.text()).toContain('Will create as:')
     await wrapper.get('#cp-name').setValue('Background policy')
@@ -96,6 +97,7 @@ describe('TenantPolicyDialogs', () => {
 
     expect(wrapper.get('[role="dialog"]').attributes('aria-label')).toBe('Edit Policy')
     expect(wrapper.get('#ep-desc').element).toHaveProperty('value', 'Current description')
+    expect(wrapper.get('#ep-priority').attributes('min')).toBe('0')
     expect(wrapper.get('[data-testid="policy-scope-readonly"]').text()).toBe(target.scope_pattern)
     expect(wrapper.text()).toContain('immutable after policy creation')
     expect(wrapper.get('#ep-cop').element).toHaveProperty('value', 'REJECT')

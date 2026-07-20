@@ -133,7 +133,11 @@ describe('useTenantPolicies', () => {
     state.policies.createForm.value.description = ''
     state.policies.createForm.value.priority = '1.5'
     await expect(state.policies.submitCreate()).resolves.toBe(false)
-    expect(state.policies.createError.value).toBe('Priority must be a whole number.')
+    expect(state.policies.createError.value).toBe('Priority must be a non-negative whole number.')
+
+    state.policies.createForm.value.priority = '-1'
+    await expect(state.policies.submitCreate()).resolves.toBe(false)
+    expect(state.policies.createError.value).toBe('Priority must be a non-negative whole number.')
 
     state.policies.createForm.value.priority = '1'
     state.policies.createForm.value.commit_overage_policy = 'FUTURE_POLICY'
@@ -287,7 +291,11 @@ describe('useTenantPolicies', () => {
     invalidPriority.policies.openEdit(invalidPriority.policyRows.value[0])
     invalidPriority.policies.editForm.value.priority = '1.5'
     await expect(invalidPriority.policies.submitEdit()).resolves.toBe(false)
-    expect(invalidPriority.policies.editError.value).toBe('Priority must be a whole number.')
+    expect(invalidPriority.policies.editError.value).toBe('Priority must be a non-negative whole number.')
+
+    invalidPriority.policies.editForm.value.priority = '-1'
+    await expect(invalidPriority.policies.submitEdit()).resolves.toBe(false)
+    expect(invalidPriority.policies.editError.value).toBe('Priority must be a non-negative whole number.')
 
     const invalidCommit = setup()
     invalidCommit.policies.openEdit(invalidCommit.policyRows.value[0])
@@ -341,11 +349,65 @@ describe('useTenantPolicies', () => {
     expect(state.update).toHaveBeenCalledWith('policy-1', { name: 'Renamed policy' })
   })
 
+  it('validates only advanced replacement groups entering the PATCH', async () => {
+    const state = setup()
+    state.policyRows.value = [policy({ caps: { max_tokens: -1 } })]
+    state.policies.openEdit(state.policyRows.value[0])
+    state.policies.editAdvanced.value.max_commits_per_minute = '21'
+
+    await expect(state.policies.submitEdit()).resolves.toBe(true)
+    expect(state.update).toHaveBeenCalledWith('policy-1', {
+      rate_limits: { max_commits_per_minute: 21 },
+    })
+  })
+
+  it('validates a changed schedule boundary against the exact stored counterpart', async () => {
+    const state = setup()
+    state.policyRows.value = [policy({ effective_until: '2026-07-22T12:00:30.000Z' })]
+    state.policies.openEdit(state.policyRows.value[0])
+    state.policies.editAdvanced.value.effective_from
+      = state.policies.editAdvanced.value.effective_until
+
+    await expect(state.policies.submitEdit()).resolves.toBe(true)
+    const displayedMinute = state.update.mock.calls[0][1].effective_from
+    expect(new Date(displayedMinute!).getTime()).toBe(
+      new Date('2026-07-22T12:00:30.000Z').getTime() - 30_000,
+    )
+    expect(state.update.mock.calls[0][1]).not.toHaveProperty('effective_until')
+  })
+
   it('rejects no-op, disappeared, and stale-row edits before the write', async () => {
     const noOp = setup()
     noOp.policies.openEdit(noOp.policyRows.value[0])
     await expect(noOp.policies.submitEdit()).resolves.toBe(false)
     expect(noOp.policies.editError.value).toBe('No changes to save.')
+
+    const whitespaceOnly = setup()
+    whitespaceOnly.policies.openEdit(whitespaceOnly.policyRows.value[0])
+    whitespaceOnly.policies.editForm.value.name = ' Engineering policy '
+    whitespaceOnly.policies.editForm.value.description = ' Current description '
+    await expect(whitespaceOnly.policies.submitEdit()).resolves.toBe(false)
+    expect(whitespaceOnly.policies.editError.value).toBe('No changes to save.')
+    expect(whitespaceOnly.update).not.toHaveBeenCalled()
+
+    const normalizedOnly = setup()
+    normalizedOnly.policyRows.value = [policy({
+      caps: { max_tokens: 1000, tool_allowlist: ['search'] },
+    })]
+    normalizedOnly.policies.openEdit(normalizedOnly.policyRows.value[0])
+    normalizedOnly.policies.editForm.value.priority = '010'
+    normalizedOnly.policies.editAdvanced.value.tool_allowlist = ' search\n'
+    await expect(normalizedOnly.policies.submitEdit()).resolves.toBe(false)
+    expect(normalizedOnly.policies.editError.value).toBe('No changes to save.')
+    expect(normalizedOnly.update).not.toHaveBeenCalled()
+
+    const reordered = setup()
+    reordered.policyRows.value = [policy({ caps: { max_tokens: 1000, cooldown_ms: 100 } })]
+    reordered.policies.openEdit(reordered.policyRows.value[0])
+    reordered.policies.editForm.value.name = 'Renamed'
+    reordered.policyRows.value = [policy({ caps: { cooldown_ms: 100, max_tokens: 1000 } })]
+    await expect(reordered.policies.submitEdit()).resolves.toBe(true)
+    expect(reordered.update).toHaveBeenCalledWith('policy-1', { name: 'Renamed' })
 
     const disappeared = setup()
     disappeared.policies.openEdit(disappeared.policyRows.value[0])

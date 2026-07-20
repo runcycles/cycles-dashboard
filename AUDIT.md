@@ -45,12 +45,16 @@ tabs, routing, and capability coordination; `TenantDetailView` drops from
 - Edit revalidates the live policy snapshot and tenant/sibling gate before the
   write. Closed tenants are visibly read-only, and policy, API-key, and tenant
   lifecycle owners use reciprocal arming gates through mutation settlement.
+- Edit diffs normalized wire values, scopes advanced validation to replacement
+  groups entering the PATCH, and checks changed schedule boundaries against the
+  exact stored counterpart. Formatting-only input and JSON key order cannot
+  create no-op writes or false stale-row failures.
 - Integer/range, tool-name length, date, and effective-window rules now run in
   the protocol as well as native controls. Unchanged unknown server enum values
   remain visible and survive unrelated edits for forward compatibility.
 
 No endpoint, server/spec minimum, server-fleet pin, or valid non-clear request
-shape changes. Validation: 1,510/1,510 tests across 128 files with 98.20%
+shape changes. Validation: 1,512/1,512 tests across 128 files with 98.21%
 line coverage; lint, strict typecheck, and the production build pass.
 
 ### 2026-07-20 — post-v0.1.25.83 dependency security maintenance
