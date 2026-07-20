@@ -154,6 +154,17 @@ describe('useWebhookDeliveryInsights', () => {
       label: 'Failure threshold reached',
       detail: '5 of 5 consecutive failures',
     })
+
+    harness.webhook.value = subscription({
+      last_success_at: '2026-07-20T11:59:00Z',
+      consecutive_failures: 10,
+      disable_after_failures: undefined,
+    })
+    expect(harness.insights.lastSuccessBand.value).toEqual({
+      band: 'red',
+      label: 'Failure threshold reached',
+      detail: '10 of 10 consecutive failures',
+    })
     harness.stop()
   })
 

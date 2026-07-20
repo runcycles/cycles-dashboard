@@ -173,10 +173,11 @@ export function useWebhookDeliveryInsights(options: UseWebhookDeliveryInsightsOp
     if (!webhook) return { band: 'unknown', label: 'No data', detail: '' }
 
     const failures = webhook.consecutive_failures ?? 0
-    const threshold = webhook.disable_after_failures
+    // Older admin responses omit the field; 10 is the server default and
+    // matches the failure tally rendered in WebhookDetailView.
+    const threshold = webhook.disable_after_failures ?? 10
     if (
-      typeof threshold === 'number'
-      && Number.isFinite(threshold)
+      Number.isFinite(threshold)
       && threshold > 0
       && Number.isFinite(failures)
       && failures >= threshold
