@@ -34,11 +34,12 @@ from 1,042 to 761 lines.
 
 **Confirmed fixes and hardening:**
 
-- Attempt bars are colored by their actual count bucket instead of sparse-array
-  position, so a lone `5+` bucket can no longer appear success-green.
-- Response summaries ignore negative and non-finite timings; `Infinity` can no
-  longer poison p95/max. The response count also renders the correct
-  `delivery`/`deliveries` plural.
+- Attempt bars now use an explicit count-based ramp: 0–1 green, 2–3 amber,
+  and 4/5+ red. This prevents a sparse lone `5+` bucket from appearing green
+  and intentionally softens bucket 3 from the old index-based red to amber.
+- Response summaries continue to exclude negative timings and now also reject
+  non-finite values, so `Infinity` can no longer poison p95/max. The response
+  count also renders the correct `delivery`/`deliveries` plural.
 - The health band now implements its documented server-controlled
   `disable_after_failures` boundary, showing red when consecutive failures
   reach the threshold even if an older successful delivery is recent.

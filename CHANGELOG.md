@@ -28,10 +28,12 @@ UX work that does not advance spec alignment.
 
 ### Fixed
 
-- Sparse attempts histograms color bars from the actual retry bucket, so a
-  high-severity `5+` bucket cannot appear green merely because it is first.
-- Response-time summaries ignore negative and non-finite values and render the
-  correct singular/plural delivery count.
+- Attempts histograms use a count-based severity ramp: 0–1 green, 2–3 amber,
+  and 4/5+ red. This fixes sparse high-attempt buckets and intentionally makes
+  bucket 3 amber instead of the old index-based red.
+- Response-time summaries continue to exclude negative values and now reject
+  non-finite values; they also render the correct singular/plural delivery
+  count.
 - Webhook health now turns red when the configured consecutive-failure disable
   threshold is reached, matching the documented traffic-light semantics.
 
