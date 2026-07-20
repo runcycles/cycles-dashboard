@@ -33,14 +33,16 @@ UX work that does not advance spec alignment.
   value defined by `WebhookUpdateRequest`. Previously the admin DTO ignored the
   dashboard's JSON `null` and returned 200 without clearing the stored value;
   the client boundary is now typed to prevent invalid update fields and nulls.
+- Disable-after-failures now requires a whole number of at least 1 in both the
+  form and editor protocol; clearing the field can no longer coerce to 0.
 - Editor and non-editor actions use reciprocal arming guards. Duplicate submit
   and mid-request cancellation protection now live in the editor protocol.
 - Tenant-owned legacy selector healing remains intact: rename-only saves omit
   hidden selector fields, while deliberate selector edits send both cleaned
   arrays (including explicit empty-array clears) and reject a both-empty result.
 
-No endpoint, successful request shape, capability gate, server/spec minimum,
-route, delivery, chart, or export changes. Validation: 1,454 tests, 97.85% line
+No endpoint, non-clear request shape, capability gate, server/spec minimum,
+route, delivery, chart, or export changes. Validation: 1,456 tests, 97.85% line
 coverage, lint, strict typecheck, production build, and Compose gates pass.
 
 ## [0.1.25.80] — 2026-07-20

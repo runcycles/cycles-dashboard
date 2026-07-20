@@ -44,8 +44,8 @@ defineEmits<{ submit: []; cancel: [] }>()
       <label for="ew-url" class="form-label">URL</label>
       <input id="ew-url" v-model="form.url" type="url" required class="form-input-mono" />
     </div>
-    <div>
-      <label class="form-label">Event types</label>
+    <fieldset>
+      <legend class="form-label">Event types</legend>
       <div class="grid grid-cols-2 gap-1 max-h-48 overflow-y-auto border border-gray-200 rounded p-2">
         <label v-for="eventType in eventTypes" :key="eventType" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
           <input v-model="form.event_types" type="checkbox" :value="eventType" class="rounded" />
@@ -56,16 +56,16 @@ defineEmits<{ submit: []; cancel: [] }>()
       <p v-if="hiddenLegacySelectorCount" class="muted-sm mt-1" data-testid="hidden-legacy-selectors-hint">
         {{ hiddenLegacySelectorCount }} legacy admin-only selector{{ hiddenLegacySelectorCount === 1 ? ' is' : 's are' }} hidden here; {{ hiddenLegacySelectorCount === 1 ? 'it remains' : 'they remain' }} active until you edit the selectors, at which point {{ hiddenLegacySelectorCount === 1 ? 'it is' : 'they are' }} cleared.
       </p>
-    </div>
-    <div>
-      <label class="form-label">Event categories <span class="muted-sm">(additive — subscribes to all events in category, including future ones)</span></label>
+    </fieldset>
+    <fieldset>
+      <legend class="form-label">Event categories <span class="muted-sm">(additive — subscribes to all events in category, including future ones)</span></legend>
       <div class="flex flex-wrap gap-2 border border-gray-200 rounded p-2">
         <label v-for="category in eventCategories" :key="category" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
           <input v-model="form.event_categories" type="checkbox" :value="category" class="rounded" />
           {{ category }}
         </label>
       </div>
-    </div>
+    </fieldset>
     <div class="grid grid-cols-2 gap-3">
       <div>
         <label for="ew-scope" class="form-label">Scope filter</label>
@@ -73,7 +73,7 @@ defineEmits<{ submit: []; cancel: [] }>()
       </div>
       <div>
         <label for="ew-failures" class="form-label">Disable after failures</label>
-        <input id="ew-failures" v-model="form.disable_after_failures" type="number" min="1" class="form-input" />
+        <input id="ew-failures" v-model="form.disable_after_failures" type="number" min="1" step="1" required class="form-input" />
       </div>
     </div>
     <div>

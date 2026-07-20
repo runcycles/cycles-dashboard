@@ -214,7 +214,17 @@ export function useWebhookEditor(options: UseWebhookEditorOptions) {
       body.scope_filter = editForm.value.scope_filter
     }
     if (editForm.value.disable_after_failures !== initial.disable_after_failures) {
-      body.disable_after_failures = Number(editForm.value.disable_after_failures)
+      const rawThreshold = editForm.value.disable_after_failures.trim()
+      const threshold = Number(rawThreshold)
+      // The input's native min/step constraints protect normal form submits,
+      // but protocol validation must also reject direct/programmatic calls.
+      // Number('') === 0, which previously made a cleared optional input send
+      // an invalid threshold that older admin DTOs could persist.
+      if (rawThreshold === '' || !Number.isInteger(threshold) || threshold < 1) {
+        editError.value = 'Disable after failures must be a whole number of 1 or greater.'
+        return false
+      }
+      body.disable_after_failures = threshold
     }
     if (editForm.value.metadata !== initial.metadata) {
       if (editForm.value.metadata.trim() === '') {

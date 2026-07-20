@@ -42,6 +42,9 @@ export presentation, and sibling-owner wiring.
   the admin DTO ignored them and returned 200 while retaining the old value.
   A new typed request DTO prevents nullable or unknown fields from returning to
   the shared client boundary.
+- `disable_after_failures` is enforced inside the editor protocol as an integer
+  of at least 1, with matching native `required`/`min`/`step` constraints. This
+  closes the blank-input path where `Number('')` became 0 before submission.
 - Editor and non-editor operations now use reciprocal arming gates, preventing
   direct or future call sites from overlapping dialogs or requests. Submit and
   cancellation guards run inside the editor protocol, not only in the template.
@@ -51,9 +54,9 @@ export presentation, and sibling-owner wiring.
   refused. Diff-only fields, metadata objects, advanced replacement
   semantics, capability gates, route intent, and operator copy are preserved.
 
-No endpoint, successful request shape, server/spec minimum, or server-fleet pin
-changes. Validation: 1,454/1,454 tests across 122 files with 97.85% line
-coverage; `useWebhookEditor` is 100% lines/functions and 96.34% branches.
+No endpoint, non-clear request shape, server/spec minimum, or server-fleet pin
+changes. Validation: 1,456/1,456 tests across 122 files with 97.85% line
+coverage; `useWebhookEditor` is 100% lines/functions and 97.70% branches.
 Lint, strict typecheck, production build, and both Compose validations pass.
 
 ### 2026-07-20 — v0.1.25.80: Webhook Detail operation ownership

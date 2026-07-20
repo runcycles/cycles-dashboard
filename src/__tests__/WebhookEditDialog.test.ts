@@ -56,6 +56,15 @@ describe('WebhookEditDialog', () => {
     const wrapper = mountDialog({ form: sharedForm })
 
     expect(wrapper.get('[role="dialog"]').attributes('aria-label')).toBe('Edit Webhook')
+    expect(wrapper.findAll('fieldset').map(group => group.get('legend').text())).toEqual([
+      'Event types',
+      'Event categories (additive — subscribes to all events in category, including future ones)',
+    ])
+    expect(wrapper.get('#ew-failures').attributes()).toMatchObject({
+      min: '1',
+      step: '1',
+      required: '',
+    })
     await wrapper.get('#ew-name').setValue('Renamed hook')
     await wrapper.get('input[value="tenant.updated"]').setValue(true)
     await wrapper.get('form').trigger('submit')

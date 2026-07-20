@@ -232,6 +232,23 @@ describe('useWebhookEditor', () => {
     harness.stop()
   })
 
+  it('rejects blank, non-integer, and below-minimum failure thresholds', async () => {
+    const harness = setup()
+    harness.editor.openEdit()
+
+    for (const invalid of ['', 'not-a-number', '1.5', '0']) {
+      harness.editor.editForm.value.disable_after_failures = invalid
+      await expect(harness.editor.submitEdit()).resolves.toBe(false)
+      expect(harness.editor.editError.value).toBe(
+        'Disable after failures must be a whole number of 1 or greater.',
+      )
+    }
+
+    expect(harness.beginSubscriptionMutation).not.toHaveBeenCalled()
+    expect(harness.updateWebhook).not.toHaveBeenCalled()
+    harness.stop()
+  })
+
   it('guards duplicate submit and cancellation while the PATCH is pending', async () => {
     const harness = setup()
     const patch = deferred<WebhookSubscription>()

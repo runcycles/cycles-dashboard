@@ -176,4 +176,29 @@ describe('WebhookDetailView — operation ownership', () => {
     expect(wrapper.text()).not.toContain('Send Test')
     expect(wrapper.text()).toContain('Webhook deleted, but navigation failed: router unavailable')
   })
+
+  it('keeps editor and operation dialogs mutually exclusive in both directions', async () => {
+    const wrapper = await mountView()
+
+    await clickWebhookAction(wrapper, 'Edit')
+    expect(wrapper.find('[role="dialog"][aria-label="Edit Webhook"]').exists()).toBe(true)
+
+    // Even a programmatic click behind the modal cannot arm an operation while
+    // the editor owns the surface.
+    await clickWebhookAction(wrapper, 'Pause')
+    expect(wrapper.text()).not.toContain('Pause this webhook?')
+
+    const editCancel = wrapper.findAll('button').find(button => button.text() === 'Cancel')
+    expect(editCancel).toBeDefined()
+    await editCancel!.trigger('click')
+    await nextTick()
+
+    await clickWebhookAction(wrapper, 'Pause')
+    expect(wrapper.text()).toContain('Pause this webhook?')
+
+    // The reciprocal gate refuses the editor while an operation confirmation
+    // is armed, even if a future call site bypasses modal pointer isolation.
+    await clickWebhookAction(wrapper, 'Edit')
+    expect(wrapper.find('[role="dialog"][aria-label="Edit Webhook"]').exists()).toBe(false)
+  })
 })
