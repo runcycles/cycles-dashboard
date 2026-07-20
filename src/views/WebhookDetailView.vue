@@ -145,6 +145,11 @@ const {
   isMutationRunning: webhookOperationBusy,
 } = webhookOperations
 const operationBusyReason = 'Another webhook operation is in progress.'
+const sendTestBusyReason = computed(() => (
+  testLoading.value
+    ? 'Webhook endpoint test is in progress.'
+    : operationBusyReason
+))
 
 const filteredDeliveries = computed(() =>
   deliveryStatusFilter.value
@@ -762,7 +767,18 @@ watch(exportError, (v) => { if (v) reportError(v) })
                  Everything else — edit, rotate, replay, state changes,
                  delete — lives in the overflow menu so the header no
                  longer wraps onto two rows. -->
-            <button @click="runTest" :disabled="webhookOperationBusy" class="btn-pill-secondary disabled:opacity-50">{{ testLoading ? 'Testing...' : 'Send Test' }}</button>
+            <button
+              @click="runTest"
+              :disabled="webhookOperationBusy"
+              :title="webhookOperationBusy ? sendTestBusyReason : undefined"
+              :aria-describedby="webhookOperationBusy ? 'webhook-operation-busy-reason' : undefined"
+              class="btn-pill-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+            >{{ testLoading ? 'Testing...' : 'Send Test' }}</button>
+            <span
+              v-if="webhookOperationBusy"
+              id="webhook-operation-busy-reason"
+              class="sr-only"
+            >{{ sendTestBusyReason }}</span>
             <RowActionsMenu
               aria-label="More webhook actions"
               trigger-label="More actions"

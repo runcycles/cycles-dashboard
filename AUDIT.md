@@ -35,9 +35,11 @@ review-sized follow-up.
 **Confirmed fixes and hardening:**
 
 - Status confirmation now exposes loading/error state and rejects re-entrant
-  submits or cancellation while its PATCH owns settlement. All non-editor
-  operations share one arming/request gate, and busy menu actions explain why
-  they are unavailable.
+  submits or cancellation while its PATCH owns settlement. It revalidates the
+  live transition immediately before the write, so an external status change
+  cannot leave a stale confirmation actionable. All non-editor operations
+  share one arming/request gate, and busy header actions expose pointer and
+  assistive-technology context for why they are unavailable.
 - Status PATCH responses are authoritative and publish directly. The previous
   PATCH-then-GET sequence could commit successfully, lose the follow-up read,
   report the whole action as failed, and invite a duplicate retry.
@@ -55,8 +57,8 @@ labels, delete navigation, rotate/test/replay copy, capability gates, charts,
 delivery acquisition/export, and the complete edit-selector protocol are
 unchanged. No governance-spec or server-fleet bump is required.
 
-**Validation.** 1,436/1,436 tests pass across 120 files with 97.75% line
-coverage; `useWebhookOperations` is 100% lines/functions and 93.33% branches.
+**Validation.** 1,437/1,437 tests pass across 120 files with 97.75% line
+coverage; `useWebhookOperations` is 100% lines/functions and 92.79% branches.
 ESLint, strict typecheck, production build, and both Compose validations pass.
 
 ### 2026-07-19 — v0.1.25.79: truthful Webhook Detail acquisition

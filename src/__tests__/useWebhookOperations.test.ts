@@ -179,6 +179,22 @@ describe('useWebhookOperations', () => {
     harness.stop()
   })
 
+  it('refuses a status action that became stale while its confirmation was open', async () => {
+    const harness = setup(subscription({ status: 'ACTIVE' }))
+    harness.operations.requestStatusAction('PAUSED')
+    harness.webhook.value = subscription({ status: 'DISABLED' })
+
+    await expect(harness.operations.executeStatusAction()).resolves.toBe(false)
+
+    expect(harness.updateWebhook).not.toHaveBeenCalled()
+    expect(harness.beginSubscriptionMutation).not.toHaveBeenCalled()
+    expect(harness.operations.pendingStatusAction.value).toBeNull()
+    expect(harness.notify.warning).toHaveBeenCalledWith(
+      'Webhook status changed while confirmation was open. Review the current status before trying again.',
+    )
+    harness.stop()
+  })
+
   it('deletes once, blocks mid-request cancel, and navigates only after commit', async () => {
     const harness = setup()
     const removing = deferred<void>()

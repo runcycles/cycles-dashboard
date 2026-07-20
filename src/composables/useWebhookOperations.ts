@@ -61,6 +61,17 @@ const STATUS_SUCCESS: Record<WebhookStatusAction, string> = {
   reset: 'Webhook re-enabled',
 }
 
+function isStatusActionLegal(
+  webhook: WebhookSubscription,
+  action: WebhookStatusAction,
+): boolean {
+  if (action === 'PAUSED') return webhook.status === 'ACTIVE'
+  if (action === 'ACTIVE') {
+    return webhook.status === 'PAUSED' || webhook.status === 'DISABLED'
+  }
+  return (webhook.consecutive_failures ?? 0) > 0 && webhook.status !== 'ACTIVE'
+}
+
 /**
  * Owns Webhook Detail's non-editor operation protocol.
  *
@@ -129,12 +140,7 @@ export function useWebhookOperations(options: UseWebhookOperationsOptions) {
     if (!canArmOperation()) return
     const webhook = options.webhook.value
     if (!webhook) return
-    const legal = action === 'PAUSED'
-      ? webhook.status === 'ACTIVE'
-      : action === 'ACTIVE'
-        ? webhook.status === 'PAUSED' || webhook.status === 'DISABLED'
-        : (webhook.consecutive_failures ?? 0) > 0 && webhook.status !== 'ACTIVE'
-    if (!legal) return
+    if (!isStatusActionLegal(webhook, action)) return
     statusActionError.value = ''
     pendingStatusActionState.value = action
   }
@@ -150,6 +156,20 @@ export function useWebhookOperations(options: UseWebhookOperationsOptions) {
     // Keep the guard before visible state mutation so a direct/re-entrant call
     // cannot clear the first request's inline error or send another PATCH.
     if (!action || statusActionLoading.value) return false
+    const webhook = options.webhook.value
+    // Polling remains active while the operator reads the confirmation. Check
+    // the newly published row again so an external transition cannot turn a
+    // formerly legal confirmation into a stale PATCH.
+    if (!webhook || !isStatusActionLegal(webhook, action)) {
+      pendingStatusActionState.value = null
+      statusActionError.value = ''
+      options.notify.warning(
+        webhook
+          ? 'Webhook status changed while confirmation was open. Review the current status before trying again.'
+          : 'Webhook is no longer available. Refresh before trying again.',
+      )
+      return false
+    }
     statusActionError.value = ''
     statusActionLoading.value = true
     options.beginSubscriptionMutation()

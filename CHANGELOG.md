@@ -27,9 +27,10 @@ UX work that does not advance spec alignment.
 ### Fixed
 
 - Status confirmations now block duplicate submits and cancellation while the
-  PATCH is active, retain actionable errors in the dialog, and publish the
-  authoritative PATCH response directly instead of risking a false failure on
-  an unnecessary follow-up GET.
+  PATCH is active, revalidate the live transition before sending, retain
+  actionable errors in the dialog, and publish the authoritative PATCH
+  response directly instead of risking a false failure on an unnecessary
+  follow-up GET.
 - Subscription writes invalidate older poll reads, and new polls stay excluded
   through operation settlement. Delete/navigation errors are classified after
   commit, so a navigation failure no longer presents a successful DELETE as
@@ -39,7 +40,7 @@ UX work that does not advance spec alignment.
   while its request is active; busy header actions expose a disabled reason.
 
 No endpoint, successful request shape, capability gate, server/spec minimum,
-chart, delivery, export, or webhook-editor contract changes. Validation: 1,436
+chart, delivery, export, or webhook-editor contract changes. Validation: 1,437
 tests, 97.75% line coverage, lint, strict typecheck, production build, and both
 Compose configurations pass.
 

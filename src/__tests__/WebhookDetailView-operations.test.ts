@@ -137,6 +137,13 @@ describe('WebhookDetailView — operation ownership', () => {
 
     expect(confirm!.attributes('disabled')).toBeDefined()
     expect(cancel?.attributes('disabled')).toBeDefined()
+    const sendTest = wrapper.findAll('button').find(button => button.text() === 'Send Test')
+    expect(sendTest?.attributes('disabled')).toBeDefined()
+    expect(sendTest?.attributes('title')).toBe('Another webhook operation is in progress.')
+    expect(sendTest?.attributes('aria-describedby')).toBe('webhook-operation-busy-reason')
+    expect(wrapper.get('#webhook-operation-busy-reason').text()).toBe(
+      'Another webhook operation is in progress.',
+    )
     expect(updateWebhookMock).toHaveBeenCalledTimes(1)
     expect(updateWebhookMock).toHaveBeenCalledWith('wh-1', { status: 'PAUSED' })
 
