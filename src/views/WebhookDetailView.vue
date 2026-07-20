@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, watch, defineAsyncComponent } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
-import { useRoute, useRouter } from 'vue-router'
+import { isNavigationFailure, useRoute, useRouter } from 'vue-router'
 import { useWebhookDetailData } from '../composables/useWebhookDetailData'
+import { useWebhookOperations } from '../composables/useWebhookOperations'
 import type { AppliedQuerySnapshot } from '../composables/useAppliedQuery'
 import { useChartTheme } from '../composables/useChartTheme'
 // Lazy-loaded to keep ECharts + vue-echarts out of the detail-view
@@ -11,9 +12,9 @@ import { useChartTheme } from '../composables/useChartTheme'
 const BaseChart = defineAsyncComponent(() => import('../components/BaseChart.vue'))
 import { useListExport } from '../composables/useListExport'
 import { useSort } from '../composables/useSort'
-import { getWebhook, updateWebhook, deleteWebhook, testWebhook, replayWebhookEvents, rotateWebhookSecret } from '../api/client'
+import { getWebhook, updateWebhook } from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import type { WebhookSubscription, WebhookDelivery, WebhookTestResponse, ReplayEventsRequest } from '../types'
+import type { WebhookSubscription, WebhookDelivery } from '../types'
 import { EVENT_TYPES, EVENT_CATEGORIES, TENANT_ALLOWED_EVENT_TYPES, TENANT_ALLOWED_EVENT_CATEGORIES } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -57,6 +58,10 @@ const canManage = computed(() => auth.capabilities?.manage_webhooks !== false)
 //   - status filter (PENDING / SUCCESS / FAILED / RETRYING)
 //   - virtualized rows so DOM stays bounded
 const deliveryStatusFilter = ref('')
+// Acquisition's initial tick can run while the operation owner is being
+// constructed below. No operation can exist during that synchronous bootstrap,
+// so false is safe until the closure is replaced with the real computed state.
+let webhookOperationRunning = () => false
 const {
   webhook,
   deliveries,
@@ -74,6 +79,7 @@ const {
   applyDeliveryParams,
   loadMoreDeliveries,
   fetchDeliveryPage,
+  beginSubscriptionMutation,
   publishWebhook,
   reportError,
   dismissError,
@@ -83,9 +89,62 @@ const {
 } = useWebhookDetailData({
   webhookId: id,
   getDeliveryParams: buildDeliveryParams,
+  isMutationRunning: () => webhookOperationRunning(),
 })
 
-const pendingAction = ref<'ACTIVE' | 'PAUSED' | 'reset' | null>(null)
+const webhookOperations = useWebhookOperations({
+  webhookId: id,
+  webhook,
+  beginSubscriptionMutation,
+  publishWebhook,
+  reportError,
+  navigateToList: async () => {
+    const failure = await router.push({ name: 'webhooks' })
+    if (isNavigationFailure(failure)) throw failure
+  },
+  notify: toast,
+})
+webhookOperationRunning = () => webhookOperations.isMutationRunning.value
+
+const {
+  pendingStatusAction,
+  statusActionLoading,
+  statusActionError,
+  requestStatusAction,
+  cancelStatusAction,
+  executeStatusAction,
+  pendingDelete,
+  deleteLoading,
+  deleteError,
+  openDelete,
+  cancelDelete,
+  executeDelete,
+  pendingRotate,
+  rotateLoading,
+  rotateError,
+  rotatedSecret,
+  openRotate,
+  cancelRotate,
+  executeRotate,
+  closeRotatedSecret,
+  testResult,
+  testLoading,
+  runTest,
+  showReplay,
+  replayLoading,
+  replayError,
+  replayForm,
+  replayResult,
+  replayMaxEventsError,
+  canSubmitReplay,
+  openReplay,
+  cancelReplay,
+  submitReplay,
+  dismissReplayResult,
+  hasPendingOperation,
+  isMutationRunning: webhookOperationBusy,
+} = webhookOperations
+const operationBusyReason = 'Another webhook operation is in progress.'
 
 const filteredDeliveries = computed(() =>
   deliveryStatusFilter.value
@@ -282,96 +341,6 @@ const attemptsChartOption = computed(() => {
   }
 })
 
-async function executeAction() {
-  if (!pendingAction.value) return
-  try {
-    if (pendingAction.value === 'reset') {
-      // Re-enabling resets consecutive_failures per spec
-      await updateWebhook(id, { status: 'ACTIVE' })
-    } else {
-      await updateWebhook(id, { status: pendingAction.value })
-    }
-    publishWebhook(await getWebhook(id))
-    const label = pendingAction.value === 'reset' ? 'Webhook re-enabled' : pendingAction.value === 'PAUSED' ? 'Webhook paused' : 'Webhook enabled'
-    toast.success(label)
-  } catch (e) {
-    const msg = toMessage(e)
-    reportError(msg)
-    toast.error(`Status change failed: ${msg}`)
-  }
-  finally { pendingAction.value = null }
-}
-
-// Delete webhook. Same close-on-success / stay-open-on-error / loading-
-// spinner pattern as Rotate Secret. Without the loading state the user
-// could cancel mid-DELETE (the network call still completes) or click
-// the destructive button repeatedly while the first request is pending.
-const pendingDelete = ref(false)
-const deleteLoading = ref(false)
-const deleteError = ref('')
-
-function openDelete() {
-  deleteError.value = ''
-  pendingDelete.value = true
-}
-
-async function executeDelete() {
-  if (deleteLoading.value) return // double-click guard
-  deleteError.value = ''
-  deleteLoading.value = true
-  try {
-    await deleteWebhook(id)
-    pendingDelete.value = false
-    toast.success('Webhook deleted')
-    router.push({ name: 'webhooks' })
-  } catch (e) {
-    const msg = toMessage(e)
-    deleteError.value = msg
-    toast.error(`Delete failed: ${msg}`)
-  } finally {
-    deleteLoading.value = false
-  }
-}
-
-// Rotate signing secret. Keep the confirm dialog mounted (with a loading
-// spinner) until the request settles. Previously we closed the dialog
-// before awaiting the PATCH — on a 403 the user saw nothing happen, then
-// a toast appeared seconds later with no UI context tying it to the
-// click. The dialog now closes only on success; on error it stays open
-// with an inline error so the user can read it next to the action they
-// confirmed, and retry or cancel.
-const pendingRotate = ref(false)
-const rotateLoading = ref(false)
-const rotateError = ref('')
-const rotatedSecret = ref<string | null>(null)
-
-function openRotate() {
-  rotateError.value = ''
-  pendingRotate.value = true
-}
-
-async function executeRotate() {
-  if (rotateLoading.value) return // double-click guard
-  rotateError.value = ''
-  rotateLoading.value = true
-  try {
-    const { signing_secret, subscription } = await rotateWebhookSecret(id)
-    // The secret is always returned by the client wrapper (generated
-    // locally before PATCH). Display it once — the server will not echo
-    // it back on subsequent reads.
-    rotatedSecret.value = signing_secret
-    publishWebhook(subscription)
-    pendingRotate.value = false
-    toast.success('Signing secret rotated — copy it now, it will not be shown again')
-  } catch (e) {
-    const msg = toMessage(e)
-    rotateError.value = msg
-    toast.error(`Rotate secret failed: ${msg}`)
-  } finally {
-    rotateLoading.value = false
-  }
-}
-
 // Edit webhook
 //
 // Covers every spec-editable field (cycles-governance-admin WebhookSubscription §2719):
@@ -449,7 +418,7 @@ function snapshotForm(w: WebhookSubscription): EditForm {
 }
 
 function openEdit() {
-  if (!webhook.value) return
+  if (!webhook.value || hasPendingOperation.value || webhookOperationBusy.value) return
   // Two independent snapshots: editForm gets mutated by the inputs;
   // editInitial stays frozen as the diff baseline. Sharing the same
   // object reference made every diff zero — the v-model writes hit
@@ -574,86 +543,6 @@ async function submitEdit() {
     showEdit.value = false
   } catch (e) { editError.value = toMessage(e) }
   finally { editLoading.value = false }
-}
-
-// Test webhook
-const testResult = ref<WebhookTestResponse | null>(null)
-const testLoading = ref(false)
-async function runTest() {
-  testLoading.value = true
-  testResult.value = null
-  try {
-    testResult.value = await testWebhook(id)
-  } catch (e) {
-    const msg = toMessage(e)
-    reportError(msg)
-    toast.error(`Test failed: ${msg}`)
-  }
-  finally { testLoading.value = false }
-}
-
-// Replay events
-const showReplay = ref(false)
-const replayLoading = ref(false)
-const replayError = ref('')
-const replayForm = ref({ from: '', to: '', max_events: '100' })
-const replayResult = ref<string | null>(null)
-
-// Live inline validation on max_events. Matches the M7 pattern on
-// TenantsView — renders the error right below the offending input so
-// operators see the problem at the field, not only at the dialog
-// header after clicking Submit. Empty field stays silent.
-//
-// Vue auto-coerces v-model on `<input type="number">` so `raw` may be
-// a number (after interaction) or a string (initial "100"). Check
-// both the empty-string case AND the numeric cases. Using `!raw`
-// alone would have been wrong — `!0` is true and would silently let
-// a zero through.
-const replayMaxEventsError = computed<string>(() => {
-  const raw = replayForm.value.max_events as unknown
-  if (raw === '' || raw === null || raw === undefined) return ''
-  const n = typeof raw === 'number' ? raw : Number(raw)
-  if (!Number.isFinite(n) || n <= 0) return 'Must be a positive number'
-  if (n > 1000) return 'Must be 1000 or fewer'
-  return ''
-})
-const canSubmitReplay = computed(() => !replayMaxEventsError.value)
-
-async function submitReplay() {
-  replayError.value = ''
-  // Client-side range sanity check. Server will also reject, but a
-  // pre-flight avoids a wasted round-trip and surfaces the problem
-  // next to the offending inputs.
-  if (replayForm.value.from && replayForm.value.to) {
-    const fromMs = new Date(replayForm.value.from).getTime()
-    const toMs = new Date(replayForm.value.to).getTime()
-    if (!isNaN(fromMs) && !isNaN(toMs) && fromMs > toMs) {
-      replayError.value = '"From" must be before "To"'
-      return
-    }
-  }
-  // Live-validation guard (H6). canSubmitReplay gates the button so
-  // this is a belt-and-suspenders check for keyboard submit paths.
-  if (!canSubmitReplay.value) {
-    replayError.value = replayMaxEventsError.value || 'Invalid input'
-    return
-  }
-  replayLoading.value = true
-  try {
-    // H6: properly typed body. Pre-fix used `Record<string, unknown>` +
-    // `as any` cast which would silently accept malformed max_events
-    // (e.g. NaN from an empty string) and shove it at the server.
-    const body: ReplayEventsRequest = {}
-    if (replayForm.value.from) body.from = new Date(replayForm.value.from).toISOString()
-    if (replayForm.value.to) body.to = new Date(replayForm.value.to).toISOString()
-    if (replayForm.value.max_events) body.max_events = Number(replayForm.value.max_events)
-    const res = await replayWebhookEvents(id, body)
-    // Leave banner visible until the user dismisses it — previous 5s
-    // auto-clear was easy to miss when scrolled into deliveries list.
-    replayResult.value = `${res.events_queued} events queued for replay`
-    showReplay.value = false
-  } catch (e) { replayError.value = toMessage(e) }
-  finally { replayLoading.value = false }
 }
 
 function buildDeliveryParams(): Record<string, string> {
@@ -873,20 +762,20 @@ watch(exportError, (v) => { if (v) reportError(v) })
                  Everything else — edit, rotate, replay, state changes,
                  delete — lives in the overflow menu so the header no
                  longer wraps onto two rows. -->
-            <button @click="runTest" :disabled="testLoading" class="btn-pill-secondary disabled:opacity-50">{{ testLoading ? 'Testing...' : 'Send Test' }}</button>
+            <button @click="runTest" :disabled="webhookOperationBusy" class="btn-pill-secondary disabled:opacity-50">{{ testLoading ? 'Testing...' : 'Send Test' }}</button>
             <RowActionsMenu
               aria-label="More webhook actions"
               trigger-label="More actions"
               :items="[
-                { label: 'Edit', onClick: openEdit },
-                { label: 'Rotate Secret', onClick: openRotate },
-                { label: 'Replay', onClick: () => { showReplay = true } },
+                { label: 'Edit', onClick: openEdit, disabled: webhookOperationBusy, disabledReason: operationBusyReason },
+                { label: 'Rotate Secret', onClick: openRotate, disabled: webhookOperationBusy, disabledReason: operationBusyReason },
+                { label: 'Replay', onClick: openReplay, disabled: webhookOperationBusy, disabledReason: operationBusyReason },
                 { label: 'Copy as JSON', onClick: () => copySubscriptionJson() },
-                { label: 'Reset & Re-enable', onClick: () => { pendingAction = 'reset' }, hidden: !((webhook.consecutive_failures ?? 0) > 0 && webhook.status !== 'ACTIVE') },
-                { label: 'Enable', onClick: () => { pendingAction = 'ACTIVE' }, hidden: webhook.status !== 'DISABLED' && webhook.status !== 'PAUSED' },
+                { label: 'Reset & Re-enable', onClick: () => requestStatusAction('reset'), disabled: webhookOperationBusy, disabledReason: operationBusyReason, hidden: !((webhook.consecutive_failures ?? 0) > 0 && webhook.status !== 'ACTIVE') },
+                { label: 'Enable', onClick: () => requestStatusAction('ACTIVE'), disabled: webhookOperationBusy, disabledReason: operationBusyReason, hidden: webhook.status !== 'DISABLED' && webhook.status !== 'PAUSED' },
                 { separator: true },
-                { label: 'Pause', onClick: () => { pendingAction = 'PAUSED' }, danger: true, hidden: webhook.status !== 'ACTIVE' },
-                { label: 'Delete', onClick: openDelete, danger: true },
+                { label: 'Pause', onClick: () => requestStatusAction('PAUSED'), disabled: webhookOperationBusy, disabledReason: operationBusyReason, danger: true, hidden: webhook.status !== 'ACTIVE' },
+                { label: 'Delete', onClick: openDelete, disabled: webhookOperationBusy, disabledReason: operationBusyReason, danger: true },
               ]"
             />
           </div>
@@ -959,7 +848,7 @@ watch(exportError, (v) => { if (v) reportError(v) })
       <!-- Replay result -->
       <div v-if="replayResult" class="mb-4 table-cell rounded-lg text-sm bg-blue-50 border border-blue-200 text-blue-700 flex items-start justify-between gap-3" role="status">
         <span>{{ replayResult }}</span>
-        <button type="button" @click="replayResult = null" aria-label="Dismiss replay notification" class="text-blue-500 hover:text-blue-800 cursor-pointer shrink-0">✕</button>
+        <button type="button" @click="dismissReplayResult" aria-label="Dismiss replay notification" class="text-blue-500 hover:text-blue-800 cursor-pointer shrink-0">✕</button>
       </div>
 
       <!-- v0.1.25.51 — Per-subscription delivery stats. 4-up grid:
@@ -1186,31 +1075,37 @@ watch(exportError, (v) => { if (v) reportError(v) })
     </template>
 
     <ConfirmAction
-      v-if="pendingAction === 'PAUSED'"
+      v-if="pendingStatusAction === 'PAUSED'"
       title="Pause this webhook?"
       :message="`Pausing will stop all event deliveries to '${webhook?.url}'. Events that occur while paused are not queued and will be silently dropped.`"
       confirm-label="Pause Webhook"
       :danger="true"
-      @confirm="executeAction"
-      @cancel="pendingAction = null"
+      :loading="statusActionLoading"
+      :error="statusActionError"
+      @confirm="executeStatusAction"
+      @cancel="cancelStatusAction"
     />
 
     <ConfirmAction
-      v-if="pendingAction === 'ACTIVE'"
+      v-if="pendingStatusAction === 'ACTIVE'"
       title="Enable this webhook?"
       :message="`Re-enabling will resume event deliveries to '${webhook?.url}'. Events that occurred while paused/disabled are not retroactively delivered.`"
       confirm-label="Enable Webhook"
-      @confirm="executeAction"
-      @cancel="pendingAction = null"
+      :loading="statusActionLoading"
+      :error="statusActionError"
+      @confirm="executeStatusAction"
+      @cancel="cancelStatusAction"
     />
 
     <ConfirmAction
-      v-if="pendingAction === 'reset'"
+      v-if="pendingStatusAction === 'reset'"
       title="Reset and re-enable?"
       :message="`This will re-enable the webhook and reset the consecutive failure count to 0 for '${webhook?.url}'. Delivery attempts will resume immediately.`"
       confirm-label="Reset &amp; Re-enable"
-      @confirm="executeAction"
-      @cancel="pendingAction = null"
+      :loading="statusActionLoading"
+      :error="statusActionError"
+      @confirm="executeStatusAction"
+      @cancel="cancelStatusAction"
     />
 
     <ConfirmAction
@@ -1222,7 +1117,7 @@ watch(exportError, (v) => { if (v) reportError(v) })
       :loading="deleteLoading"
       :error="deleteError"
       @confirm="executeDelete"
-      @cancel="pendingDelete = false"
+      @cancel="cancelDelete"
     />
 
     <FormDialog
@@ -1233,7 +1128,7 @@ watch(exportError, (v) => { if (v) reportError(v) })
       :error="replayError"
       :submit-disabled="!canSubmitReplay"
       @submit="submitReplay"
-      @cancel="showReplay = false"
+      @cancel="cancelReplay"
     >
       <p class="muted-sm">Re-delivers historical events to this webhook. May cause duplicate deliveries.</p>
       <div>
@@ -1269,10 +1164,10 @@ watch(exportError, (v) => { if (v) reportError(v) })
       :loading="rotateLoading"
       :error="rotateError"
       @confirm="executeRotate"
-      @cancel="pendingRotate = false"
+      @cancel="cancelRotate"
     />
 
-    <SecretReveal v-if="rotatedSecret" title="New Signing Secret" :secret="rotatedSecret" label="Signing Secret" @close="rotatedSecret = null" />
+    <SecretReveal v-if="rotatedSecret" title="New Signing Secret" :secret="rotatedSecret" label="Signing Secret" @close="closeRotatedSecret" />
 
     <ExportDialog
       :format="showExportConfirm"

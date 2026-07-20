@@ -43,6 +43,7 @@ type PollCallback = Parameters<WebhookDetailDataDependencies['usePolling']>[0]
 
 function setup() {
   let deliveryParams: Record<string, string> = {}
+  let mutationRunning = false
   let tick!: PollCallback
   const pollingLoading = ref(false)
   const lastSuccessAt = ref<Date | null>(null)
@@ -62,6 +63,7 @@ function setup() {
   const data = scope.run(() => useWebhookDetailData({
     webhookId: 'wh-1',
     getDeliveryParams: () => ({ ...deliveryParams }),
+    isMutationRunning: () => mutationRunning,
     dependencies: {
       getWebhook: getWebhook as unknown as WebhookDetailDataDependencies['getWebhook'],
       listDeliveries: listDeliveries as unknown as WebhookDetailDataDependencies['listDeliveries'],
@@ -78,6 +80,7 @@ function setup() {
     lastSuccessAt,
     runTick: (signal = new AbortController().signal) => tick(signal),
     setParams: (params: Record<string, string>) => { deliveryParams = params },
+    setMutationRunning: (running: boolean) => { mutationRunning = running },
     stop: () => scope.stop(),
   }
 }
@@ -95,6 +98,17 @@ describe('useWebhookDetailData', () => {
     expect(harness.data.deliveries.value.map(item => item.delivery_id)).toEqual(['initial'])
     expect(harness.data.initialLoadDone.value).toBe(true)
     expect(harness.data.resultsMatchAppliedFilter.value).toBe(true)
+    harness.stop()
+  })
+
+  it('keeps ambient polling out while the operation owner is settling a write', async () => {
+    const harness = setup()
+    harness.setMutationRunning(true)
+
+    await expect(harness.runTick()).resolves.toBe(POLLING_STALE)
+
+    expect(harness.getWebhook).not.toHaveBeenCalled()
+    expect(harness.listDeliveries).not.toHaveBeenCalled()
     harness.stop()
   })
 
@@ -480,6 +494,21 @@ describe('useWebhookDetailData', () => {
 
     await expect(poll).resolves.toBe(POLLING_STALE)
     expect(harness.data.webhook.value?.name).toBe('Mutation response')
+    expect(harness.listDeliveries).not.toHaveBeenCalled()
+    harness.stop()
+  })
+
+  it('invalidates an older poll read when a subscription mutation begins', async () => {
+    const harness = setup()
+    const oldRead = deferred<WebhookSubscription>()
+    harness.getWebhook.mockImplementationOnce(() => oldRead.promise)
+    const poll = harness.runTick()
+
+    harness.data.beginSubscriptionMutation()
+    oldRead.resolve(subscription('Stale poll'))
+
+    await expect(poll).resolves.toBe(POLLING_STALE)
+    expect(harness.data.webhook.value).toBeNull()
     expect(harness.listDeliveries).not.toHaveBeenCalled()
     harness.stop()
   })

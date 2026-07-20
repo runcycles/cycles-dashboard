@@ -15,6 +15,34 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.80] — 2026-07-20
+
+### Changed
+
+- Webhook Detail status, delete, signing-secret rotation, endpoint-test, and
+  replay protocols now run through the focused `useWebhookOperations` owner.
+  Route intent, charts, delivery acquisition/presentation, export, and the
+  security-sensitive webhook editor remain in the view.
+
+### Fixed
+
+- Status confirmations now block duplicate submits and cancellation while the
+  PATCH is active, retain actionable errors in the dialog, and publish the
+  authoritative PATCH response directly instead of risking a false failure on
+  an unnecessary follow-up GET.
+- Subscription writes invalidate older poll reads, and new polls stay excluded
+  through operation settlement. Delete/navigation errors are classified after
+  commit, so a navigation failure no longer presents a successful DELETE as
+  retryable.
+- Rotate, test, and replay have protocol-level duplicate guards. Replay also
+  rejects invalid date values before request construction and cannot be closed
+  while its request is active; busy header actions expose a disabled reason.
+
+No endpoint, successful request shape, capability gate, server/spec minimum,
+chart, delivery, export, or webhook-editor contract changes. Validation: 1,436
+tests, 97.75% line coverage, lint, strict typecheck, production build, and both
+Compose configurations pass.
+
 ## [0.1.25.79] — 2026-07-19
 
 ### Changed
