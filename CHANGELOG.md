@@ -33,15 +33,16 @@ UX work that does not advance spec alignment.
   follow-up GET.
 - Subscription writes invalidate older poll reads, and new polls stay excluded
   through operation settlement. Delete/navigation errors are classified after
-  commit, so a navigation failure no longer presents a successful DELETE as
-  retryable.
+  commit; the deleted detail state publishes before navigation, so a navigation
+  failure neither leaves dead actions active nor presents the successful DELETE
+  as retryable.
 - Rotate, test, and replay have protocol-level duplicate guards. Replay also
   rejects invalid date values before request construction and cannot be closed
   while its request is active; busy header actions expose a disabled reason.
 
 No endpoint, successful request shape, capability gate, server/spec minimum,
-chart, delivery, export, or webhook-editor contract changes. Validation: 1,437
-tests, 97.75% line coverage, lint, strict typecheck, production build, and both
+chart, delivery, export, or webhook-editor contract changes. Validation: 1,439
+tests, 97.76% line coverage, lint, strict typecheck, production build, and both
 Compose configurations pass.
 
 ## [0.1.25.79] — 2026-07-19

@@ -44,6 +44,7 @@ function setup(initial: WebhookSubscription | null = subscription()) {
   const replayWebhookEvents = vi.fn().mockResolvedValue({ events_queued: 3 })
   const beginSubscriptionMutation = vi.fn()
   const publishWebhook = vi.fn((value: WebhookSubscription) => { webhook.value = value })
+  const publishDeletedWebhook = vi.fn(() => { webhook.value = null })
   const reportError = vi.fn()
   const navigateToList = vi.fn().mockResolvedValue(undefined)
   const notify = { success: vi.fn(), warning: vi.fn(), error: vi.fn() }
@@ -54,6 +55,7 @@ function setup(initial: WebhookSubscription | null = subscription()) {
     webhook,
     beginSubscriptionMutation,
     publishWebhook,
+    publishDeletedWebhook,
     reportError,
     navigateToList,
     notify,
@@ -76,6 +78,7 @@ function setup(initial: WebhookSubscription | null = subscription()) {
     replayWebhookEvents,
     beginSubscriptionMutation,
     publishWebhook,
+    publishDeletedWebhook,
     reportError,
     navigateToList,
     notify,
@@ -211,6 +214,8 @@ describe('useWebhookOperations', () => {
     await expect(first).resolves.toBe(true)
     expect(harness.deleteWebhook).toHaveBeenCalledOnce()
     expect(harness.beginSubscriptionMutation).toHaveBeenCalledOnce()
+    expect(harness.publishDeletedWebhook).toHaveBeenCalledOnce()
+    expect(harness.webhook.value).toBeNull()
     expect(harness.notify.success).toHaveBeenCalledWith('Webhook deleted')
     expect(harness.navigateToList).toHaveBeenCalledOnce()
     harness.stop()
@@ -241,6 +246,8 @@ describe('useWebhookOperations', () => {
 
     expect(harness.operations.pendingDelete.value).toBe(false)
     expect(harness.operations.deleteError.value).toBe('')
+    expect(harness.publishDeletedWebhook).toHaveBeenCalledOnce()
+    expect(harness.webhook.value).toBeNull()
     expect(harness.reportError).toHaveBeenCalledWith(
       'Webhook deleted, but navigation failed: router unavailable',
     )

@@ -390,6 +390,12 @@ export function useWebhookDetailData(options: UseWebhookDetailDataOptions) {
     notFound.value = false
   }
 
+  /** A committed DELETE owns the terminal detail state before navigation. */
+  function publishDeletedWebhook(): void {
+    beginSubscriptionMutation()
+    publishNotFound()
+  }
+
   function reportError(message: string): void {
     error.value = message
   }
@@ -457,6 +463,7 @@ export function useWebhookDetailData(options: UseWebhookDetailDataOptions) {
     fetchDeliveryPage,
     beginSubscriptionMutation,
     publishWebhook,
+    publishDeletedWebhook,
     reportError,
     dismissError,
     refreshAll,

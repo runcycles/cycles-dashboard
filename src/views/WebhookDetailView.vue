@@ -81,6 +81,7 @@ const {
   fetchDeliveryPage,
   beginSubscriptionMutation,
   publishWebhook,
+  publishDeletedWebhook,
   reportError,
   dismissError,
   refreshAll,
@@ -97,6 +98,7 @@ const webhookOperations = useWebhookOperations({
   webhook,
   beginSubscriptionMutation,
   publishWebhook,
+  publishDeletedWebhook,
   reportError,
   navigateToList: async () => {
     const failure = await router.push({ name: 'webhooks' })

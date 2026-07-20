@@ -23,7 +23,7 @@ After `.79` extracted truthful acquisition, `WebhookDetailView` still owned
 status changes, deletion, secret rotation, endpoint tests, and replay alongside
 charts, delivery presentation, routing, and its security-sensitive editor.
 `useWebhookOperations` now owns those non-editor protocols, reducing the view
-from 1,355 to 1,250 lines while leaving selector editing unchanged for its own
+from 1,355 to 1,268 lines while leaving selector editing unchanged for its own
 review-sized follow-up.
 
 | Owner | Responsibilities |
@@ -45,8 +45,9 @@ review-sized follow-up.
   report the whole action as failed, and invite a duplicate retry.
 - Subscription writes invalidate an older poll read before starting; new poll
   ticks remain excluded until operation settlement. Delete remains committed
-  if post-delete navigation fails and reports that narrower warning instead of
-  falsely labelling the DELETE unsuccessful.
+  if post-delete navigation fails, immediately clears the dead action surface,
+  and reports that narrower warning instead of falsely labelling the DELETE
+  unsuccessful.
 - Replay keeps its typed request and range/limit gates, adds explicit invalid-
   date handling, blocks duplicate submits and mid-request cancellation, and
   retains the success result until dismissal. Rotate retains its one-time
@@ -57,7 +58,7 @@ labels, delete navigation, rotate/test/replay copy, capability gates, charts,
 delivery acquisition/export, and the complete edit-selector protocol are
 unchanged. No governance-spec or server-fleet bump is required.
 
-**Validation.** 1,437/1,437 tests pass across 120 files with 97.75% line
+**Validation.** 1,439/1,439 tests pass across 120 files with 97.76% line
 coverage; `useWebhookOperations` is 100% lines/functions and 92.79% branches.
 ESLint, strict typecheck, production build, and both Compose validations pass.
 

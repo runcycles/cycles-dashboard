@@ -513,6 +513,24 @@ describe('useWebhookDetailData', () => {
     harness.stop()
   })
 
+  it('publishes a committed delete as terminal before an older poll can return', async () => {
+    const harness = setup()
+    await harness.runTick()
+    const oldRead = deferred<WebhookSubscription>()
+    harness.getWebhook.mockImplementationOnce(() => oldRead.promise)
+    const poll = harness.runTick()
+
+    harness.data.publishDeletedWebhook()
+    oldRead.resolve(subscription('Stale poll'))
+
+    await expect(poll).resolves.toBe(POLLING_STALE)
+    expect(harness.data.notFound.value).toBe(true)
+    expect(harness.data.webhook.value).toBeNull()
+    expect(harness.data.deliveries.value).toEqual([])
+    expect(harness.listDeliveries).toHaveBeenCalledOnce()
+    harness.stop()
+  })
+
   it('queues a manual refresh while a filter transition owns loading', async () => {
     const harness = setup()
     await harness.runTick()

@@ -8,6 +8,8 @@ import type { Capabilities, WebhookSubscription } from '../types'
 const getWebhookMock = vi.fn()
 const listDeliveriesMock = vi.fn()
 const updateWebhookMock = vi.fn()
+const deleteWebhookMock = vi.fn()
+const routerPushMock = vi.fn()
 
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
@@ -16,6 +18,7 @@ vi.mock('../api/client', async () => {
     getWebhook: (...args: unknown[]) => getWebhookMock(...args),
     listDeliveries: (...args: unknown[]) => listDeliveriesMock(...args),
     updateWebhook: (...args: unknown[]) => updateWebhookMock(...args),
+    deleteWebhook: (...args: unknown[]) => deleteWebhookMock(...args),
   }
 })
 
@@ -23,7 +26,7 @@ vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
   return {
     ...actual,
-    useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
+    useRouter: () => ({ push: routerPushMock, replace: vi.fn(), back: vi.fn() }),
     useRoute: () => ({ query: {}, params: { id: 'wh-1' } }),
     RouterLink: { props: ['to'], template: '<a><slot /></a>' },
   }
@@ -120,6 +123,8 @@ describe('WebhookDetailView — operation ownership', () => {
     getWebhookMock.mockReset().mockResolvedValue(subscription())
     listDeliveriesMock.mockReset().mockResolvedValue({ deliveries: [], has_more: false })
     updateWebhookMock.mockReset()
+    deleteWebhookMock.mockReset().mockResolvedValue(undefined)
+    routerPushMock.mockReset().mockResolvedValue(undefined)
     document.body.innerHTML = ''
   })
 
@@ -153,5 +158,22 @@ describe('WebhookDetailView — operation ownership', () => {
     expect(getWebhookMock).toHaveBeenCalledTimes(1)
     expect(wrapper.text()).toContain('PAUSED')
     expect(wrapper.text()).not.toContain('Pause this webhook?')
+  })
+
+  it('removes the deleted webhook action surface before failed navigation settles', async () => {
+    routerPushMock.mockRejectedValueOnce(new Error('router unavailable'))
+    const wrapper = await mountView()
+    await clickWebhookAction(wrapper, 'Delete')
+
+    const confirm = wrapper.findAll('button').find(button => button.text().includes('Delete Webhook'))
+    expect(confirm).toBeDefined()
+    await confirm!.trigger('click')
+    await flushPromises()
+
+    expect(deleteWebhookMock).toHaveBeenCalledWith('wh-1')
+    expect(routerPushMock).toHaveBeenCalledWith({ name: 'webhooks' })
+    expect(wrapper.find('[data-testid="webhook-not-found"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('Send Test')
+    expect(wrapper.text()).toContain('Webhook deleted, but navigation failed: router unavailable')
   })
 })

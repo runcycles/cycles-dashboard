@@ -41,6 +41,7 @@ export interface UseWebhookOperationsOptions {
   /** Invalidates a poll read before a subscription mutation starts. */
   beginSubscriptionMutation: () => void
   publishWebhook: (webhook: WebhookSubscription) => void
+  publishDeletedWebhook: () => void
   reportError: (message: string) => void
   navigateToList: () => void | Promise<void>
   notify: WebhookOperationNotifications
@@ -221,6 +222,9 @@ export function useWebhookOperations(options: UseWebhookOperationsOptions) {
         options.notify.error(`Delete failed: ${message}`)
         return false
       }
+      // DELETE is already committed. Clear the detail surface before route
+      // settlement so a rejected navigation cannot leave dead actions active.
+      options.publishDeletedWebhook()
       pendingDeleteState.value = false
       options.notify.success('Webhook deleted')
       try {
