@@ -286,6 +286,21 @@ describe('useTenantDetailData', () => {
     expect(h.data.apiKeys.value.map(item => item.key_id)).toEqual(['key-3', 'key-1', 'key-2'])
   })
 
+  it('publishes authoritative policy mutation responses without replacing sibling rows', async () => {
+    const h = createHarness('policies')
+    h.listPolicies.mockResolvedValue({ policies: [policy('policy-1'), policy('policy-2')], has_more: false })
+    await h.tick()
+
+    h.data.commitPolicy({ ...policy('policy-2'), name: 'Updated policy' })
+    expect(h.data.policies.value.map(item => `${item.policy_id}:${item.name}`)).toEqual([
+      'policy-1:policy-1',
+      'policy-2:Updated policy',
+    ])
+
+    h.data.commitPolicy(policy('policy-3'))
+    expect(h.data.policies.value.map(item => item.policy_id)).toEqual(['policy-3', 'policy-1', 'policy-2'])
+  })
+
   it('does not publish an action-time walk aborted between pages', async () => {
     const h = createHarness()
     h.listBudgets.mockResolvedValue({ ledgers: [budget('owned')], has_more: false })

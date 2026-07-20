@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.83 (2026-07-20)
+**Current release:** v0.1.25.84 (2026-07-20)
 
 ## Baseline requirements
 
@@ -16,6 +16,46 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-07-20 — v0.1.25.84: Tenant Detail policy ownership
+
+Tenant Detail's policy create/edit protocol and presentation now have focused
+owners. The parent retains acquisition, policy table/copy/activity actions,
+tabs, routing, and capability coordination; `TenantDetailView` drops from
+1,150 to 1,023 lines.
+
+| Owner | Responsibilities |
+|---|---|
+| `useTenantPolicies` | Form snapshots, validation/diff construction, mutation ownership, authoritative response publication, stale-row protection, and refresh settlement. |
+| `TenantPolicyDialogs` | Create/edit presentation, structured scope creation, immutable scope display, and API clear-boundary guidance. |
+| `useTenantDetailData` / view | Read generations and authoritative policy commits; table actions, capability gates, and sibling-owner coordination. |
+
+**Confirmed fixes and hardening:**
+
+- Create/edit acquire publication ownership before their first write and
+  publish the authoritative response before refresh settlement. Duplicate
+  submits and cancellation during a write are refused; failed writes remain
+  retryable in their dialog.
+- The editor now shows the stored description and commit-overage value instead
+  of blank controls. An explicit blank description clears it; caps, rate-limit,
+  and TTL groups use spec-valid empty objects when all fields are cleared.
+- Immutable scope is visible rather than omitted. Priority, commit-overage,
+  and effective timestamps reject clear attempts the current non-null admin
+  PATCH cannot represent, so the UI no longer implies a successful no-op.
+- Edit revalidates the live policy snapshot and tenant/sibling gate before the
+  write. Closed tenants are visibly read-only, and policy, API-key, and tenant
+  lifecycle owners use reciprocal arming gates through mutation settlement.
+- Edit diffs normalized wire values, scopes advanced validation to replacement
+  groups entering the PATCH, and checks changed schedule boundaries against the
+  exact stored counterpart. Formatting-only input and JSON key order cannot
+  create no-op writes or false stale-row failures.
+- Integer/range, tool-name length, date, and effective-window rules now run in
+  the protocol as well as native controls. Unchanged unknown server enum values
+  remain visible and survive unrelated edits for forward compatibility.
+
+No endpoint, server/spec minimum, server-fleet pin, or valid non-clear request
+shape changes. Validation: 1,512/1,512 tests across 128 files with 98.21%
+line coverage; lint, strict typecheck, and the production build pass.
 
 ### 2026-07-20 — post-v0.1.25.83 dependency security maintenance
 

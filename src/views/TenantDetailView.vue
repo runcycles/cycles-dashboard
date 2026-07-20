@@ -11,16 +11,11 @@ import {
 } from '../composables/useTenantDetailData'
 import { useTenantLifecycle } from '../composables/useTenantLifecycle'
 import { useTenantApiKeys } from '../composables/useTenantApiKeys'
-import { updateTenant, createBudget, createPolicy, updatePolicy } from '../api/client'
+import { useTenantPolicies } from '../composables/useTenantPolicies'
+import { updateTenant, createBudget } from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import type { TenantUpdateRequest, BudgetLedger, ApiKey, Policy, BudgetCreateRequest, PolicyCreateRequest, PolicyUpdateRequest } from '../types'
+import type { TenantUpdateRequest, BudgetLedger, ApiKey, Policy, BudgetCreateRequest } from '../types'
 import { COMMIT_OVERAGE_POLICIES } from '../types'
-import PolicyAdvancedFields from '../components/PolicyAdvancedFields.vue'
-import {
-  emptyPolicyAdvancedForm,
-  policyAdvancedToRequest,
-  policyToAdvancedForm,
-} from '../utils/policyAdvanced'
 import { validateScope } from '../utils/safe'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -31,6 +26,7 @@ import InlineErrorBanner from '../components/InlineErrorBanner.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
 import TenantApiKeyDialogs from '../components/TenantApiKeyDialogs.vue'
+import TenantPolicyDialogs from '../components/TenantPolicyDialogs.vue'
 import ScopeBuilder from '../components/ScopeBuilder.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { writeClipboardJson } from '../utils/clipboard'
@@ -60,6 +56,7 @@ const tab = ref<TenantDetailTab>('budgets')
 // no mutation can have started, so the safe bootstrap answer is false.
 let tenantMutationRunning = () => false
 let apiKeyOwnerArmed = () => false
+let policyOwnerArmed = () => false
 
 // Breadcrumb back-link origin. When the operator clicks a child tenant
 // from another tenant's "Children" list, the link threads ?parent=<src>
@@ -117,6 +114,7 @@ const {
   beginMutation,
   commitTenant,
   commitApiKey,
+  commitPolicy,
   reportError,
   dismissError,
 } = useTenantDetailData({
@@ -141,7 +139,7 @@ const tenantLifecycle = useTenantLifecycle({
   reportError,
   dismissError,
   notify: toast,
-  canArm: () => !apiKeyOwnerArmed(),
+  canArm: () => !apiKeyOwnerArmed() && !policyOwnerArmed(),
 })
 
 const tenantApiKeys = useTenantApiKeys({
@@ -153,12 +151,32 @@ const tenantApiKeys = useTenantApiKeys({
   commitApiKey,
   notify: toast,
   canArm: () => (
-    !tenantLifecycle.lifecycleArmed.value && !isTerminalTenant(tenant.value)
+    !tenantLifecycle.lifecycleArmed.value
+    && !policyOwnerArmed()
+    && !isTerminalTenant(tenant.value)
+  ),
+})
+
+const tenantPolicies = useTenantPolicies({
+  tenantId: id,
+  tenant,
+  policies,
+  error,
+  refreshPolicies,
+  beginMutation,
+  commitPolicy,
+  notify: toast,
+  canArm: () => (
+    !tenantLifecycle.lifecycleArmed.value
+    && !apiKeyOwnerArmed()
   ),
 })
 apiKeyOwnerArmed = () => tenantApiKeys.ownerArmed.value
+policyOwnerArmed = () => tenantPolicies.ownerArmed.value
 tenantMutationRunning = () => (
-  tenantLifecycle.isMutationRunning.value || tenantApiKeys.isMutationRunning.value
+  tenantLifecycle.isMutationRunning.value
+  || tenantApiKeys.isMutationRunning.value
+  || tenantPolicies.isMutationRunning.value
 )
 
 const {
@@ -218,22 +236,63 @@ const {
   submitEdit: submitEditKey,
 } = tenantApiKeys
 
+const {
+  ownerArmed: policyOwnerBusy,
+  showCreate: showCreatePolicy,
+  createLoading: createPolicyLoading,
+  createError: createPolicyError,
+  createForm: createPolicyForm,
+  createAdvanced: createPolicyAdvanced,
+  openCreate: openCreatePolicy,
+  cancelCreate: cancelCreatePolicy,
+  submitCreate: submitCreatePolicy,
+  editingPolicy,
+  editLoading: editPolicyLoading,
+  editError: editPolicyError,
+  editForm: editPolicyForm,
+  editAdvanced: editPolicyAdvanced,
+  editHasAdvanced: editPolicyHasAdvanced,
+  openEdit: openEditPolicy,
+  cancelEdit: cancelEditPolicy,
+  submitEdit: submitEditPolicy,
+} = tenantPolicies
+
 const lifecycleActionsBlocked = computed(() => (
-  tenantLifecycle.lifecycleArmed.value || apiKeyOwnerBusy.value
+  tenantLifecycle.lifecycleArmed.value || apiKeyOwnerBusy.value || policyOwnerBusy.value
 ))
 const apiKeyActionsBlocked = computed(() => (
   isTerminalTenant(tenant.value)
   || apiKeyOwnerBusy.value
   || tenantLifecycle.lifecycleArmed.value
+  || policyOwnerBusy.value
 ))
 const apiKeyActionBlockedReason = computed(() => (
   isTerminalTenant(tenant.value)
     ? 'Closed tenants are permanently read-only'
     : tenantLifecycle.lifecycleArmed.value
       ? 'Finish the current tenant action first'
+      : policyOwnerBusy.value
+        ? 'Finish the current policy action first'
+        : apiKeyOwnerBusy.value
+          ? 'Finish the current API-key action first'
+          : ''
+))
+const policyActionsBlocked = computed(() => (
+  isTerminalTenant(tenant.value)
+  || policyOwnerBusy.value
+  || tenantLifecycle.lifecycleArmed.value
+  || apiKeyOwnerBusy.value
+))
+const policyActionBlockedReason = computed(() => (
+  isTerminalTenant(tenant.value)
+    ? 'Closed tenants are permanently read-only'
+    : tenantLifecycle.lifecycleArmed.value
+      ? 'Finish the current tenant action first'
       : apiKeyOwnerBusy.value
         ? 'Finish the current API-key action first'
-        : ''
+        : policyOwnerBusy.value
+          ? 'Finish the current policy action first'
+          : ''
 ))
 
 // v0.1.25.46: hide terminal rows in the embedded sub-lists by default.
@@ -492,156 +551,6 @@ async function submitCreateBudget() {
   finally { createBudgetLoading.value = false }
 }
 
-// v0.1.25.20: Create Policy — admin-on-behalf-of. Same shape as Create
-// Budget — tenant_id supplied by wrapper. UI exposes the most-used
-// fields; advanced fields (caps, rate_limits, action_quotas) can be
-// added in a follow-up once the basic flow is exercised.
-const showCreatePolicy = ref(false)
-const createPolicyLoading = ref(false)
-const createPolicyError = ref('')
-const createPolicyForm = ref<{
-  name: string
-  scope_pattern: string
-  description: string
-  priority: number | string
-  commit_overage_policy: string
-}>({
-  name: '',
-  scope_pattern: `tenant:${id}/*`,
-  description: '',
-  priority: '',
-  commit_overage_policy: '',
-})
-// Advanced enforcement editor model (caps / rate limits / TTL / schedule).
-const createPolicyAdvanced = ref(emptyPolicyAdvancedForm())
-
-function openCreatePolicy() {
-  createPolicyForm.value = {
-    name: '',
-    scope_pattern: `tenant:${id}/*`,
-    description: '',
-    priority: '',
-    commit_overage_policy: '',
-  }
-  createPolicyAdvanced.value = emptyPolicyAdvancedForm()
-  createPolicyError.value = ''
-  showCreatePolicy.value = true
-}
-
-async function submitCreatePolicy() {
-  if (createPolicyLoading.value) return
-  createPolicyError.value = ''
-  if (!createPolicyForm.value.name.trim()) {
-    createPolicyError.value = 'Name is required'
-    return
-  }
-  if (!createPolicyForm.value.scope_pattern.trim()) {
-    createPolicyError.value = 'Scope pattern is required'
-    return
-  }
-  // Client-side grammar check for the pattern. `allowWildcards: true`
-  // because policy patterns can use `tenant:acme/*` (all descendants)
-  // and `tenant:acme/agent:*` (id-wildcard) per spec examples. Budget
-  // scopes stay concrete (no wildcards).
-  const scopeError = validateScope(createPolicyForm.value.scope_pattern.trim(), {
-    fieldName: 'Scope pattern', allowWildcards: true,
-  })
-  if (scopeError) { createPolicyError.value = scopeError; return }
-  const body: PolicyCreateRequest = {
-    name: createPolicyForm.value.name.trim(),
-    scope_pattern: createPolicyForm.value.scope_pattern.trim(),
-  }
-  if (createPolicyForm.value.description.trim()) body.description = createPolicyForm.value.description.trim()
-  const prio = Number(createPolicyForm.value.priority)
-  if (createPolicyForm.value.priority !== '' && Number.isFinite(prio)) body.priority = prio
-  if (createPolicyForm.value.commit_overage_policy) body.commit_overage_policy = createPolicyForm.value.commit_overage_policy
-  Object.assign(body, policyAdvancedToRequest(createPolicyAdvanced.value))
-  createPolicyLoading.value = true
-  try {
-    await createPolicy(id, body)
-    showCreatePolicy.value = false
-    toast.success('Policy created')
-    warnRefreshSettlement(await refreshPolicies(), 'Policy created')
-  } catch (e) { createPolicyError.value = toMessage(e) }
-  finally { createPolicyLoading.value = false }
-}
-
-// v0.1.25.20: Edit Policy — uses PATCH /v1/admin/policies/{id}. policy_id
-// pins the owning tenant on the server; no tenant_id needed in body.
-const showEditPolicy = ref(false)
-const editPolicyLoading = ref(false)
-const editPolicyError = ref('')
-const editPolicyTarget = ref<Policy | null>(null)
-const editPolicyForm = ref<{
-  name: string
-  description: string
-  priority: number | string
-  commit_overage_policy: string
-}>({ name: '', description: '', priority: '', commit_overage_policy: '' })
-const editPolicyAdvanced = ref(emptyPolicyAdvancedForm())
-// Frozen baseline of the advanced form at open — used to diff so an
-// unchanged advanced section never enters the PATCH body (mirrors the
-// webhook edit flow). Without this, editing only the name would re-send
-// caps/rate_limits/ttl, which the server may treat as replacement.
-const editPolicyAdvancedInitial = ref('')
-// Open the advanced section expanded when the policy already carries any
-// of that config so it's not hidden behind a disclosure the operator
-// might not notice.
-const editPolicyHasAdvanced = ref(false)
-
-function openEditPolicy(p: Policy) {
-  editPolicyTarget.value = p
-  editPolicyForm.value = {
-    name: p.name,
-    description: '',
-    priority: p.priority ?? '',
-    commit_overage_policy: '',
-  }
-  editPolicyAdvanced.value = policyToAdvancedForm(p)
-  editPolicyAdvancedInitial.value = JSON.stringify(editPolicyAdvanced.value)
-  editPolicyHasAdvanced.value = !!(p.caps || p.rate_limits || p.reservation_ttl_override || p.effective_from || p.effective_until)
-  editPolicyError.value = ''
-  showEditPolicy.value = true
-}
-
-async function submitEditPolicy() {
-  if (!editPolicyTarget.value || editPolicyLoading.value) return
-  editPolicyError.value = ''
-  const body: PolicyUpdateRequest = {}
-  // PATCH semantics: only send fields the user actually changed/filled.
-  // Avoid no-op payloads that would dirty the audit log.
-  if (editPolicyForm.value.name.trim() && editPolicyForm.value.name.trim() !== editPolicyTarget.value.name) {
-    body.name = editPolicyForm.value.name.trim()
-  }
-  if (editPolicyForm.value.description.trim()) body.description = editPolicyForm.value.description.trim()
-  const prio = Number(editPolicyForm.value.priority)
-  if (editPolicyForm.value.priority !== '' && Number.isFinite(prio) && prio !== editPolicyTarget.value.priority) {
-    body.priority = prio
-  }
-  if (editPolicyForm.value.commit_overage_policy) body.commit_overage_policy = editPolicyForm.value.commit_overage_policy
-  // Advanced enforcement uses spec replacement semantics: a present field
-  // overwrites. Only touch the body when the advanced section actually
-  // changed, so a name-only edit doesn't re-send (and potentially clobber)
-  // caps/rate_limits/ttl. NOTE: emptying a previously-set field omits it
-  // (server leaves it unchanged) — the form sets/adjusts, it doesn't clear
-  // advanced config (surfaced in the edit dialog + documented in AUDIT.md).
-  if (JSON.stringify(editPolicyAdvanced.value) !== editPolicyAdvancedInitial.value) {
-    Object.assign(body, policyAdvancedToRequest(editPolicyAdvanced.value))
-  }
-  if (Object.keys(body).length === 0) {
-    editPolicyError.value = 'No changes to save'
-    return
-  }
-  editPolicyLoading.value = true
-  try {
-    await updatePolicy(editPolicyTarget.value.policy_id, body)
-    showEditPolicy.value = false
-    toast.success('Policy updated')
-    warnRefreshSettlement(await refreshPolicies(), 'Policy updated')
-  } catch (e) { editPolicyError.value = toMessage(e) }
-  finally { editPolicyLoading.value = false }
-}
-
 </script>
 
 <template>
@@ -731,7 +640,7 @@ async function submitEditPolicy() {
                  uncluttered. -->
             <button v-if="tab === 'budgets' && canManageBudgets" @click="openCreateBudget" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Budget</button>
             <button v-if="tab === 'keys' && canManageKeys" @click="openCreateKey" :disabled="apiKeyActionsBlocked" :title="apiKeyActionBlockedReason || undefined" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed">Create API Key</button>
-            <button v-if="tab === 'policies' && canManagePolicies" @click="openCreatePolicy" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Policy</button>
+            <button v-if="tab === 'policies' && canManagePolicies" @click="openCreatePolicy" :disabled="policyActionsBlocked" :title="policyActionBlockedReason || undefined" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed">Create Policy</button>
             <template v-if="canManageTenants">
               <button @click="openEditTenant" class="btn-pill-secondary">Edit</button>
               <!-- #7 Emergency Freeze: only shown if there are ACTIVE budgets
@@ -894,7 +803,7 @@ async function submitEditPolicy() {
                   :items="[
                     { label: 'Activity', to: { name: 'audit', query: { resource_type: 'policy', resource_id: p.policy_id } } },
                     { label: 'Copy as JSON', onClick: () => copyPolicyJson(p) },
-                    { label: 'Edit', onClick: () => openEditPolicy(p) },
+                    { label: 'Edit', onClick: () => openEditPolicy(p), disabled: policyActionsBlocked, disabledReason: policyActionBlockedReason },
                   ]"
                 />
               </td>
@@ -1092,59 +1001,23 @@ async function submitEditPolicy() {
       </div>
     </FormDialog>
 
-    <!-- v0.1.25.20: Create Policy (admin-on-behalf-of) -->
-    <FormDialog v-if="showCreatePolicy" wide title="Create Policy" submit-label="Create" :loading="createPolicyLoading" :error="createPolicyError" @submit="submitCreatePolicy" @cancel="showCreatePolicy = false">
-      <div>
-        <label for="cp-name" class="form-label">Name</label>
-        <input id="cp-name" v-model="createPolicyForm.name" required maxlength="256" class="form-input" />
-      </div>
-      <div>
-        <label class="form-label">Scope pattern</label>
-        <!-- Policy patterns enable wildcards: per-row "any <kind> (*)"
-             radio for id-wildcards, and a trailing /* checkbox for
-             "match everything deeper." -->
-        <ScopeBuilder v-model="createPolicyForm.scope_pattern" :tenant-id="id" allow-wildcards />
-      </div>
-      <div>
-        <label for="cp-desc" class="form-label">Description (optional)</label>
-        <input id="cp-desc" v-model="createPolicyForm.description" maxlength="1024" class="form-input" />
-      </div>
-      <div>
-        <label for="cp-priority" class="form-label">Priority (higher wins on overlap)</label>
-        <input id="cp-priority" v-model="createPolicyForm.priority" type="number" step="1" class="form-input-mono" placeholder="0" />
-      </div>
-      <div>
-        <label for="cp-cop" class="form-label">Commit overage policy (optional)</label>
-        <select id="cp-cop" v-model="createPolicyForm.commit_overage_policy" class="form-select w-full">
-          <option value="">— Default —</option>
-          <option v-for="p in COMMIT_OVERAGE_POLICIES" :key="p" :value="p">{{ p }}</option>
-        </select>
-      </div>
-      <PolicyAdvancedFields :form="createPolicyAdvanced" id-prefix="cp-adv" mode="create" />
-    </FormDialog>
-
-    <!-- v0.1.25.20: Edit Policy -->
-    <FormDialog v-if="showEditPolicy" wide title="Edit Policy" submit-label="Save Changes" :loading="editPolicyLoading" :error="editPolicyError" @submit="submitEditPolicy" @cancel="showEditPolicy = false">
-      <div>
-        <label for="ep-name" class="form-label">Name</label>
-        <input id="ep-name" v-model="editPolicyForm.name" maxlength="256" class="form-input" />
-      </div>
-      <div>
-        <label for="ep-desc" class="form-label">Description (optional)</label>
-        <input id="ep-desc" v-model="editPolicyForm.description" maxlength="1024" class="form-input" />
-      </div>
-      <div>
-        <label for="ep-priority" class="form-label">Priority</label>
-        <input id="ep-priority" v-model="editPolicyForm.priority" type="number" step="1" class="form-input-mono" />
-      </div>
-      <div>
-        <label for="ep-cop" class="form-label">Commit overage policy (optional)</label>
-        <select id="ep-cop" v-model="editPolicyForm.commit_overage_policy" class="form-select w-full">
-          <option value="">— Unchanged —</option>
-          <option v-for="p in COMMIT_OVERAGE_POLICIES" :key="p" :value="p">{{ p }}</option>
-        </select>
-      </div>
-      <PolicyAdvancedFields :form="editPolicyAdvanced" :start-open="editPolicyHasAdvanced" id-prefix="ep-adv" mode="edit" />
-    </FormDialog>
+    <TenantPolicyDialogs
+      :tenant-id="id"
+      :show-create="showCreatePolicy"
+      :create-loading="createPolicyLoading"
+      :create-error="createPolicyError"
+      :create-form="createPolicyForm"
+      :create-advanced="createPolicyAdvanced"
+      :editing-policy="editingPolicy"
+      :edit-loading="editPolicyLoading"
+      :edit-error="editPolicyError"
+      :edit-form="editPolicyForm"
+      :edit-advanced="editPolicyAdvanced"
+      :edit-has-advanced="editPolicyHasAdvanced"
+      @submit-create="submitCreatePolicy"
+      @cancel-create="cancelCreatePolicy"
+      @submit-edit="submitEditPolicy"
+      @cancel-edit="cancelEditPolicy"
+    />
   </div>
 </template>

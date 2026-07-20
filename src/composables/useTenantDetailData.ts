@@ -504,6 +504,16 @@ export function useTenantDetailData(options: UseTenantDetailDataOptions) {
     clearOwnedError('keys')
   }
 
+  /** Commit an authoritative policy create/update response in place. */
+  function commitPolicy(nextPolicy: Policy): void {
+    publicationGeneration++
+    const index = policies.value.findIndex(policy => policy.policy_id === nextPolicy.policy_id)
+    policies.value = index < 0
+      ? [nextPolicy, ...policies.value]
+      : policies.value.map((policy, policyIndex) => policyIndex === index ? nextPolicy : policy)
+    clearOwnedError('policies')
+  }
+
   function reportError(message: string): void {
     setError('external', message)
   }
@@ -558,6 +568,7 @@ export function useTenantDetailData(options: UseTenantDetailDataOptions) {
     beginMutation,
     commitTenant,
     commitApiKey,
+    commitPolicy,
     reportError,
     dismissError,
   }

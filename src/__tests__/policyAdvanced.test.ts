@@ -3,10 +3,29 @@ import {
   emptyPolicyAdvancedForm,
   policyAdvancedToRequest,
   policyToAdvancedForm,
+  validatePolicyAdvancedForm,
 } from '../utils/policyAdvanced'
 import type { Policy } from '../types'
 
 describe('policyAdvanced converters', () => {
+  it('validates numeric, list, date, and window constraints before serialization', () => {
+    const form = emptyPolicyAdvancedForm()
+    expect(validatePolicyAdvancedForm(form)).toBeNull()
+
+    form.max_commits_per_minute = '1.5'
+    expect(validatePolicyAdvancedForm(form)).toBe('Max commits per minute must be a whole number.')
+    form.max_commits_per_minute = '1'
+    form.default_ttl_ms = '999'
+    expect(validatePolicyAdvancedForm(form)).toContain('between 1,000 and 86,400,000')
+    form.default_ttl_ms = '1000'
+    form.tool_allowlist = 'x'.repeat(257)
+    expect(validatePolicyAdvancedForm(form)).toContain('256 characters or fewer')
+    form.tool_allowlist = ''
+    form.effective_from = '2026-07-21T12:00'
+    form.effective_until = '2026-07-21T11:00'
+    expect(validatePolicyAdvancedForm(form)).toBe('Effective until must be later than effective from.')
+  })
+
   it('empty form produces an empty request (no sub-objects)', () => {
     expect(policyAdvancedToRequest(emptyPolicyAdvancedForm())).toEqual({})
   })

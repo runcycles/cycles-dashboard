@@ -15,6 +15,35 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.84] — 2026-07-20
+
+### Changed
+
+- Tenant Detail's policy create/edit protocol and form presentation now live
+  in focused composable and dialog owners. Acquisition, the policy table,
+  copy/activity actions, tabs, routing, and capability gates remain in the
+  parent view.
+- Policy, API-key, and destructive tenant-lifecycle surfaces now expose and
+  enforce reciprocal ownership through request settlement. Closed tenants
+  visibly disable policy creation and editing with read-only guidance.
+
+### Fixed
+
+- Successful policy writes invalidate older reads and publish their
+  authoritative response before refresh settlement. Duplicate submissions,
+  in-flight cancellation, disappeared/stale rows, and submit-time tenant or
+  sibling-owner changes are guarded inside the protocol.
+- Policy edit now displays the current description and commit-overage value.
+  Empty descriptions clear correctly, while clearing caps, rate limits, or TTL
+  overrides sends the spec-defined empty replacement object. Immutable scope
+  and fields the current API cannot clear are presented honestly and enforced.
+- Policy forms now validate integer/range, tool-name length, date, and
+  effective-window constraints before mutation. Unknown current server enum
+  values remain visible and are preserved during unrelated edits.
+
+No endpoint, server/spec minimum, server-fleet pin, or valid non-clear request
+shape changes. Full validation results are recorded in `AUDIT.md`.
+
 ## [0.1.25.83] — 2026-07-20
 
 ### Changed
