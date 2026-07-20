@@ -128,7 +128,9 @@ describe('WebhookDetailView — selector clearing (spec rev 0.1.25.39)', () => {
     listDeliveriesMock.mockReset()
     updateWebhookMock.mockReset()
     listDeliveriesMock.mockResolvedValue({ deliveries: [], has_more: false })
-    updateWebhookMock.mockResolvedValue({})
+    // PATCH returns the authoritative subscription. The editor publishes this
+    // response directly instead of issuing a fallible settlement GET.
+    updateWebhookMock.mockResolvedValue(subscription())
     routeRef.query = { action: 'edit' }
     document.body.innerHTML = ''
   })
@@ -149,6 +151,9 @@ describe('WebhookDetailView — selector clearing (spec rev 0.1.25.39)', () => {
     expect(body.event_types).toEqual([])
     // Categories untouched → diff omits them (server keeps stored value).
     expect('event_categories' in body).toBe(false)
+    // Initial acquisition only: the authoritative PATCH response settles the
+    // editor without a second GET that could falsely fail after commit.
+    expect(getWebhookMock).toHaveBeenCalledTimes(1)
     expect(w.text()).not.toContain('Select at least one event type')
   })
 
@@ -174,7 +179,7 @@ describe('WebhookDetailView — tenant-owned selector gating (spec revs .38/.40/
     listDeliveriesMock.mockReset()
     updateWebhookMock.mockReset()
     listDeliveriesMock.mockResolvedValue({ deliveries: [], has_more: false })
-    updateWebhookMock.mockResolvedValue({})
+    updateWebhookMock.mockResolvedValue(subscription())
     routeRef.query = { action: 'edit' }
     document.body.innerHTML = ''
   })

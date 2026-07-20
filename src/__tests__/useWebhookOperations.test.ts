@@ -29,7 +29,10 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-function setup(initial: WebhookSubscription | null = subscription()) {
+function setup(
+  initial: WebhookSubscription | null = subscription(),
+  canArm: () => boolean = () => true,
+) {
   const webhook = ref<WebhookSubscription | null>(initial)
   const updateWebhook = vi.fn().mockResolvedValue(subscription({ status: 'PAUSED' }))
   const deleteWebhook = vi.fn().mockResolvedValue(undefined)
@@ -59,6 +62,7 @@ function setup(initial: WebhookSubscription | null = subscription()) {
     reportError,
     navigateToList,
     notify,
+    canArm,
     dependencies: {
       updateWebhook: updateWebhook as unknown as WebhookOperationDependencies['updateWebhook'],
       deleteWebhook: deleteWebhook as unknown as WebhookOperationDependencies['deleteWebhook'],
@@ -89,6 +93,20 @@ function setup(initial: WebhookSubscription | null = subscription()) {
 describe('useWebhookOperations', () => {
   it('refuses to arm or run operations without a published subscription', async () => {
     const harness = setup(null)
+
+    harness.operations.openDelete()
+    harness.operations.openRotate()
+    harness.operations.openReplay()
+    harness.operations.requestStatusAction('PAUSED')
+    await expect(harness.operations.runTest()).resolves.toBe(false)
+
+    expect(harness.operations.hasPendingOperation.value).toBe(false)
+    expect(harness.testWebhook).not.toHaveBeenCalled()
+    harness.stop()
+  })
+
+  it('refuses every operation while a sibling owner blocks arming', async () => {
+    const harness = setup(subscription(), () => false)
 
     harness.operations.openDelete()
     harness.operations.openRotate()
