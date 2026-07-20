@@ -234,8 +234,8 @@ export function useTenantPolicies(options: UseTenantPoliciesOptions) {
     }
     const priorityText = String(createForm.value.priority).trim()
     const priority = Number(priorityText)
-    if (priorityText && (!Number.isFinite(priority) || !Number.isInteger(priority) || priority < 0)) {
-      createError.value = 'Priority must be a non-negative whole number.'
+    if (priorityText && (!Number.isFinite(priority) || !Number.isInteger(priority))) {
+      createError.value = 'Priority must be a whole number.'
       return null
     }
     if (!validCommitOveragePolicy(createForm.value.commit_overage_policy)) {
@@ -354,8 +354,8 @@ export function useTenantPolicies(options: UseTenantPoliciesOptions) {
         return null
       }
       const priority = Number(priorityText)
-      if (!Number.isFinite(priority) || !Number.isInteger(priority) || priority < 0) {
-        editError.value = 'Priority must be a non-negative whole number.'
+      if (!Number.isFinite(priority) || !Number.isInteger(priority)) {
+        editError.value = 'Priority must be a whole number.'
         return null
       }
       if (priority !== target.priority) body.priority = priority

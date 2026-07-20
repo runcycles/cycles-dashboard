@@ -133,11 +133,7 @@ describe('useTenantPolicies', () => {
     state.policies.createForm.value.description = ''
     state.policies.createForm.value.priority = '1.5'
     await expect(state.policies.submitCreate()).resolves.toBe(false)
-    expect(state.policies.createError.value).toBe('Priority must be a non-negative whole number.')
-
-    state.policies.createForm.value.priority = '-1'
-    await expect(state.policies.submitCreate()).resolves.toBe(false)
-    expect(state.policies.createError.value).toBe('Priority must be a non-negative whole number.')
+    expect(state.policies.createError.value).toBe('Priority must be a whole number.')
 
     state.policies.createForm.value.priority = '1'
     state.policies.createForm.value.commit_overage_policy = 'FUTURE_POLICY'
@@ -291,11 +287,7 @@ describe('useTenantPolicies', () => {
     invalidPriority.policies.openEdit(invalidPriority.policyRows.value[0])
     invalidPriority.policies.editForm.value.priority = '1.5'
     await expect(invalidPriority.policies.submitEdit()).resolves.toBe(false)
-    expect(invalidPriority.policies.editError.value).toBe('Priority must be a non-negative whole number.')
-
-    invalidPriority.policies.editForm.value.priority = '-1'
-    await expect(invalidPriority.policies.submitEdit()).resolves.toBe(false)
-    expect(invalidPriority.policies.editError.value).toBe('Priority must be a non-negative whole number.')
+    expect(invalidPriority.policies.editError.value).toBe('Priority must be a whole number.')
 
     const invalidCommit = setup()
     invalidCommit.policies.openEdit(invalidCommit.policyRows.value[0])
