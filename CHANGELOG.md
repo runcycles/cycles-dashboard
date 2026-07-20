@@ -15,6 +15,39 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.83] — 2026-07-20
+
+### Changed
+
+- Tenant Detail's API-key create, edit, revoke, and one-time-secret protocols
+  now live in a focused composable, with their confirmation/form presentation
+  in a focused component. Acquisition, the key table, copy/activity actions,
+  tabs, routing, and capability gates remain in the parent view.
+- API-key mutations and destructive tenant-lifecycle actions now expose and
+  enforce reciprocal ownership, including visibly disabled header and row
+  actions while the sibling flow is armed. Closed tenants also disable API-key
+  creation and active legacy-row mutations with explicit read-only guidance.
+
+### Fixed
+
+- API-key writes now invalidate older reads before mutation and publish
+  authoritative edit/revoke responses before refresh settlement. A late poll
+  or failed post-write refresh can no longer make a committed action look
+  stale and retryable.
+- Create/edit/revoke reject duplicate submissions and stale or wrong-tenant
+  rows inside the protocol. Revoke failures stay open with inline feedback;
+  one-time-secret dismissal owns its refresh against duplicate close calls.
+- Create now rejects blank names and malformed expiry date-times before the
+  request. Array request fields are snapshotted across awaits, while legacy
+  permission healing and diff-only edit bodies remain unchanged.
+- The extracted dialogs preserve existing DOM IDs, add the shared name limit
+  and date-input styling, and keep permission-diff guidance legible in dark
+  mode.
+
+No endpoint, successful request shape, polling cadence, capability gate,
+server/spec minimum, or server-fleet pin changes. Full validation results are
+recorded in `AUDIT.md`.
+
 ## [0.1.25.82] — 2026-07-20
 
 ### Changed

@@ -152,6 +152,21 @@ export function useTenantDetailData(options: UseTenantDetailDataOptions) {
     }
   }
 
+  /**
+   * Transfer publication ownership to a mutation before its first write.
+   *
+   * A poll has its own AbortSignal, so the generation is the authoritative
+   * stale guard for both polling and direct reads. Direct reads are also
+   * aborted eagerly so a mutation does not leave unnecessary child walks in
+   * flight while its response becomes the new source of truth.
+   */
+  function beginMutation(): void {
+    publicationGeneration++
+    directController?.abort()
+    directController = null
+    directLoading.value = false
+  }
+
   function walkBudgets(signal: AbortSignal) {
     return walkCursorPages<BudgetLedger>(async (cursor) => {
       throwIfAborted(signal)
@@ -479,6 +494,16 @@ export function useTenantDetailData(options: UseTenantDetailDataOptions) {
     clearOwnedError('tenant')
   }
 
+  /** Commit an authoritative API-key mutation response in place. */
+  function commitApiKey(nextKey: ApiKey): void {
+    publicationGeneration++
+    const index = apiKeys.value.findIndex(key => key.key_id === nextKey.key_id)
+    apiKeys.value = index < 0
+      ? [nextKey, ...apiKeys.value]
+      : apiKeys.value.map((key, keyIndex) => keyIndex === index ? nextKey : key)
+    clearOwnedError('keys')
+  }
+
   function reportError(message: string): void {
     setError('external', message)
   }
@@ -530,7 +555,9 @@ export function useTenantDetailData(options: UseTenantDetailDataOptions) {
     refreshApiKeys,
     refreshPolicies,
     refreshCascadeState,
+    beginMutation,
     commitTenant,
+    commitApiKey,
     reportError,
     dismissError,
   }

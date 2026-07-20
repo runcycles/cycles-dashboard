@@ -117,7 +117,9 @@ describe('TenantDetailView — immutable fields are read-only, never PATCHed', (
     listPoliciesMock.mockResolvedValue({ policies: [] as Policy[], has_more: false })
     listWebhooksMock.mockResolvedValue({ subscriptions: [], has_more: false })
     updateTenantMock.mockResolvedValue(tenant())
-    updateApiKeyMock.mockResolvedValue({})
+    // PATCH returns the authoritative ApiKey representation; Tenant Detail
+    // publishes it before the mutation-owned refresh settles.
+    updateApiKeyMock.mockResolvedValue(apiKey({ name: 'renamed-key' }))
   })
 
   describe('tenant edit — reservation_expiry_policy is create-only', () => {
@@ -202,5 +204,41 @@ describe('TenantDetailView — immutable fields are read-only, never PATCHed', (
       expect(body.name).toBe('renamed-key')
       expect('expires_at' in body).toBe(false)
     })
+  })
+
+  it('visibly enforces reciprocal API-key and tenant-lifecycle arming', async () => {
+    const w = await mountView()
+    const keysTab = w.findAll('button').find(button => button.text().startsWith('API Keys'))!
+    await keysTab.trigger('click')
+    await flushPromises()
+
+    const createButton = w.findAll('button').find(button => button.text() === 'Create API Key')!
+    await createButton.trigger('click')
+    for (const label of ['Suspend', 'Close']) {
+      const button = w.findAll('button').find(item => item.text() === label)!
+      expect(button.attributes('disabled'), `${label} should be blocked by the key owner`).toBeDefined()
+    }
+
+    const cancel = w.findAll('button').find(button => button.text() === 'Cancel')!
+    await cancel.trigger('click')
+    const suspend = w.findAll('button').find(button => button.text() === 'Suspend')!
+    await suspend.trigger('click')
+
+    expect(w.text()).toContain('Suspend this tenant?')
+    expect(createButton.attributes('disabled')).toBeDefined()
+  })
+
+  it('disables API-key creation on a permanently closed tenant', async () => {
+    getTenantMock.mockResolvedValue(tenant({ status: 'CLOSED' }))
+    const w = await mountView()
+    const keysTab = w.findAll('button').find(button => button.text().startsWith('API Keys'))!
+    await keysTab.trigger('click')
+    await flushPromises()
+
+    const createButton = w.findAll('button').find(button => button.text() === 'Create API Key')!
+    expect(createButton.attributes('disabled')).toBeDefined()
+    expect(createButton.attributes('title')).toBe('Closed tenants are permanently read-only')
+    await createButton.trigger('click')
+    expect(w.find('[aria-label="Create API Key"]').exists()).toBe(false)
   })
 })

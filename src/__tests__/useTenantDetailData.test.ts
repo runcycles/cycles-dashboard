@@ -253,6 +253,39 @@ describe('useTenantDetailData', () => {
     expect(h.data.budgets.value.map(item => item.ledger_id)).toEqual(['post-mutation'])
   })
 
+  it('aborts direct reads and supersedes their publication when a mutation begins', async () => {
+    const h = createHarness('keys')
+    await h.tick()
+    const keyRead = deferred<{ keys: ApiKey[]; has_more: boolean }>()
+    h.listApiKeys.mockImplementationOnce((_params, signal) => {
+      signal?.addEventListener('abort', () => keyRead.reject(new DOMException('aborted', 'AbortError')))
+      return keyRead.promise
+    })
+
+    const staleRefresh = h.data.refreshApiKeys()
+    expect(h.data.isLoading.value).toBe(true)
+    h.data.beginMutation()
+
+    await expect(staleRefresh).resolves.toBe('superseded')
+    expect(h.data.isLoading.value).toBe(false)
+    expect(h.data.error.value).toBe('')
+  })
+
+  it('publishes authoritative API-key mutation responses without replacing sibling rows', async () => {
+    const h = createHarness('keys')
+    h.listApiKeys.mockResolvedValue({ keys: [key('key-1'), key('key-2')], has_more: false })
+    await h.tick()
+
+    h.data.commitApiKey({ ...key('key-2'), status: 'REVOKED' })
+    expect(h.data.apiKeys.value.map(item => `${item.key_id}:${item.status}`)).toEqual([
+      'key-1:ACTIVE',
+      'key-2:REVOKED',
+    ])
+
+    h.data.commitApiKey(key('key-3'))
+    expect(h.data.apiKeys.value.map(item => item.key_id)).toEqual(['key-3', 'key-1', 'key-2'])
+  })
+
   it('does not publish an action-time walk aborted between pages', async () => {
     const h = createHarness()
     h.listBudgets.mockResolvedValue({ ledgers: [budget('owned')], has_more: false })

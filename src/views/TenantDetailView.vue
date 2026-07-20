@@ -10,11 +10,11 @@ import {
   type TenantDetailTab,
 } from '../composables/useTenantDetailData'
 import { useTenantLifecycle } from '../composables/useTenantLifecycle'
-import { updateTenant, revokeApiKey, createApiKey, updateApiKey, createBudget, createPolicy, updatePolicy } from '../api/client'
+import { useTenantApiKeys } from '../composables/useTenantApiKeys'
+import { updateTenant, createBudget, createPolicy, updatePolicy } from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import type { TenantUpdateRequest, BudgetLedger, ApiKey, ApiKeyCreateRequest, ApiKeyCreateResponse, ApiKeyUpdateRequest, Policy, BudgetCreateRequest, PolicyCreateRequest, PolicyUpdateRequest } from '../types'
-import { COMMIT_OVERAGE_POLICIES, PERMISSIONS } from '../types'
-import PermissionPicker from '../components/PermissionPicker.vue'
+import type { TenantUpdateRequest, BudgetLedger, ApiKey, Policy, BudgetCreateRequest, PolicyCreateRequest, PolicyUpdateRequest } from '../types'
+import { COMMIT_OVERAGE_POLICIES } from '../types'
 import PolicyAdvancedFields from '../components/PolicyAdvancedFields.vue'
 import {
   emptyPolicyAdvancedForm,
@@ -30,11 +30,10 @@ import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import InlineErrorBanner from '../components/InlineErrorBanner.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
-import SecretReveal from '../components/SecretReveal.vue'
+import TenantApiKeyDialogs from '../components/TenantApiKeyDialogs.vue'
 import ScopeBuilder from '../components/ScopeBuilder.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { writeClipboardJson } from '../utils/clipboard'
-import { formatDateTime } from '../utils/format'
 import { useToast } from '../composables/useToast'
 import { toMessage } from '../utils/errors'
 import { isTerminalTenant } from '../utils/tenantStatus'
@@ -57,9 +56,10 @@ const canManagePolicies = computed(() => auth.capabilities?.manage_policies !== 
 
 const tab = ref<TenantDetailTab>('budgets')
 // The acquisition composable's first test tick can run synchronously. The
-// lifecycle owner is wired immediately after acquisition exists; until then no
-// mutation can have started, so the safe bootstrap answer is false.
-let lifecycleMutationRunning = () => false
+// mutation owners are wired immediately after acquisition exists; until then
+// no mutation can have started, so the safe bootstrap answer is false.
+let tenantMutationRunning = () => false
+let apiKeyOwnerArmed = () => false
 
 // Breadcrumb back-link origin. When the operator clicks a child tenant
 // from another tenant's "Children" list, the link threads ?parent=<src>
@@ -114,13 +114,15 @@ const {
   refreshApiKeys,
   refreshPolicies,
   refreshCascadeState,
+  beginMutation,
   commitTenant,
+  commitApiKey,
   reportError,
   dismissError,
 } = useTenantDetailData({
   tenantId: id,
   getActiveTab: () => tab.value,
-  isMutationRunning: () => lifecycleMutationRunning(),
+  isMutationRunning: () => tenantMutationRunning(),
 })
 
 const tenantLifecycle = useTenantLifecycle({
@@ -139,15 +141,31 @@ const tenantLifecycle = useTenantLifecycle({
   reportError,
   dismissError,
   notify: toast,
+  canArm: () => !apiKeyOwnerArmed(),
 })
-lifecycleMutationRunning = () => tenantLifecycle.isMutationRunning.value
+
+const tenantApiKeys = useTenantApiKeys({
+  tenantId: id,
+  apiKeys,
+  error,
+  refreshApiKeys,
+  beginMutation,
+  commitApiKey,
+  notify: toast,
+  canArm: () => (
+    !tenantLifecycle.lifecycleArmed.value && !isTerminalTenant(tenant.value)
+  ),
+})
+apiKeyOwnerArmed = () => tenantApiKeys.ownerArmed.value
+tenantMutationRunning = () => (
+  tenantLifecycle.isMutationRunning.value || tenantApiKeys.isMutationRunning.value
+)
 
 const {
   activeBudgets,
   cascadePending,
   cascadePreview,
   showRecoveryBanner,
-  isMutationRunning: lifecycleBusy,
   pendingTenantAction,
   closeConfirmInput,
   tenantActionLoading,
@@ -171,6 +189,52 @@ const {
   cancelEmergencyFreeze,
   closeEmergencyFreezeResult,
 } = tenantLifecycle
+
+const {
+  ownerArmed: apiKeyOwnerBusy,
+  pendingRevoke: pendingKeyRevoke,
+  revokeLoading: keyRevokeLoading,
+  revokeError: keyRevokeError,
+  requestRevoke: requestKeyRevoke,
+  cancelRevoke: cancelKeyRevoke,
+  executeRevoke: executeKeyRevoke,
+  showCreate: showCreateKey,
+  createLoading: createKeyLoading,
+  createError: createKeyError,
+  createForm: createKeyForm,
+  createdSecret: createdKeySecret,
+  openCreate: openCreateKey,
+  cancelCreate: cancelCreateKey,
+  submitCreate: submitCreateKey,
+  closeCreatedSecret: closeCreatedKeySecret,
+  editingKey,
+  editLoading: editKeyLoading,
+  editError: editKeyError,
+  editForm: editKeyForm,
+  pendingPermissionAdds: pendingKeyPermAdds,
+  pendingPermissionRemoves: pendingKeyPermRemoves,
+  openEdit: openEditKey,
+  cancelEdit: cancelEditKey,
+  submitEdit: submitEditKey,
+} = tenantApiKeys
+
+const lifecycleActionsBlocked = computed(() => (
+  tenantLifecycle.lifecycleArmed.value || apiKeyOwnerBusy.value
+))
+const apiKeyActionsBlocked = computed(() => (
+  isTerminalTenant(tenant.value)
+  || apiKeyOwnerBusy.value
+  || tenantLifecycle.lifecycleArmed.value
+))
+const apiKeyActionBlockedReason = computed(() => (
+  isTerminalTenant(tenant.value)
+    ? 'Closed tenants are permanently read-only'
+    : tenantLifecycle.lifecycleArmed.value
+      ? 'Finish the current tenant action first'
+      : apiKeyOwnerBusy.value
+        ? 'Finish the current API-key action first'
+        : ''
+))
 
 // v0.1.25.46: hide terminal rows in the embedded sub-lists by default.
 // Pre-fix, the budgets/keys tables rendered in whatever order the API
@@ -287,9 +351,6 @@ watch(() => pendingTenantAction.value === 'CLOSED', (open, was) => {
 })
 onUnmounted(() => document.removeEventListener('keydown', onCloseDialogKeydown))
 
-// API key revoke action
-const pendingKeyRevoke = ref<ApiKey | null>(null)
-
 async function copyKeyId(keyId: string) {
   try {
     await navigator.clipboard.writeText(keyId)
@@ -307,20 +368,6 @@ async function copyApiKeyJson(k: ApiKey) {
 async function copyPolicyJson(p: Policy) {
   if (await writeClipboardJson(p)) toast.success('Policy JSON copied')
   else toast.error('Copy failed — clipboard unavailable')
-}
-
-async function executeKeyRevoke() {
-  if (!pendingKeyRevoke.value) return
-  try {
-    await revokeApiKey(pendingKeyRevoke.value.key_id, 'Revoked via admin dashboard')
-    toast.success('API key revoked')
-    warnRefreshSettlement(await refreshApiKeys(), 'API key revoked')
-  } catch (e) {
-    const msg = toMessage(e)
-    reportError(msg)
-    toast.error(`Revoke failed: ${msg}`)
-  }
-  finally { pendingKeyRevoke.value = null }
 }
 
 // Edit tenant. No reservation_expiry_policy field — the spec's PATCH
@@ -363,123 +410,6 @@ async function submitEditTenant() {
     showEditTenant.value = false
   } catch (e) { editTenantError.value = toMessage(e) }
   finally { editTenantLoading.value = false }
-}
-
-// Create API key for this tenant
-const showCreateKey = ref(false)
-const createKeyLoading = ref(false)
-const createKeyError = ref('')
-const createKeyForm = ref({ name: '', permissions: [] as string[], scope_filter: '', expires_at: '' })
-const createdKeySecret = ref<ApiKeyCreateResponse | null>(null)
-
-function openCreateKey() {
-  createKeyForm.value = { name: '', permissions: [], scope_filter: '', expires_at: '' }
-  createKeyError.value = ''
-  showCreateKey.value = true
-}
-
-async function submitCreateKey() {
-  createKeyError.value = ''
-  createKeyLoading.value = true
-  try {
-    const body: ApiKeyCreateRequest = { tenant_id: id, name: createKeyForm.value.name }
-    if (createKeyForm.value.permissions.length) body.permissions = createKeyForm.value.permissions
-    if (createKeyForm.value.scope_filter) body.scope_filter = createKeyForm.value.scope_filter.split(',').map(s => s.trim()).filter(Boolean)
-    if (createKeyForm.value.expires_at) body.expires_at = new Date(createKeyForm.value.expires_at).toISOString()
-    const res = await createApiKey(body)
-    createdKeySecret.value = res
-    showCreateKey.value = false
-  } catch (e) { createKeyError.value = toMessage(e) }
-  finally { createKeyLoading.value = false }
-}
-
-async function closeCreatedKeySecret() {
-  createdKeySecret.value = null
-  warnRefreshSettlement(await refreshApiKeys(), 'API key created')
-}
-
-// Edit API key — mirrors the ApiKeysView.vue flow (v0.1.25.24
-// diff-before-patch) so operators can rename / reshape permissions
-// without navigating away from the tenant page. Sends only changed
-// fields to dodge the closed-permission-enum 400 on round-tripped
-// legacy values.
-const editingKey = ref<ApiKey | null>(null)
-const editKeyLoading = ref(false)
-const editKeyError = ref('')
-// No expires_at field — immutable per spec (revoke + recreate); shown
-// read-only in the dialog. Same rationale as ApiKeysView.
-const editKeyForm = ref({ name: '', permissions: [] as string[], scope_filter: '' })
-
-function openEditKey(k: ApiKey) {
-  // Drop any stored permission that isn't in the canonical set — same
-  // legacy-value handling as ApiKeysView.openEdit.
-  const allowed = new Set<string>(PERMISSIONS as readonly string[])
-  const stored = k.permissions || []
-  const dropped = stored.filter(p => !allowed.has(p))
-  const kept = stored.filter(p => allowed.has(p))
-  editKeyForm.value = {
-    name: k.name || '',
-    permissions: kept,
-    scope_filter: k.scope_filter?.join(', ') || '',
-  }
-  editKeyError.value = ''
-  editingKey.value = k
-  if (dropped.length) {
-    // Advisory, not a failure — same rationale as ApiKeysView.openEdit.
-    toast.warning(`Unrecognized permissions will be removed on save: ${dropped.join(', ')}`)
-  }
-}
-
-function sameKeyStringSet(a: string[] | undefined, b: string[] | undefined): boolean {
-  const aa = a || []
-  const bb = b || []
-  if (aa.length !== bb.length) return false
-  const sa = new Set(aa)
-  for (const v of bb) if (!sa.has(v)) return false
-  return true
-}
-
-const pendingKeyPermAdds = computed<string[]>(() => {
-  if (!editingKey.value) return []
-  const orig = new Set(editingKey.value.permissions || [])
-  return editKeyForm.value.permissions.filter(p => !orig.has(p))
-})
-const pendingKeyPermRemoves = computed<string[]>(() => {
-  if (!editingKey.value) return []
-  const curr = new Set(editKeyForm.value.permissions)
-  return (editingKey.value.permissions || []).filter(p => !curr.has(p))
-})
-
-async function submitEditKey() {
-  if (!editingKey.value) return
-  editKeyError.value = ''
-  editKeyLoading.value = true
-  try {
-    const body: ApiKeyUpdateRequest = {}
-    const original = editingKey.value
-    if (editKeyForm.value.name !== (original.name || '')) {
-      body.name = editKeyForm.value.name
-    }
-    if (!sameKeyStringSet(editKeyForm.value.permissions, original.permissions)) {
-      body.permissions = editKeyForm.value.permissions
-    }
-    const scopes = editKeyForm.value.scope_filter
-      ? editKeyForm.value.scope_filter.split(',').map(s => s.trim()).filter(Boolean)
-      : []
-    if (!sameKeyStringSet(scopes, original.scope_filter)) {
-      body.scope_filter = scopes
-    }
-    // expires_at is never sent — immutable per spec (revoke + recreate).
-    if (Object.keys(body).length === 0) {
-      editingKey.value = null
-      return
-    }
-    await updateApiKey(original.key_id, body)
-    toast.success('API key updated')
-    editingKey.value = null
-    warnRefreshSettlement(await refreshApiKeys(), 'API key updated')
-  } catch (e) { editKeyError.value = toMessage(e) }
-  finally { editKeyLoading.value = false }
 }
 
 // v0.1.25.20: Create Budget — admin-on-behalf-of (server v0.1.25.14, spec
@@ -775,7 +705,7 @@ async function submitEditPolicy() {
       <button
         v-if="canManageTenants"
         @click="openRerunCascade"
-        :disabled="rerunCascadeLoading"
+        :disabled="lifecycleActionsBlocked"
         class="btn-pill-danger disabled:opacity-50 disabled:cursor-not-allowed"
         data-testid="cascade-recovery-button"
       >{{ rerunCascadeLoading ? 'Re-running…' : 'Re-run cascade' }}</button>
@@ -800,7 +730,7 @@ async function submitEditPolicy() {
                  only the current tab's creator shows, keeping the header
                  uncluttered. -->
             <button v-if="tab === 'budgets' && canManageBudgets" @click="openCreateBudget" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Budget</button>
-            <button v-if="tab === 'keys' && canManageKeys" @click="openCreateKey" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create API Key</button>
+            <button v-if="tab === 'keys' && canManageKeys" @click="openCreateKey" :disabled="apiKeyActionsBlocked" :title="apiKeyActionBlockedReason || undefined" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed">Create API Key</button>
             <button v-if="tab === 'policies' && canManagePolicies" @click="openCreatePolicy" class="text-xs bg-blue-600 text-white hover:bg-blue-700 rounded px-3 py-1.5 cursor-pointer transition-colors">Create Policy</button>
             <template v-if="canManageTenants">
               <button @click="openEditTenant" class="btn-pill-secondary">Edit</button>
@@ -809,13 +739,13 @@ async function submitEditPolicy() {
               <button
                 v-if="canManageBudgets && !isTerminalTenant(tenant) && (activeBudgets.length > 0 || budgetsPartial)"
                 @click="openEmergencyFreeze"
-                :disabled="lifecycleBusy"
+                :disabled="lifecycleActionsBlocked"
                 :title="budgetsPartial ? `Re-scan required because the last budget scan could not complete within ${TENANT_DETAIL_SCAN_MAX_ROWS.toLocaleString()} rows` : 'Scan ACTIVE budgets and review the immutable target count'"
                 class="btn-pill-danger disabled:opacity-50 disabled:cursor-not-allowed"
               >{{ emergencyFreezePreparing ? 'Scanning budgets…' : budgetsPartial ? 'Emergency Freeze (re-scan)' : `Emergency Freeze (${activeBudgets.length})` }}</button>
-              <button v-if="tenant.status === 'ACTIVE'" @click="requestTenantAction('SUSPENDED')" :disabled="lifecycleBusy" class="btn-pill-danger disabled:opacity-50 disabled:cursor-not-allowed">Suspend</button>
-              <button v-if="tenant.status === 'SUSPENDED'" @click="requestTenantAction('ACTIVE')" :disabled="lifecycleBusy" class="btn-pill-success disabled:opacity-50 disabled:cursor-not-allowed">Reactivate</button>
-              <button v-if="tenant.status !== 'CLOSED'" @click="requestTenantAction('CLOSED')" :disabled="lifecycleBusy" class="btn-pill-danger disabled:opacity-50 disabled:cursor-not-allowed">Close</button>
+              <button v-if="tenant.status === 'ACTIVE'" @click="requestTenantAction('SUSPENDED')" :disabled="lifecycleActionsBlocked" class="btn-pill-danger disabled:opacity-50 disabled:cursor-not-allowed">Suspend</button>
+              <button v-if="tenant.status === 'SUSPENDED'" @click="requestTenantAction('ACTIVE')" :disabled="lifecycleActionsBlocked" class="btn-pill-success disabled:opacity-50 disabled:cursor-not-allowed">Reactivate</button>
+              <button v-if="tenant.status !== 'CLOSED'" @click="requestTenantAction('CLOSED')" :disabled="lifecycleActionsBlocked" class="btn-pill-danger disabled:opacity-50 disabled:cursor-not-allowed">Close</button>
             </template>
           </div>
         </div>
@@ -933,9 +863,9 @@ async function submitEditPolicy() {
                     { label: 'Activity', to: { name: 'audit', query: { key_id: k.key_id } } },
                     { label: 'Copy key ID', onClick: () => copyKeyId(k.key_id) },
                     { label: 'Copy as JSON', onClick: () => copyApiKeyJson(k) },
-                    { label: 'Edit', onClick: () => openEditKey(k), hidden: k.status !== 'ACTIVE' },
+                    { label: 'Edit', onClick: () => openEditKey(k), hidden: k.status !== 'ACTIVE', disabled: apiKeyActionsBlocked, disabledReason: apiKeyActionBlockedReason },
                     { separator: true },
-                    { label: 'Revoke', onClick: () => pendingKeyRevoke = k, danger: true, hidden: k.status !== 'ACTIVE' },
+                    { label: 'Revoke', onClick: () => requestKeyRevoke(k), danger: true, hidden: k.status !== 'ACTIVE', disabled: apiKeyActionsBlocked, disabledReason: apiKeyActionBlockedReason },
                   ]"
                 />
               </td>
@@ -1013,16 +943,6 @@ async function submitEditPolicy() {
       </div>
     </div>
 
-    <ConfirmAction
-      v-if="pendingKeyRevoke"
-      title="Revoke this API key?"
-      :message="`Revoking key '${pendingKeyRevoke.name || pendingKeyRevoke.key_id}' will immediately invalidate it. Any services using this key will lose access. This cannot be undone.`"
-      confirm-label="Revoke Key"
-      :danger="true"
-      @confirm="executeKeyRevoke"
-      @cancel="pendingKeyRevoke = null"
-    />
-
     <!-- Rerun cascade confirm — v0.1.25.44. ConfirmAction (not the
          type-to-confirm CLOSE dialog) because at this point the tenant
          is already CLOSED; the irreversible step already happened.
@@ -1080,75 +1000,29 @@ async function submitEditPolicy() {
       </div>
     </FormDialog>
 
-    <!-- Create API key for this tenant -->
-    <FormDialog v-if="showCreateKey" title="Create API Key" submit-label="Create Key" :loading="createKeyLoading" :error="createKeyError" @submit="submitCreateKey" @cancel="showCreateKey = false">
-      <div>
-        <label for="ck2-name" class="form-label">Name</label>
-        <input id="ck2-name" v-model="createKeyForm.name" required class="form-input" placeholder="my-service-key" />
-      </div>
-      <div>
-        <label class="form-label">Permissions</label>
-        <PermissionPicker v-model="createKeyForm.permissions" />
-      </div>
-      <div>
-        <label for="ck2-scope" class="form-label">Scope filter (comma-separated, optional)</label>
-        <input id="ck2-scope" v-model="createKeyForm.scope_filter" class="form-input-mono" />
-      </div>
-      <div>
-        <label for="ck2-expires" class="form-label">Expires at (optional)</label>
-        <input id="ck2-expires" v-model="createKeyForm.expires_at" type="datetime-local" class="border border-gray-300 rounded px-2 py-1.5 text-sm" />
-      </div>
-    </FormDialog>
-
-    <SecretReveal v-if="createdKeySecret" title="API Key Created" :secret="createdKeySecret.key_secret" label="API Key Secret" @close="closeCreatedKeySecret" />
-
-    <!-- Edit API Key — mirrors ApiKeysView.vue's edit dialog, including
-         the green/red pending-changes diff so operators see what the
-         PATCH body will actually carry. -->
-    <FormDialog v-if="editingKey" title="Edit API Key" submit-label="Save Changes" :loading="editKeyLoading" :error="editKeyError" @submit="submitEditKey" @cancel="editingKey = null">
-      <div>
-        <label for="ek2-name" class="form-label">Name</label>
-        <input id="ek2-name" v-model="editKeyForm.name" required class="form-input" />
-      </div>
-      <div>
-        <label class="form-label">Permissions</label>
-        <PermissionPicker v-model="editKeyForm.permissions" />
-        <div
-          v-if="pendingKeyPermAdds.length || pendingKeyPermRemoves.length"
-          class="mt-2 text-xs flex flex-wrap gap-1 items-center"
-          aria-live="polite"
-        >
-          <template v-if="pendingKeyPermAdds.length">
-            <span class="text-green-700 font-medium">Adding:</span>
-            <span
-              v-for="p in pendingKeyPermAdds"
-              :key="'add:' + p"
-              class="bg-green-50 text-green-700 border border-green-200 rounded px-1.5 py-0.5 font-mono"
-            >+{{ p }}</span>
-          </template>
-          <template v-if="pendingKeyPermRemoves.length">
-            <span class="text-red-700 font-medium" :class="pendingKeyPermAdds.length ? 'ml-3' : ''">Removing:</span>
-            <span
-              v-for="p in pendingKeyPermRemoves"
-              :key="'rem:' + p"
-              class="bg-red-50 text-red-700 border border-red-200 rounded px-1.5 py-0.5 font-mono"
-            >−{{ p }}</span>
-          </template>
-        </div>
-      </div>
-      <div>
-        <label for="ek2-scope" class="form-label">Scope filter (comma-separated)</label>
-        <input id="ek2-scope" v-model="editKeyForm.scope_filter" class="form-input-mono" />
-      </div>
-      <!-- Expiry is read-only: immutable on PATCH per spec — the server
-           silently dropped the field pre-fix, making the old picker a
-           no-op. Same rationale as ApiKeysView's edit dialog. -->
-      <div>
-        <span class="form-label">Expires at</span>
-        <p class="text-sm text-gray-700 dark:text-gray-200">{{ editingKey.expires_at ? formatDateTime(editingKey.expires_at) : 'Never' }}</p>
-        <p class="muted-sm mt-0.5">Expiry is immutable — revoke and recreate the key to change it.</p>
-      </div>
-    </FormDialog>
+    <TenantApiKeyDialogs
+      :pending-revoke="pendingKeyRevoke"
+      :revoke-loading="keyRevokeLoading"
+      :revoke-error="keyRevokeError"
+      :show-create="showCreateKey"
+      :create-loading="createKeyLoading"
+      :create-error="createKeyError"
+      :create-form="createKeyForm"
+      :created-secret="createdKeySecret"
+      :editing-key="editingKey"
+      :edit-loading="editKeyLoading"
+      :edit-error="editKeyError"
+      :edit-form="editKeyForm"
+      :pending-permission-adds="pendingKeyPermAdds"
+      :pending-permission-removes="pendingKeyPermRemoves"
+      @confirm-revoke="executeKeyRevoke"
+      @cancel-revoke="cancelKeyRevoke"
+      @submit-create="submitCreateKey"
+      @cancel-create="cancelCreateKey"
+      @close-created-secret="closeCreatedKeySecret"
+      @submit-edit="submitEditKey"
+      @cancel-edit="cancelEditKey"
+    />
 
     <!-- v0.1.25.21 (#7): Emergency Freeze confirm. Intentionally spells
          out the blast radius from the complete action-time scan. The target

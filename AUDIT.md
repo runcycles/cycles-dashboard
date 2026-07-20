@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.82 (2026-07-20)
+**Current release:** v0.1.25.83 (2026-07-20)
 
 ## Baseline requirements
 
@@ -16,6 +16,53 @@
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-07-20 — v0.1.25.83: Tenant Detail API-key ownership
+
+Tenant Detail's create, edit, revoke, and one-time-secret flows now have a
+focused protocol and presentation boundary. `useTenantApiKeys` owns mutation
+state and settlement, `TenantApiKeyDialogs` owns the three forms/confirmations,
+and the parent retains acquisition, table/copy/activity actions, tabs, routing,
+and capability coordination. `TenantDetailView` drops from 1,276 to 1,150
+lines without changing endpoints or successful request shapes.
+
+| Owner | Responsibilities |
+|---|---|
+| `useTenantApiKeys` | Surface serialization, validation/diff construction, write ownership, authoritative response publication, one-time-secret settlement, and operator notifications. |
+| `TenantApiKeyDialogs` | Revoke confirmation, create/edit forms, permission-diff guidance, immutable expiry display, and secret reveal composition. |
+| `useTenantDetailData` | Cursor-aware reads, mutation publication generation, direct-read cancellation, and authoritative API-key collection commits. |
+| `TenantDetailView` | Tabs, capability gates, key table/copy/activity actions, and reciprocal API-key/lifecycle coordination. |
+
+**Confirmed fixes and hardening:**
+
+- Create, edit, and revoke acquire publication ownership before their first
+  write. Older polls and direct reads cannot overwrite the authoritative
+  response; edit/revoke publish that response before a follow-up refresh, so a
+  failed settlement cannot leave a committed mutation looking retryable.
+- Every protocol entry point enforces tenant/status eligibility, one-surface
+  ownership, duplicate-submit protection, and in-flight cancellation guards.
+  Edit/revoke also revalidate the live row at submit time so an expired,
+  revoked, or disappeared key cannot be mutated from a stale dialog snapshot.
+- API-key and tenant-lifecycle owners use reciprocal arming gates. The header,
+  row menus, cascade recovery, Emergency Freeze, and lifecycle buttons expose
+  the same disabled state as the protocol guard instead of silently ignoring a
+  click behind another dialog. Closed tenants now expose the same permanent
+  read-only gate on API-key creation and active legacy rows.
+- Create validates blank names and malformed date-time values before acquiring
+  mutation ownership. Request arrays are snapshotted before await boundaries;
+  legacy permission healing and diff-only PATCH semantics remain intact.
+- Revoke failures remain visible and retryable in the confirmation instead of
+  closing unconditionally. One-time-secret acknowledgement remains the terminal
+  create step and now owns its refresh settlement against duplicate close calls.
+- Moved fields preserve their established DOM IDs for automation. Name limits,
+  dark-mode permission-diff colors, and the date-time input's shared form style
+  bring the extracted dialogs in line with the rest of the dashboard.
+
+No endpoint, successful request body, polling cadence, capability gate,
+server/spec minimum, or server-fleet pin changes. Validation: 1,487/1,487 tests
+across 126 files with 98.05% line coverage; `useTenantApiKeys` is 100%
+lines/functions and 92.66% branches. Lint, strict typecheck, and the production
+build pass.
 
 ### 2026-07-20 — v0.1.25.82: Webhook delivery-insight ownership
 

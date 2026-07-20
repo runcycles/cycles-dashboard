@@ -64,6 +64,8 @@ export interface UseTenantLifecycleOptions {
   reportError: (message: string) => void
   dismissError: () => void
   notify: TenantLifecycleNotifications
+  /** Refuse to arm a lifecycle surface while a sibling owner is armed. */
+  canArm?: () => boolean
   /** Focused dependency seams for deterministic destructive-flow tests. */
   updateStatus?: UpdateTenantStatusFn
   freeze?: FreezeBudgetFn
@@ -134,10 +136,19 @@ export function useTenantLifecycle(options: UseTenantLifecycleOptions) {
     || emergencyFreezeSettling.value
   ))
 
+  const lifecycleArmed = computed(() => (
+    isMutationRunning.value
+    || pendingTenantActionState.value !== null
+    || pendingRerunCascadeState.value
+    || pendingEmergencyFreezeState.value
+    || emergencyFreezeResultState.value !== null
+  ))
+
   function hasPendingLifecycleAction(): boolean {
     return pendingTenantActionState.value !== null
       || pendingRerunCascadeState.value
       || pendingEmergencyFreezeState.value
+      || emergencyFreezeResultState.value !== null
   }
 
   function warnRefreshSettlement(
@@ -153,7 +164,11 @@ export function useTenantLifecycle(options: UseTenantLifecycleOptions) {
   }
 
   function requestTenantAction(action: TenantLifecycleAction): void {
-    if (isMutationRunning.value || hasPendingLifecycleAction()) return
+    if (
+      options.canArm?.() === false
+      || isMutationRunning.value
+      || hasPendingLifecycleAction()
+    ) return
     const status = options.tenant.value?.status
     const isLegalTransition = action === 'SUSPENDED'
       ? status === 'ACTIVE'
@@ -221,7 +236,8 @@ export function useTenantLifecycle(options: UseTenantLifecycleOptions) {
 
   function openRerunCascade(): void {
     if (
-      isMutationRunning.value
+      options.canArm?.() === false
+      || isMutationRunning.value
       || hasPendingLifecycleAction()
       || !isTerminalTenant(options.tenant.value)
     ) return
@@ -287,7 +303,11 @@ export function useTenantLifecycle(options: UseTenantLifecycleOptions) {
   }
 
   async function openEmergencyFreeze(): Promise<boolean> {
-    if (isMutationRunning.value || hasPendingLifecycleAction()) return false
+    if (
+      options.canArm?.() === false
+      || isMutationRunning.value
+      || hasPendingLifecycleAction()
+    ) return false
     if (isTerminalTenant(options.tenant.value)) return false
     emergencyFreezePreparing.value = true
     try {
@@ -449,6 +469,7 @@ export function useTenantLifecycle(options: UseTenantLifecycleOptions) {
     cascadePreview,
     showRecoveryBanner,
     isMutationRunning,
+    lifecycleArmed,
     pendingTenantAction,
     closeConfirmInput,
     tenantActionLoading: readonly(tenantActionLoading),
