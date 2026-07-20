@@ -59,9 +59,10 @@ vi.mock('vue-router', async (importOriginal) => {
 vi.mock('../composables/usePolling', async () => {
   const vue = await vi.importActual<typeof import('vue')>('vue')
   return {
-    usePolling: (fn: () => Promise<void> | void) => {
-      void fn()
-      return { refresh: async () => { void fn() }, isLoading: vue.ref(false), lastSuccessAt: vue.ref(null) }
+    usePolling: (fn: (signal: AbortSignal) => Promise<void> | void) => {
+      const run = () => fn(new AbortController().signal)
+      void run()
+      return { refresh: async () => { void run() }, isLoading: vue.ref(false), lastSuccessAt: vue.ref(null) }
     },
   }
 })

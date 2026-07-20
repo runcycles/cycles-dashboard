@@ -2,8 +2,8 @@
 import { ref, computed, watch, defineAsyncComponent } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute, useRouter } from 'vue-router'
-import { usePolling } from '../composables/usePolling'
-import { POLL_FAST_MS } from '../composables/pollingConstants'
+import { useWebhookDetailData } from '../composables/useWebhookDetailData'
+import type { AppliedQuerySnapshot } from '../composables/useAppliedQuery'
 import { useChartTheme } from '../composables/useChartTheme'
 // Lazy-loaded to keep ECharts + vue-echarts out of the detail-view
 // initial chunk. Stats panel hides itself when deliveries.length === 0
@@ -11,7 +11,7 @@ import { useChartTheme } from '../composables/useChartTheme'
 const BaseChart = defineAsyncComponent(() => import('../components/BaseChart.vue'))
 import { useListExport } from '../composables/useListExport'
 import { useSort } from '../composables/useSort'
-import { getWebhook, listDeliveries, updateWebhook, deleteWebhook, testWebhook, replayWebhookEvents, rotateWebhookSecret, ApiError } from '../api/client'
+import { getWebhook, updateWebhook, deleteWebhook, testWebhook, replayWebhookEvents, rotateWebhookSecret } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { WebhookSubscription, WebhookDelivery, WebhookTestResponse, ReplayEventsRequest } from '../types'
 import { EVENT_TYPES, EVENT_CATEGORIES, TENANT_ALLOWED_EVENT_TYPES, TENANT_ALLOWED_EVENT_CATEGORIES } from '../types'
@@ -50,28 +50,43 @@ const auth = useAuthStore()
 const id = route.params.id as string
 const canManage = computed(() => auth.capabilities?.manage_webhooks !== false)
 
-const webhook = ref<WebhookSubscription | null>(null)
-const deliveries = ref<WebhookDelivery[]>([])
-const error = ref('')
-// P0-C2: distinguish "initial fetch pending" from "404" so the view can
-// render a skeleton or a dedicated not-found card instead of a blank page.
-const notFound = ref(false)
-const initialLoadDone = ref(false)
-const pendingAction = ref<'ACTIVE' | 'PAUSED' | 'reset' | null>(null)
-
 // Delivery-history pagination + filter (scale hardening). A busy
 // webhook can have thousands of delivery records; pre-fix the view
 // fetched them all and rendered each as a real DOM row. Now:
 //   - cursor pagination via Load more (append)
 //   - status filter (PENDING / SUCCESS / FAILED / RETRYING)
 //   - virtualized rows so DOM stays bounded
-// Polling still refreshes page 1 every 30s — operators who Load-
-// more'd will see the tail reset, same trade-off documented on
-// the other list views (ReservationsView / TenantsView).
-const deliveriesHasMore = ref(false)
-const deliveriesNextCursor = ref('')
-const deliveriesLoadingMore = ref(false)
 const deliveryStatusFilter = ref('')
+const {
+  webhook,
+  deliveries,
+  error,
+  notFound,
+  initialLoadDone,
+  deliveriesHasMore,
+  deliveriesNextCursor,
+  deliveriesLoadingMore,
+  deliveryFilterLoading,
+  deliveryContinuationUsable,
+  resultsMatchAppliedFilter,
+  snapshotDeliveryQuery,
+  ownsDeliveryQuery,
+  applyDeliveryParams,
+  loadMoreDeliveries,
+  fetchDeliveryPage,
+  publishWebhook,
+  reportError,
+  dismissError,
+  refreshAll,
+  loading: dataLoading,
+  lastSuccessAt,
+} = useWebhookDetailData({
+  webhookId: id,
+  getDeliveryParams: buildDeliveryParams,
+})
+
+const pendingAction = ref<'ACTIVE' | 'PAUSED' | 'reset' | null>(null)
+
 const filteredDeliveries = computed(() =>
   deliveryStatusFilter.value
     ? deliveries.value.filter(d => d.status === deliveryStatusFilter.value)
@@ -276,12 +291,12 @@ async function executeAction() {
     } else {
       await updateWebhook(id, { status: pendingAction.value })
     }
-    webhook.value = await getWebhook(id)
+    publishWebhook(await getWebhook(id))
     const label = pendingAction.value === 'reset' ? 'Webhook re-enabled' : pendingAction.value === 'PAUSED' ? 'Webhook paused' : 'Webhook enabled'
     toast.success(label)
   } catch (e) {
     const msg = toMessage(e)
-    error.value = msg
+    reportError(msg)
     toast.error(`Status change failed: ${msg}`)
   }
   finally { pendingAction.value = null }
@@ -345,7 +360,7 @@ async function executeRotate() {
     // locally before PATCH). Display it once — the server will not echo
     // it back on subsequent reads.
     rotatedSecret.value = signing_secret
-    webhook.value = subscription
+    publishWebhook(subscription)
     pendingRotate.value = false
     toast.success('Signing secret rotated — copy it now, it will not be shown again')
   } catch (e) {
@@ -555,7 +570,7 @@ async function submitEdit() {
   try {
     await updateWebhook(id, body)
     toast.success('Webhook updated')
-    webhook.value = await getWebhook(id)
+    publishWebhook(await getWebhook(id))
     showEdit.value = false
   } catch (e) { editError.value = toMessage(e) }
   finally { editLoading.value = false }
@@ -571,7 +586,7 @@ async function runTest() {
     testResult.value = await testWebhook(id)
   } catch (e) {
     const msg = toMessage(e)
-    error.value = msg
+    reportError(msg)
     toast.error(`Test failed: ${msg}`)
   }
   finally { testLoading.value = false }
@@ -647,58 +662,15 @@ function buildDeliveryParams(): Record<string, string> {
   return p
 }
 
-// WebhooksView kebab "Edit" routes here with ?action=edit; apply once
-// after the first successful webhook fetch (openEdit depends on
-// webhook.value being populated). Guarded so polling-driven refetches
-// don't keep re-opening the dialog if the user dismisses it.
+// WebhooksView kebab "Edit" routes here with ?action=edit. Route intent
+// stays in the view; the data owner only publishes the fetched row.
 let editIntentApplied = false
-
-const { refresh, isLoading, lastSuccessAt } = usePolling(async (signal) => {
-  try {
-    const fetchedWebhook = await getWebhook(id)
-    // P0-H5: defensive abort-check between awaits. usePolling already
-    // aborts the signal on unmount and in-flight dedup prevents
-    // overlapping ticks, but forwarding the signal here means a late
-    // response from a cancelled tick can't sneak its write into a
-    // torn-down view or between two sequential reads in the same tick.
-    if (signal?.aborted) return
-    webhook.value = fetchedWebhook
-    if (!editIntentApplied && route.query.action === 'edit' && webhook.value) {
-      editIntentApplied = true
-      openEdit()
-    }
-    const res = await listDeliveries(id, buildDeliveryParams())
-    if (signal?.aborted) return
-    deliveries.value = res.deliveries
-    deliveriesHasMore.value = !!res.has_more
-    deliveriesNextCursor.value = res.next_cursor ?? ''
-    error.value = ''
-    notFound.value = false
-    initialLoadDone.value = true
-  } catch (e) {
-    // P0-C2: 404 → dedicated not-found card, not a red banner.
-    if (e instanceof ApiError && e.status === 404) {
-      notFound.value = true
-      error.value = ''
-    } else {
-      error.value = toMessage(e)
-    }
-    return false
+watch(webhook, (value) => {
+  if (!editIntentApplied && route.query.action === 'edit' && value) {
+    editIntentApplied = true
+    openEdit()
   }
-}, POLL_FAST_MS)
-
-async function loadMoreDeliveries() {
-  if (!deliveriesNextCursor.value || deliveriesLoadingMore.value) return
-  deliveriesLoadingMore.value = true
-  try {
-    const params = { ...buildDeliveryParams(), cursor: deliveriesNextCursor.value }
-    const res = await listDeliveries(id, params)
-    deliveries.value = [...deliveries.value, ...res.deliveries]
-    deliveriesHasMore.value = !!res.has_more
-    deliveriesNextCursor.value = res.next_cursor ?? ''
-  } catch (e) { error.value = toMessage(e) }
-  finally { deliveriesLoadingMore.value = false }
-}
+})
 
 // V1 virtualization on the delivery list. Simple fixed-height rows —
 // no expandable details so the pattern from ReservationsView applies
@@ -764,11 +736,13 @@ function deliveryActions(d: WebhookDelivery) {
 // (not just client-side filtering of already-loaded data — that
 // would let the filter miss matches from un-loaded pages). A select
 // change is instant-apply; no debounce needed.
-watch(deliveryStatusFilter, () => { refresh() })
+watch(deliveryStatusFilter, () => { void applyDeliveryParams() })
 
 // Export. Server-side status filter means the fetchPage adapter passes
 // the same filter param — cursor pages stay consistent with what's
 // on screen.
+let exportDeliverySnapshot: AppliedQuerySnapshot | null = null
+
 const {
   showExportConfirm,
   exporting,
@@ -776,19 +750,22 @@ const {
   exportError,
   exportCancellable,
   maxRows: EXPORT_MAX_ROWS,
-  confirmExport,
-  cancelExport,
+  confirmExport: openExportConfirm,
+  cancelExport: closeExportConfirm,
   cancelRunningExport,
-  executeExport,
+  executeExport: runExport,
 } = useListExport<WebhookDelivery>({
   itemNoun: 'delivery',
   filenameStem: 'webhook-deliveries',
   currentItems: sortedDeliveries,
   hasMore: deliveriesHasMore,
   nextCursor: deliveriesNextCursor,
-  fetchPage: async (cursor) => {
-    const res = await listDeliveries(id, { ...buildDeliveryParams(), cursor })
-    return { items: res.deliveries, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
+  fetchPage: async (cursor, signal) => {
+    const snapshot = exportDeliverySnapshot
+    if (!snapshot || !ownsDeliveryQuery(snapshot)) {
+      throw new Error('Export cancelled because the applied delivery filter changed.')
+    }
+    return fetchDeliveryPage(snapshot, cursor, signal)
   },
   columns: [
     { header: 'delivery_id',      value: d => d.delivery_id },
@@ -807,19 +784,56 @@ const {
   ],
 })
 
-watch(exportError, (v) => { if (v) error.value = v })
+const canExport = computed(() => (
+  !dataLoading.value &&
+  resultsMatchAppliedFilter.value &&
+  deliveryContinuationUsable.value &&
+  sortedDeliveries.value.length > 0
+))
+
+function confirmExport(format: 'csv' | 'json') {
+  if (!canExport.value) return
+  exportDeliverySnapshot = snapshotDeliveryQuery()
+  openExportConfirm(format)
+}
+
+function cancelExport() {
+  closeExportConfirm()
+  exportDeliverySnapshot = null
+}
+
+async function executeExport() {
+  const snapshot = exportDeliverySnapshot
+  if (!canExport.value || !snapshot || !ownsDeliveryQuery(snapshot)) {
+    cancelExport()
+    return
+  }
+  try {
+    await runExport()
+  } finally {
+    exportDeliverySnapshot = null
+  }
+}
+
+function cancelDeliveryExport() {
+  cancelRunningExport()
+  closeExportConfirm()
+  exportDeliverySnapshot = null
+}
+
+watch(exportError, (v) => { if (v) reportError(v) })
 </script>
 
 <template>
   <div>
-    <PageHeader title="Webhook Detail" :subtitle="webhook?.name || webhook?.subscription_id" :loading="isLoading" :last-updated-at="lastSuccessAt" @refresh="refresh">
+    <PageHeader title="Webhook Detail" :subtitle="webhook?.name || webhook?.subscription_id" :loading="dataLoading" :last-updated-at="lastSuccessAt" @refresh="refreshAll">
       <template #back>
         <button @click="router.push({ name: 'webhooks' })" aria-label="Back to webhooks" class="muted hover:text-gray-700 cursor-pointer">
           <BackArrowIcon class="w-5 h-5" />
         </button>
       </template>
     </PageHeader>
-    <InlineErrorBanner v-if="error" :message="error" @dismiss="error = ''" />
+    <InlineErrorBanner v-if="error" :message="error" @dismiss="dismissError" />
 
     <!-- P0-C2: not-found card. A stale link / typo'd URL for a webhook
          that doesn't exist (or was deleted) gets a clear "no such
@@ -1062,13 +1076,16 @@ watch(exportError, (v) => { if (v) error.value = v })
            view — "CSV" / "JSON" was a lone abbreviation. Status filter
            applied server-side so pagination stays consistent;
            Load-more appends. -->
-      <div class="bg-white rounded-lg shadow overflow-hidden text-sm" role="table" :aria-rowcount="filteredDeliveries.length + 1" :aria-colcount="7">
+      <div class="bg-white rounded-lg shadow overflow-hidden text-sm" role="table" :aria-rowcount="filteredDeliveries.length + 1" :aria-colcount="7" :aria-busy="deliveryFilterLoading">
         <div class="table-cell border-b border-gray-100 space-y-2">
           <h3 class="text-sm font-medium text-gray-700">Delivery History</h3>
           <div class="flex items-center gap-x-3 gap-y-2 flex-wrap">
-            <span class="muted-sm tabular-nums">
-              {{ filteredDeliveries.length.toLocaleString() }} loaded
-              <span v-if="deliveriesHasMore" class="text-amber-600 ml-1">(more available)</span>
+            <span class="muted-sm tabular-nums" role="status" aria-live="polite" aria-atomic="true">
+              <template v-if="deliveryFilterLoading">Updating delivery history…</template>
+              <template v-else>
+                {{ filteredDeliveries.length.toLocaleString() }} loaded
+                <span v-if="deliveriesHasMore" class="text-amber-600 ml-1">(more available)</span>
+              </template>
             </span>
             <span class="flex-1" />
             <select v-model="deliveryStatusFilter" aria-label="Filter deliveries by status" class="form-select">
@@ -1078,11 +1095,11 @@ watch(exportError, (v) => { if (v) error.value = v })
               <option>FAILED</option>
               <option>RETRYING</option>
             </select>
-            <button @click="confirmExport('csv')" :disabled="filteredDeliveries.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+            <button @click="confirmExport('csv')" :disabled="!canExport" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
               <DownloadIcon class="w-3.5 h-3.5" />
               Export CSV
             </button>
-            <button @click="confirmExport('json')" :disabled="filteredDeliveries.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+            <button @click="confirmExport('json')" :disabled="!canExport" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
               <DownloadIcon class="w-3.5 h-3.5" />
               Export JSON
             </button>
@@ -1147,7 +1164,7 @@ watch(exportError, (v) => { if (v) error.value = v })
         </div>
         </div>
 
-        <div v-if="sortedDeliveries.length === 0" class="responsive-table-state">
+        <div v-if="!deliveryFilterLoading && sortedDeliveries.length === 0" class="responsive-table-state">
           <EmptyState
             item-noun="delivery"
             :has-active-filter="!!deliveryStatusFilter"
@@ -1157,7 +1174,12 @@ watch(exportError, (v) => { if (v) error.value = v })
       </div>
 
       <div v-if="deliveriesHasMore || deliveriesLoadingMore" class="mt-3 flex justify-end">
-        <button @click="loadMoreDeliveries" :disabled="deliveriesLoadingMore" class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50 cursor-pointer">
+        <button
+          @click="loadMoreDeliveries"
+          :disabled="deliveriesLoadingMore || !deliveryContinuationUsable"
+          :title="!deliveryContinuationUsable ? 'The server did not provide a continuation cursor.' : undefined"
+          class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+        >
           {{ deliveriesLoadingMore ? 'Loading…' : 'Load more' }}
         </button>
       </div>
@@ -1266,7 +1288,7 @@ watch(exportError, (v) => { if (v) error.value = v })
       :fetched="exportFetched"
       :cancellable="exportCancellable"
       item-noun-plural="deliveries"
-      @cancel="cancelRunningExport"
+      @cancel="cancelDeliveryExport"
     />
 
     <!-- Edit webhook dialog -->
