@@ -7,8 +7,8 @@
 | Component | Minimum | Shipped (compose) | Notes |
 |---|---|---|---|
 | cycles-server (runtime plane) | v0.1.25.8+ | v0.1.25.58 | `.37+` supplies the complete reservation/evidence surface used by the dashboard. `.47`–`.58` add tenant-close guards, replay/idempotency integrity, scalable sorted reservation queries, typed query boundaries, leased Redis maintenance/recovery, rolling-upgrade guidance, and replay metrics. The `.58` release is metrics-only relative to `.57`; no public wire break. Older runtimes remain tolerated with graceful omission/404 behavior, but the shipped stack uses the latest published release. |
-| cycles-admin (governance plane) | v0.1.25.17+ | v0.1.25.53 | `.49`–`.51` align webhook matcher/ownership boundaries; `.52` hardens truthful cursor pagination, equal-score continuation, sorted-query limits, API-key collision handling, durable tenant-close cascades, bulk idempotency, CORS trace headers, and strict request DTO parsing; `.53` correctly maps unsupported methods to the standard 405 response and audit shape. Public response compatibility is preserved; `.51+` should deploy after events `.23+`. |
-| cycles-events (dispatch worker) | v0.1.25.6+ | v0.1.25.24 | `.23` enforces the webhook ownership boundary expected by admin `.51+`. `.24` adds owner-fenced dispatch, atomic terminal transitions, durable outboxes, bounded quarantine/DLQs, and authoritative evidence canonicalization. Its `evidence:processing` member format changes internally; existing evidence-enabled fleets must drain/recover that list with older workers before starting `.24` (OPERATIONS.md). |
+| cycles-admin (governance plane) | v0.1.25.17+ | v0.1.25.54 | `.49`–`.51` align webhook matcher/ownership boundaries; `.52` hardens pagination, sorted-query limits, API-key collisions, tenant-close cascades, bulk idempotency, CORS traces, and request parsing; `.53` standardizes unsupported-method 405 responses; `.54` makes webhook-secret encryption fail closed unless plaintext is explicitly allowed for development. Public response compatibility is preserved; `.51+` should deploy after events `.23+`. |
+| cycles-events (dispatch worker) | v0.1.25.6+ | v0.1.25.25 | `.23` enforces webhook ownership; `.24` adds owner-fenced dispatch, atomic terminal transitions, durable outboxes, bounded quarantine/DLQs, and authoritative evidence canonicalization. Its `evidence:processing` format requires the OPERATIONS.md drain/recovery sequence. `.25` adds an always-on private-network SSRF baseline and fail-closed webhook-secret key handling; local-only escape hatches remain explicit. |
 | Spec alignment | — | v0.1.25.41 | Pin moves on end-to-end support. `.36` adds `admin_on_behalf_of` actor type, `.37` adds `TENANT_CLOSED` reason code (both tolerated — open string types). `.38`/`.40`/`.41` define the tenant-owned category boundary (admin-only `api_key.*`/`policy.*`/`webhook.*`/`system.*` types are 400'd on tenant-owned subscriptions; dashboard `.68` gates the pickers). `.39` allows category-only subscriptions on update (dashboard `.68` permits clearing `event_types` when categories remain). Earlier: (prior `.32`–`.35` notes preserved in release history.) `.32` formalized per-row event emission for `bulkActionBudgets` / `bulkActionTenants` (docs-only, no wire change). `.33` added six `webhook.*` EventType values + `EventDataWebhookLifecycle` payload schema. `.34` expanded `EventCategory` enum to include `webhook` so the `.33` events pass server-side validation. `.35` added the four `*_via_tenant_cascade` EventType values (+ `EventDataTenantCascade` payload schema) the admin server has emitted since implementing the tenant-close cascade; dashboard `.65` adds them to `EVENT_TYPES` so they are pickable in webhook subscriptions and suggested in the Events type filter. All additive — pre-`.31` servers tolerate unknown enum values per the spec's forward-compat rule, so the dashboard is backwards-compatible with every deployed admin version. |
 
 **Pre-baseline compatibility:** dashboard `TenantLink.isSystem` accepts both legacy `<unauthenticated>` and new `__`-prefixed sentinels (shipped v0.1.25.31). Row-select bulk paths (Tenants/Webhooks suspend, Budgets freeze, Emergency-freeze) fan out per-row and work against any admin version.
@@ -49,10 +49,13 @@ table/copy/activity actions, tabs, routing, and capability coordination;
   secret acknowledgement owns its duplicate-safe refresh settlement.
 - Existing DOM IDs remain stable. Semantic permission fieldsets, dark-mode
   picker/diff colors, name limits, and shared date-input styling align the UI.
+- Deployment pins advance admin `.53` → `.54` and events `.24` → `.25`.
+  Production requires one shared encryption key with plaintext disabled; the
+  local stack opts into plaintext and private-network webhook targets explicitly.
 
 No endpoint, successful request body, polling cadence, capability gate,
-server/spec minimum, or server-fleet pin changes. Validation: 1,489/1,489 tests
-across 126 files with 98.05% line coverage; `useTenantApiKeys` is 100%
+or server/spec minimum changes. Validation: 1,490/1,490 tests across 126 files
+with 98.05% line coverage; `useTenantApiKeys` is 100%
 lines/functions and 93.16% branches. Lint, strict typecheck, and the production
 build pass.
 

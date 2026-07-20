@@ -64,11 +64,12 @@ services:
     # Event-dispatch / webhook delivery worker. Consumes events emitted
     # by cycles-admin and cycles-server from Redis and fans them out
     # to registered webhook endpoints. Independent release cadence.
-    # .24 is the latest published worker release: owner-fenced dispatch,
-    # durable terminal transitions/outboxes, and hardened evidence signing.
+    # .25 keeps .24's owner-fenced dispatch and durable evidence work, then
+    # adds an always-on private-network SSRF baseline and fail-closed secret
+    # encryption. Local Docker-network delivery uses the explicit dev escape.
     # Existing evidence-enabled fleets must follow OPERATIONS.md's .24
     # processing-list migration sequence before upgrading.
-    image: ghcr.io/runcycles/cycles-server-events:0.1.25.24
+    image: ghcr.io/runcycles/cycles-server-events:0.1.25.25
     restart: unless-stopped
     ports:
       - "127.0.0.1:7980:7980"  # loopback-only — see dashboard service note
@@ -76,9 +77,11 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ""
-      # Matches the empty default in cycles-admin — enable in prod by
-      # setting a 32-byte key so webhook secrets round-trip encrypted.
-      WEBHOOK_SECRET_ENCRYPTION_KEY: ""
+      # Local-only defaults, overrideable for security-path testing.
+      # Production requires one shared 32-byte key and keeps both opt-outs off.
+      WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:-}
+      WEBHOOK_SECRET_ALLOW_PLAINTEXT: ${WEBHOOK_SECRET_ALLOW_PLAINTEXT:-true}
+      WEBHOOK_URL_GUARD_ALLOW_PRIVATE_NETWORKS: ${WEBHOOK_URL_GUARD_ALLOW_PRIVATE_NETWORKS:-true}
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:9980/actuator/health/readiness"]
       interval: 10s
@@ -93,7 +96,7 @@ services:
 
   cycles-admin:
     logging: *default-logging
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.53
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.54
     restart: unless-stopped
     ports:
       - "127.0.0.1:7979:7979"  # loopback-only — see dashboard service note
@@ -102,6 +105,8 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ""
       ADMIN_API_KEY: ${ADMIN_API_KEY:-admin-key}
+      WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:-}
+      WEBHOOK_SECRET_ALLOW_PLAINTEXT: ${WEBHOOK_SECRET_ALLOW_PLAINTEXT:-true}
       # Allow the docker dashboard origin (:8080) plus Vite's dev origins
       # (:5173 and :5174 fallback when :5173 is in TIME_WAIT from a prior
       # run). Spring's CorsFilter rejects mismatches with 403 "Invalid CORS

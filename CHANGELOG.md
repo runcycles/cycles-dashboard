@@ -27,6 +27,10 @@ UX work that does not advance spec alignment.
   enforce reciprocal ownership, including visibly disabled header and row
   actions while the sibling flow is armed. Closed tenants also disable API-key
   creation and active legacy-row mutations with explicit read-only guidance.
+- The shipped server fleet now pins admin `0.1.25.54` and events `0.1.25.25`.
+  Production Compose requires their shared webhook-secret encryption key and
+  disables plaintext; local Compose opts into plaintext and private-network
+  webhook delivery explicitly for development.
 
 ### Fixed
 
@@ -46,9 +50,9 @@ UX work that does not advance spec alignment.
   and date-input styling, expose permission checkboxes as semantic fieldsets,
   and keep the picker and diff guidance legible in dark mode.
 
-No endpoint, successful request shape, polling cadence, capability gate,
-server/spec minimum, or server-fleet pin changes. Full validation results are
-recorded in `AUDIT.md`.
+No dashboard endpoint, successful request shape, polling cadence, capability
+gate, or server/spec minimum changes. Full validation results are recorded in
+`AUDIT.md`; follow the fleet upgrade notes in `OPERATIONS.md`.
 
 ## [0.1.25.82] — 2026-07-20
 

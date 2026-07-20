@@ -392,7 +392,7 @@ services:
       - cycles
 
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.53
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.54
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
@@ -400,7 +400,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
       ADMIN_API_KEY: ${ADMIN_API_KEY:?ADMIN_API_KEY must be set}
       WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:?WEBHOOK_SECRET_ENCRYPTION_KEY must be set}
-      WEBHOOK_SECRET_ENCRYPTION_REQUIRED: "true"
+      WEBHOOK_SECRET_ALLOW_PLAINTEXT: "false"
       JAVA_OPTS: "-XX:MaxRAMPercentage=75 -XX:+UseG1GC -XX:+UseStringDeduplication"
       DASHBOARD_CORS_ORIGIN: ${DASHBOARD_ORIGIN:-https://admin.example.com}
     healthcheck:
@@ -449,16 +449,17 @@ services:
       - cycles
 
   # Webhook-delivery worker. Existing evidence-enabled fleets upgrading to
-  # .24 must first drain evidence:processing with the old workers; see
-  # OPERATIONS.md. Fresh deployments require no migration.
+  # .24+ must first drain evidence:processing with the old workers; see
+  # OPERATIONS.md. .25 also enforces the private-network SSRF baseline.
   cycles-events:
-    image: ghcr.io/runcycles/cycles-server-events:0.1.25.24
+    image: ghcr.io/runcycles/cycles-server-events:0.1.25.25
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
       WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:?WEBHOOK_SECRET_ENCRYPTION_KEY must be set}
+      WEBHOOK_SECRET_ALLOW_PLAINTEXT: "false"
       CYCLES_METRICS_TENANT_TAG_ENABLED: "false"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:9980/actuator/health/readiness"]
@@ -623,7 +624,9 @@ duplicated; do not replace the generated hash with `'unsafe-inline'`.
 |----------|----------|---------|-------------|
 | `ADMIN_API_KEY` | Yes | — | Admin API key for `X-Admin-API-Key` header |
 | `REDIS_PASSWORD` | Yes in prod | (empty in dev) | Redis authentication password; required by `docker-compose.prod.yml` |
-| `WEBHOOK_SECRET_ENCRYPTION_KEY` | Yes in prod | (empty in dev) | AES-256-GCM key for webhook signing secrets at rest |
+| `WEBHOOK_SECRET_ENCRYPTION_KEY` | Yes in prod | (empty in dev) | Shared base64-encoded 32-byte AES-256-GCM key used by admin to encrypt and events to decrypt webhook signing secrets |
+| `WEBHOOK_SECRET_ALLOW_PLAINTEXT` | Dev only | `true` in dev / `false` in prod | Explicit local compatibility opt-out when no encryption key is configured; never enable in production |
+| `WEBHOOK_URL_GUARD_ALLOW_PRIVATE_NETWORKS` | Dev only | `true` in dev / unset in prod | Allows local Docker-network webhook targets; production keeps events `.25`'s private-network SSRF baseline enabled |
 | `DASHBOARD_ORIGIN` | Yes in prod | `https://admin.example.com` | Origin used by production compose to configure backend CORS |
 | `DASHBOARD_CORS_ORIGIN` | Dev only | `http://localhost:5173` | CORS origin — only needed when browser calls admin server directly (not via nginx proxy) |
 | `ADMIN_UPSTREAM` | No | `http://cycles-admin:7979` | Governance-plane upstream for the dashboard container's bundled nginx proxy (`/v1/*` except the runtime routes below) |

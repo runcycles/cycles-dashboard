@@ -4,8 +4,8 @@ import { describe, expect, it } from 'vitest'
 
 const EXPECTED = {
   'cycles-server': '0.1.25.58',
-  'cycles-server-admin': '0.1.25.53',
-  'cycles-server-events': '0.1.25.24',
+  'cycles-server-admin': '0.1.25.54',
+  'cycles-server-events': '0.1.25.25',
 } as const
 
 function source(path: string): string {
@@ -38,5 +38,19 @@ describe('published server deployment pins', () => {
     expect(operations).toContain('runtime `0.1.25.58`, admin')
     expect(operations).toContain('`evidence:processing`')
     expect(operations).toContain('Upgrade events before')
+  })
+
+  it('keeps webhook-secret and private-network escape hatches development-only', () => {
+    const development = source('docker-compose.yml')
+    const production = source('docker-compose.prod.yml')
+
+    expect(development.match(/WEBHOOK_SECRET_ALLOW_PLAINTEXT: \$\{WEBHOOK_SECRET_ALLOW_PLAINTEXT:-true\}/g)).toHaveLength(2)
+    expect(development).toContain(
+      'WEBHOOK_URL_GUARD_ALLOW_PRIVATE_NETWORKS: ${WEBHOOK_URL_GUARD_ALLOW_PRIVATE_NETWORKS:-true}',
+    )
+    expect(production.match(/WEBHOOK_SECRET_ALLOW_PLAINTEXT: "false"/g)).toHaveLength(2)
+    expect(production.match(/WEBHOOK_SECRET_ENCRYPTION_KEY: \$\{WEBHOOK_SECRET_ENCRYPTION_KEY:\?/g)).toHaveLength(2)
+    expect(production).not.toContain('WEBHOOK_URL_GUARD_ALLOW_PRIVATE_NETWORKS')
+    expect(production).not.toContain('WEBHOOK_SECRET_ENCRYPTION_REQUIRED')
   })
 })

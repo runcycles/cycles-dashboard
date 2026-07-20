@@ -106,11 +106,12 @@ services:
     logging: *default-logging
     # Event-dispatch / webhook delivery worker. Consumes events from
     # Redis and fans them out to registered webhook endpoints. Keep
-    # pinned to the latest published worker. .24 adds owner-fenced dispatch,
-    # durable terminal transitions/outboxes, and hardened evidence signing.
+    # pinned to the latest published worker. .25 adds a fail-closed signing-
+    # secret key and always-on private-network SSRF baseline on top of .24's
+    # owner-fenced dispatch, durable terminal transitions, and evidence work.
     # Evidence-enabled upgrades MUST follow OPERATIONS.md's .24 processing-
     # list migration sequence before starting the new worker.
-    image: ghcr.io/runcycles/cycles-server-events:0.1.25.24
+    image: ghcr.io/runcycles/cycles-server-events:0.1.25.25
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -124,6 +125,7 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
       WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:?WEBHOOK_SECRET_ENCRYPTION_KEY must be set}
+      WEBHOOK_SECRET_ALLOW_PLAINTEXT: "false"
       CYCLES_METRICS_TENANT_TAG_ENABLED: "false"
       EVENT_TTL_DAYS: ${EVENT_TTL_DAYS:-90}
       DELIVERY_TTL_DAYS: ${DELIVERY_TTL_DAYS:-14}
@@ -141,7 +143,7 @@ services:
 
   cycles-admin:
     logging: *default-logging
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.53
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.54
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -157,7 +159,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
       ADMIN_API_KEY: ${ADMIN_API_KEY:?ADMIN_API_KEY must be set}
       WEBHOOK_SECRET_ENCRYPTION_KEY: ${WEBHOOK_SECRET_ENCRYPTION_KEY:?WEBHOOK_SECRET_ENCRYPTION_KEY must be set}
-      WEBHOOK_SECRET_ENCRYPTION_REQUIRED: "true"
+      WEBHOOK_SECRET_ALLOW_PLAINTEXT: "false"
       JAVA_OPTS: "-XX:MaxRAMPercentage=75 -XX:+UseG1GC -XX:+UseStringDeduplication"
       DASHBOARD_CORS_ORIGIN: ${DASHBOARD_ORIGIN:-https://admin.example.com}
       EVENT_TTL_DAYS: ${EVENT_TTL_DAYS:-90}
