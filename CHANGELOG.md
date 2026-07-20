@@ -35,8 +35,10 @@ UX work that does not advance spec alignment.
   or failed post-write refresh can no longer make a committed action look
   stale and retryable.
 - Create/edit/revoke reject duplicate submissions and stale or wrong-tenant
-  rows inside the protocol. Revoke failures stay open with inline feedback;
-  one-time-secret dismissal owns its refresh against duplicate close calls.
+  rows inside the protocol. Their submit-time gate also catches a tenant that
+  became CLOSED after the dialog opened. Revoke failures stay open with inline
+  feedback; one-time-secret dismissal owns its refresh against duplicate close
+  calls.
 - Create now rejects blank names and malformed expiry date-times before the
   request. Array request fields are snapshotted across awaits, while legacy
   permission healing and diff-only edit bodies remain unchanged.

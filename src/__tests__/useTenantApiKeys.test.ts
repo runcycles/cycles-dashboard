@@ -106,6 +106,34 @@ describe('useTenantApiKeys', () => {
     expect(state.keys.pendingRevoke.value).toBeNull()
   })
 
+  it('revalidates the external tenant/lifecycle gate before every write', async () => {
+    let allowed = true
+    const createState = setup({ canArm: () => allowed })
+    createState.keys.openCreate()
+    createState.keys.createForm.value.name = 'Worker'
+    allowed = false
+    await expect(createState.keys.submitCreate()).resolves.toBe(false)
+    expect(createState.keys.createError.value).toContain('no longer available')
+    expect(createState.create).not.toHaveBeenCalled()
+
+    allowed = true
+    const editState = setup({ canArm: () => allowed })
+    editState.keys.openEdit(editState.apiKeys.value[0])
+    editState.keys.editForm.value.name = 'Renamed worker'
+    allowed = false
+    await expect(editState.keys.submitEdit()).resolves.toBe(false)
+    expect(editState.keys.editError.value).toContain('no longer available')
+    expect(editState.update).not.toHaveBeenCalled()
+
+    allowed = true
+    const revokeState = setup({ canArm: () => allowed })
+    revokeState.keys.requestRevoke(revokeState.apiKeys.value[0])
+    allowed = false
+    await expect(revokeState.keys.executeRevoke()).resolves.toBe(false)
+    expect(revokeState.keys.revokeError.value).toContain('no longer available')
+    expect(revokeState.revoke).not.toHaveBeenCalled()
+  })
+
   it('validates create name and expiry before acquiring mutation ownership', async () => {
     const state = setup()
     state.keys.openCreate()
@@ -232,6 +260,21 @@ describe('useTenantApiKeys', () => {
     expect(state.keys.editError.value).toContain('no longer active')
     expect(state.update).not.toHaveBeenCalled()
     expect(state.keys.editingKey.value).not.toBeNull()
+  })
+
+  it('refuses disappeared and live wrong-tenant rows after arming', async () => {
+    const disappeared = setup()
+    disappeared.keys.openEdit(disappeared.apiKeys.value[0])
+    disappeared.keys.editForm.value.name = 'Renamed worker'
+    disappeared.apiKeys.value = []
+    await expect(disappeared.keys.submitEdit()).resolves.toBe(false)
+    expect(disappeared.update).not.toHaveBeenCalled()
+
+    const wrongTenant = setup()
+    wrongTenant.keys.requestRevoke(wrongTenant.apiKeys.value[0])
+    wrongTenant.apiKeys.value = [key({ tenant_id: 'other' })]
+    await expect(wrongTenant.keys.executeRevoke()).resolves.toBe(false)
+    expect(wrongTenant.revoke).not.toHaveBeenCalled()
   })
 
   it('validates edit names before mutation and supports a guarded normal cancel', async () => {

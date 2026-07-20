@@ -42,7 +42,10 @@ lines without changing endpoints or successful request shapes.
 - Every protocol entry point enforces tenant/status eligibility, one-surface
   ownership, duplicate-submit protection, and in-flight cancellation guards.
   Edit/revoke also revalidate the live row at submit time so an expired,
-  revoked, or disappeared key cannot be mutated from a stale dialog snapshot.
+  revoked, disappeared, or wrong-tenant key cannot be mutated from a stale
+  dialog snapshot. All three executors recheck the external tenant/lifecycle
+  gate so an externally closed tenant cannot submit through an already-open
+  dialog.
 - API-key and tenant-lifecycle owners use reciprocal arming gates. The header,
   row menus, cascade recovery, Emergency Freeze, and lifecycle buttons expose
   the same disabled state as the protocol guard instead of silently ignoring a
@@ -59,9 +62,9 @@ lines without changing endpoints or successful request shapes.
   bring the extracted dialogs in line with the rest of the dashboard.
 
 No endpoint, successful request body, polling cadence, capability gate,
-server/spec minimum, or server-fleet pin changes. Validation: 1,487/1,487 tests
+server/spec minimum, or server-fleet pin changes. Validation: 1,489/1,489 tests
 across 126 files with 98.05% line coverage; `useTenantApiKeys` is 100%
-lines/functions and 92.66% branches. Lint, strict typecheck, and the production
+lines/functions and 93.16% branches. Lint, strict typecheck, and the production
 build pass.
 
 ### 2026-07-20 — v0.1.25.82: Webhook delivery-insight ownership

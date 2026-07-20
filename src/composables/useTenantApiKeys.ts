@@ -133,6 +133,10 @@ export function useTenantApiKeys(options: UseTenantApiKeysOptions) {
     return !ownerArmed.value && options.canArm?.() !== false
   }
 
+  function externalGateStillAllowsAction(): boolean {
+    return options.canArm?.() !== false
+  }
+
   function warnRefreshSettlement(
     result: TenantDetailRefreshResult,
     committedLabel: string,
@@ -180,8 +184,16 @@ export function useTenantApiKeys(options: UseTenantApiKeysOptions) {
     // Keep the guard before visible error/loading mutation so a re-entrant
     // call cannot clear the first request's error or send a second write.
     if (!pending || revokeLoading.value) return false
+    if (!externalGateStillAllowsAction()) {
+      revokeError.value = 'Revocation is no longer available. Refresh and review the tenant state.'
+      return false
+    }
     const current = options.apiKeys.value.find(key => key.key_id === pending.key_id)
-    if (!current || current.status !== 'ACTIVE') {
+    if (
+      !current
+      || current.tenant_id !== options.tenantId
+      || current.status !== 'ACTIVE'
+    ) {
       revokeError.value = 'This API key is no longer active. Refresh and review its current state.'
       return false
     }
@@ -234,6 +246,10 @@ export function useTenantApiKeys(options: UseTenantApiKeysOptions) {
 
   async function submitCreate(): Promise<boolean> {
     if (!showCreateState.value || createLoading.value) return false
+    if (!externalGateStillAllowsAction()) {
+      createError.value = 'API-key creation is no longer available. Refresh and review the tenant state.'
+      return false
+    }
     const form = createForm.value
     if (!form.name.trim()) {
       createError.value = 'Name is required.'
@@ -323,8 +339,16 @@ export function useTenantApiKeys(options: UseTenantApiKeysOptions) {
   async function submitEdit(): Promise<boolean> {
     const original = editingKeyState.value
     if (!original || editLoading.value) return false
+    if (!externalGateStillAllowsAction()) {
+      editError.value = 'Editing is no longer available. Refresh and review the tenant state.'
+      return false
+    }
     const current = options.apiKeys.value.find(key => key.key_id === original.key_id)
-    if (!current || current.status !== 'ACTIVE') {
+    if (
+      !current
+      || current.tenant_id !== options.tenantId
+      || current.status !== 'ACTIVE'
+    ) {
       editError.value = 'This API key is no longer active. Refresh and review its current state.'
       return false
     }
