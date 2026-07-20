@@ -2,19 +2,19 @@ import { computed, type Ref } from 'vue'
 import type { WebhookDelivery, WebhookSubscription } from '../types'
 import type { ChartPalette } from './useChartTheme'
 
-export const DELIVERY_INSIGHT_STATUSES = ['SUCCESS', 'FAILED', 'RETRYING', 'PENDING'] as const
+const DELIVERY_INSIGHT_STATUSES = ['SUCCESS', 'FAILED', 'RETRYING', 'PENDING'] as const
 export type DeliveryInsightStatus = typeof DELIVERY_INSIGHT_STATUSES[number]
 
-export type DeliveryOutcomeBuckets = {
+type DeliveryOutcomeBuckets = {
   success: number
   failed: number
   retrying: number
   pending: number
 }
 
-export type AttemptsBucket = { label: string; count: number }
-export type ResponseStats = { count: number; p50: number; p95: number; max: number }
-export type HealthBand = {
+type AttemptsBucket = { label: string; count: number }
+type ResponseStats = { count: number; p50: number; p95: number; max: number }
+type HealthBand = {
   band: 'green' | 'amber' | 'red' | 'unknown'
   label: string
   detail: string

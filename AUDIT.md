@@ -51,7 +51,7 @@ from 1,042 to 761 lines.
 No endpoint, request shape, acquisition cadence, loaded-page scope, route,
 server/spec minimum, or server-fleet pin changes. Validation: 1,465/1,465 tests
 across 124 files with 97.91% line coverage; the new insights composable is 100%
-lines/functions and 92.42% branches. Lint, strict typecheck, and the production
+lines/functions and 92.53% branches. Lint, strict typecheck, and the production
 build pass; the build retains `BaseChart` as its own lazy chunk.
 
 ### 2026-07-20 — v0.1.25.81: Webhook Detail editor ownership
