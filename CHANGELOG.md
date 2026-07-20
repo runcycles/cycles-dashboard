@@ -15,6 +15,45 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.83] — 2026-07-20
+
+### Changed
+
+- Tenant Detail's API-key create, edit, revoke, and one-time-secret protocols
+  now live in a focused composable, with their confirmation/form presentation
+  in a focused component. Acquisition, the key table, copy/activity actions,
+  tabs, routing, and capability gates remain in the parent view.
+- API-key mutations and destructive tenant-lifecycle actions now expose and
+  enforce reciprocal ownership, including visibly disabled header and row
+  actions while the sibling flow is armed. Closed tenants also disable API-key
+  creation and active legacy-row mutations with explicit read-only guidance.
+- The shipped server fleet now pins admin `0.1.25.54` and events `0.1.25.25`.
+  Production Compose requires their shared webhook-secret encryption key and
+  disables plaintext; local Compose opts into plaintext and private-network
+  webhook delivery explicitly for development.
+
+### Fixed
+
+- API-key writes now invalidate older reads before mutation and publish
+  authoritative edit/revoke responses before refresh settlement. A late poll
+  or failed post-write refresh can no longer make a committed action look
+  stale and retryable.
+- Create/edit/revoke reject duplicate submissions and stale or wrong-tenant
+  rows inside the protocol. Their submit-time gate also catches a tenant that
+  became CLOSED after the dialog opened. Revoke failures stay open with inline
+  feedback; one-time-secret dismissal owns its refresh against duplicate close
+  calls.
+- Create now rejects blank names and malformed expiry date-times before the
+  request. Array request fields are snapshotted across awaits, while legacy
+  permission healing and diff-only edit bodies remain unchanged.
+- The extracted dialogs preserve existing DOM IDs, add the shared name limit
+  and date-input styling, expose permission checkboxes as semantic fieldsets,
+  and keep the picker and diff guidance legible in dark mode.
+
+No dashboard endpoint, successful request shape, polling cadence, capability
+gate, or server/spec minimum changes. Full validation results are recorded in
+`AUDIT.md`; follow the fleet upgrade notes in `OPERATIONS.md`.
+
 ## [0.1.25.82] — 2026-07-20
 
 ### Changed

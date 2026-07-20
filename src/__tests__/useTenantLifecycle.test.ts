@@ -130,6 +130,28 @@ function setup(overrides: Partial<UseTenantLifecycleOptions> = {}) {
 }
 
 describe('useTenantLifecycle', () => {
+  it('exposes its armed state and refuses every entry point while a sibling owner blocks arming', async () => {
+    const state = setup()
+    expect(state.lifecycle.lifecycleArmed.value).toBe(false)
+    state.lifecycle.requestTenantAction('SUSPENDED')
+    expect(state.lifecycle.lifecycleArmed.value).toBe(true)
+    state.lifecycle.cancelTenantAction()
+    expect(state.lifecycle.lifecycleArmed.value).toBe(false)
+
+    const blocked = setup({ canArm: () => false })
+    blocked.lifecycle.requestTenantAction('SUSPENDED')
+    blocked.tenantRef.value = tenant('CLOSED')
+    blocked.lifecycle.openRerunCascade()
+    blocked.tenantRef.value = tenant('ACTIVE')
+    blocked.budgets.value = [budget('active')]
+
+    expect(await blocked.lifecycle.openEmergencyFreeze()).toBe(false)
+    expect(blocked.lifecycle.pendingTenantAction.value).toBeNull()
+    expect(blocked.lifecycle.pendingRerunCascade.value).toBe(false)
+    expect(blocked.lifecycle.pendingEmergencyFreeze.value).toBe(false)
+    expect(blocked.refreshBudgets).not.toHaveBeenCalled()
+  })
+
   it('derives cascade preview, recovery counts, and partial verification state', () => {
     const state = setup()
     state.tenantRef.value = tenant('CLOSED')
