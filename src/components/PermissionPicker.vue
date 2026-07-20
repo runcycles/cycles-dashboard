@@ -66,10 +66,10 @@ function groupState(items: readonly string[]): 'none' | 'some' | 'all' {
     someone later widens FormDialog materially (e.g. adds :xwide), this
     is worth revisiting.
   -->
-  <div class="border border-gray-200 rounded p-2 space-y-3 max-h-[28rem] overflow-y-auto">
+  <div data-testid="permission-picker" class="border border-gray-200 dark:border-gray-700 rounded p-2 space-y-3 max-h-[28rem] overflow-y-auto">
     <div v-for="plane in PERMISSION_GROUPS" :key="plane.plane" class="space-y-1.5">
       <!-- Plane header: aggregate bulk-select across all sections in the plane -->
-      <label class="flex items-center gap-2 text-xs font-medium text-gray-700 bg-gray-50 px-2 py-1 rounded cursor-pointer">
+      <label class="flex items-center gap-2 text-xs font-medium text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-800 px-2 py-1 rounded cursor-pointer">
         <input
           type="checkbox"
           class="rounded"
@@ -90,7 +90,7 @@ function groupState(items: readonly string[]): 'none' | 'some' | 'all' {
         <!-- Section sub-header (omitted when label is null, e.g. admin wildcards) -->
         <label
           v-if="section.label"
-          class="flex items-center gap-2 text-xs text-gray-600 cursor-pointer"
+          class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300 cursor-pointer"
         >
           <input
             type="checkbox"
@@ -110,7 +110,7 @@ function groupState(items: readonly string[]): 'none' | 'some' | 'all' {
           <label
             v-for="p in section.items"
             :key="p"
-            class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer"
+            class="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300 cursor-pointer"
           >
             <input
               type="checkbox"

@@ -57,8 +57,11 @@ describe('TenantApiKeyDialogs', () => {
     const wrapper = mountDialogs({ showCreate: true, createForm: shared })
 
     expect(wrapper.get('[role="dialog"]').attributes('aria-label')).toBe('Create API Key')
+    expect(wrapper.get('fieldset legend').text()).toBe('Permissions')
     expect(wrapper.get('#ck2-name').attributes('maxlength')).toBe('256')
     expect(wrapper.get('#ck2-expires').classes()).toContain('form-input')
+    expect(wrapper.get('[data-testid="permission-picker"]').classes()).toContain('dark:border-gray-700')
+    expect(wrapper.get('[data-testid="permission-picker"] > div > label').classes()).toContain('dark:bg-gray-800')
     await wrapper.get('#ck2-name').setValue('Background worker')
     await wrapper.get('#ck2-scope').setValue('tenant:acme/*')
     await wrapper.get('form').trigger('submit')
@@ -94,6 +97,7 @@ describe('TenantApiKeyDialogs', () => {
 
     expect(wrapper.text()).toContain('+budgets:write')
     expect(wrapper.text()).toContain('−budgets:read')
+    expect(wrapper.get('fieldset legend').text()).toBe('Permissions')
     expect(wrapper.text()).toContain('Expiry is immutable')
     await wrapper.get('#ek2-name').setValue('Renamed worker')
     await wrapper.get('form').trigger('submit')

@@ -58,8 +58,9 @@ lines without changing endpoints or successful request shapes.
   closing unconditionally. One-time-secret acknowledgement remains the terminal
   create step and now owns its refresh settlement against duplicate close calls.
 - Moved fields preserve their established DOM IDs for automation. Name limits,
-  dark-mode permission-diff colors, and the date-time input's shared form style
-  bring the extracted dialogs in line with the rest of the dashboard.
+  semantic permission fieldsets, dark-mode picker/diff colors, and the
+  date-time input's shared form style bring the extracted dialogs in line with
+  the rest of the dashboard.
 
 No endpoint, successful request body, polling cadence, capability gate,
 server/spec minimum, or server-fleet pin changes. Validation: 1,489/1,489 tests

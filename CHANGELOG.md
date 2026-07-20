@@ -43,8 +43,8 @@ UX work that does not advance spec alignment.
   request. Array request fields are snapshotted across awaits, while legacy
   permission healing and diff-only edit bodies remain unchanged.
 - The extracted dialogs preserve existing DOM IDs, add the shared name limit
-  and date-input styling, and keep permission-diff guidance legible in dark
-  mode.
+  and date-input styling, expose permission checkboxes as semantic fieldsets,
+  and keep the picker and diff guidance legible in dark mode.
 
 No endpoint, successful request shape, polling cadence, capability gate,
 server/spec minimum, or server-fleet pin changes. Full validation results are

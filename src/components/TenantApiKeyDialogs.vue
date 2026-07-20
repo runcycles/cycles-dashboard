@@ -71,10 +71,10 @@ defineEmits<{
         placeholder="my-service-key"
       />
     </div>
-    <div>
-      <label class="form-label">Permissions</label>
+    <fieldset>
+      <legend class="form-label">Permissions</legend>
       <PermissionPicker v-model="createForm.permissions" />
-    </div>
+    </fieldset>
     <div>
       <label for="ck2-scope" class="form-label">Scope filter (comma-separated, optional)</label>
       <input
@@ -122,8 +122,8 @@ defineEmits<{
         class="form-input"
       />
     </div>
-    <div>
-      <label class="form-label">Permissions</label>
+    <fieldset>
+      <legend class="form-label">Permissions</legend>
       <PermissionPicker v-model="editForm.permissions" />
       <div
         v-if="pendingPermissionAdds.length || pendingPermissionRemoves.length"
@@ -150,7 +150,7 @@ defineEmits<{
           >−{{ permission }}</span>
         </template>
       </div>
-    </div>
+    </fieldset>
     <div>
       <label for="ek2-scope" class="form-label">Scope filter (comma-separated)</label>
       <input
