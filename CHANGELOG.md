@@ -23,7 +23,8 @@ UX work that does not advance spec alignment.
   summaries now run through focused calculation and presentation owners. Data
   acquisition, filters/pagination, virtualization, export, routing, and
   mutations remain in the detail view; chart dependencies remain lazy-loaded.
-- The attempts histogram now exposes its bucket/value rows to screen readers.
+- The insights panel now states its loaded-page sample size, and the attempts
+  histogram exposes its bucket/value rows to screen readers.
 
 ### Fixed
 

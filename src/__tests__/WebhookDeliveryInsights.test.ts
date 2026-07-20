@@ -70,6 +70,7 @@ describe('WebhookDeliveryInsights', () => {
     ])
 
     expect(wrapper.find('[data-testid="webhook-delivery-stats"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="webhook-delivery-stats"]').text()).toContain('Based on 2 loaded deliveries')
     expect(wrapper.get('[data-testid="webhook-response-time-stats"]').text()).toContain('over 2 deliveries')
     const histogram = wrapper.get('[data-testid="webhook-attempts-histogram"]')
       .findComponent({ name: 'BaseChart' })

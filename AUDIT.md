@@ -43,8 +43,10 @@ from 1,042 to 761 lines.
   `disable_after_failures` boundary, showing red when consecutive failures
   reach the threshold even if an older successful delivery is recent.
 - The attempts chart supplies the same bucket/value rows to `BaseChart`'s
-  screen-reader table. Unknown chart slices remain inert; known outcomes keep
-  the existing local status-filter interaction without route changes.
+  screen-reader table, and the panel visibly states its loaded delivery count
+  so paginated metrics cannot be mistaken for all-time history. Unknown chart
+  slices remain inert; known outcomes keep the existing local status-filter
+  interaction without route changes.
 
 No endpoint, request shape, acquisition cadence, loaded-page scope, route,
 server/spec minimum, or server-fleet pin changes. Validation: 1,465/1,465 tests

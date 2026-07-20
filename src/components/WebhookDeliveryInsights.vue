@@ -47,6 +47,14 @@ function onDeliveryOutcomeClick(params: { name?: string }) {
     class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4"
     data-testid="webhook-delivery-stats"
   >
+    <div class="md:col-span-2 lg:col-span-4 flex flex-wrap items-baseline gap-x-2 -mb-1">
+      <h3 class="text-sm font-medium text-gray-700 dark:text-gray-200">Delivery insights</h3>
+      <span class="muted-sm">
+        Based on {{ deliveries.length.toLocaleString() }} loaded
+        {{ deliveries.length === 1 ? 'delivery' : 'deliveries' }}
+      </span>
+    </div>
+
     <div class="card p-3 flex flex-col justify-between" data-testid="webhook-last-success-band">
       <div class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Last successful delivery</div>
       <div class="inline-flex items-center gap-2 text-sm" :title="lastSuccessBand.detail">
