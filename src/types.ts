@@ -223,10 +223,9 @@ export interface WebhookSubscription {
   // mirrors §WebhookThresholdConfig / §WebhookRetryPolicy.
   thresholds?: WebhookThresholdConfig
   retry_policy?: WebhookRetryPolicy
-  // Custom headers: server masks values on GET (keys preserved). Edit
-  // flow writes new keys but can't round-trip masked values back — the
-  // form treats existing headers as read-only keys + an "Add header"
-  // affordance for new entries.
+  // Custom headers: server masks values on GET (keys preserved). The create
+  // flow can write them, but the edit form cannot safely round-trip masked
+  // values and therefore presents existing header names as read-only.
   headers?: Record<string, string>
   status: string
   consecutive_failures?: number
@@ -469,6 +468,28 @@ export interface WebhookCreateRequest {
   signing_secret?: string
   headers?: Record<string, string>
   disable_after_failures?: number
+  metadata?: Record<string, unknown>
+}
+
+// §WebhookUpdateRequest (additionalProperties:false). Keep this distinct from
+// WebhookCreateRequest: selector arrays may be explicitly empty on update,
+// status is update-only, and every field is optional for PATCH semantics.
+// None of these fields is nullable. In particular, JSON null is ignored by the
+// current admin DTO, so clear operations must use a spec-valid empty string /
+// empty object rather than silently reporting a successful no-op.
+export interface WebhookUpdateRequest {
+  name?: string
+  description?: string
+  url?: string
+  event_types?: string[]
+  event_categories?: string[]
+  scope_filter?: string
+  thresholds?: WebhookThresholdConfig
+  signing_secret?: string
+  headers?: Record<string, string>
+  retry_policy?: WebhookRetryPolicy
+  disable_after_failures?: number
+  status?: 'ACTIVE' | 'PAUSED'
   metadata?: Record<string, unknown>
 }
 

@@ -45,6 +45,8 @@ export interface UseWebhookOperationsOptions {
   reportError: (message: string) => void
   navigateToList: () => void | Promise<void>
   notify: WebhookOperationNotifications
+  /** Optional sibling-owner gate (for example, an armed edit dialog). */
+  canArm?: () => boolean
   dependencies?: Partial<WebhookOperationDependencies>
 }
 
@@ -76,10 +78,10 @@ function isStatusActionLegal(
 /**
  * Owns Webhook Detail's non-editor operation protocol.
  *
- * The view retains route intent, charts, delivery acquisition, and the
- * security-sensitive edit form. This owner provides one dialog/request gate,
- * duplicate-submit protection, direct publication of authoritative PATCH
- * responses, one-time secret reveal, and replay/test settlement.
+ * The view retains route intent, charts, and delivery presentation; the editor
+ * is a sibling owner. This owner provides one dialog/request gate, duplicate-
+ * submit protection, direct publication of authoritative PATCH responses,
+ * one-time secret reveal, and replay/test settlement.
  */
 export function useWebhookOperations(options: UseWebhookOperationsOptions) {
   const deps: WebhookOperationDependencies = {
@@ -135,6 +137,7 @@ export function useWebhookOperations(options: UseWebhookOperationsOptions) {
     return !!options.webhook.value
       && !isMutationRunning.value
       && !hasPendingOperation.value
+      && options.canArm?.() !== false
   }
 
   function requestStatusAction(action: WebhookStatusAction): void {
@@ -279,7 +282,7 @@ export function useWebhookOperations(options: UseWebhookOperationsOptions) {
   }
 
   async function runTest(): Promise<boolean> {
-    if (!options.webhook.value || isMutationRunning.value || hasPendingOperation.value) return false
+    if (!canArmOperation()) return false
     testLoading.value = true
     testResultState.value = null
     try {

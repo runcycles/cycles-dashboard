@@ -353,8 +353,8 @@ export const revokeApiKey = (keyId: string, reason?: string) =>
 export const createWebhook = (body: import('../types').WebhookCreateRequest, tenantId?: string) =>
   post<import('../types').WebhookCreateResponse>(`${BASE}/admin/webhooks`, body as unknown as Record<string, unknown>, tenantId ? { tenant_id: tenantId } : undefined)
 
-export const updateWebhook = (id: string, body: Record<string, unknown>) =>
-  patch<import('../types').WebhookSubscription>(`${BASE}/admin/webhooks/${id}`, body)
+export const updateWebhook = (id: string, body: import('../types').WebhookUpdateRequest) =>
+  patch<import('../types').WebhookSubscription>(`${BASE}/admin/webhooks/${id}`, body as unknown as Record<string, unknown>)
 
 export const deleteWebhook = (id: string) =>
   del<void>(`${BASE}/admin/webhooks/${id}`)

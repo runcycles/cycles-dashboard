@@ -3,6 +3,7 @@ import { ref, computed, watch, defineAsyncComponent } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { isNavigationFailure, useRoute, useRouter } from 'vue-router'
 import { useWebhookDetailData } from '../composables/useWebhookDetailData'
+import { useWebhookEditor } from '../composables/useWebhookEditor'
 import { useWebhookOperations } from '../composables/useWebhookOperations'
 import type { AppliedQuerySnapshot } from '../composables/useAppliedQuery'
 import { useChartTheme } from '../composables/useChartTheme'
@@ -12,10 +13,8 @@ import { useChartTheme } from '../composables/useChartTheme'
 const BaseChart = defineAsyncComponent(() => import('../components/BaseChart.vue'))
 import { useListExport } from '../composables/useListExport'
 import { useSort } from '../composables/useSort'
-import { getWebhook, updateWebhook } from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import type { WebhookSubscription, WebhookDelivery } from '../types'
-import { EVENT_TYPES, EVENT_CATEGORIES, TENANT_ALLOWED_EVENT_TYPES, TENANT_ALLOWED_EVENT_CATEGORIES } from '../types'
+import type { WebhookDelivery } from '../types'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import SortHeader from '../components/SortHeader.vue'
@@ -29,17 +28,10 @@ import DownloadIcon from '../components/icons/DownloadIcon.vue'
 import BackArrowIcon from '../components/icons/BackArrowIcon.vue'
 import ConfirmAction from '../components/ConfirmAction.vue'
 import FormDialog from '../components/FormDialog.vue'
-import WebhookAdvancedFields from '../components/WebhookAdvancedFields.vue'
-import {
-  emptyWebhookAdvancedForm,
-  webhookAdvancedToRequest,
-  webhookAdvancedError,
-  webhookToAdvancedForm,
-} from '../utils/webhookAdvanced'
+import WebhookEditDialog from '../components/WebhookEditDialog.vue'
 import SecretReveal from '../components/SecretReveal.vue'
 import RowActionsMenu from '../components/RowActionsMenu.vue'
 import { useToast } from '../composables/useToast'
-import { toMessage } from '../utils/errors'
 import { writeClipboardJson, writeClipboardText } from '../utils/clipboard'
 
 const toast = useToast()
@@ -58,10 +50,13 @@ const canManage = computed(() => auth.capabilities?.manage_webhooks !== false)
 //   - status filter (PENDING / SUCCESS / FAILED / RETRYING)
 //   - virtualized rows so DOM stays bounded
 const deliveryStatusFilter = ref('')
-// Acquisition's initial tick can run while the operation owner is being
-// constructed below. No operation can exist during that synchronous bootstrap,
-// so false is safe until the closure is replaced with the real computed state.
-let webhookOperationRunning = () => false
+// Acquisition's initial tick can run while the sibling mutation owners are
+// being constructed below. No mutation can exist during that synchronous
+// bootstrap, so false is safe until the closure is replaced with their state.
+let webhookMutationRunning = () => false
+// Operations are constructed before the editor. This sibling gate is replaced
+// synchronously after both owners exist, before a user can arm either one.
+let webhookEditorArmed = () => false
 const {
   webhook,
   deliveries,
@@ -90,7 +85,7 @@ const {
 } = useWebhookDetailData({
   webhookId: id,
   getDeliveryParams: buildDeliveryParams,
-  isMutationRunning: () => webhookOperationRunning(),
+  isMutationRunning: () => webhookMutationRunning(),
 })
 
 const webhookOperations = useWebhookOperations({
@@ -105,8 +100,8 @@ const webhookOperations = useWebhookOperations({
     if (isNavigationFailure(failure)) throw failure
   },
   notify: toast,
+  canArm: () => !webhookEditorArmed(),
 })
-webhookOperationRunning = () => webhookOperations.isMutationRunning.value
 
 const {
   pendingStatusAction,
@@ -146,6 +141,33 @@ const {
   hasPendingOperation,
   isMutationRunning: webhookOperationBusy,
 } = webhookOperations
+
+const webhookEditor = useWebhookEditor({
+  webhookId: id,
+  webhook,
+  canOpen: () => !hasPendingOperation.value && !webhookOperationBusy.value,
+  beginSubscriptionMutation,
+  publishWebhook,
+  notifySuccess: toast.success,
+})
+const {
+  showEdit,
+  editLoading,
+  editError,
+  editMetadataError,
+  editForm,
+  editAdvanced,
+  editAdvancedHasConfig,
+  hiddenLegacySelectorCount,
+  isTenantOwned,
+  editEventTypes,
+  editEventCategories,
+  openEdit,
+  cancelEdit,
+  submitEdit,
+} = webhookEditor
+webhookEditorArmed = () => webhookEditor.editorArmed.value
+webhookMutationRunning = () => webhookOperationBusy.value || editLoading.value
 const operationBusyReason = 'Another webhook operation is in progress.'
 const sendTestBusyReason = computed(() => (
   testLoading.value
@@ -347,210 +369,6 @@ const attemptsChartOption = computed(() => {
     }],
   }
 })
-
-// Edit webhook
-//
-// Covers every spec-editable field (cycles-governance-admin WebhookSubscription §2719):
-// name, description, url, event_types, event_categories, scope_filter,
-// disable_after_failures, metadata, plus thresholds + retry_policy (via
-// the shared WebhookAdvancedFields editor). `headers` remain read-only:
-// their values are masked on GET so the form cannot round-trip them.
-//
-// Diff-before-patch: only the fields the operator actually changed go
-// into the PATCH body. Sending every field unconditionally would
-// overwrite server-owned fields (e.g. metadata keys set by another
-// client) on every save — the spec's PATCH semantics treat null as
-// "clear", so an echoing send of `name: ""` would wipe a name the
-// user didn't touch. `pendingChanges()` reports what will be sent so
-// the operator isn't surprised. Same pattern as ApiKeysView edit
-// (v0.1.25.24 AUDIT entry).
-const showEdit = ref(false)
-const editLoading = ref(false)
-const editError = ref('')
-const editMetadataError = ref('')
-interface EditForm {
-  name: string
-  description: string
-  url: string
-  event_types: string[]
-  event_categories: string[]
-  scope_filter: string
-  disable_after_failures: string
-  metadata: string  // JSON string — parsed on submit
-}
-const editForm = ref<EditForm>({ name: '', description: '', url: '', event_types: [], event_categories: [], scope_filter: '', disable_after_failures: '', metadata: '' })
-const editInitial = ref<EditForm | null>(null)
-
-// TENANT-OWNED CATEGORY BOUNDARY (spec revisions 0.1.25.38/.40/.41,
-// updateWebhookSubscription lines 6560-6574): when the subscription's
-// owning tenant is a CONCRETE tenant (tenant_id present and !=
-// "__system__"), any provided event_types / event_categories must stay
-// within the tenant-accessible sets (budget / reservation / tenant) —
-// servers at .40+ reject admin-only selectors with 400 INVALID_REQUEST
-// regardless of auth context. Filter the edit pickers to those sets for
-// tenant-owned rows; system-owned rows keep the full lists (system-wide
-// admin monitoring is legitimate).
-const SYSTEM_TENANT_ID = '__system__'
-const isTenantOwned = computed(() =>
-  !!webhook.value?.tenant_id && webhook.value.tenant_id !== SYSTEM_TENANT_ID,
-)
-const editEventTypes = computed<readonly string[]>(() =>
-  isTenantOwned.value ? TENANT_ALLOWED_EVENT_TYPES : EVENT_TYPES,
-)
-const editEventCategories = computed<readonly string[]>(() =>
-  isTenantOwned.value ? TENANT_ALLOWED_EVENT_CATEGORIES : EVENT_CATEGORIES,
-)
-// Thresholds + retry policy, edited via the shared WebhookAdvancedFields
-// component. Diffed against a frozen baseline the same way as editForm so
-// an unchanged advanced section never enters the PATCH body.
-const editAdvanced = ref(emptyWebhookAdvancedForm())
-const editAdvancedInitial = ref('')
-const editAdvancedHasConfig = ref(false)
-// How many legacy admin-only selectors openEdit stripped from the
-// pickers on a tenant-owned row. > 0 renders a muted hint in the edit
-// dialog so the empty checkboxes aren't mistaken for the server state.
-const hiddenLegacySelectorCount = ref(0)
-
-function snapshotForm(w: WebhookSubscription): EditForm {
-  return {
-    name: w.name ?? '',
-    description: w.description ?? '',
-    url: w.url,
-    event_types: [...(w.event_types || [])],
-    event_categories: [...(w.event_categories || [])],
-    scope_filter: w.scope_filter ?? '',
-    disable_after_failures: String(w.disable_after_failures ?? 10),
-    metadata: w.metadata && Object.keys(w.metadata).length ? JSON.stringify(w.metadata, null, 2) : '',
-  }
-}
-
-function openEdit() {
-  if (!webhook.value || hasPendingOperation.value || webhookOperationBusy.value) return
-  // Two independent snapshots: editForm gets mutated by the inputs;
-  // editInitial stays frozen as the diff baseline. Sharing the same
-  // object reference made every diff zero — the v-model writes hit
-  // both refs.
-  editForm.value = snapshotForm(webhook.value)
-  editInitial.value = snapshotForm(webhook.value)
-  // Tenant-owned rows: strip admin-only selectors (persisted by servers
-  // pre-dating the .40 boundary enforcement) from BOTH snapshots. The
-  // picker no longer renders their checkboxes, so leaving them in the
-  // form would keep invisible un-uncheckable selections; stripping only
-  // editForm would make every save carry a phantom event_types diff.
-  // With both stripped, an untouched selector stays out of the PATCH
-  // (server keeps the stored value; a rename must not silently change
-  // delivery) and a deliberate selector edit heals the legacy row —
-  // submitEdit sends BOTH cleaned arrays whenever anything was hidden,
-  // so a stripped-to-empty field goes out as an explicit [] (clear)
-  // instead of being omitted (keep). See the legacy-clear block there.
-  hiddenLegacySelectorCount.value = 0
-  if (isTenantOwned.value) {
-    const allowedTypes = new Set<string>(TENANT_ALLOWED_EVENT_TYPES)
-    const allowedCategories = new Set<string>(TENANT_ALLOWED_EVENT_CATEGORIES)
-    const before = editForm.value.event_types.length + editForm.value.event_categories.length
-    for (const form of [editForm.value, editInitial.value]) {
-      form.event_types = form.event_types.filter(et => allowedTypes.has(et))
-      form.event_categories = form.event_categories.filter(ec => allowedCategories.has(ec))
-    }
-    // Count what stripping hid so the dialog can say so — otherwise a
-    // legacy row whose ONLY selectors are admin-only renders an all-
-    // empty picker that reads like the server state (it isn't; the
-    // stored selectors stay active until the operator edits them).
-    hiddenLegacySelectorCount.value =
-      before - (editForm.value.event_types.length + editForm.value.event_categories.length)
-  }
-  editAdvanced.value = webhookToAdvancedForm(webhook.value)
-  editAdvancedInitial.value = JSON.stringify(editAdvanced.value)
-  editAdvancedHasConfig.value = !!(webhook.value.thresholds || webhook.value.retry_policy)
-  editError.value = ''
-  editMetadataError.value = ''
-  showEdit.value = true
-}
-
-async function submitEdit() {
-  editError.value = ''
-  editMetadataError.value = ''
-  // SELECTOR CLEARING (spec revision 0.1.25.39, WebhookUpdateRequest
-  // lines 2781-2813): an update MAY set event_types to [] to convert the
-  // subscription to category-only, PROVIDED event_categories is (or
-  // remains) non-empty. The form holds the full resulting state for both
-  // selectors, so both-empty is the only invalid combination (the server
-  // rejects it 400 per the SUBSCRIPTION SELECTOR INVARIANT). The diff
-  // below sends event_types: [] explicitly when cleared — the spec
-  // distinguishes empty-array (clear) from omitted (leave unchanged).
-  //
-  // Only enforce when the operator actually CHANGED the selectors: on a
-  // legacy tenant-owned row whose only selectors are admin-only, openEdit
-  // strips both snapshots to empty — an untouched save then omits the
-  // selector fields entirely (server keeps the stored values), so a
-  // URL/name-only edit must not be blocked by the invariant. A deliberate
-  // selector edit still sends the cleaned arrays and gets validated.
-  const body: Record<string, unknown> = {}
-  const init = editInitial.value
-  if (!init) return
-  const selectorsChanged =
-    JSON.stringify(editForm.value.event_types) !== JSON.stringify(init.event_types) ||
-    JSON.stringify(editForm.value.event_categories) !== JSON.stringify(init.event_categories)
-  if (selectorsChanged && !editForm.value.event_types.length && !editForm.value.event_categories.length) {
-    editError.value = 'Select at least one event type or category.'
-    return
-  }
-  // Diff each field. For strings, empty → undefined so we don't echo
-  // an empty value that would overwrite a server default.
-  if (editForm.value.name !== init.name) body.name = editForm.value.name || null
-  if (editForm.value.description !== init.description) body.description = editForm.value.description || null
-  if (editForm.value.url !== init.url) body.url = editForm.value.url
-  if (JSON.stringify(editForm.value.event_types) !== JSON.stringify(init.event_types)) body.event_types = editForm.value.event_types
-  if (JSON.stringify(editForm.value.event_categories) !== JSON.stringify(init.event_categories)) body.event_categories = editForm.value.event_categories
-  // LEGACY-SELECTOR CLEAR: when openEdit hid legacy admin-only selectors
-  // and the operator deliberately edited EITHER selector field, send
-  // BOTH cleaned arrays explicitly. The per-field diffs above miss the
-  // stripped field when the edit only touched the other one (stripped-
-  // empty == stripped-empty → omitted → server KEEPS the hidden legacy
-  // selectors, which keep delivering admin telemetry to the tenant
-  // endpoint) — and an unchanged-empty field must go out as the spec's
-  // explicit `event_types: []` clear. Untouched-selectors saves still
-  // omit both (guarded by selectorsChanged), so a rename never silently
-  // changes delivery.
-  if (selectorsChanged && hiddenLegacySelectorCount.value > 0) {
-    body.event_types = editForm.value.event_types
-    body.event_categories = editForm.value.event_categories
-  }
-  if (editForm.value.scope_filter !== init.scope_filter) body.scope_filter = editForm.value.scope_filter || null
-  if (editForm.value.disable_after_failures !== init.disable_after_failures) body.disable_after_failures = Number(editForm.value.disable_after_failures)
-  if (editForm.value.metadata !== init.metadata) {
-    if (editForm.value.metadata.trim() === '') {
-      body.metadata = null
-    } else {
-      try {
-        const parsed = JSON.parse(editForm.value.metadata)
-        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-          editMetadataError.value = 'Metadata must be a JSON object'
-          return
-        }
-        body.metadata = parsed
-      } catch { editMetadataError.value = 'Invalid JSON'; return }
-    }
-  }
-  // Thresholds / retry policy: only touch the body when the advanced
-  // section actually changed. Replacement semantics — emptying a
-  // previously-set field omits it (server keeps the old value); the form
-  // supports setting/adjusting, not clearing (documented in AUDIT.md).
-  if (JSON.stringify(editAdvanced.value) !== editAdvancedInitial.value) {
-    const advError = webhookAdvancedError(editAdvanced.value)
-    if (advError) { editError.value = advError; return }
-    Object.assign(body, webhookAdvancedToRequest(editAdvanced.value))
-  }
-  if (Object.keys(body).length === 0) { editError.value = 'No changes to save'; return }
-  editLoading.value = true
-  try {
-    await updateWebhook(id, body)
-    toast.success('Webhook updated')
-    publishWebhook(await getWebhook(id))
-    showEdit.value = false
-  } catch (e) { editError.value = toMessage(e) }
-  finally { editLoading.value = false }
-}
 
 function buildDeliveryParams(): Record<string, string> {
   const p: Record<string, string> = {}
@@ -1204,65 +1022,21 @@ watch(exportError, (v) => { if (v) reportError(v) })
       @cancel="cancelDeliveryExport"
     />
 
-    <!-- Edit webhook dialog -->
-    <FormDialog v-if="showEdit" title="Edit Webhook" submit-label="Save Changes" :loading="editLoading" :error="editError" @submit="submitEdit" @cancel="showEdit = false" :wide="true">
-      <div>
-        <label for="ew-name" class="form-label">Name</label>
-        <input id="ew-name" v-model="editForm.name" class="form-input" placeholder="Human-readable name (optional)" maxlength="256" />
-      </div>
-      <div>
-        <label for="ew-description" class="form-label">Description</label>
-        <textarea id="ew-description" v-model="editForm.description" class="form-input" rows="2" placeholder="What this webhook is for (optional)" maxlength="1024" />
-      </div>
-      <div>
-        <label for="ew-url" class="form-label">URL</label>
-        <input id="ew-url" v-model="editForm.url" type="url" required class="form-input-mono" />
-      </div>
-      <div>
-        <label class="form-label">Event types</label>
-        <div class="grid grid-cols-2 gap-1 max-h-48 overflow-y-auto border border-gray-200 rounded p-2">
-          <label v-for="et in editEventTypes" :key="et" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
-            <input type="checkbox" :value="et" v-model="editForm.event_types" class="rounded" />
-            {{ et }}
-          </label>
-        </div>
-        <p v-if="isTenantOwned" class="muted-sm mt-1">Tenant-owned subscriptions can only receive tenant-scoped events (budget.*, reservation.*, tenant.*).</p>
-        <p v-if="hiddenLegacySelectorCount" class="muted-sm mt-1" data-testid="hidden-legacy-selectors-hint">
-          {{ hiddenLegacySelectorCount }} legacy admin-only selector{{ hiddenLegacySelectorCount === 1 ? ' is' : 's are' }} hidden here; {{ hiddenLegacySelectorCount === 1 ? 'it remains' : 'they remain' }} active until you edit the selectors, at which point {{ hiddenLegacySelectorCount === 1 ? 'it is' : 'they are' }} cleared.
-        </p>
-      </div>
-      <div>
-        <label class="form-label">Event categories <span class="muted-sm">(additive — subscribes to all events in category, including future ones)</span></label>
-        <div class="flex flex-wrap gap-2 border border-gray-200 rounded p-2">
-          <label v-for="ec in editEventCategories" :key="ec" class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
-            <input type="checkbox" :value="ec" v-model="editForm.event_categories" class="rounded" />
-            {{ ec }}
-          </label>
-        </div>
-      </div>
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label for="ew-scope" class="form-label">Scope filter</label>
-          <input id="ew-scope" v-model="editForm.scope_filter" class="form-input-mono" placeholder="tenant:acme/*" />
-        </div>
-        <div>
-          <label for="ew-failures" class="form-label">Disable after failures</label>
-          <input id="ew-failures" v-model="editForm.disable_after_failures" type="number" min="1" class="form-input" />
-        </div>
-      </div>
-      <div>
-        <label for="ew-metadata" class="form-label">Metadata <span class="muted-sm">(JSON object, optional)</span></label>
-        <textarea id="ew-metadata" v-model="editForm.metadata" class="form-input-mono" rows="4" placeholder='{ "team": "payments", "env": "prod" }' />
-        <p v-if="editMetadataError" class="text-xs text-red-600 mt-1">{{ editMetadataError }}</p>
-      </div>
-      <div v-if="webhook && webhook.headers && Object.keys(webhook.headers).length > 0" class="info-panel">
-        <span class="form-label">Custom headers</span>
-        <p class="muted-sm mb-1">Keys preserved, values encrypted on the server and masked on read. Rotating values requires re-creating the subscription.</p>
-        <div class="flex flex-wrap gap-1 mt-1">
-          <span v-for="k in Object.keys(webhook.headers)" :key="k" class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs font-mono">{{ k }}: ********</span>
-        </div>
-      </div>
-      <WebhookAdvancedFields :form="editAdvanced" :start-open="editAdvancedHasConfig" id-prefix="ew-adv" mode="edit" />
-    </FormDialog>
+    <WebhookEditDialog
+      v-if="showEdit"
+      :loading="editLoading"
+      :error="editError"
+      :metadata-error="editMetadataError"
+      :form="editForm"
+      :advanced="editAdvanced"
+      :advanced-has-config="editAdvancedHasConfig"
+      :event-types="editEventTypes"
+      :event-categories="editEventCategories"
+      :tenant-owned="isTenantOwned"
+      :hidden-legacy-selector-count="hiddenLegacySelectorCount"
+      :webhook="webhook"
+      @submit="submitEdit"
+      @cancel="cancelEdit"
+    />
   </div>
 </template>

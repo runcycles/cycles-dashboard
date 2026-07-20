@@ -15,6 +15,34 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.81] — 2026-07-20
+
+### Changed
+
+- Webhook Detail's editor protocol and form presentation now live in focused
+  `useWebhookEditor` and `WebhookEditDialog` owners. Route intent, charts,
+  delivery acquisition/presentation, export, and sibling-owner coordination
+  remain in the view.
+
+### Fixed
+
+- Successful edits publish the authoritative PATCH response directly instead
+  of risking a false failure and duplicate retry when a follow-up GET fails.
+  Poll reads are invalidated before the write and excluded through settlement.
+- Clearing name, description, scope, or metadata now sends the non-null empty
+  value defined by `WebhookUpdateRequest`. Previously the admin DTO ignored the
+  dashboard's JSON `null` and returned 200 without clearing the stored value;
+  the client boundary is now typed to prevent invalid update fields and nulls.
+- Editor and non-editor actions use reciprocal arming guards. Duplicate submit
+  and mid-request cancellation protection now live in the editor protocol.
+- Tenant-owned legacy selector healing remains intact: rename-only saves omit
+  hidden selector fields, while deliberate selector edits send both cleaned
+  arrays (including explicit empty-array clears) and reject a both-empty result.
+
+No endpoint, successful request shape, capability gate, server/spec minimum,
+route, delivery, chart, or export changes. Validation: 1,454 tests, 97.85% line
+coverage, lint, strict typecheck, production build, and Compose gates pass.
+
 ## [0.1.25.80] — 2026-07-20
 
 ### Changed
