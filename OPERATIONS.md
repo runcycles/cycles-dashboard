@@ -213,7 +213,7 @@ dashboard image does not need to change for an admin-only version bump.
 
 ## Upgrades and rollback
 
-**Pinned server fleet (dashboard v0.1.25.83):** runtime `0.1.25.58`, admin
+**Pinned server fleet (dashboard v0.1.25.84):** runtime `0.1.25.58`, admin
 `0.1.25.54`, events `0.1.25.25`. These are exact tags, not floating aliases.
 
 **Upgrading an existing fleet to the pinned versions.** Upgrade events before

@@ -16,8 +16,7 @@ const props = defineProps<{
   // carries advanced config so it's visible without a click).
   startOpen?: boolean
   idPrefix?: string
-  // 'edit' surfaces a note that clearing a field here does not remove
-  // existing config (PATCH replacement omits absent fields).
+  // 'edit' explains the API's replacement/clear boundary.
   mode?: 'create' | 'edit'
 }>()
 
@@ -39,10 +38,10 @@ const pfx = props.idPrefix ?? 'pol-adv'
     </button>
 
     <div v-if="open" class="mt-3 space-y-4">
-      <p v-if="mode === 'edit'" class="text-xs rounded px-3 py-2 bg-amber-50 text-amber-800 border border-amber-200">
-        Editing updates the fields you change. Clearing a field here does
-        <strong>not</strong> remove existing config — the save omits empty fields,
-        so the server keeps the previous value. Use the API to clear a cap or limit.
+      <p v-if="mode === 'edit'" class="text-xs rounded px-3 py-2 bg-blue-50 text-blue-800 border border-blue-200 dark:bg-blue-950 dark:text-blue-200 dark:border-blue-800">
+        Caps, rate limits, and TTL overrides use replacement semantics; clearing
+        fields removes them from that group. Effective timestamps can be changed,
+        but the current admin API cannot clear a timestamp once set.
       </p>
       <fieldset class="space-y-2">
         <legend class="form-label">Caps</legend>

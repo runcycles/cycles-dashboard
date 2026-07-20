@@ -30,6 +30,24 @@ export interface PolicyAdvancedRequest {
   effective_until?: string
 }
 
+interface NumericRule {
+  field: keyof PolicyAdvancedForm
+  label: string
+  minimum: number
+  maximum?: number
+}
+
+const NUMERIC_RULES: readonly NumericRule[] = [
+  { field: 'max_tokens', label: 'Max tokens', minimum: 0 },
+  { field: 'max_steps_remaining', label: 'Max steps remaining', minimum: 0 },
+  { field: 'cooldown_ms', label: 'Cooldown', minimum: 0 },
+  { field: 'max_reservations_per_minute', label: 'Max reservations per minute', minimum: 1 },
+  { field: 'max_commits_per_minute', label: 'Max commits per minute', minimum: 1 },
+  { field: 'default_ttl_ms', label: 'Default TTL', minimum: 1000, maximum: 86400000 },
+  { field: 'max_ttl_ms', label: 'Max TTL', minimum: 1000, maximum: 86400000 },
+  { field: 'max_extensions', label: 'Max extensions', minimum: 0 },
+]
+
 export function emptyPolicyAdvancedForm(): PolicyAdvancedForm {
   return {
     max_tokens: '', max_steps_remaining: '', cooldown_ms: '',
@@ -38,6 +56,49 @@ export function emptyPolicyAdvancedForm(): PolicyAdvancedForm {
     default_ttl_ms: '', max_ttl_ms: '', max_extensions: '',
     effective_from: '', effective_until: '',
   }
+}
+
+/** Validate the spec constraints that native inputs cannot enforce for direct calls. */
+export function validatePolicyAdvancedForm(f: PolicyAdvancedForm): string | null {
+  for (const rule of NUMERIC_RULES) {
+    const text = String(f[rule.field]).trim()
+    if (!text) continue
+    const value = Number(text)
+    if (!Number.isFinite(value) || !Number.isInteger(value)) {
+      return `${rule.label} must be a whole number.`
+    }
+    if (value < rule.minimum || (rule.maximum !== undefined && value > rule.maximum)) {
+      const range = rule.maximum === undefined
+        ? `at least ${rule.minimum.toLocaleString()}`
+        : `between ${rule.minimum.toLocaleString()} and ${rule.maximum.toLocaleString()}`
+      return `${rule.label} must be ${range}.`
+    }
+  }
+
+  for (const [field, label] of [
+    ['tool_allowlist', 'Tool allowlist'],
+    ['tool_denylist', 'Tool denylist'],
+  ] as const) {
+    const tooLong = f[field]
+      .split(/[\n,]/)
+      .map(value => value.trim())
+      .find(value => value.length > 256)
+    if (tooLong) return `${label} entries must be 256 characters or fewer.`
+  }
+
+  for (const [field, label] of [
+    ['effective_from', 'Effective from'],
+    ['effective_until', 'Effective until'],
+  ] as const) {
+    const value = f[field]
+    if (value && Number.isNaN(new Date(value).getTime())) return `${label} must be a valid date and time.`
+  }
+  if (f.effective_from && f.effective_until) {
+    const from = new Date(f.effective_from).getTime()
+    const until = new Date(f.effective_until).getTime()
+    if (until <= from) return 'Effective until must be later than effective from.'
+  }
+  return null
 }
 
 function numOrUndef(s: string): number | undefined {

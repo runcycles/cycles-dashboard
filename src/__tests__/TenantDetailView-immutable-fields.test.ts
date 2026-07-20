@@ -85,6 +85,17 @@ function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
   }
 }
 
+function policy(overrides: Partial<Policy> = {}): Policy {
+  return {
+    policy_id: 'policy_1',
+    name: 'Engineering policy',
+    scope_pattern: 'tenant:acme/*',
+    status: 'ACTIVE',
+    created_at: '2026-01-01T00:00:00Z',
+    ...overrides,
+  }
+}
+
 async function mountView() {
   const { default: TenantDetailView } = await import('../views/TenantDetailView.vue')
   const w = mount(TenantDetailView, {
@@ -240,5 +251,43 @@ describe('TenantDetailView — immutable fields are read-only, never PATCHed', (
     expect(createButton.attributes('title')).toBe('Closed tenants are permanently read-only')
     await createButton.trigger('click')
     expect(w.find('[aria-label="Create API Key"]').exists()).toBe(false)
+  })
+
+  it('visibly enforces reciprocal policy and sibling-owner arming', async () => {
+    listPoliciesMock.mockResolvedValue({ policies: [policy()], has_more: false })
+    const w = await mountView()
+    const policiesTab = w.findAll('button').find(button => button.text().startsWith('Policies'))!
+    await policiesTab.trigger('click')
+    await flushPromises()
+
+    const createPolicy = w.findAll('button').find(button => button.text() === 'Create Policy')!
+    await createPolicy.trigger('click')
+    for (const label of ['Suspend', 'Close']) {
+      const button = w.findAll('button').find(item => item.text() === label)!
+      expect(button.attributes('disabled'), `${label} should be blocked by the policy owner`).toBeDefined()
+    }
+
+    const cancel = w.findAll('button').find(button => button.text() === 'Cancel')!
+    await cancel.trigger('click')
+    const suspend = w.findAll('button').find(button => button.text() === 'Suspend')!
+    await suspend.trigger('click')
+
+    expect(w.text()).toContain('Suspend this tenant?')
+    expect(createPolicy.attributes('disabled')).toBeDefined()
+    expect(createPolicy.attributes('title')).toBe('Finish the current tenant action first')
+  })
+
+  it('disables policy creation on a permanently closed tenant', async () => {
+    getTenantMock.mockResolvedValue(tenant({ status: 'CLOSED' }))
+    const w = await mountView()
+    const policiesTab = w.findAll('button').find(button => button.text().startsWith('Policies'))!
+    await policiesTab.trigger('click')
+    await flushPromises()
+
+    const createPolicy = w.findAll('button').find(button => button.text() === 'Create Policy')!
+    expect(createPolicy.attributes('disabled')).toBeDefined()
+    expect(createPolicy.attributes('title')).toBe('Closed tenants are permanently read-only')
+    await createPolicy.trigger('click')
+    expect(w.find('[aria-label="Create Policy"]').exists()).toBe(false)
   })
 })
