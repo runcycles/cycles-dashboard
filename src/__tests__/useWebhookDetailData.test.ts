@@ -120,7 +120,9 @@ describe('useWebhookDetailData', () => {
     expect(harness.data.deliveries.value.map(item => item.delivery_id)).toEqual(['newer'])
     expect(harness.data.deliveriesNextCursor.value).toBe('new-cursor')
     expect(harness.data.error.value).toBe('')
-    expect(harness.lastSuccessAt.value).toBeInstanceOf(Date)
+    // Delivery-only filter work must not make the subscription's global
+    // PageHeader freshness timestamp claim a full refresh occurred.
+    expect(harness.lastSuccessAt.value).toBeNull()
     harness.stop()
   })
 
@@ -294,6 +296,35 @@ describe('useWebhookDetailData', () => {
     harness.stop()
   })
 
+  it('re-anchors when a mutable delivery would otherwise remain stale in the retained tail', async () => {
+    const harness = setup()
+    harness.listDeliveries
+      .mockResolvedValueOnce({
+        deliveries: [delivery('d4'), delivery('d3')],
+        has_more: true,
+        next_cursor: 'cursor-page-2',
+      })
+      .mockResolvedValueOnce({
+        deliveries: [delivery('mutable-tail', 'RETRYING'), delivery('terminal-tail')],
+        has_more: true,
+        next_cursor: 'cursor-page-3',
+      })
+      .mockResolvedValueOnce({
+        deliveries: [delivery('d5'), delivery('d4')],
+        has_more: true,
+        next_cursor: 'fresh-page-2',
+      })
+
+    await harness.runTick()
+    await harness.data.loadMoreDeliveries()
+    await harness.runTick()
+
+    expect(harness.data.deliveries.value.map(item => item.delivery_id)).toEqual(['d5', 'd4'])
+    expect(harness.data.deliveriesNextCursor.value).toBe('fresh-page-2')
+    expect(harness.data.deliveriesHasMore.value).toBe(true)
+    harness.stop()
+  })
+
   it('binds export pages to one snapshot and rejects a mid-export filter change', async () => {
     const harness = setup()
     harness.setParams({ status: 'FAILED' })
@@ -363,6 +394,26 @@ describe('useWebhookDetailData', () => {
     harness.stop()
   })
 
+  it('rejects a malformed continuation page instead of silently truncating export', async () => {
+    const harness = setup()
+    harness.listDeliveries.mockResolvedValueOnce({
+      deliveries: [delivery('page-1')],
+      has_more: true,
+      next_cursor: 'cursor-1',
+    })
+    await harness.runTick()
+    const snapshot = harness.data.snapshotDeliveryQuery()
+    harness.listDeliveries.mockResolvedValueOnce({
+      deliveries: [delivery('page-2')],
+      has_more: true,
+    })
+
+    await expect(harness.data.fetchDeliveryPage(snapshot, 'cursor-1')).rejects.toThrow(
+      'omitted the continuation cursor',
+    )
+    harness.stop()
+  })
+
   it('keeps the applied page and cursor when Load more fails', async () => {
     const harness = setup()
     harness.listDeliveries.mockResolvedValueOnce({
@@ -394,6 +445,27 @@ describe('useWebhookDetailData', () => {
     expect(harness.data.deliveries.value).toEqual([])
     expect(harness.data.initialLoadDone.value).toBe(true)
     expect(harness.data.error.value).toBe('')
+    harness.stop()
+  })
+
+  it('keeps an authoritative 404 after an older delivery filter request resolves', async () => {
+    const harness = setup()
+    await harness.runTick()
+    const stalePage = deferred<{ deliveries: WebhookDelivery[]; has_more: boolean }>()
+    harness.listDeliveries.mockImplementationOnce(() => stalePage.promise)
+    harness.setParams({ status: 'FAILED' })
+    const applying = harness.data.applyDeliveryParams()
+
+    harness.getWebhook.mockRejectedValueOnce(new ApiError(404, 'missing'))
+    await expect(harness.runTick()).resolves.toBe(false)
+    stalePage.resolve({ deliveries: [delivery('stale', 'FAILED')], has_more: false })
+    await expect(applying).resolves.toBe(POLLING_STALE)
+
+    expect(harness.data.notFound.value).toBe(true)
+    expect(harness.data.webhook.value).toBeNull()
+    expect(harness.data.deliveries.value).toEqual([])
+    expect(harness.data.resultsMatchAppliedFilter.value).toBe(false)
+    expect(harness.data.deliveryFilterLoading.value).toBe(false)
     harness.stop()
   })
 

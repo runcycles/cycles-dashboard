@@ -22,10 +22,10 @@ UX work that does not advance spec alignment.
 - Webhook Detail subscription and delivery acquisition now run through the
   focused `useWebhookDetailData` composable. Mutation forms, charts, route
   intent, dialogs, and virtualized presentation remain in the view.
-- Routine polling preserves delivery pages loaded by the operator. A fresh
-  page-one head is merged by delivery ID; overlapping heads retain the tail
-  continuation, while a burst with no safe overlap resets to the fresh head so
-  Load more and export bridge the gap without skipping or duplicating rows.
+- Routine polling preserves terminal delivery pages loaded by the operator. A
+  fresh page-one head is merged by delivery ID; a burst with no safe overlap or
+  a mutable nonterminal row in the retained tail resets to the fresh head so
+  historical delivery status cannot remain stale indefinitely.
 
 ### Fixed
 
@@ -36,14 +36,17 @@ UX work that does not advance spec alignment.
   filter. Mid-request filter changes can no longer pair a new filter with an
   old cursor, and a filter refresh requested during a poll is replayed after
   the in-flight request settles.
-- A later 404 clears stale detail content. A malformed paginated response that
-  reports more rows without a continuation cursor now blocks Load more and
-  export with an actionable error instead of producing an incomplete file.
+- A later 404 invalidates in-flight delivery reads and clears stale detail
+  content, so a late response cannot replace the not-found state. Every
+  malformed page that reports more rows without a continuation cursor now
+  blocks Load more and export with an actionable error instead of producing an
+  incomplete file.
 - The delivery toolbar reports its updating state, and export remains disabled
-  until visible rows belong to the applied filter.
+  until visible rows belong to the applied filter. Delivery-only filter work no
+  longer advances the PageHeader timestamp reserved for a full refresh.
 
 No endpoint, successful request shape, capability gate, server/spec minimum,
-or dialog/table layout changes. Validation: 1,414 tests, 97.56% line coverage,
+or dialog/table layout changes. Validation: 1,417 tests, 97.58% line coverage,
 lint, strict typecheck, production build, and both Compose configurations pass.
 
 ## [0.1.25.78] — 2026-07-19

@@ -37,6 +37,8 @@ const defaultDependencies: WebhookDetailDataDependencies = {
   usePolling: usePollingDefault,
 }
 
+const MISSING_DELIVERY_CURSOR = 'The server reported more deliveries but omitted the continuation cursor. Refresh or change the filter before retrying.'
+
 function isAbortError(cause: unknown): boolean {
   return (
     (cause instanceof DOMException && cause.name === 'AbortError') ||
@@ -50,6 +52,10 @@ function mergeDeliveryHead(
 ): WebhookDelivery[] {
   const seen = new Set(head.map(delivery => delivery.delivery_id))
   return [...head, ...existing.filter(delivery => !seen.has(delivery.delivery_id))]
+}
+
+function isTerminalDelivery(delivery: WebhookDelivery): boolean {
+  return delivery.status === 'SUCCESS' || delivery.status === 'FAILED'
 }
 
 /**
@@ -120,11 +126,29 @@ export function useWebhookDetailData(options: UseWebhookDetailDataOptions) {
     deliveriesHasMore.value = false
     deliveriesNextCursor.value = ''
     deliveriesLoadingMore.value = false
+    deliveryFilterLoading.value = false
     resultsMatchAppliedFilter.value = false
     loadedMorePages = false
   }
 
   function publishNotFound(): void {
+    // A subscription 404 is authoritative for the whole detail surface. Make
+    // every delivery owner stale before clearing its rows so a request that
+    // ignores abort cannot republish data after the not-found state.
+    const activeFilter = filterController
+    const activeLoadMore = loadMoreController
+    filterController = null
+    loadMoreController = null
+    activeFilter?.abort()
+    activeLoadMore?.abort()
+    pendingFilterSnapshot = null
+    pendingManualRefresh.value = false
+    if (deliveryQueryInitialized) {
+      startFilterTransition(snapshotDeliveryQuery().params, {
+        force: true,
+        commit: 'start',
+      })
+    }
     webhook.value = null
     clearDeliveryState()
     notFound.value = true
@@ -166,8 +190,21 @@ export function useWebhookDetailData(options: UseWebhookDetailDataOptions) {
       const loadedIds = preservesLoadedHistory
         ? new Set(deliveries.value.map(existing => existing.delivery_id))
         : null
+      const headIds = preservesLoadedHistory
+        ? new Set(response.deliveries.map(fresh => fresh.delivery_id))
+        : null
       const headReconnects = !!loadedIds && response.deliveries.some(fresh => loadedIds.has(fresh.delivery_id))
-      const keepsTailCursor = preservesLoadedHistory && headReconnects && deliveryContinuationUsable.value
+      // SUCCESS and FAILED are immutable terminal outcomes. A retained
+      // PENDING/RETRYING (or forward-compatible unknown) row can change after
+      // it falls beyond page one, so re-anchor instead of presenting a stale
+      // status indefinitely under the old tail cursor.
+      const retainedTailIsTerminal = !headIds || deliveries.value.every(existing => (
+        headIds.has(existing.delivery_id) || isTerminalDelivery(existing)
+      ))
+      const keepsTailCursor = preservesLoadedHistory
+        && headReconnects
+        && deliveryContinuationUsable.value
+        && retainedTailIsTerminal
       if (keepsTailCursor) {
         deliveries.value = mergeDeliveryHead(response.deliveries, deliveries.value)
       } else {
@@ -183,10 +220,9 @@ export function useWebhookDetailData(options: UseWebhookDetailDataOptions) {
 
       resultsMatchAppliedFilter.value = true
       initialLoadDone.value = true
-      notFound.value = false
       const missingContinuation = !keepsTailCursor && !!response.has_more && !response.next_cursor
       error.value = missingContinuation
-        ? 'The server reported more deliveries but omitted the continuation cursor. Refresh or change the filter before retrying.'
+        ? MISSING_DELIVERY_CURSOR
         : ''
       return missingContinuation ? false : true
     } catch (cause) {
@@ -226,9 +262,6 @@ export function useWebhookDetailData(options: UseWebhookDetailDataOptions) {
       const result = await loadDeliveryPageOne(snapshot, controller.signal, false)
       if (result !== POLLING_STALE) {
         settlePendingFilter(snapshot)
-        // Some focused view harnesses predate the freshness ref; production
-        // usePolling always supplies it. Keep the dependency seam tolerant.
-        if (result === true && lastSuccessAt) lastSuccessAt.value = new Date()
       }
       return result
     } catch (cause) {
@@ -299,7 +332,7 @@ export function useWebhookDetailData(options: UseWebhookDetailDataOptions) {
       loadedMorePages = true
       const missingContinuation = !!response.has_more && !response.next_cursor
       error.value = missingContinuation
-        ? 'The server reported more deliveries but omitted the continuation cursor. Refresh or change the filter before retrying.'
+        ? MISSING_DELIVERY_CURSOR
         : ''
       return missingContinuation ? false : true
     } catch (cause) {
@@ -330,6 +363,9 @@ export function useWebhookDetailData(options: UseWebhookDetailDataOptions) {
     )
     if (!resultsMatchAppliedFilter.value || !ownsDeliveryQuery(snapshot)) {
       throw new Error('Export cancelled because the applied delivery filter changed.')
+    }
+    if (response.has_more && !response.next_cursor) {
+      throw new Error(MISSING_DELIVERY_CURSOR)
     }
     return {
       items: response.deliveries,

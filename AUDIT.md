@@ -38,25 +38,26 @@ had explicitly loaded.
 - Delivery status is captured as one immutable applied tuple. Page one, Load
   more, and every export page reuse it; a changed filter invalidates older
   cursors and an in-flight poll cannot swallow the new filter refresh.
-- Routine polls merge their fresh page-one head into an operator-loaded tail
-  by `delivery_id`, preferring the newest representation of an overlapping
-  delivery. When the head overlaps, the oldest page's continuation stays
-  authoritative; a burst with no safe overlap resets to the fresh head so
-  Load more and export bridge the gap without skipping or duplicating rows.
-- A response with `has_more=true` but no continuation cursor is now a visible
-  protocol error. Load more and export remain disabled, avoiding a silently
-  incomplete download.
-- A later authoritative 404 clears stale subscription and delivery content.
-  Filter refreshes expose an updating status, and export stays disabled until
-  the visible rows belong to the applied tuple.
+- Routine polls merge their fresh page-one head into an operator-loaded,
+  terminal-only tail by `delivery_id`, preferring the newest representation of
+  an overlapping delivery. A burst with no safe overlap, or a retained
+  `PENDING`/`RETRYING`/unknown row that may still change, resets to the fresh
+  head rather than presenting stale state under the old tail cursor.
+- Every page rejects `has_more=true` without a continuation cursor. Page one,
+  Load more, and export all surface the protocol error instead of silently
+  producing an incomplete download.
+- A later authoritative 404 aborts and invalidates delivery filters, Load more,
+  and export before clearing stale content, so late responses cannot replace
+  the not-found state. Delivery-only filter refreshes expose an updating status
+  without advancing the PageHeader timestamp for the full subscription.
 
 **Preserved contracts:** successful endpoint paths and request shapes, the
 30-second cadence, server-side status filtering, chart calculations, mutation
 forms, capability gates, route-driven Edit intent, virtualization, and dialog
 layout are unchanged. No governance-spec or server-fleet bump is required.
 
-**Validation.** 1,414/1,414 tests pass across 118 files with 97.56% line
-coverage; `useWebhookDetailData` is 96.13% lines and 100% functions. ESLint,
+**Validation.** 1,417/1,417 tests pass across 118 files with 97.58% line
+coverage; `useWebhookDetailData` is 96.46% lines and 100% functions. ESLint,
 strict typecheck, production build, and both Compose validations pass.
 
 ### 2026-07-19 — v0.1.25.78: Tenant Detail lifecycle ownership
