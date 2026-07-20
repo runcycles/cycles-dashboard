@@ -49,5 +49,8 @@
     "vite-plugin-sri-gen": "^1.7.1",
     "vitest": "^4.1.10",
     "vue-tsc": "^3.3.7"
+  },
+  "overrides": {
+    "brace-expansion@2": "2.1.2"
   }
 }

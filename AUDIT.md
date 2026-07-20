@@ -17,6 +17,18 @@
 
 Newest at the top. Older entries preserved verbatim.
 
+### 2026-07-20 — post-v0.1.25.83 dependency security maintenance
+
+Dependabot could not open its `brace-expansion` security update because its
+resolver proposed downgrading `@vue/test-utils` even though the vulnerable
+test-only path (`@vue/test-utils` → `js-beautify` → `minimatch@9`) accepts the
+patched `brace-expansion@2.1.2`. A major-scoped npm override now holds only
+`brace-expansion@2` at `2.1.2`; the unrelated patched major-5 copies used by
+ESLint and TypeScript ESLint remain at `5.0.7`. The package is development-only
+and absent from the nginx runtime image, so the published dashboard version,
+Compose pins, changelog, and operator docs remain unchanged. A clean `npm ci`,
+full validation suite, and zero-vulnerability `npm audit` verify the lock.
+
 ### 2026-07-20 — v0.1.25.83: Tenant Detail API-key ownership
 
 Tenant Detail's create, edit, revoke, and one-time-secret flows now have a
