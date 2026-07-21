@@ -1,6 +1,6 @@
 # Cycles Admin Dashboard — Audit
 
-**Current release:** v0.1.25.84 (2026-07-20)
+**Current release:** v0.1.25.85 (2026-07-20)
 
 ## Baseline requirements
 
@@ -9,13 +9,37 @@
 | cycles-server (runtime plane) | v0.1.25.8+ | v0.1.25.58 | `.37+` supplies the complete reservation/evidence surface used by the dashboard. `.47`–`.58` add tenant-close guards, replay/idempotency integrity, scalable sorted reservation queries, typed query boundaries, leased Redis maintenance/recovery, rolling-upgrade guidance, and replay metrics. The `.58` release is metrics-only relative to `.57`; no public wire break. Older runtimes remain tolerated with graceful omission/404 behavior, but the shipped stack uses the latest published release. |
 | cycles-admin (governance plane) | v0.1.25.17+ | v0.1.25.54 | `.49`–`.51` align webhook matcher/ownership boundaries; `.52` hardens pagination, sorted-query limits, API-key collisions, tenant-close cascades, bulk idempotency, CORS traces, and request parsing; `.53` standardizes unsupported-method 405 responses; `.54` makes webhook-secret encryption fail closed unless plaintext is explicitly allowed for development. Public response compatibility is preserved; `.51+` should deploy after events `.23+`. |
 | cycles-events (dispatch worker) | v0.1.25.6+ | v0.1.25.25 | `.23` enforces webhook ownership; `.24` adds owner-fenced dispatch, atomic terminal transitions, durable outboxes, bounded quarantine/DLQs, and authoritative evidence canonicalization. Its `evidence:processing` format requires the OPERATIONS.md drain/recovery sequence. `.25` adds an always-on private-network SSRF baseline and fail-closed webhook-secret key handling; local-only escape hatches remain explicit. |
-| Spec alignment | — | v0.1.25.41 | Pin moves on end-to-end support. `.36` adds `admin_on_behalf_of` actor type, `.37` adds `TENANT_CLOSED` reason code (both tolerated — open string types). `.38`/`.40`/`.41` define the tenant-owned category boundary (admin-only `api_key.*`/`policy.*`/`webhook.*`/`system.*` types are 400'd on tenant-owned subscriptions; dashboard `.68` gates the pickers). `.39` allows category-only subscriptions on update (dashboard `.68` permits clearing `event_types` when categories remain). Earlier: (prior `.32`–`.35` notes preserved in release history.) `.32` formalized per-row event emission for `bulkActionBudgets` / `bulkActionTenants` (docs-only, no wire change). `.33` added six `webhook.*` EventType values + `EventDataWebhookLifecycle` payload schema. `.34` expanded `EventCategory` enum to include `webhook` so the `.33` events pass server-side validation. `.35` added the four `*_via_tenant_cascade` EventType values (+ `EventDataTenantCascade` payload schema) the admin server has emitted since implementing the tenant-close cascade; dashboard `.65` adds them to `EVENT_TYPES` so they are pickable in webhook subscriptions and suggested in the Events type filter. All additive — pre-`.31` servers tolerate unknown enum values per the spec's forward-compat rule, so the dashboard is backwards-compatible with every deployed admin version. |
+| Spec alignment | — | v0.1.25.42 | Pin moves on end-to-end support. `.42` makes the existing non-negative `Policy.priority` response invariant explicit on create/update requests; dashboard `.85` enforces it while preserving unchanged legacy negatives during unrelated edits. `.36` adds `admin_on_behalf_of` actor type, `.37` adds `TENANT_CLOSED` reason code (both tolerated — open string types). `.38`/`.40`/`.41` define the tenant-owned category boundary (admin-only `api_key.*`/`policy.*`/`webhook.*`/`system.*` types are 400'd on tenant-owned subscriptions; dashboard `.68` gates the pickers). `.39` allows category-only subscriptions on update (dashboard `.68` permits clearing `event_types` when categories remain). Earlier: (prior `.32`–`.35` notes preserved in release history.) `.32` formalized per-row event emission for `bulkActionBudgets` / `bulkActionTenants` (docs-only, no wire change). `.33` added six `webhook.*` EventType values + `EventDataWebhookLifecycle` payload schema. `.34` expanded `EventCategory` enum to include `webhook` so the `.33` events pass server-side validation. `.35` added the four `*_via_tenant_cascade` EventType values (+ `EventDataTenantCascade` payload schema) the admin server has emitted since implementing the tenant-close cascade; dashboard `.65` adds them to `EVENT_TYPES` so they are pickable in webhook subscriptions and suggested in the Events type filter. All additive — pre-`.31` servers tolerate unknown enum values per the spec's forward-compat rule, so the dashboard is backwards-compatible with every deployed admin version. |
 
 **Pre-baseline compatibility:** dashboard `TenantLink.isSystem` accepts both legacy `<unauthenticated>` and new `__`-prefixed sentinels (shipped v0.1.25.31). Row-select bulk paths (Tenants/Webhooks suspend, Budgets freeze, Emergency-freeze) fan out per-row and work against any admin version.
 
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-07-20 — v0.1.25.85: non-negative policy priority contract
+
+Governance spec revision 0.1.25.42 resolves a contradiction: policy responses
+already declared `priority >= 0`, while create/update requests admitted any
+integer. Direct writes could therefore produce a row that violated its own
+successful response schema. This dashboard patch coordinates with
+cycles-protocol #141 and cycles-server-admin #224.
+
+- Create and changed edit values must be non-negative whole numbers in the
+  composable, so programmatic submission cannot bypass the rule. Create and
+  ordinary edit inputs also expose the native `min="0"` constraint.
+- A stored legacy negative remains visible and may stay unchanged during an
+  unrelated edit. Its input deliberately omits the native minimum so the
+  browser does not block the whole form; guidance explains that a replacement
+  must be zero or greater, and the protocol rejects a changed negative value.
+- Empty stored caps, rate-limit, and TTL objects no longer make the Advanced
+  section reopen as if they contained overrides.
+
+The published server-fleet pin remains admin 0.1.25.54 until 0.1.25.55 is
+released; client-side validation is compatible with that server. Validation:
+1,514/1,514 tests across 128 files with 98.21% line coverage; strict typecheck,
+ESLint, production build, deployment-pin checks, and zero-vulnerability npm
+audit pass.
 
 ### 2026-07-20 — v0.1.25.84: Tenant Detail policy ownership
 

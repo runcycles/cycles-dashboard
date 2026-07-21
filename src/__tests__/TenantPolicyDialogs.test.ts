@@ -68,6 +68,7 @@ describe('TenantPolicyDialogs', () => {
 
     expect(wrapper.get('[role="dialog"]').attributes('aria-label')).toBe('Create Policy')
     expect(wrapper.get('#cp-name').attributes('maxlength')).toBe('256')
+    expect(wrapper.get('#cp-priority').attributes('min')).toBe('0')
     expect(wrapper.get('fieldset legend').text()).toBe('Scope pattern')
     expect(wrapper.text()).toContain('Will create as:')
     await wrapper.get('#cp-name').setValue('Background policy')
@@ -99,6 +100,7 @@ describe('TenantPolicyDialogs', () => {
     expect(wrapper.get('[data-testid="policy-scope-readonly"]').text()).toBe(target.scope_pattern)
     expect(wrapper.text()).toContain('immutable after policy creation')
     expect(wrapper.get('#ep-cop').element).toHaveProperty('value', 'REJECT')
+    expect(wrapper.get('#ep-priority').attributes('min')).toBe('0')
     expect(wrapper.get('#ep-cop option[value=""]').attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('cannot clear it')
     expect(wrapper.text()).toContain('clearing fields removes them from that group')
@@ -128,5 +130,18 @@ describe('TenantPolicyDialogs', () => {
 
     expect(wrapper.get('#ep-cop').element).toHaveProperty('value', 'FUTURE_POLICY')
     expect(wrapper.text()).toContain('FUTURE_POLICY (current server value)')
+  })
+
+  it('keeps a legacy negative priority editable without implying new negatives are valid', () => {
+    const target = policy()
+    target.priority = -1
+    const shared = editForm()
+    shared.priority = -1
+    const wrapper = mountDialogs({ editingPolicy: target, editForm: shared })
+
+    expect(wrapper.get('#ep-priority').attributes('min')).toBeUndefined()
+    expect(wrapper.get('[data-testid="legacy-priority-warning"]').text())
+      .toContain('may remain unchanged')
+    expect(wrapper.text()).toContain('replacement must be 0 or greater')
   })
 })

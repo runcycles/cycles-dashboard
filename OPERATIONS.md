@@ -213,8 +213,13 @@ dashboard image does not need to change for an admin-only version bump.
 
 ## Upgrades and rollback
 
-**Pinned server fleet (dashboard v0.1.25.84):** runtime `0.1.25.58`, admin
+**Pinned server fleet (dashboard v0.1.25.85):** runtime `0.1.25.58`, admin
 `0.1.25.54`, events `0.1.25.25`. These are exact tags, not floating aliases.
+
+Dashboard `.85` applies governance spec `.42`'s non-negative policy-priority
+rule before submission and remains compatible with admin `.54`. Server-side
+rejection of direct negative writes requires admin `.55+`; advance the Compose
+pin only after that immutable image is published and passes its release smoke.
 
 **Upgrading an existing fleet to the pinned versions.** Upgrade events before
 admin: admin `.51+` assumes the ownership boundary enforced by events `.23+`.
