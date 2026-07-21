@@ -1,6 +1,6 @@
 [![CI](https://github.com/runcycles/cycles-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/runcycles/cycles-dashboard/actions)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Spec](https://img.shields.io/badge/spec-v0.1.25.41-blue)](https://github.com/runcycles/cycles-protocol/blob/main/cycles-governance-admin-v0.1.25.yaml)
+[![Spec](https://img.shields.io/badge/spec-v0.1.25.42-blue)](https://github.com/runcycles/cycles-protocol/blob/402307a88906e9fd090159e5ccf2d0036e6aec83/cycles-governance-admin-v0.1.25.yaml)
 [![Vue](https://img.shields.io/badge/vue-3-brightgreen)](https://vuejs.org)
 [![TypeScript](https://img.shields.io/badge/typescript-strict-blue)](https://www.typescriptlang.org)
 
@@ -8,7 +8,7 @@
 
 **Operations-first admin dashboard for the Cycles AI agent governance platform — visualize tenant budgets, action-authority enforcement, reservations, and webhook delivery in real time.** Multi-tenant by default, designed around operator workflows for incident response, not CRUD entity lists.
 
-Pairs with the [Cycles Admin API](https://github.com/runcycles/cycles-server-admin) and the [Cycles Server](https://github.com/runcycles/cycles-server) to provide end-to-end observability into agent spend, risk, and tool action enforcement. Aligned with [governance spec v0.1.25.41](https://github.com/runcycles/cycles-protocol/blob/main/cycles-governance-admin-v0.1.25.yaml).
+Pairs with the [Cycles Admin API](https://github.com/runcycles/cycles-server-admin) and the [Cycles Server](https://github.com/runcycles/cycles-server) to provide end-to-end observability into agent spend, risk, and tool action enforcement. Aligned with [governance spec v0.1.25.42](https://github.com/runcycles/cycles-protocol/blob/402307a88906e9fd090159e5ccf2d0036e6aec83/cycles-governance-admin-v0.1.25.yaml).
 
 **Documentation:** [CHANGELOG](CHANGELOG.md) (downstream release notes) · [OPERATIONS](OPERATIONS.md) (production runbook) · [AUDIT](AUDIT.md) (engineering narrative).
 
@@ -370,7 +370,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.84
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.85
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]
@@ -392,7 +392,7 @@ services:
       - cycles
 
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.54
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.55
     restart: unless-stopped
     environment:
       REDIS_HOST: redis

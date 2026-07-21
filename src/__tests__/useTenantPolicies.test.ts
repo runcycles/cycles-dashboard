@@ -133,7 +133,11 @@ describe('useTenantPolicies', () => {
     state.policies.createForm.value.description = ''
     state.policies.createForm.value.priority = '1.5'
     await expect(state.policies.submitCreate()).resolves.toBe(false)
-    expect(state.policies.createError.value).toBe('Priority must be a whole number.')
+    expect(state.policies.createError.value).toBe('Priority must be a non-negative whole number.')
+
+    state.policies.createForm.value.priority = '-1'
+    await expect(state.policies.submitCreate()).resolves.toBe(false)
+    expect(state.policies.createError.value).toBe('Priority must be a non-negative whole number.')
 
     state.policies.createForm.value.priority = '1'
     state.policies.createForm.value.commit_overage_policy = 'FUTURE_POLICY'
@@ -212,6 +216,7 @@ describe('useTenantPolicies', () => {
       priority: 10,
       commit_overage_policy: 'REJECT',
     })
+    expect(state.policies.editHasAdvanced.value).toBe(true)
 
     state.policies.editForm.value.description = ''
     state.policies.editAdvanced.value.max_tokens = ''
@@ -228,6 +233,20 @@ describe('useTenantPolicies', () => {
     expect(state.commitPolicy).toHaveBeenCalledBefore(state.refreshPolicies)
     expect(state.policies.editingPolicy.value).toBeNull()
     expect(state.notify.success).toHaveBeenCalledWith('Policy updated')
+  })
+
+  it('does not open advanced fields for empty stored replacement groups', () => {
+    const state = setup()
+    state.policyRows.value = [policy({
+      caps: {},
+      rate_limits: {},
+      reservation_ttl_override: {},
+      effective_from: undefined,
+      effective_until: undefined,
+    })]
+
+    expect(state.policies.openEdit(state.policyRows.value[0])).toBe(true)
+    expect(state.policies.editHasAdvanced.value).toBe(false)
   })
 
   it('keeps immutable/unrepresentable clears explicit and never sends scope_pattern', async () => {
@@ -287,7 +306,15 @@ describe('useTenantPolicies', () => {
     invalidPriority.policies.openEdit(invalidPriority.policyRows.value[0])
     invalidPriority.policies.editForm.value.priority = '1.5'
     await expect(invalidPriority.policies.submitEdit()).resolves.toBe(false)
-    expect(invalidPriority.policies.editError.value).toBe('Priority must be a whole number.')
+    expect(invalidPriority.policies.editError.value)
+      .toBe('Priority must be a non-negative whole number.')
+
+    const negativePriority = setup()
+    negativePriority.policies.openEdit(negativePriority.policyRows.value[0])
+    negativePriority.policies.editForm.value.priority = '-1'
+    await expect(negativePriority.policies.submitEdit()).resolves.toBe(false)
+    expect(negativePriority.policies.editError.value)
+      .toBe('Priority must be a non-negative whole number.')
 
     const invalidCommit = setup()
     invalidCommit.policies.openEdit(invalidCommit.policyRows.value[0])
@@ -332,6 +359,7 @@ describe('useTenantPolicies', () => {
     const state = setup()
     state.policyRows.value = [policy({
       commit_overage_policy: 'FUTURE_POLICY',
+      priority: -1,
       caps: { max_tokens: -1 },
     })]
     state.policies.openEdit(state.policyRows.value[0])
@@ -339,6 +367,22 @@ describe('useTenantPolicies', () => {
 
     await expect(state.policies.submitEdit()).resolves.toBe(true)
     expect(state.update).toHaveBeenCalledWith('policy-1', { name: 'Renamed policy' })
+
+    const repaired = setup()
+    repaired.policyRows.value = [policy({ priority: -1 })]
+    repaired.policies.openEdit(repaired.policyRows.value[0])
+    repaired.policies.editForm.value.priority = '0'
+    await expect(repaired.policies.submitEdit()).resolves.toBe(true)
+    expect(repaired.update).toHaveBeenCalledWith('policy-1', { priority: 0 })
+
+    const worsened = setup()
+    worsened.policyRows.value = [policy({ priority: -1 })]
+    worsened.policies.openEdit(worsened.policyRows.value[0])
+    worsened.policies.editForm.value.priority = '-2'
+    await expect(worsened.policies.submitEdit()).resolves.toBe(false)
+    expect(worsened.policies.editError.value)
+      .toBe('Priority must be a non-negative whole number.')
+    expect(worsened.update).not.toHaveBeenCalled()
   })
 
   it('validates only advanced replacement groups entering the PATCH', async () => {
