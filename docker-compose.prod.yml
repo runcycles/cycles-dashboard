@@ -143,7 +143,7 @@ services:
 
   cycles-admin:
     logging: *default-logging
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.54
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.55
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true

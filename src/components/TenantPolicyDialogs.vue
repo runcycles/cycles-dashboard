@@ -9,9 +9,9 @@ import type {
 import type { Policy } from '../types'
 import { COMMIT_OVERAGE_POLICIES } from '../types'
 import type { PolicyAdvancedForm } from '../utils/policyAdvanced'
-import type { DeepReadonly } from 'vue'
+import { computed, type DeepReadonly } from 'vue'
 
-defineProps<{
+const props = defineProps<{
   tenantId: string
   showCreate: boolean
   createLoading: boolean
@@ -25,6 +25,11 @@ defineProps<{
   editAdvanced: PolicyAdvancedForm
   editHasAdvanced: boolean
 }>()
+
+const hasLegacyPriority = computed(() => {
+  const priority = props.editingPolicy?.priority
+  return priority !== undefined && priority < 0
+})
 
 defineEmits<{
   submitCreate: []
@@ -107,13 +112,13 @@ function isKnownCommitOveragePolicy(value: string | undefined): boolean {
         id="ep-priority"
         v-model="editForm.priority"
         type="number"
-        :min="editingPolicy.priority !== undefined && editingPolicy.priority < 0 ? undefined : 0"
-        :aria-describedby="editingPolicy.priority !== undefined && editingPolicy.priority < 0 ? 'ep-priority-legacy-help' : undefined"
+        :min="hasLegacyPriority ? undefined : 0"
+        :aria-describedby="hasLegacyPriority ? 'ep-priority-legacy-help' : undefined"
         step="1"
         class="form-input-mono"
       />
       <p
-        v-if="editingPolicy.priority !== undefined && editingPolicy.priority < 0"
+        v-if="hasLegacyPriority"
         id="ep-priority-legacy-help"
         data-testid="legacy-priority-warning"
         class="mt-1 text-xs text-amber-700 dark:text-amber-300"

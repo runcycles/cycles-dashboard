@@ -392,7 +392,7 @@ services:
       - cycles
 
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.54
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.55
     restart: unless-stopped
     environment:
       REDIS_HOST: redis

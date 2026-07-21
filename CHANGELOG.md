@@ -15,7 +15,7 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
-## [0.1.25.85] — 2026-07-20
+## [0.1.25.85] — 2026-07-21
 
 ### Fixed
 
@@ -30,9 +30,9 @@ UX work that does not advance spec alignment.
 
 ### Changed
 
-- Governance-spec alignment advances from 0.1.25.41 to 0.1.25.42. The shipped
-  admin image remains pinned to the latest published 0.1.25.54 until the
-  coordinated 0.1.25.55 server enforcement is released.
+- Governance-spec alignment advances from 0.1.25.41 to 0.1.25.42, and the
+  shipped admin image advances to 0.1.25.55 so direct writes receive the same
+  non-negative priority enforcement at the HTTP boundary.
 
 ## [0.1.25.84] — 2026-07-20
 
