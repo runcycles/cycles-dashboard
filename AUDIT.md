@@ -31,7 +31,8 @@ cycles-protocol #141 and cycles-server-admin #224.
 - A stored legacy negative remains visible and may stay unchanged during an
   unrelated edit. Its input deliberately omits the native minimum so the
   browser does not block the whole form; guidance explains that a replacement
-  must be zero or greater, and the protocol rejects a changed negative value.
+  must be zero or greater, the input references that guidance through
+  `aria-describedby`, and the protocol rejects a changed negative value.
 - Empty stored caps, rate-limit, and TTL objects no longer make the Advanced
   section reopen as if they contained overrides.
 

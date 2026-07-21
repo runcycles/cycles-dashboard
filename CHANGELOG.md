@@ -24,7 +24,7 @@ UX work that does not advance spec alignment.
   the same minimum for new and ordinary values.
 - Existing legacy negative priorities remain visible and can be left unchanged
   during unrelated edits; the dialog explains that any replacement must be
-  zero or greater.
+  zero or greater and programmatically associates that guidance with the input.
 - Empty stored policy override objects no longer expand Advanced options as if
   they contained configured values.
 

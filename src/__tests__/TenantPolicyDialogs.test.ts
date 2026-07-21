@@ -101,6 +101,7 @@ describe('TenantPolicyDialogs', () => {
     expect(wrapper.text()).toContain('immutable after policy creation')
     expect(wrapper.get('#ep-cop').element).toHaveProperty('value', 'REJECT')
     expect(wrapper.get('#ep-priority').attributes('min')).toBe('0')
+    expect(wrapper.get('#ep-priority').attributes('aria-describedby')).toBeUndefined()
     expect(wrapper.get('#ep-cop option[value=""]').attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('cannot clear it')
     expect(wrapper.text()).toContain('clearing fields removes them from that group')
@@ -139,8 +140,12 @@ describe('TenantPolicyDialogs', () => {
     shared.priority = -1
     const wrapper = mountDialogs({ editingPolicy: target, editForm: shared })
 
-    expect(wrapper.get('#ep-priority').attributes('min')).toBeUndefined()
-    expect(wrapper.get('[data-testid="legacy-priority-warning"]').text())
+    const input = wrapper.get('#ep-priority')
+    const warning = wrapper.get('[data-testid="legacy-priority-warning"]')
+    expect(input.attributes('min')).toBeUndefined()
+    expect(input.attributes('aria-describedby')).toBe('ep-priority-legacy-help')
+    expect(warning.attributes('id')).toBe('ep-priority-legacy-help')
+    expect(warning.text())
       .toContain('may remain unchanged')
     expect(wrapper.text()).toContain('replacement must be 0 or greater')
   })
