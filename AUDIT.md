@@ -19,15 +19,17 @@ Newest at the top. Older entries preserved verbatim.
 
 ### 2026-07-26 — post-v0.1.25.85 dependency maintenance
 
-Dependabot PRs #274, #275, #277–#280, #282, and #283 refresh the shared
-TypeScript CI workflow reference, checkout 7.0.1, OSSF Scorecard 2.4.4,
-Docker login 4.5.1, Playwright 1.62.0, ESLint 10.8.0, eslint-plugin-vue
-10.10.0, and TypeScript ESLint 8.65.0. Workflow actions remain SHA-pinned.
-The npm changes are development-only; application dependencies, the production
-bundle surface, API requests, UI behavior, spec alignment, and server fleet
-pins are unchanged. Each reviewed or Dependabot-rebased head passed Node 20/22
-tests with the 95% coverage gate, strict typecheck, lint, production build,
-CodeQL, container scanning, and applicable Compose/E2E checks.
+Dependabot PRs #274–#284 refresh the shared TypeScript CI workflow reference,
+checkout 7.0.1, OSSF Scorecard 2.4.4, Docker login 4.5.1, CodeQL SARIF upload
+4.37.3, Playwright 1.62.0, ESLint 10.8.0, eslint-plugin-vue 10.10.0,
+TypeScript ESLint 8.65.0, `@tanstack/vue-virtual` 3.13.34, and PostCSS 8.5.23.
+Workflow actions remain SHA-pinned. The virtualization patch stays within the
+existing API surface, while the remaining npm changes are development-only;
+the PostCSS patch includes source-map loading hardening. There are no source,
+API-request, UI-contract, spec-alignment, or server-fleet-pin changes. Each
+reviewed or Dependabot-rebased head passed Node 20/22 tests with the 95%
+coverage gate, strict typecheck, lint, production build, CodeQL, container
+scanning, and applicable Compose/E2E checks.
 
 ### 2026-07-21 — v0.1.25.85: non-negative policy priority contract
 
