@@ -11,6 +11,6 @@ permissions:
 
 jobs:
   ci:
-    uses: runcycles/.github/.github/workflows/ci-typescript.yml@91fe188bf8c6a3904c82065828e9c5c808881422 # main
+    uses: runcycles/.github/.github/workflows/ci-typescript.yml@38b51a7e16f551364f5ccfa457987ed2cb4e7ab5 # main
     with:
       run-lint: true
