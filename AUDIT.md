@@ -1,5 +1,9 @@
 # Cycles Admin Dashboard — Audit
 
+## 2026-10-04 — Dependency maintenance
+
+Consolidates Dependabot PRs #350 and #349: globals 17.13.0 and undici 7.30.0. Application code and API behavior are unchanged. The existing Node 20/22 lint, typecheck, build, test coverage (95% line minimum), and security checks must pass on the combined commit before merge. Local lint, typecheck, build, and tests pass with 98.21% line coverage.
+
 **Current release:** v0.1.25.85 (2026-07-21)
 
 ## Baseline requirements
