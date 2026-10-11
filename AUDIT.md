@@ -1,5 +1,9 @@
 # Cycles Admin Dashboard — Audit
 
+## 2026-10-11 — Dependency maintenance
+
+Consolidates PRs #359, #357, #356, #358, #355, and #362: Vue Router 5.4.0, Vue Test Utils 2.5.1, eslint-plugin-vue 10.11.1, and reviewed SHA-pinned CI, setup-node 7.1.0, and CodeQL 4.38.3 actions. The reusable CI workflow change has no change to ci-typescript.yml itself. Existing Node 20/22 lint, typecheck, build, coverage, container security, and Compose checks remain enabled and must pass on the combined commit before merge.
+
 ## 2026-10-04 — Dependency maintenance
 
 Consolidates Dependabot PRs #350 and #349: globals 17.13.0 and undici 7.30.0. Application code and API behavior are unchanged. The existing Node 20/22 lint, typecheck, build, test coverage (95% line minimum), and security checks must pass on the combined commit before merge. Local lint, typecheck, build, and tests pass with 98.21% line coverage.
