@@ -34,7 +34,7 @@
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.6.4",
     "@vitejs/plugin-vue": "^6.0.9",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@vitest/coverage-v8": "^5.0.4",
     "@vue/eslint-config-typescript": "^14.9.0",
     "@vue/test-utils": "^2.5.1",
     "@vue/tsconfig": "^0.9.1",
