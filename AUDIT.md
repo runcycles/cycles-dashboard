@@ -1,5 +1,20 @@
 # Cycles Admin Dashboard — Audit
 
+## 2026-10-19 — Dependabot dependency review
+
+Consolidates the following reviewed updates on current main:
+
+- PR #366: chore(deps): bump pinia from 4.0.3 to 4.1.0
+- PR #367: chore(deps-dev): bump @playwright/test from 1.63.0 to 1.64.1
+- PR #371: chore(deps): bump github/codeql-action/upload-sarif from 4.38.3 to 4.39.0
+- PR #372: chore(deps): bump runcycles/.github/.github/workflows/ci-typescript.yml from 044a7807b617f093a24d0d458f5d8f88d2400e4e to d2ef76afc96c302167d3b171745a5b9461a798a3
+- PR #373: chore(deps): bump ossf/scorecard-action from 2.4.4 to 2.5.0
+
+Workflow actions remain pinned to verified upstream commit SHAs. Existing supported runtime versions, application code, and YAML protocol contracts are preserved. Existing lint, build, test, coverage, conformance, and applicable security checks must pass on the combined commit before merge; coverage requirements are not lowered.
+
+Declines Vitest 5 / coverage-v8 5 PRs #368 and #369 because Vitest 5 requires Node 22.12+ while this project retains Node 20 support. The test runner and coverage provider remain aligned on version 4.
+
+
 ## 2026-10-11 — Dependency maintenance
 
 Consolidates PRs #359, #357, #356, #358, #355, and #362: Vue Router 5.4.0, Vue Test Utils 2.5.1, eslint-plugin-vue 10.11.1, and reviewed SHA-pinned CI, setup-node 7.1.0, and CodeQL 4.38.3 actions. The reusable CI workflow change has no change to ci-typescript.yml itself. Existing Node 20/22 lint, typecheck, build, coverage, container security, and Compose checks remain enabled and must pass on the combined commit before merge.
