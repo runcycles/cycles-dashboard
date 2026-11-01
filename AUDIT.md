@@ -1,5 +1,19 @@
 # Cycles Admin Dashboard — Audit
 
+## 2026-11-01 — Dependabot tooling and workflow review
+
+Consolidates PRs #385 (ESLint 10.13.0), #386 (eslint-plugin-vue 10.12.0),
+#387 (docker/login-action 4.7.0), and #388 (shared TypeScript CI revision).
+The Docker action SHA matches the upstream v4.7.0 tag. The shared workflow
+revision changes only Python workflows upstream; the TypeScript workflow
+content is identical. Application source and YAML protocol contracts are
+unchanged. Node 20/22 lint, typecheck, build, tests, the existing 95% line
+coverage gate, container scan, and compose/Playwright E2E must pass together.
+
+PR #384 (@axe-core/playwright 4.14.0) is declined because it requires Node
+22.12+, while this repository and its Playwright E2E workflow retain Node 20.
+Its green unit checks did not exercise the updated accessibility dependency.
+
 ## 2026-10-19 — Dependabot dependency review
 
 Consolidates the following reviewed updates on current main:
