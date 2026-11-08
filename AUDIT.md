@@ -1,5 +1,11 @@
 # Cycles Admin Dashboard — Audit
 
+## 2026-11-08 - Dependabot dependency review
+
+Consolidates PRs #391 (docker/login-action 4.8.0) and #389 (shared TypeScript CI revision b3f0dc1). The Docker action pin matches upstream v4.8.0; GHCR inputs and permissions are preserved. The referenced ci-typescript.yml content is identical at the old and new revisions. Declines Vitest 5 PR #392 because supported Node 20 is outside its engine range.
+
+Current main is incorporated. Application source and authoritative YAML contracts are unchanged. Existing build, lint, typecheck, test, coverage, conformance, and security checks where configured must pass on the final commit before merge. The minimum 95% line coverage gate is preserved.
+
 ## 2026-11-01 — Dependabot tooling and workflow review
 
 Consolidates PRs #385 (ESLint 10.13.0), #386 (eslint-plugin-vue 10.12.0),
