@@ -16,8 +16,11 @@ GHSA-qxg6-89mg-rqv8 and GHSA-xp26-3454-mjgp. Overrides vulnerable minimatch
 minimatch versions keep their existing dependency ranges. The fresh npm audit
 also identified GHSA-3g3m-2fjr-6pw4, addressed by overriding affected glob
 versions to 14.0.2. These patched tools retain Node 20 support. Lint,
-typechecking, build, and coverage must validate the combined development-tool
-dependency tree before merge.
+typechecking, and build pass locally; all 1,514 tests pass with 98.21% line
+coverage. npm audit reports zero vulnerabilities. The glob override is
+unconditional so npm 10 used by Node 20/22 CI resolves the same patched tree
+as npm 11; verified using npm 10.9.9 clean install and lockfile validation.
+Node 20/22 CI must pass on the final combined revision before merge.
 
 ## 2026-11-08 - Dependabot dependency review
 
