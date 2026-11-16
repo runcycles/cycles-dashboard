@@ -10,6 +10,15 @@ contracts are unchanged. Node 20/22 lint, typechecking, build, the existing
 95% line coverage gate, and container security checks remain enabled and
 must pass on the combined revision before merge.
 
+Also aligns Vitest and coverage-v8 on the patched 4.1.12 release line for
+GHSA-qxg6-89mg-rqv8 and GHSA-xp26-3454-mjgp. Overrides vulnerable minimatch
+7–11.0.0 instances to 11.0.1 for GHSA-g3hv-75wg-m249; older unaffected
+minimatch versions keep their existing dependency ranges. The fresh npm audit
+also identified GHSA-3g3m-2fjr-6pw4, addressed by overriding affected glob
+versions to 14.0.2. These patched tools retain Node 20 support. Lint,
+typechecking, build, and coverage must validate the combined development-tool
+dependency tree before merge.
+
 ## 2026-11-08 - Dependabot dependency review
 
 Consolidates PRs #391 (docker/login-action 4.8.0) and #389 (shared TypeScript CI revision b3f0dc1). The Docker action pin matches upstream v4.8.0; GHCR inputs and permissions are preserved. The referenced ci-typescript.yml content is identical at the old and new revisions. Declines Vitest 5 PR #392 because supported Node 20 is outside its engine range.
