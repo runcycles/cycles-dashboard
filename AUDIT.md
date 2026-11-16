@@ -1,5 +1,15 @@
 # Cycles Admin Dashboard — Audit
 
+## 2026-11-16 — Lint tooling and reusable CI maintenance (PRs #402, #397)
+
+Updates typescript-eslint and its coordinated packages to 8.72.2 and merges
+the reviewed reusable CI workflow pin at `d6d49ff`. The referenced
+`ci-typescript.yml` content is unchanged between the old and new commits;
+the upstream changes affect Java setup only. Application code and API
+contracts are unchanged. Node 20/22 lint, typechecking, build, the existing
+95% line coverage gate, and container security checks remain enabled and
+must pass on the combined revision before merge.
+
 ## 2026-11-08 - Dependabot dependency review
 
 Consolidates PRs #391 (docker/login-action 4.8.0) and #389 (shared TypeScript CI revision b3f0dc1). The Docker action pin matches upstream v4.8.0; GHCR inputs and permissions are preserved. The referenced ci-typescript.yml content is identical at the old and new revisions. Declines Vitest 5 PR #392 because supported Node 20 is outside its engine range.
