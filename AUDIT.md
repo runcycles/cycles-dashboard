@@ -1,5 +1,11 @@
 # Cycles Admin Dashboard — Audit
 
+## 2026-11-22 — Dependabot dependency review
+
+PR #404 pinned the Scorecard action to its upstream v2.6.0 commit. PR #407 updated Playwright Test to 1.65.1. Both PRs passed their configured CI checks.
+
+PR #406 was declined. The proposed coverage provider requires Vitest 5.1.1, which excludes the dashboard’s supported Node 20 runtime.
+
 ## 2026-11-16 — Lint tooling and reusable CI maintenance (PRs #402, #397)
 
 Updates typescript-eslint and its coordinated packages to 8.72.2 and merges
