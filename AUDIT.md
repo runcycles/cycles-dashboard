@@ -112,7 +112,8 @@ No wire-contract or spec-alignment change.
 | `src/utils/listAllTenants.ts` | NEW — tenant directory walk, returns `partial`. |
 | `src/views/TenantsView.vue` | Server-side filters, queued refresh, applied-tuple Load more, accumulated parent options. |
 | `src/views/BudgetsView.vue` | Audit links, filter → URL sync, `listQuery` through detail and Back. |
-| `src/views/OverviewView.vue`, `useOverviewData.ts` | Bulk-action link guard, debt sort, `has_more` lower-bound counts. |
+| `src/views/OverviewView.vue`, `useOverviewData.ts` | Bulk-action link guard, debt sort, `has_more` lower-bound counts, card top-up. |
+| `src/composables/useBudgetFunding.ts` | Funding tenant taken from the ledger. |
 | `src/views/ReservationsView.vue` | Directory walk; keeps a URL tenant when the directory is partial. |
 | `ApiKeysView.vue`, `WebhooksView.vue`, `useBudgetData.ts` | Use `listAllTenants`. |
 
@@ -123,15 +124,26 @@ No wire-contract or spec-alignment change.
 - Budgets unit and scope prefix stay out of the URL; `?status` is now synced both ways.
 - Tenant pickers cost one request per 100 tenants per refresh (was one total).
 
+**PR #410 review round** (six findings, all reproduced and fixed)
+
+| Finding | Fix |
+|---|---|
+| Debt card empty when page one is all closed-tenant rows | `topUpBudgetCard` re-reads at limit 100 until 5 eligible rows, exhausted, or 10 pages; frozen card too |
+| Fund sent the list filter's tenant, not the ledger's | `budget.tenant_id` first; filter is the pre-`.19` fallback |
+| Tenants export used previous-filter rows mid-transition | `resultsMatchFilters` gates export + Load more; query pinned at confirm; filter change cancels |
+| Create Tenant parents came from filtered rows | Independent `listAllTenants` lookup, seeded from seen tenants |
+| Pending Budgets input leaked into a new navigation | Echo detected by the exact query written (`pendingSelfWrites`), not by debounced-value equality |
+| Tenant id `bulk-action` lost its detail link | Bulk check also requires a `bulkAction*` operation |
+
 **Open (server repo)** `fundBudget` audits `scope:UNIT` while every other budget operation audits `ledger_id`; aligning them would remove the second link.
 
 **Tests**
 - NEW `listAllTenants.test.ts` — 4 specs (paging, cap, single page, failure).
-- NEW `TenantsView-server-filters.test.ts` — 8 specs (wire params, parent options, queued refresh, stale Load more).
-- NEW `BudgetsView-filter-url-write.test.ts` — 8 specs (write-back, status sync, round trip, route guard, audit links).
-- Updated `OverviewView.test.ts` (+4), `ReservationsView-url-deeplink.test.ts` (+2), `deployment-pins.test.ts` (version).
+- NEW `TenantsView-server-filters.test.ts` — 12 specs (wire params, parent options, queued refresh, stale Load more, export gating, create-parent lookup).
+- NEW `BudgetsView-filter-url-write.test.ts` — 10 specs (write-back, status sync, round trip, debounce-window navigation, audit links).
+- Updated `OverviewView.test.ts` (+7), `ReservationsView-url-deeplink.test.ts` (+2), `useBudgetFunding.test.ts` (+1), `deployment-pins.test.ts` (version).
 
-**Gates** typecheck clean • lint clean • vitest 1540 / 1540 across 131 files • build clean.
+**Gates** typecheck clean • lint clean • vitest 1550 / 1550 across 131 files • build clean.
 
 **Version bumps** package `.85 → .86` • dashboard image pin `.86` • server fleet unchanged.
 

@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute, useRouter } from 'vue-router'
+import type { LocationQueryValue } from 'vue-router'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useTerminalAwareList } from '../composables/useTerminalAwareList'
@@ -606,6 +607,17 @@ function cancelBulkStatus() {
 watch(selectedTenant, () => {
   if (!isCrossTenantFilter.value && !isDetail.value) void applyListParams()
 })
+// Queries this view has written via router.replace and not yet seen
+// echoed back through the route.query watcher. Order-independent
+// signature so key order can't cause a miss.
+const pendingSelfWrites = new Set<string>()
+function querySignature(q: Record<string, LocationQueryValue | LocationQueryValue[] | undefined>): string {
+  return Object.keys(q)
+    .filter(k => q[k] !== undefined && q[k] !== null && q[k] !== '')
+    .sort()
+    .map(k => `${k}=${stringParam(q[k])}`)
+    .join('&')
+}
 watch(() => route.query, (q, previousQuery) => {
   // BulkActionResultDialog's View-budget link and the Overview
   // utilization donut's drill-down both navigate to the same /budgets
@@ -626,16 +638,25 @@ watch(() => route.query, (q, previousQuery) => {
   // operator switched the dropdown back to "All").
   const nextStatus = stringParam(q.status)
   if (nextStatus !== filterStatus.value) filterStatus.value = nextStatus
-  // The write-back below stamps the DEBOUNCED values into the URL. When
-  // the URL equals the debounced value it is our own echo and the live
-  // ref may already be ahead of it (operator still typing) — don't
-  // clobber in-progress input with the older echo.
-  const nextSearch = stringParam(q.search)
-  if (nextSearch !== search.value.trim() && nextSearch !== debouncedSearch.value.trim()) search.value = nextSearch
-  const nextUtilMin = parseUtilPct(q.utilization_min)
-  if (nextUtilMin !== parseUtilPct(filterUtilMin.value) && nextUtilMin !== parseUtilPct(debouncedFilterUtilMin.value)) filterUtilMin.value = nextUtilMin
-  const nextUtilMax = parseUtilPct(q.utilization_max)
-  if (nextUtilMax !== parseUtilPct(filterUtilMax.value) && nextUtilMax !== parseUtilPct(debouncedFilterUtilMax.value)) filterUtilMax.value = nextUtilMax
+  // The write-back below stamps the DEBOUNCED text/number values into
+  // the URL, so on its echo the live ref may already be ahead (operator
+  // still typing) and must not be clobbered. An echo is recognised by
+  // the exact query this view wrote — NOT by "URL equals the debounced
+  // value", which also holds for a genuine navigation (typing on
+  // /budgets?tenant_id=acme then going to bare /budgets within the
+  // debounce window: both have an empty search). A genuine navigation
+  // is URL-authoritative: it resets pending input, which also cancels
+  // the pending debounce so the old text is never written into the
+  // destination URL.
+  const isOwnEcho = pendingSelfWrites.delete(querySignature(q))
+  if (!isOwnEcho) {
+    const nextSearch = stringParam(q.search)
+    if (nextSearch !== search.value.trim()) search.value = nextSearch
+    const nextUtilMin = parseUtilPct(q.utilization_min)
+    if (nextUtilMin !== parseUtilPct(filterUtilMin.value)) filterUtilMin.value = nextUtilMin
+    const nextUtilMax = parseUtilPct(q.utilization_max)
+    if (nextUtilMax !== parseUtilPct(filterUtilMax.value)) filterUtilMax.value = nextUtilMax
+  }
   if (isDetail.value) {
     cancelBudgetExport()
     invalidateList()
@@ -660,7 +681,8 @@ watch(() => route.query, (q, previousQuery) => {
 // values (while status / unit / scope-prefix, which the watcher doesn't
 // touch, survived) and filtered views weren't shareable. `replace`, not
 // push — filter fiddling shouldn't add history entries. Loop-safe: the
-// watcher only assigns refs that differ from the URL.
+// watcher only assigns refs that differ from the URL, and recognises
+// this function's own writes via pendingSelfWrites.
 function utilQueryValue(v: number | string): string | undefined {
   const pct = parseUtilPct(v)
   return pct === '' ? undefined : String(pct)
@@ -677,7 +699,9 @@ function syncFiltersToUrl() {
   const unchanged = (Object.keys(desired) as Array<keyof typeof desired>)
     .every(k => (stringParam(route.query[k]) || undefined) === desired[k])
   if (unchanged) return
-  router.replace({ query: { ...route.query, ...desired } })
+  const next = { ...route.query, ...desired }
+  pendingSelfWrites.add(querySignature(next))
+  router.replace({ query: next })
 }
 watch([selectedTenant, filterStatus, debouncedSearch, debouncedFilterUtilMin, debouncedFilterUtilMax], syncFiltersToUrl)
 

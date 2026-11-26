@@ -1,4 +1,4 @@
-import { ref, watch } from 'vue'
+import { ref, watch, type Ref } from 'vue'
 import {
   getOverview as getOverviewDefault,
   listApiKeys as listApiKeysDefault,
@@ -18,7 +18,15 @@ import { POLLING_STALE } from './pollingResult'
 import { POLL_FAST_MS } from './pollingConstants'
 import { usePolling as usePollingDefault } from './usePolling'
 import { toMessage } from '../utils/errors'
-import { walkCursorPages, LIST_PAGE_LIMIT } from '../utils/cursorWalk'
+import { walkCursorPages, LIST_PAGE_LIMIT, CURSOR_WALK_MAX_PAGES } from '../utils/cursorWalk'
+
+// Rows the debt / frozen cards display (the view slices to this).
+const BUDGET_CARD_ROWS = 5
+// Explicit debt-desc sort: the server default is utilization desc, so an
+// unsorted page was "top 10 by utilization that have debt", not the top
+// debtors the card presents.
+const DEBT_CARD_QUERY: Record<string, string> = { has_debt: 'true', sort_by: 'debt', sort_dir: 'desc' }
+const FROZEN_CARD_QUERY: Record<string, string> = { status: 'FROZEN' }
 
 type OverviewPolling = (
   callback: Parameters<typeof usePollingDefault>[0],
@@ -189,6 +197,52 @@ export function useOverviewData(
     return JSON.stringify([ov.tenant_counts, ov.budget_counts, ov.webhook_counts])
   }
 
+  // The debt / frozen cards hide rows owned by CLOSED tenants (the view
+  // filters on closedTenantIds). With a single capped page that filter
+  // could empty the card — "No outstanding debt" — while an open tenant's
+  // budget sat on page two: e.g. the ten largest debts all belonging to
+  // closed tenants. When the first page yields fewer eligible rows than
+  // the card shows and the server has more, re-read from the top at the
+  // max page size until the card is full, the set is exhausted, or the
+  // page cap is hit (then has_more stays true and the count reads "N+").
+  // Best-effort: a failure keeps the first page and its has_more flag.
+  function isOpenTenantRow(b: BudgetLedger): boolean {
+    return !b.tenant_id || !closedTenantIds.value.has(b.tenant_id)
+  }
+  async function topUpBudgetCard(
+    base: Record<string, string>,
+    rows: Ref<BudgetLedger[]>,
+    more: Ref<boolean>,
+  ): Promise<void> {
+    if (!more.value) return
+    if (rows.value.filter(isOpenTenantRow).length >= BUDGET_CARD_ROWS) return
+    try {
+      const collected: BudgetLedger[] = []
+      let eligible = 0
+      let cursor = ''
+      let hasMore = true
+      let pages = 0
+      while (hasMore && pages < CURSOR_WALK_MAX_PAGES && eligible < BUDGET_CARD_ROWS) {
+        const res = await deps.listBudgets({
+          ...base,
+          limit: String(LIST_PAGE_LIMIT),
+          ...(cursor ? { cursor } : {}),
+        })
+        collected.push(...res.ledgers)
+        eligible += res.ledgers.filter(isOpenTenantRow).length
+        pages++
+        hasMore = !!res.has_more
+        cursor = res.next_cursor ?? ''
+        // Defensive: has_more without a cursor would loop on page one.
+        if (hasMore && !cursor) break
+      }
+      rows.value = collected
+      more.value = hasMore
+    } catch {
+      // Keep the first page; the next tick retries.
+    }
+  }
+
   // All fetches within a phase parallelize; any individual failure
   // degrades gracefully (error banner, but other sections keep rendering
   // so a flaky audit endpoint doesn't blank out the whole landing page).
@@ -201,13 +255,10 @@ export function useOverviewData(
       deps.listAuditLogs({ limit: '10' }),
       // Frozen budgets — scopes, not just a count. Lets the Frozen
       // Budgets card list the top 5 inline instead of a center link.
-      deps.listBudgets({ status: 'FROZEN', limit: '10' }),
+      deps.listBudgets({ ...FROZEN_CARD_QUERY, limit: '10' }),
       // Budgets with debt — replaces overview.debt_scopes so the list
       // carries tenant_id and can be filtered against the closed set.
-      // Explicit debt-desc sort: the server default is utilization desc,
-      // so an unsorted page was "top 10 by utilization that have debt",
-      // not the top debtors the card presents.
-      deps.listBudgets({ has_debt: 'true', sort_by: 'debt', sort_dir: 'desc', limit: '10' }),
+      deps.listBudgets({ ...DEBT_CARD_QUERY, limit: '10' }),
     ])
     if (ov.status === 'fulfilled') overview.value = ov.value
     if (audit.status === 'fulfilled') recentAudit.value = audit.value.logs
@@ -296,6 +347,15 @@ export function useOverviewData(
         if (sig !== null) lastWalkSignature = sig
       }
     }
+    // Phase 3 — top up the two capped budget cards. Runs after the walk
+    // block so the closed-tenant exclusion set is current. No-op (zero
+    // requests) unless a card's first page is short of eligible rows AND
+    // the server has more.
+    await Promise.all([
+      topUpBudgetCard(DEBT_CARD_QUERY, debtBudgets, debtBudgetsHasMore),
+      topUpBudgetCard(FROZEN_CARD_QUERY, frozenBudgets, frozenBudgetsHasMore),
+    ])
+
     // Surface the first failure so the operator sees *something* wrong —
     // but only error-banner; cards for the successful fetches still render.
     // Phase-1 failures win (they're fresher — re-checked every tick);

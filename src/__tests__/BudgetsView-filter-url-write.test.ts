@@ -65,9 +65,33 @@ vi.mock('../composables/usePolling', async () => {
   return { usePolling: createPollingMock }
 })
 
-vi.mock('../composables/useDebouncedRef', () => ({
-  useDebouncedRef: <T>(source: { value: T }) => source,
+// Debounce double. Default: mirrors the source synchronously (same as
+// the identity mock other view tests use). With `manual` set, updates
+// are held until flushDebounce() — like the real composable, a newer
+// change replaces the pending one — so tests can act inside the window.
+const debounceCtl = vi.hoisted(() => ({
+  manual: false,
+  pending: new Map<object, () => void>(),
 }))
+function flushDebounce() {
+  const jobs = [...debounceCtl.pending.values()]
+  debounceCtl.pending.clear()
+  for (const job of jobs) job()
+}
+
+vi.mock('../composables/useDebouncedRef', async () => {
+  const { ref, watch } = await import('vue')
+  return {
+    useDebouncedRef: <T>(source: { value: T }) => {
+      const out = ref(source.value)
+      watch(() => source.value, (next) => {
+        if (debounceCtl.manual) debounceCtl.pending.set(out, () => { out.value = next })
+        else out.value = next
+      }, { flush: 'sync' })
+      return out
+    },
+  }
+})
 
 vi.mock('@tanstack/vue-virtual', async () => {
   const { computed, isRef } = await import('vue')
@@ -150,6 +174,8 @@ describe('BudgetsView — filter URL write-back and audit links', () => {
     routeRef.name = 'budgets'
     routeRef.query = {}
     routeRef.params = {}
+    debounceCtl.manual = false
+    debounceCtl.pending.clear()
   })
 
   it('does not rewrite the URL on a bare mount', async () => {
@@ -242,6 +268,48 @@ describe('BudgetsView — filter URL write-back and audit links', () => {
     await flushPromises()
     expect(w.find<HTMLSelectElement>('#budget-tenant').element.value).toBe('acme')
     expect(replaceMock).not.toHaveBeenCalled()
+  })
+
+  it('a navigation inside the debounce window resets pending input instead of leaking it', async () => {
+    // Review finding: type a search on /budgets?tenant_id=acme, then go
+    // to bare /budgets before the 300ms debounce fires. Both URLs have
+    // an empty search, so "URL equals the debounced value" misread the
+    // navigation as this view's own echo, kept the typed text, and the
+    // timer then wrote it into the destination URL.
+    routeRef.query = { tenant_id: 'acme' }
+    const w = await mountView()
+    replaceMock.mockClear()
+    debounceCtl.manual = true
+    await w.find('#budget-search').setValue('prod')
+    await flushPromises()
+    // Debounce still pending: nothing written yet.
+    expect(replaceMock).not.toHaveBeenCalled()
+
+    routeRef.query = {}
+    await flushPromises()
+    expect(w.find<HTMLInputElement>('#budget-search').element.value).toBe('')
+    expect(w.find<HTMLSelectElement>('#budget-tenant').element.value).toBe('')
+
+    flushDebounce()
+    await flushPromises()
+    expect(replaceMock).not.toHaveBeenCalled()
+    expect(routeRef.query).toEqual({})
+  })
+
+  it("the view's own URL write does not clobber text typed after the debounce fired", async () => {
+    const w = await mountView()
+    debounceCtl.manual = true
+    const input = w.find<HTMLInputElement>('#budget-search')
+    await input.setValue('pro')
+    flushDebounce()
+    // Operator keeps typing before the router echo is processed.
+    await input.setValue('prod')
+    await flushPromises()
+    expect(routeRef.query.search).toBe('pro')
+    expect(input.element.value).toBe('prod')
+    flushDebounce()
+    await flushPromises()
+    expect(routeRef.query.search).toBe('prod')
   })
 
   it('row Activity links filter the audit log by ledger_id, funding by scope:UNIT', async () => {

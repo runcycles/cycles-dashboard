@@ -656,6 +656,7 @@ function jumpTo(id: string) {
 }
 
 const BULK_ACTION_RESOURCE_ID = 'bulk-action'
+const BULK_ACTION_OPERATION_PREFIX = 'bulkAction'
 // Map an audit entry to the most useful detail-view link. Falls back
 // to the Audit view with a pre-filled filter so "click through for
 // context" always works.
@@ -664,7 +665,11 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
   // is no single resource) — routing that to a detail view produced
   // /tenants/bulk-action (not found). Fall through to the audit row,
   // whose metadata carries the per-row outcomes.
+  // "bulk-action" is also a legal tenant id, so the id alone is not
+  // proof — require the bulk operation name as well (bulkActionTenants /
+  // bulkActionWebhooks / bulkActionBudgets).
   const isBulk = entry.resource_id === BULK_ACTION_RESOURCE_ID
+    && (entry.operation ?? '').startsWith(BULK_ACTION_OPERATION_PREFIX)
   if (entry.resource_type === 'tenant' && entry.resource_id && !isBulk) {
     return { name: 'tenant-detail', params: { id: entry.resource_id } }
   }

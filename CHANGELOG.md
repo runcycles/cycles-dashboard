@@ -45,6 +45,19 @@ UX work that does not advance spec alignment.
   budget detail view and its Back arrow, and are shareable. Unit and scope
   prefix are not in the URL.
 
+- **Overview debt and frozen cards could read empty while budgets needed
+  attention.** When the first rows all belonged to closed tenants (which the
+  cards hide), the card showed "No outstanding debt". The cards now read
+  further until they are full or the list is exhausted.
+- **Funding a budget used the list's tenant filter instead of the budget's own
+  tenant**, so funding a row from a tenant other than the one selected was
+  rejected. The budget's tenant is now used.
+- **Tenants export while a filter change is loading** could download the
+  previous filter's rows. Export and Load more are held until the list matches
+  the selected filters, and an open export is cancelled if a filter changes.
+- **Create Tenant parent picker** lists the full tenant directory instead of
+  the rows currently shown, so a filtered list no longer hides valid parents.
+
 ### Changed
 
 - No API, spec-alignment, or server-fleet pin changes. Governance spec stays

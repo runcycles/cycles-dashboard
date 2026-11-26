@@ -1857,28 +1857,92 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
         budget_counts: { total: 40, active: 20, frozen: 20, closed: 0, over_limit: 0, with_debt: 20, by_unit: {} },
       }))
       listBudgetsMock.mockImplementation((params: Record<string, string>) => {
+        // Six eligible rows — enough to fill the 5-row card, so no top-up.
+        const six = (kind: string, o: Partial<BudgetLedger>) =>
+          Array.from({ length: 6 }, (_, i) => atCapBudget(`acme/${kind}-${i}`, { tenant_id: 'acme', ...o }))
         if (params.has_debt === 'true') {
-          return Promise.resolve({
-            ledgers: [atCapBudget('acme/debt', { tenant_id: 'acme', debt: { unit: 'tokens', amount: 30 } })],
-            has_more: true,
-            next_cursor: 'c',
-          })
+          return Promise.resolve({ ledgers: six('debt', { debt: { unit: 'tokens', amount: 30 } }), has_more: true, next_cursor: 'c' })
         }
         if (params.status === 'FROZEN') {
-          return Promise.resolve({
-            ledgers: [atCapBudget('acme/frozen', { tenant_id: 'acme', status: 'FROZEN' })],
-            has_more: true,
-            next_cursor: 'c',
-          })
+          return Promise.resolve({ ledgers: six('frozen', { status: 'FROZEN' }), has_more: true, next_cursor: 'c' })
         }
         return Promise.resolve({ ledgers: [], has_more: false })
       })
       const w = await mountOverview()
-      expect(w.find('#budgets-with-debt .badge-warning').text()).toBe('1+')
-      expect(w.find('#frozen-budgets .badge-warning').text()).toBe('1+')
+      expect(w.find('#budgets-with-debt .badge-warning').text()).toBe('6+')
+      expect(w.find('#frozen-budgets .badge-warning').text()).toBe('6+')
       const pills = w.findAll('button').map(b => b.text().replace(/\s+/g, ' '))
-      expect(pills.some(t => t.includes('Budgets with debt') && t.includes('·1+'))).toBe(true)
-      expect(pills.some(t => t.includes('Frozen budgets') && t.includes('·1+'))).toBe(true)
+      expect(pills.some(t => t.includes('Budgets with debt') && t.includes('·6+'))).toBe(true)
+      expect(pills.some(t => t.includes('Frozen budgets') && t.includes('·6+'))).toBe(true)
+      // A full first page must not trigger follow-up requests.
+      const cardCalls = listBudgetsMock.mock.calls.map(c => c[0] as Record<string, string>)
+        .filter(p => p.has_debt === 'true' || p.status === 'FROZEN')
+      expect(cardCalls.every(p => p.limit === '10' && !p.cursor)).toBe(true)
+    })
+
+    it('follows the cursor when the first debt page is all closed-tenant rows', async () => {
+      // Review finding: the ten largest debts belong to CLOSED tenants,
+      // an ACTIVE tenant's debt is on page two. Pre-fix the card said
+      // "No outstanding debt".
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        budget_counts: { total: 12, active: 1, frozen: 0, closed: 11, over_limit: 0, with_debt: 12, by_unit: {} },
+      }))
+      listTenantsMock.mockResolvedValue({ tenants: [tenant('closed-co')], has_more: false })
+      const closedDebt = (n: number) => Array.from({ length: n }, (_, i) =>
+        atCapBudget(`closed-co/debt-${i}`, { tenant_id: 'closed-co', debt: { unit: 'tokens', amount: 900 - i } }))
+      listBudgetsMock.mockImplementation((params: Record<string, string>) => {
+        if (params.has_debt !== 'true') return Promise.resolve({ ledgers: [], has_more: false })
+        if (params.limit === '10') return Promise.resolve({ ledgers: closedDebt(10), has_more: true, next_cursor: 'p1' })
+        if (!params.cursor) return Promise.resolve({ ledgers: closedDebt(100), has_more: true, next_cursor: 'p2' })
+        return Promise.resolve({
+          ledgers: [atCapBudget('acme/owes', { tenant_id: 'acme', debt: { unit: 'tokens', amount: 5 } })],
+          has_more: false,
+        })
+      })
+      const w = await mountOverview()
+      const card = w.find('#budgets-with-debt')
+      expect(card.text()).toContain('acme/owes')
+      expect(card.text()).not.toContain('No outstanding debt')
+      expect(card.text()).not.toContain('closed-co/')
+      expect(card.find('.badge-warning').text()).toBe('1')
+      const followUps = listBudgetsMock.mock.calls.map(c => c[0] as Record<string, string>)
+        .filter(p => p.has_debt === 'true' && p.limit === '100')
+      expect(followUps).toHaveLength(2)
+      expect(followUps[0]).toMatchObject({ sort_by: 'debt', sort_dir: 'desc' })
+      expect(followUps[1].cursor).toBe('p2')
+    })
+
+    it('keeps the first page when a debt follow-up request fails', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      listBudgetsMock.mockImplementation((params: Record<string, string>) => {
+        if (params.has_debt !== 'true') return Promise.resolve({ ledgers: [], has_more: false })
+        if (params.limit === '10') {
+          return Promise.resolve({
+            ledgers: [atCapBudget('acme/debt', { tenant_id: 'acme', debt: { unit: 'tokens', amount: 30 } })],
+            has_more: true,
+            next_cursor: 'p1',
+          })
+        }
+        return Promise.reject(new Error('follow-up down'))
+      })
+      const w = await mountOverview()
+      expect(w.find('#budgets-with-debt').text()).toContain('acme/debt')
+      expect(w.find('#budgets-with-debt .badge-warning').text()).toBe('1+')
+    })
+
+    it('a tenant literally named "bulk-action" keeps its detail link for ordinary operations', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      listAuditLogsMock.mockResolvedValue({
+        logs: [
+          auditEntry('log-real', { operation: 'createTenant', resource_type: 'tenant', resource_id: 'bulk-action' }),
+          auditEntry('log-bulk', { operation: 'bulkActionTenants', resource_type: 'tenant', resource_id: 'bulk-action' }),
+        ],
+        has_more: false,
+      })
+      const w = await mountOverview()
+      const links = activityLinks(w)
+      expect(links).toContainEqual({ name: 'tenant-detail', params: { id: 'bulk-action' } })
+      expect(links).toContainEqual({ name: 'audit', query: { search: 'log-bulk' } })
     })
 
     it('shows exact counts (no "+") when the page is complete', async () => {

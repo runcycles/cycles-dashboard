@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, shallowRef, computed, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRouter, useRoute } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
@@ -9,6 +9,7 @@ import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useTerminalAwareList } from '../composables/useTerminalAwareList'
 import { useListExport } from '../composables/useListExport'
 import { listTenants, createTenant, updateTenantStatus } from '../api/client'
+import { listAllTenants } from '../utils/listAllTenants'
 import { rateLimitedBatch } from '../utils/rateLimitedBatch'
 import { synthesizeRowSelectBulkResult } from '../utils/rowSelectBulkResult'
 import type { RowSelectBulkResponse } from '../utils/rowSelectBulkResult'
@@ -414,6 +415,33 @@ function openCreate() {
   }
   createError.value = ''
   showCreate.value = true
+  void loadCreateParentOptions()
+}
+
+// Parent picker for Create Tenant. Independent of the list: the list is
+// server-filtered (search / status / parent), so on /tenants?parent=root
+// it holds only root's children and offering those rows as parents made
+// it impossible to add another child under root. Seeded from every
+// tenant this view has seen so the select is usable immediately, then
+// replaced by the full directory walk.
+const createParentOptions = ref<Tenant[]>([])
+const createParentsError = ref('')
+let createParentsSeq = 0
+async function loadCreateParentOptions() {
+  const seq = ++createParentsSeq
+  createParentsError.value = ''
+  createParentOptions.value = [...knownTenants.value.values()]
+  try {
+    const directory = await listAllTenants()
+    if (seq !== createParentsSeq) return
+    createParentOptions.value = directory.tenants
+    if (directory.partial) {
+      createParentsError.value = 'Showing the first 1,000 tenants. A parent beyond that cannot be selected here.'
+    }
+  } catch (e) {
+    if (seq !== createParentsSeq) return
+    createParentsError.value = `Could not load the full tenant list: ${toMessage(e)}`
+  }
 }
 
 // M7 (form UX): live validation of the tenant-id input. Pre-fix the
@@ -533,7 +561,16 @@ function withListParams(params: Record<string, string> = {}): Record<string, str
 // refs: a filter can change while the page-one refetch is still in
 // flight, and a live-ref follow-up would pair the old cursor with new
 // filters (server 400s on the cursor's filter hash).
-let appliedListParams: Record<string, string> = {}
+const appliedListParams = shallowRef<Record<string, string>>({})
+// False from the moment a filter / search / sort changes until page one
+// for the new tuple lands (and before the first load). While false the
+// rows + cursor on screen belong to the PREVIOUS tuple, so export and
+// Load more are held: exporting then would download old-filter rows
+// under new-filter controls (clear SUSPENDED → "All" still exported
+// only the suspended tenants).
+const resultsMatchFilters = computed(() =>
+  JSON.stringify(withListParams()) === JSON.stringify(appliedListParams.value),
+)
 
 const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
   try {
@@ -541,7 +578,7 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
     const res = await listTenants({ ...params })
     tenants.value = res.tenants
     rememberTenants(res.tenants)
-    appliedListParams = params
+    appliedListParams.value = params
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
     error.value = ''
@@ -609,7 +646,7 @@ const {
   exportError,
   exportCancellable,
   maxRows: EXPORT_MAX_ROWS,
-  confirmExport,
+  confirmExport: openExportConfirm,
   cancelExport,
   cancelRunningExport,
   executeExport,
@@ -622,7 +659,8 @@ const {
   hasMore,
   nextCursor,
   fetchPage: async (cursor) => {
-    const res = await listTenants({ ...appliedListParams, cursor })
+    // Pinned at confirm time: one immutable tuple owns the whole walk.
+    const res = await listTenants({ ...exportListParams, cursor })
     return { items: res.tenants, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
   },
   filterFn: tenantMatchesFilter,
@@ -637,21 +675,38 @@ const {
 
 watch(exportError, (v) => { if (v) error.value = v })
 
+// The query tuple the export walks. Captured when the dialog opens so
+// later polls (which replace appliedListParams) can't change it mid-walk.
+let exportListParams: Record<string, string> = {}
+function confirmExport(format: 'csv' | 'json') {
+  if (!resultsMatchFilters.value) return
+  exportListParams = appliedListParams.value
+  openExportConfirm(format)
+}
+// A filter change while the confirm dialog is open or the walk is
+// running invalidates the export: its seed rows and cursor belong to the
+// old tuple, and filterFn would start applying the new one.
+watch(resultsMatchFilters, (matches) => {
+  if (matches) return
+  cancelExport()
+  if (exporting.value) cancelRunningExport()
+})
+
 async function loadMore() {
-  if (!nextCursor.value || loadingMore.value) return
+  if (!nextCursor.value || loadingMore.value || !resultsMatchFilters.value) return
   loadingMore.value = true
-  const owner = appliedListParams
+  const owner = appliedListParams.value
   try {
     const res = await listTenants({ ...owner, cursor: nextCursor.value })
     // A page-one refetch (filter / sort / poll) replaced the list while
     // this page was in flight — it belongs to a superseded result set.
-    if (owner !== appliedListParams) return
+    if (owner !== appliedListParams.value) return
     tenants.value = [...tenants.value, ...res.tenants]
     rememberTenants(res.tenants)
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
   } catch (e) {
-    if (owner === appliedListParams) error.value = toMessage(e)
+    if (owner === appliedListParams.value) error.value = toMessage(e)
   }
   finally { loadingMore.value = false }
 }
@@ -719,11 +774,11 @@ const gridTemplate = computed(() =>
         </button>
       </template>
       <template #actions>
-        <button @click="confirmExport('csv')" :disabled="sortedTenants.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+        <button @click="confirmExport('csv')" :disabled="sortedTenants.length === 0 || !resultsMatchFilters" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
           <DownloadIcon class="w-3.5 h-3.5" />
           Export CSV
         </button>
-        <button @click="confirmExport('json')" :disabled="sortedTenants.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+        <button @click="confirmExport('json')" :disabled="sortedTenants.length === 0 || !resultsMatchFilters" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
           <DownloadIcon class="w-3.5 h-3.5" />
           Export JSON
         </button>
@@ -958,7 +1013,7 @@ const gridTemplate = computed(() =>
       </p>
       <button
         @click="loadMore"
-        :disabled="loadingMore || !nextCursor"
+        :disabled="loadingMore || !nextCursor || !resultsMatchFilters"
         class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
       >
         {{ loadingMore ? 'Loading…' : 'Load more' }}
@@ -1062,8 +1117,9 @@ const gridTemplate = computed(() =>
         <label for="ct-parent" class="form-label">Parent Tenant (optional)</label>
         <select id="ct-parent" v-model="createForm.parent_tenant_id" class="form-select w-full">
           <option value="">None</option>
-          <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
+          <option v-for="t in createParentOptions" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
         </select>
+        <p v-if="createParentsError" class="muted-sm mt-0.5" role="status">{{ createParentsError }}</p>
       </div>
       <details class="border-t border-gray-200 dark:border-gray-700 pt-3">
         <summary class="text-sm font-medium text-gray-700 dark:text-gray-200 cursor-pointer">Reservation defaults (optional)</summary>

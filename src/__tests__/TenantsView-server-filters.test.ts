@@ -235,4 +235,87 @@ describe('TenantsView — server-side status / parent filters', () => {
     await flushPromises()
     expect(w.text()).not.toContain('stale-row')
   })
+
+  function exportButtons(w: Awaited<ReturnType<typeof mountView>>) {
+    return w.findAll<HTMLButtonElement>('button').filter(b => /^Export (CSV|JSON)$/.test(b.text().trim()))
+  }
+
+  it('holds export and Load more while the rows belong to the previous filter', async () => {
+    // Review finding: clear SUSPENDED while its replacement is pending.
+    // Pre-fix export stayed enabled with the suspended-only rows and
+    // downloaded them under a filter that now says "All".
+    routeRef.query = { status: 'SUSPENDED' }
+    listTenantsMock.mockResolvedValue({
+      tenants: [tenant('s1', 'SUSPENDED')], has_more: true, next_cursor: 'c1',
+    })
+    const w = await mountView()
+    expect(exportButtons(w)).toHaveLength(2)
+    expect(exportButtons(w).every(b => !b.element.disabled)).toBe(true)
+
+    let resolvePageOne!: (v: unknown) => void
+    listTenantsMock.mockImplementationOnce(() => new Promise((res) => { resolvePageOne = res }))
+    await selectByLabel(w, 'status').setValue('')
+    await flushPromises()
+    // Replacement page one still in flight.
+    expect(exportButtons(w).every(b => b.element.disabled)).toBe(true)
+    const more = w.findAll<HTMLButtonElement>('button').find(b => /load more/i.test(b.text()))!
+    expect(more.element.disabled).toBe(true)
+    const callsBefore = listTenantsMock.mock.calls.length
+    await more.trigger('click')
+    expect(listTenantsMock.mock.calls.length).toBe(callsBefore)
+
+    resolvePageOne({ tenants: [tenant('a'), tenant('s1', 'SUSPENDED')], has_more: false })
+    await flushPromises()
+    expect(exportButtons(w).every(b => !b.element.disabled)).toBe(true)
+  })
+
+  it('closes an open export confirmation when a filter changes', async () => {
+    const w = await mountView()
+    await exportButtons(w)[0].trigger('click')
+    await flushPromises()
+    const { default: ExportDialog } = await import('../components/ExportDialog.vue')
+    expect(w.findComponent(ExportDialog).props('format')).toBe('csv')
+    await selectByLabel(w, 'status').setValue('SUSPENDED')
+    await flushPromises()
+    expect(w.findComponent(ExportDialog).props('format')).toBeNull()
+  })
+
+  it('Create Tenant offers the full directory as parents, not the filtered rows', async () => {
+    // Review finding: on /tenants?parent=root the list holds only
+    // root's children, so the dialog could not create another child
+    // under root.
+    routeRef.query = { parent: 'root' }
+    listTenantsMock.mockImplementation((params: Record<string, string>) => {
+      if (params.parent_tenant_id === 'root') {
+        return Promise.resolve({ tenants: [tenant('kid', 'ACTIVE', 'root')], has_more: false })
+      }
+      // Directory walk (no filters, max page size).
+      return Promise.resolve({
+        tenants: [tenant('root'), tenant('kid', 'ACTIVE', 'root'), tenant('other')],
+        has_more: false,
+      })
+    })
+    const w = await mountView()
+    const create = w.findAll('button').find(b => b.text().trim() === 'Create Tenant')!
+    await create.trigger('click')
+    await flushPromises()
+    const directoryCall = listTenantsMock.mock.calls
+      .map(c => c[0] as Record<string, string>)
+      .find(p => p.limit === '100' && !p.parent_tenant_id)
+    expect(directoryCall).toBeDefined()
+    const options = Array.from(w.get<HTMLSelectElement>('#ct-parent').element.options).map(o => o.value)
+    expect(options).toEqual(expect.arrayContaining(['', 'root', 'kid', 'other']))
+  })
+
+  it('Create Tenant falls back to already-seen tenants when the directory fails', async () => {
+    const w = await mountView()
+    listTenantsMock.mockRejectedValue(new Error('directory down'))
+    const create = w.findAll('button').find(b => b.text().trim() === 'Create Tenant')!
+    await create.trigger('click')
+    await flushPromises()
+    const select = w.get<HTMLSelectElement>('#ct-parent')
+    const options = Array.from(select.element.options).map(o => o.value)
+    expect(options).toEqual(expect.arrayContaining(['root', 'kid', 'susp']))
+    expect(w.text()).toContain('Could not load the full tenant list')
+  })
 })
