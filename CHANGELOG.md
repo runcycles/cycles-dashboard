@@ -39,10 +39,11 @@ UX work that does not advance spec alignment.
   Overview's "suspended" chip are now complete on fleets above one page.
 - **Tenants search / filter / sort changes made during a background refresh**
   are no longer dropped until the next 60-second poll.
-- **Budgets filters survive a detail round trip.** Tenant, search, and
-  utilization range are written to the URL (`?tenant_id`, `?search`,
-  `?utilization_min`, `?utilization_max`), preserved through the budget detail
-  view and its Back arrow, and are shareable.
+- **Budgets filters survive a detail round trip.** Tenant, status, search, and
+  utilization range are written to the URL (`?tenant_id`, `?status`,
+  `?search`, `?utilization_min`, `?utilization_max`), preserved through the
+  budget detail view and its Back arrow, and are shareable. Unit and scope
+  prefix are not in the URL.
 
 ### Changed
 

@@ -189,12 +189,29 @@ describe('BudgetsView — filter URL write-back and audit links', () => {
     expect(routeRef.query.utilization_max).toBe('100')
   })
 
-  it('preserves unrelated query params (status, include_terminal) when writing filters', async () => {
-    routeRef.query = { status: 'FROZEN' }
+  it('preserves unrelated query params (filter, include_terminal) when writing filters', async () => {
+    routeRef.query = { status: 'FROZEN', include_terminal: '1' }
     const w = await mountView()
     await w.find('#budget-tenant').setValue('beta')
     await flushPromises()
-    expect(routeRef.query).toEqual({ status: 'FROZEN', tenant_id: 'beta' })
+    expect(routeRef.query).toEqual({ status: 'FROZEN', include_terminal: '1', tenant_id: 'beta' })
+  })
+
+  it('keeps ?status in step with the Status dropdown in both directions', async () => {
+    routeRef.query = { status: 'FROZEN' }
+    const w = await mountView()
+    const status = w.find<HTMLSelectElement>('#budget-status')
+    expect(status.element.value).toBe('FROZEN')
+    // Dropdown → URL: clearing must drop the stale ?status=FROZEN.
+    await status.setValue('')
+    await flushPromises()
+    expect(routeRef.query.status).toBeUndefined()
+    // URL → dropdown: same-route navigation (back/forward, deep link).
+    routeRef.query = { status: 'ACTIVE' }
+    await flushPromises()
+    expect(status.element.value).toBe('ACTIVE')
+    const params = listBudgetsMock.mock.calls[listBudgetsMock.mock.calls.length - 1][0] as Record<string, string>
+    expect(params.status).toBe('ACTIVE')
   })
 
   it('carries the list filters through the detail drill-in and the Back arrow', async () => {

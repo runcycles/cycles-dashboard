@@ -203,6 +203,8 @@ Shared implementation: `src/composables/useTerminalAwareList.ts`.
 | Tenants | search, status, parent (`parent_tenant_id`) | `?search` `?status` `?parent` |
 | Budgets | tenant, status, unit, scope prefix, search, utilization range | `?tenant_id` `?status` `?search` `?utilization_min` `?utilization_max` |
 
+- Budgets unit and scope prefix are server-side but not in the URL: they survive the budget detail round trip, not a reload or a shared link.
+
 - Tenants "(root-level only)" is the one client-side filter — the API has no null-parent filter, so it applies to loaded rows only.
 - Tenant pickers (Budgets, API Keys, Webhooks, Reservations) load the full tenant directory by cursor walk (`src/utils/listAllTenants.ts`, capped at 1,000 tenants), not the API's 50-row default page.
 

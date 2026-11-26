@@ -620,6 +620,12 @@ watch(() => route.query, (q, previousQuery) => {
   const wasDetail = !!previousQuery?.scope && !!previousQuery?.unit
   const nextTenant = stringParam(q.tenant_id)
   if (nextTenant !== selectedTenant.value) selectedTenant.value = nextTenant
+  // ?status is hydrated at setup and written back below, so it must be
+  // re-synced here too — otherwise the URL and the dropdown drift apart
+  // (a stale ?status=FROZEN surviving in a shared link after the
+  // operator switched the dropdown back to "All").
+  const nextStatus = stringParam(q.status)
+  if (nextStatus !== filterStatus.value) filterStatus.value = nextStatus
   // The write-back below stamps the DEBOUNCED values into the URL. When
   // the URL equals the debounced value it is our own echo and the live
   // ref may already be ahead of it (operator still typing) — don't
@@ -645,8 +651,10 @@ watch(() => route.query, (q, previousQuery) => {
   }
 })
 
-// Filter → URL write-back for the four filters the route.query watcher
-// above treats as URL-authoritative (tenant, search, utilization range).
+// Filter → URL write-back for the filters the route.query watcher above
+// treats as URL-authoritative (tenant, status, search, utilization
+// range). Unit and scope prefix are not URL-backed: they live in refs
+// only, which survive the in-view detail round trip but not a reload.
 // Pre-fix they were hydrated FROM the URL but never written TO it, so a
 // drill into a budget and Back reset them to the bare URL's empty
 // values (while status / unit / scope-prefix, which the watcher doesn't
@@ -661,6 +669,7 @@ function syncFiltersToUrl() {
   if (route.name !== 'budgets' || isDetail.value) return
   const desired = {
     tenant_id: selectedTenant.value || undefined,
+    status: filterStatus.value || undefined,
     search: debouncedSearch.value.trim() || undefined,
     utilization_min: utilQueryValue(debouncedFilterUtilMin.value),
     utilization_max: utilQueryValue(debouncedFilterUtilMax.value),
@@ -670,7 +679,7 @@ function syncFiltersToUrl() {
   if (unchanged) return
   router.replace({ query: { ...route.query, ...desired } })
 }
-watch([selectedTenant, debouncedSearch, debouncedFilterUtilMin, debouncedFilterUtilMax], syncFiltersToUrl)
+watch([selectedTenant, filterStatus, debouncedSearch, debouncedFilterUtilMin, debouncedFilterUtilMax], syncFiltersToUrl)
 
 // List-mode query carried through the detail drill-in and restored by
 // the in-page Back arrow, so a round trip lands on the same filtered

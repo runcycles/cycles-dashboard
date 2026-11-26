@@ -120,16 +120,18 @@ No wire-contract or spec-alignment change.
 - Tenants "(root-level only)" stays client-side: no null-parent server filter.
 - Fleets above 1,000 tenants: pickers are partial; Reservations does not reject an unlisted deep-linked tenant.
 - Budgets URL echo never overwrites in-progress typing (compares against the debounced value).
+- Budgets unit and scope prefix stay out of the URL; `?status` is now synced both ways.
+- Tenant pickers cost one request per 100 tenants per refresh (was one total).
 
 **Open (server repo)** `fundBudget` audits `scope:UNIT` while every other budget operation audits `ledger_id`; aligning them would remove the second link.
 
 **Tests**
 - NEW `listAllTenants.test.ts` — 4 specs (paging, cap, single page, failure).
 - NEW `TenantsView-server-filters.test.ts` — 8 specs (wire params, parent options, queued refresh, stale Load more).
-- NEW `BudgetsView-filter-url-write.test.ts` — 7 specs (write-back, round trip, route guard, audit links).
+- NEW `BudgetsView-filter-url-write.test.ts` — 8 specs (write-back, status sync, round trip, route guard, audit links).
 - Updated `OverviewView.test.ts` (+4), `ReservationsView-url-deeplink.test.ts` (+2), `deployment-pins.test.ts` (version).
 
-**Gates** typecheck clean • lint clean • vitest 1539 / 1539 across 131 files • build clean.
+**Gates** typecheck clean • lint clean • vitest 1540 / 1540 across 131 files • build clean.
 
 **Version bumps** package `.85 → .86` • dashboard image pin `.86` • server fleet unchanged.
 
