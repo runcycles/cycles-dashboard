@@ -1814,4 +1814,86 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       expect(listTenantsMock).toHaveBeenCalledTimes(1)
     })
   })
+
+  describe('review fixes — bulk-action links and capped budget cards', () => {
+    function activityLinks(w: Awaited<ReturnType<typeof mountOverview>>) {
+      return w.find('[data-testid="recent-activity-card"]').findAll('a')
+        .map(a => JSON.parse(a.attributes('data-to') ?? 'null') as { name?: string; params?: Record<string, string>; query?: Record<string, string> } | null)
+        .filter((to): to is NonNullable<typeof to> => !!to)
+    }
+
+    it('bulk-action audit rows link to the audit entry, not /tenants/bulk-action', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      listAuditLogsMock.mockResolvedValue({
+        logs: [
+          auditEntry('log-bulk-t', { operation: 'bulkActionTenants', resource_type: 'tenant', resource_id: 'bulk-action' }),
+          auditEntry('log-bulk-w', { operation: 'bulkActionWebhooks', resource_type: 'webhook', resource_id: 'bulk-action' }),
+          auditEntry('log-one', { operation: 'updateTenant', resource_type: 'tenant', resource_id: 'acme' }),
+          auditEntry('log-hook', { operation: 'updateWebhook', resource_type: 'webhook', resource_id: 'wh_1' }),
+        ],
+        has_more: false,
+      })
+      const w = await mountOverview()
+      const links = activityLinks(w)
+      expect(links.some(l => l.params?.id === 'bulk-action')).toBe(false)
+      expect(links).toContainEqual({ name: 'audit', query: { search: 'log-bulk-t' } })
+      expect(links).toContainEqual({ name: 'audit', query: { search: 'log-bulk-w' } })
+      // Single-resource rows still deep-link to the resource.
+      expect(links).toContainEqual({ name: 'tenant-detail', params: { id: 'acme' } })
+      expect(links).toContainEqual({ name: 'webhook-detail', params: { id: 'wh_1' } })
+    })
+
+    it('requests the debt card sorted by debt desc (server default is utilization)', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      await mountOverview()
+      const debtCall = listBudgetsMock.mock.calls
+        .map(c => c[0] as Record<string, string>)
+        .find(p => p.has_debt === 'true')
+      expect(debtCall).toMatchObject({ has_debt: 'true', sort_by: 'debt', sort_dir: 'desc', limit: '10' })
+    })
+
+    it('marks the debt / frozen counts as lower bounds ("N+") when the capped page has more', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        budget_counts: { total: 40, active: 20, frozen: 20, closed: 0, over_limit: 0, with_debt: 20, by_unit: {} },
+      }))
+      listBudgetsMock.mockImplementation((params: Record<string, string>) => {
+        if (params.has_debt === 'true') {
+          return Promise.resolve({
+            ledgers: [atCapBudget('acme/debt', { tenant_id: 'acme', debt: { unit: 'tokens', amount: 30 } })],
+            has_more: true,
+            next_cursor: 'c',
+          })
+        }
+        if (params.status === 'FROZEN') {
+          return Promise.resolve({
+            ledgers: [atCapBudget('acme/frozen', { tenant_id: 'acme', status: 'FROZEN' })],
+            has_more: true,
+            next_cursor: 'c',
+          })
+        }
+        return Promise.resolve({ ledgers: [], has_more: false })
+      })
+      const w = await mountOverview()
+      expect(w.find('#budgets-with-debt .badge-warning').text()).toBe('1+')
+      expect(w.find('#frozen-budgets .badge-warning').text()).toBe('1+')
+      const pills = w.findAll('button').map(b => b.text().replace(/\s+/g, ' '))
+      expect(pills.some(t => t.includes('Budgets with debt') && t.includes('·1+'))).toBe(true)
+      expect(pills.some(t => t.includes('Frozen budgets') && t.includes('·1+'))).toBe(true)
+    })
+
+    it('shows exact counts (no "+") when the page is complete', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      listBudgetsMock.mockImplementation((params: Record<string, string>) => {
+        if (params.has_debt === 'true') {
+          return Promise.resolve({
+            ledgers: [atCapBudget('acme/debt', { tenant_id: 'acme', debt: { unit: 'tokens', amount: 30 } })],
+            has_more: false,
+          })
+        }
+        return Promise.resolve({ ledgers: [], has_more: false })
+      })
+      const w = await mountOverview()
+      expect(w.find('#budgets-with-debt .badge-warning').text()).toBe('1')
+    })
+  })
 })

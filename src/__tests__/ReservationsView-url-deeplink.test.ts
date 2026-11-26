@@ -436,4 +436,46 @@ describe('ReservationsView — URL deep-link smoke', () => {
     expect(toasts.value.some(t => t.type === 'warning' && t.message.includes('deleted-tenant'))).toBe(true)
     toasts.value = []
   })
+
+  it('walks the tenant directory so a ?tenant_id= beyond the first page is accepted', async () => {
+    // Pre-fix a bare listTenants() returned the server's 50-row default
+    // page; a valid tenant past it was rejected as "Unknown tenant id"
+    // and replaced by the default tenant.
+    routeRef.query = { tenant_id: 'page-two' }
+    listTenantsMock
+      .mockResolvedValueOnce({
+        tenants: [{ tenant_id: 'alpha', status: 'ACTIVE' }],
+        has_more: true,
+        next_cursor: 'c1',
+      })
+      .mockResolvedValueOnce({
+        tenants: [{ tenant_id: 'page-two', status: 'ACTIVE' }],
+        has_more: false,
+      })
+    const { default: ReservationsView } = await import('../views/ReservationsView.vue')
+    mount(ReservationsView, stdMount())
+    await flushPromises()
+    expect(listTenantsMock).toHaveBeenNthCalledWith(1, { limit: '100' })
+    expect(listTenantsMock).toHaveBeenNthCalledWith(2, { limit: '100', cursor: 'c1' })
+    expect(listReservationsMock.mock.calls.some(args => args[0] === 'page-two')).toBe(true)
+    expect(listReservationsMock.mock.calls.some(args => args[0] === 'alpha')).toBe(false)
+  })
+
+  it('keeps a URL tenant that is absent from a PARTIAL directory (fleet above the walk cap)', async () => {
+    // Every page reports has_more → the walk stops at its cap with
+    // partial=true. "Not in the list" is then not proof of "unknown".
+    routeRef.query = { tenant_id: 'beyond-cap' }
+    listTenantsMock.mockResolvedValue({
+      tenants: [{ tenant_id: 'alpha', status: 'ACTIVE' }],
+      has_more: true,
+      next_cursor: 'more',
+    })
+    const { default: ReservationsView } = await import('../views/ReservationsView.vue')
+    const w = mount(ReservationsView, stdMount())
+    await flushPromises()
+    expect(listReservationsMock.mock.calls.some(args => args[0] === 'beyond-cap')).toBe(true)
+    const select = w.find<HTMLSelectElement>('#res-tenant')
+    expect(select.element.value).toBe('beyond-cap')
+    expect(Array.from(select.element.options).map(o => o.value)).toContain('beyond-cap')
+  })
 })

@@ -21,7 +21,8 @@ import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { POLL_FAST_MS } from '../composables/pollingConstants'
 import { useSort } from '../composables/useSort'
 import { useListExport } from '../composables/useListExport'
-import { listReservations, getReservation, releaseReservation, listTenants } from '../api/client'
+import { listReservations, getReservation, releaseReservation } from '../api/client'
+import { listAllTenants } from '../utils/listAllTenants'
 import type { ListReservationsParams } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { ReservationSummary, ReservationDetail, Tenant } from '../types'
@@ -60,6 +61,9 @@ const canManage = computed(() => auth.capabilities?.manage_reservations !== fals
 // an empty filter. Default the first tenant in the list once tenants
 // are loaded so the view has something to show without manual picking.
 const tenants = ref<Tenant[]>([])
+// True when the tenant directory walk hit its page cap — the list is a
+// lower bound, so an id missing from it is not provably unknown.
+const tenantsPartial = ref(false)
 // M14: pre-select a tenant from `?tenant_id=` when present so the view
 // lands on the right scope on first mount (Overview drill-downs,
 // copy-pasted deep-links, operator-saved URLs). Without this every
@@ -249,15 +253,21 @@ function defaultTenantId(): string {
 
 async function loadTenants() {
   try {
-    const res = await listTenants()
+    // Cursor-walk: a bare listTenants() stops at the server's 50-row
+    // default page, so a valid ?tenant_id= beyond it was rejected below
+    // as "Unknown tenant id".
+    const res = await listAllTenants()
     tenants.value = res.tenants
+    tenantsPartial.value = res.partial
     // Skip the default when `?tenant_id=` pre-selected one already
     // (M14). Also validate that a URL-supplied tenant actually exists
     // in the list; an outdated/malformed link otherwise silently holds
     // the dropdown on a non-existent value.
     if (tenantFilter.value) {
       const found = tenants.value.some(t => t.tenant_id === tenantFilter.value)
-      if (!found && tenants.value.length > 0) {
+      // A partial directory (fleet larger than the walk cap) can't
+      // prove the id is unknown — keep the URL's tenant in that case.
+      if (!found && tenants.value.length > 0 && !tenantsPartial.value) {
         // URL tenant doesn't exist — drop to the default and clear the
         // stale query param so reloading doesn't resurrect it (the
         // tenantFilter write-back below stamps the corrected value).
@@ -455,7 +465,7 @@ watch(() => route.query.tenant_id, (v) => {
     // write-back below can't fire because the ref doesn't change), and
     // tell the operator why nothing happened. If tenants haven't loaded
     // yet, adopt provisionally — loadTenants validates once they land.
-    if (tenants.value.length > 0 && !tenants.value.some(t => t.tenant_id === nextTenantId)) {
+    if (tenants.value.length > 0 && !tenantsPartial.value && !tenants.value.some(t => t.tenant_id === nextTenantId)) {
       toast.warning(`Unknown tenant id: ${nextTenantId}`)
       router.replace({
         query: {
@@ -715,6 +725,9 @@ const gridTemplate = computed(() =>
           <select id="res-tenant" v-model="tenantFilter" class="form-select">
             <option value="" disabled>— pick a tenant —</option>
             <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
+            <!-- Partial directory: keep a URL-supplied tenant selectable
+                 even though it is beyond the loaded tenant pages. -->
+            <option v-if="tenantFilter && !tenants.some(t => t.tenant_id === tenantFilter)" :value="tenantFilter">{{ tenantFilter }}</option>
           </select>
         </div>
         <div>

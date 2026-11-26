@@ -71,7 +71,7 @@ Consolidates PRs #359, #357, #356, #358, #355, and #362: Vue Router 5.4.0, Vue T
 
 Consolidates Dependabot PRs #350 and #349: globals 17.13.0 and undici 7.30.0. Application code and API behavior are unchanged. The existing Node 20/22 lint, typecheck, build, test coverage (95% line minimum), and security checks must pass on the combined commit before merge. Local lint, typecheck, build, and tests pass with 98.21% line coverage.
 
-**Current release:** v0.1.25.85 (2026-07-21)
+**Current release:** v0.1.25.86 (2026-11-26)
 
 ## Baseline requirements
 
@@ -87,6 +87,51 @@ Consolidates Dependabot PRs #350 and #349: globals 17.13.0 and undici 7.30.0. Ap
 ## Release history
 
 Newest at the top. Older entries preserved verbatim.
+
+### 2026-11-26 — v0.1.25.86: review fixes — audit links, tenant pickers, server-side filters
+
+Full usability / spec / server-implementation review of the dashboard. Six
+findings verified against `cycles-server-admin` handler code are fixed here.
+No wire-contract or spec-alignment change.
+
+**What landed**
+
+| Finding | Root cause (server-verified) | Fix |
+|---|---|---|
+| Budget "Activity" always empty | Audit `resource_id` is exact-match; budget rows carry `ledger_id`, funding carries `scope:UNIT` | Link by `ledger_id`; add "Funding activity" link |
+| Overview activity link → not found | Bulk ops write `resource_id="bulk-action"` | Bulk rows link to the audit entry |
+| Tenant pickers capped at 50 | Bare `listTenants()` gets the default page | `listAllTenants` cursor walk in 4 views |
+| Debt card not top debtors | Default sort is utilization desc | `sort_by=debt`; `N+` when `has_more` |
+| Tenants status/parent filter page-local | Filters never sent | Send `status`, `parent_tenant_id` |
+| Budgets filters lost after detail | Hydrated from URL, never written | URL write-back; query carried through detail |
+
+**Changes**
+
+| File | Change |
+|---|---|
+| `src/utils/listAllTenants.ts` | NEW — tenant directory walk, returns `partial`. |
+| `src/views/TenantsView.vue` | Server-side filters, queued refresh, applied-tuple Load more, accumulated parent options. |
+| `src/views/BudgetsView.vue` | Audit links, filter → URL sync, `listQuery` through detail and Back. |
+| `src/views/OverviewView.vue`, `useOverviewData.ts` | Bulk-action link guard, debt sort, `has_more` lower-bound counts. |
+| `src/views/ReservationsView.vue` | Directory walk; keeps a URL tenant when the directory is partial. |
+| `ApiKeysView.vue`, `WebhooksView.vue`, `useBudgetData.ts` | Use `listAllTenants`. |
+
+**Edge cases**
+- Tenants "(root-level only)" stays client-side: no null-parent server filter.
+- Fleets above 1,000 tenants: pickers are partial; Reservations does not reject an unlisted deep-linked tenant.
+- Budgets URL echo never overwrites in-progress typing (compares against the debounced value).
+
+**Open (server repo)** `fundBudget` audits `scope:UNIT` while every other budget operation audits `ledger_id`; aligning them would remove the second link.
+
+**Tests**
+- NEW `listAllTenants.test.ts` — 4 specs (paging, cap, single page, failure).
+- NEW `TenantsView-server-filters.test.ts` — 8 specs (wire params, parent options, queued refresh, stale Load more).
+- NEW `BudgetsView-filter-url-write.test.ts` — 7 specs (write-back, round trip, route guard, audit links).
+- Updated `OverviewView.test.ts` (+4), `ReservationsView-url-deeplink.test.ts` (+2), `deployment-pins.test.ts` (version).
+
+**Gates** typecheck clean • lint clean • vitest 1539 / 1539 across 131 files • build clean.
+
+**Version bumps** package `.85 → .86` • dashboard image pin `.86` • server fleet unchanged.
 
 ### 2026-07-26 — post-v0.1.25.85 dependency maintenance
 

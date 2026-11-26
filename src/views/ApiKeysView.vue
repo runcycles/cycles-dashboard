@@ -10,7 +10,8 @@ import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useTerminalAwareList } from '../composables/useTerminalAwareList'
 import { useListExport } from '../composables/useListExport'
 import { useFocusTrap } from '../composables/useFocusTrap'
-import { listTenants, listApiKeys, revokeApiKey, createApiKey, updateApiKey } from '../api/client'
+import { listApiKeys, revokeApiKey, createApiKey, updateApiKey } from '../api/client'
+import { listAllTenants } from '../utils/listAllTenants'
 import { useAuthStore } from '../stores/auth'
 import type { Tenant, ApiKey, ApiKeyCreateRequest, ApiKeyCreateResponse, ApiKeyUpdateRequest } from '../types'
 import { PERMISSIONS } from '../types'
@@ -454,7 +455,9 @@ let ticksSinceWalk = WALK_EVERY_N_TICKS
 
 const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
   try {
-    const tRes = await listTenants()
+    // Cursor-walk: a bare listTenants() stops at the server's 50-row
+    // default page, truncating the tenant filter + create dropdowns.
+    const tRes = await listAllTenants()
     tenants.value = tRes.tenants
     // Capture the mode for this tick. Walk-mode ticks span up to 11
     // requests — an operator can toggle the expiring chip (or press

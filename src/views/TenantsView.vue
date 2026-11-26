@@ -192,7 +192,7 @@ const { sortKey, sortDir, toggle, sorted: columnSortedTenants } = useSort(
   'created_at',
   'desc',
   undefined,
-  { serverSide: true, onChange: () => { refresh() } },
+  { serverSide: true, onChange: () => { requestRefresh() } },
 )
 
 // v0.1.25.46: hide CLOSED tenants by default. Terminal state — nothing
@@ -221,9 +221,29 @@ const {
 // Parents available in the filter dropdown — union of tenants that have
 // at least one child, so the filter doesn't list tenants with no kids
 // (those would always produce an empty table).
-const parentOptions = computed<Tenant[]>(() => {
-  const withChildren = new Set(Object.keys(childCountMap.value))
-  return tenants.value.filter(t => withChildren.has(t.tenant_id))
+//
+// The parent filter is server-side (parent_tenant_id), so while it is
+// active the loaded rows are ONLY that parent's children — the parent
+// itself and every other parent drop out of tenants.value. Deriving the
+// options from the loaded rows alone would empty the dropdown (and
+// blank the selected value) the moment a filter is applied. So the
+// option set accumulates across loads for the lifetime of the view,
+// and always includes the active filter value (deep-link to a parent
+// that was never loaded).
+const knownTenants = ref(new Map<string, Tenant>())
+const knownParentIds = ref(new Set<string>())
+function rememberTenants(list: Tenant[]) {
+  for (const t of list) {
+    knownTenants.value.set(t.tenant_id, t)
+    if (t.parent_tenant_id) knownParentIds.value.add(t.parent_tenant_id)
+  }
+}
+const parentOptions = computed<Array<{ tenant_id: string; name: string }>>(() => {
+  const ids = new Set(knownParentIds.value)
+  if (parentFilter.value && parentFilter.value !== '__root__') ids.add(parentFilter.value)
+  return [...ids]
+    .map(id => ({ tenant_id: id, name: knownTenants.value.get(id)?.name ?? '' }))
+    .sort((a, b) => (a.name || a.tenant_id).localeCompare(b.name || b.tenant_id))
 })
 
 // ─── #4 bulk suspend / reactivate ─────────────────────────────────────
@@ -487,6 +507,15 @@ async function executeStatusAction() {
 // older servers MUST ignore the unknown param, so the client-side
 // filter on filteredTenants stays as graceful degradation for
 // pre-0.1.25.21 deployments.
+//
+// status + parent_tenant_id are server-side too (spec listTenants).
+// Pre-fix they were applied only to the loaded page, so on a fleet
+// larger than one page an Overview drill-down like "3 suspended"
+// showed whichever suspended tenants happened to be in the newest 50.
+// "(root-level only)" has no server equivalent (no null-parent filter)
+// and stays client-side. The client-side filters on filteredTenants
+// remain as a second pass, which also keeps old-filter rows hidden
+// during the brief window before a refetch lands.
 function withListParams(params: Record<string, string> = {}): Record<string, string> {
   if (sortKey.value) {
     params.sort_by = sortKey.value
@@ -494,13 +523,25 @@ function withListParams(params: Record<string, string> = {}): Record<string, str
   }
   const q = debouncedSearch.value.trim()
   if (q) params.search = q
+  if (statusFilter.value) params.status = statusFilter.value
+  if (parentFilter.value && parentFilter.value !== '__root__') params.parent_tenant_id = parentFilter.value
   return params
 }
 
+// The (sort, filter) tuple that produced the rows + cursor on screen.
+// Load-more and export page-follows must send THIS tuple, not the live
+// refs: a filter can change while the page-one refetch is still in
+// flight, and a live-ref follow-up would pair the old cursor with new
+// filters (server 400s on the cursor's filter hash).
+let appliedListParams: Record<string, string> = {}
+
 const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
   try {
-    const res = await listTenants(withListParams())
+    const params = withListParams()
+    const res = await listTenants({ ...params })
     tenants.value = res.tenants
+    rememberTenants(res.tenants)
+    appliedListParams = params
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
     error.value = ''
@@ -511,11 +552,33 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
   }
 }, POLL_SLOW_MS)
 
-// Refetch page 1 whenever the debounced search changes so the cursor
-// stays aligned with the server's (sort_by, sort_dir, search) tuple.
-// Same rationale as useSort's onChange — the opaque cursor is filter-
-// scoped, so carrying it across a filter change would 400.
-watch(debouncedSearch, () => { refresh() })
+// Operator-initiated refetch (search / filter / sort change). usePolling's
+// refresh() is a documented no-op while a tick is in flight, which
+// silently dropped a change made mid-tick until the next 60s poll.
+// Queue it instead and replay on the isLoading true→false edge — same
+// pattern as ApiKeysView.requestRefresh.
+const pendingRefresh = ref(false)
+function requestRefresh() {
+  if (isLoading.value) {
+    pendingRefresh.value = true
+    return
+  }
+  refresh()
+}
+watch(isLoading, (now, was) => {
+  if (was && !now && pendingRefresh.value) {
+    pendingRefresh.value = false
+    requestRefresh()
+  }
+})
+
+// Refetch page 1 whenever the debounced search or a server-side filter
+// changes so the cursor stays aligned with the server's (sort_by,
+// sort_dir, filter) tuple. Same rationale as useSort's onChange — the
+// opaque cursor is filter-scoped, so carrying it across a filter change
+// would 400.
+watch(debouncedSearch, () => { requestRefresh() })
+watch([parentFilter, statusFilter], () => { requestRefresh() })
 
 // Export. filterFn mirrors the client-side filteredTenants computed
 // so the exported set matches what the operator sees on screen. The
@@ -559,7 +622,7 @@ const {
   hasMore,
   nextCursor,
   fetchPage: async (cursor) => {
-    const res = await listTenants(withListParams({ cursor }))
+    const res = await listTenants({ ...appliedListParams, cursor })
     return { items: res.tenants, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
   },
   filterFn: tenantMatchesFilter,
@@ -577,19 +640,28 @@ watch(exportError, (v) => { if (v) error.value = v })
 async function loadMore() {
   if (!nextCursor.value || loadingMore.value) return
   loadingMore.value = true
+  const owner = appliedListParams
   try {
-    const res = await listTenants(withListParams({ cursor: nextCursor.value }))
+    const res = await listTenants({ ...owner, cursor: nextCursor.value })
+    // A page-one refetch (filter / sort / poll) replaced the list while
+    // this page was in flight — it belongs to a superseded result set.
+    if (owner !== appliedListParams) return
     tenants.value = [...tenants.value, ...res.tenants]
+    rememberTenants(res.tenants)
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
-  } catch (e) { error.value = toMessage(e) }
+  } catch (e) {
+    if (owner === appliedListParams) error.value = toMessage(e)
+  }
   finally { loadingMore.value = false }
 }
 
 function parentName(id: string | undefined): string {
   if (!id) return ''
   // V3: O(1) Map lookup (was tenants.value.find() per-row — O(n²) total).
-  const p = tenantById.value.get(id)
+  // Falls back to the accumulated directory: under a server-side parent
+  // filter the parent row itself is not in the loaded page.
+  const p = tenantById.value.get(id) ?? knownTenants.value.get(id)
   return p?.name || id
 }
 

@@ -620,12 +620,16 @@ watch(() => route.query, (q, previousQuery) => {
   const wasDetail = !!previousQuery?.scope && !!previousQuery?.unit
   const nextTenant = stringParam(q.tenant_id)
   if (nextTenant !== selectedTenant.value) selectedTenant.value = nextTenant
+  // The write-back below stamps the DEBOUNCED values into the URL. When
+  // the URL equals the debounced value it is our own echo and the live
+  // ref may already be ahead of it (operator still typing) — don't
+  // clobber in-progress input with the older echo.
   const nextSearch = stringParam(q.search)
-  if (nextSearch !== search.value) search.value = nextSearch
+  if (nextSearch !== search.value.trim() && nextSearch !== debouncedSearch.value.trim()) search.value = nextSearch
   const nextUtilMin = parseUtilPct(q.utilization_min)
-  if (nextUtilMin !== filterUtilMin.value) filterUtilMin.value = nextUtilMin
+  if (nextUtilMin !== parseUtilPct(filterUtilMin.value) && nextUtilMin !== parseUtilPct(debouncedFilterUtilMin.value)) filterUtilMin.value = nextUtilMin
   const nextUtilMax = parseUtilPct(q.utilization_max)
-  if (nextUtilMax !== filterUtilMax.value) filterUtilMax.value = nextUtilMax
+  if (nextUtilMax !== parseUtilPct(filterUtilMax.value) && nextUtilMax !== parseUtilPct(debouncedFilterUtilMax.value)) filterUtilMax.value = nextUtilMax
   if (isDetail.value) {
     cancelBudgetExport()
     invalidateList()
@@ -639,6 +643,43 @@ watch(() => route.query, (q, previousQuery) => {
     if (wasDetail) void loadListMode(paramsChanged)
     else if (paramsChanged) void applyListParams()
   }
+})
+
+// Filter → URL write-back for the four filters the route.query watcher
+// above treats as URL-authoritative (tenant, search, utilization range).
+// Pre-fix they were hydrated FROM the URL but never written TO it, so a
+// drill into a budget and Back reset them to the bare URL's empty
+// values (while status / unit / scope-prefix, which the watcher doesn't
+// touch, survived) and filtered views weren't shareable. `replace`, not
+// push — filter fiddling shouldn't add history entries. Loop-safe: the
+// watcher only assigns refs that differ from the URL.
+function utilQueryValue(v: number | string): string | undefined {
+  const pct = parseUtilPct(v)
+  return pct === '' ? undefined : String(pct)
+}
+function syncFiltersToUrl() {
+  if (route.name !== 'budgets' || isDetail.value) return
+  const desired = {
+    tenant_id: selectedTenant.value || undefined,
+    search: debouncedSearch.value.trim() || undefined,
+    utilization_min: utilQueryValue(debouncedFilterUtilMin.value),
+    utilization_max: utilQueryValue(debouncedFilterUtilMax.value),
+  }
+  const unchanged = (Object.keys(desired) as Array<keyof typeof desired>)
+    .every(k => (stringParam(route.query[k]) || undefined) === desired[k])
+  if (unchanged) return
+  router.replace({ query: { ...route.query, ...desired } })
+}
+watch([selectedTenant, debouncedSearch, debouncedFilterUtilMin, debouncedFilterUtilMax], syncFiltersToUrl)
+
+// List-mode query carried through the detail drill-in and restored by
+// the in-page Back arrow, so a round trip lands on the same filtered
+// list (browser Back already does, via the write-back above).
+const listQuery = computed(() => {
+  const rest = { ...route.query }
+  delete rest.scope
+  delete rest.unit
+  return rest
 })
 
 // V5 debounce auto-apply on text/numeric filter changes. All three
@@ -801,7 +842,7 @@ function rowTenantId(b: BudgetLedger): string {
       @refresh="refresh"
     >
       <template #back>
-        <button v-if="isDetail" @click="router.push({ name: 'budgets' })" aria-label="Back to budgets" class="muted hover:text-gray-700 cursor-pointer">
+        <button v-if="isDetail" @click="router.push({ name: 'budgets', query: listQuery })" aria-label="Back to budgets" class="muted hover:text-gray-700 cursor-pointer">
           <BackArrowIcon class="w-5 h-5" />
         </button>
       </template>
@@ -1035,7 +1076,7 @@ function rowTenantId(b: BudgetLedger): string {
                 <span v-else class="muted-sm">—</span>
               </div>
               <div role="cell" class="table-cell min-w-0">
-                <router-link :to="{ name: 'budgets', query: { scope: sortedBudgets[v.index].scope, unit: sortedBudgets[v.index].unit } }" class="text-blue-600 hover:underline font-mono text-xs truncate inline-block max-w-full align-middle">{{ sortedBudgets[v.index].scope }}</router-link>
+                <router-link :to="{ name: 'budgets', query: { ...listQuery, scope: sortedBudgets[v.index].scope, unit: sortedBudgets[v.index].unit } }" class="text-blue-600 hover:underline font-mono text-xs truncate inline-block max-w-full align-middle">{{ sortedBudgets[v.index].scope }}</router-link>
                 <span v-if="sortedBudgets[v.index].is_over_limit" class="ml-1.5 bg-red-100 text-red-700 px-1 py-0.5 rounded text-xs font-medium">OVER</span>
               </div>
               <div role="cell" class="table-cell font-mono text-xs muted">{{ sortedBudgets[v.index].unit }}</div>
@@ -1053,12 +1094,16 @@ function rowTenantId(b: BudgetLedger): string {
               <div v-if="canManage" role="cell" class="table-cell">
                 <!-- Activity + Copy scope are always shown so even
                      CLOSED budgets (which gate every other action off)
-                     still expose a 2-item kebab. Activity drills the
-                     audit log pre-filtered to this budget scope. -->
+                     still expose a read-only kebab. The audit filter is
+                     exact-match on resource_id and the server keys budget
+                     entries two ways: ledger_id for create / update /
+                     freeze / unfreeze, `scope:UNIT` for funding. Hence
+                     two links (a scope-only id matched nothing). -->
                 <RowActionsMenu
                   :aria-label="`Actions for budget ${sortedBudgets[v.index].scope}`"
                   :items="[
-                    { label: 'Activity', to: { name: 'audit', query: { resource_type: 'budget', resource_id: sortedBudgets[v.index].scope } } },
+                    { label: 'Activity', to: { name: 'audit', query: { resource_type: 'budget', resource_id: sortedBudgets[v.index].ledger_id } } },
+                    { label: 'Funding activity', to: { name: 'audit', query: { resource_type: 'budget', resource_id: `${sortedBudgets[v.index].scope}:${sortedBudgets[v.index].unit}` } } },
                     { label: 'Copy scope', onClick: () => copyScope(sortedBudgets[v.index].scope) },
                     { label: 'Copy as JSON', onClick: () => copyBudgetJson(sortedBudgets[v.index]) },
                     {

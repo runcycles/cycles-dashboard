@@ -41,7 +41,7 @@ Tier 1 incident-response actions available directly from the dashboard (capabili
 |--------|-------|--------|
 | **Freeze budget** | Budget detail | Blocks all reservations, commits, and fund operations |
 | **Unfreeze budget** | Budget detail | Re-enables normal operations |
-| **Create budget** | Budgets list, Tenant detail | Admin-on-behalf-of (dual-auth) — modal with ScopeBuilder + tenant selector |
+| **Create budget** | Tenant detail | Admin-on-behalf-of (dual-auth) — modal with ScopeBuilder + tenant selector |
 | **Adjust budget allocation** | Budget detail | Inline form — uses fund endpoint with RESET operation |
 | **Rollover billing period (RESET_SPENT)** | Budget detail → Fund → RESET_SPENT | Resets `spent` tally; optional exact-spent override (blank = zero). The raw operation sets `allocated = amount` — this single-budget flow preserves the allocation by passing the budget's current `allocated` for you. Requires cycles-server-admin v0.1.25.18+ |
 | **Bulk budget action (CREDIT / DEBIT / RESET / RESET_SPENT / REPAY_DEBT)** | Budgets list | Filter-apply — single tenant required (spec constraint); preview walk + expected_count gate + per-row result dialog for failed/skipped rows. **Bulk RESET / RESET_SPENT set every matched budget's `allocated` to the single amount given** (budgets with differing allocations are all overwritten — the form's hint spells this out); FROZEN budgets in the selection fail per-row. Requires cycles-server-admin v0.1.25.29+ |
@@ -195,6 +195,16 @@ Every top-level list view (Tenants, Budgets, Webhooks, API Keys) and the TenantD
 - **Export / select-all / counter:** all read from the post-terminal-filter visible list. CSV/JSON export never includes hidden terminals; bulk actions never silently touch a hidden row.
 
 Shared implementation: `src/composables/useTerminalAwareList.ts`.
+
+**Server-side filters and shareable URLs.** List filters are sent to the admin API rather than applied to the loaded page, and are mirrored into the URL so a filtered list survives a detail round trip and can be shared:
+
+| View | Server-side filters | URL params |
+|---|---|---|
+| Tenants | search, status, parent (`parent_tenant_id`) | `?search` `?status` `?parent` |
+| Budgets | tenant, status, unit, scope prefix, search, utilization range | `?tenant_id` `?status` `?search` `?utilization_min` `?utilization_max` |
+
+- Tenants "(root-level only)" is the one client-side filter — the API has no null-parent filter, so it applies to loaded rows only.
+- Tenant pickers (Budgets, API Keys, Webhooks, Reservations) load the full tenant directory by cursor walk (`src/utils/listAllTenants.ts`, capped at 1,000 tenants), not the API's 50-row default page.
 
 ## Visualizations
 
@@ -370,7 +380,7 @@ services:
       - cycles
 
   dashboard:
-    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.85
+    image: ghcr.io/runcycles/cycles-dashboard:0.1.25.86
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]

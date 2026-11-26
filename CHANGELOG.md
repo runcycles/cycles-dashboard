@@ -15,6 +15,40 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.86] — 2026-11-26
+
+### Fixed
+
+- **Budget audit drill-down.** The Budgets row action **Activity** always
+  opened an empty audit list. It now filters by the budget's ledger id, and a
+  new **Funding activity** action covers funding entries, which the admin
+  server records under `<scope>:<UNIT>`.
+- **Overview → bulk actions.** "Recent operator activity" rows for bulk tenant
+  and webhook actions linked to a not-found page (`/tenants/bulk-action`). They
+  now open the audit entry.
+- **Tenant dropdowns stopped at 50 tenants.** The Budgets, API Keys, Webhooks,
+  and Reservations tenant pickers now load the full tenant directory (up to
+  1,000). Reservations no longer rejects a valid `?tenant_id=` deep link as
+  "Unknown tenant id" when the tenant is outside the first page.
+- **Overview "Budgets with debt".** The card now lists the largest debts; it
+  previously showed the highest-utilization budgets that happened to have
+  debt. Debt and frozen counts show `10+` when more rows exist than the card
+  loads.
+- **Tenants status and parent filters** are applied by the server, so they
+  cover the whole fleet instead of only the loaded rows. Drill-downs such as
+  Overview's "suspended" chip are now complete on fleets above one page.
+- **Tenants search / filter / sort changes made during a background refresh**
+  are no longer dropped until the next 60-second poll.
+- **Budgets filters survive a detail round trip.** Tenant, search, and
+  utilization range are written to the URL (`?tenant_id`, `?search`,
+  `?utilization_min`, `?utilization_max`), preserved through the budget detail
+  view and its Back arrow, and are shareable.
+
+### Changed
+
+- No API, spec-alignment, or server-fleet pin changes. Governance spec stays
+  at 0.1.25.42.
+
 ## [0.1.25.85] — 2026-07-21
 
 ### Fixed

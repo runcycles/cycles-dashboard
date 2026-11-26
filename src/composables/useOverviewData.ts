@@ -79,6 +79,11 @@ export function useOverviewData(
   // listBudgets(has_debt=true) returns BudgetLedger rows that carry
   // tenant_id from v0.1.25.19+.
   const debtBudgets = ref<BudgetLedger[]>([])
+  // Both capped lists are single limit=10 pages. has_more lets the card
+  // badge and banner pill say "10+" instead of presenting the page size
+  // as the fleet total.
+  const debtBudgetsHasMore = ref(false)
+  const frozenBudgetsHasMore = ref(false)
   // Failing webhooks — replaces overview.failing_webhooks (narrower
   // shape without tenant_id). Fetch full WebhookSubscription rows, then
   // client-filter for (consecutive_failures ?? 0) > 0. listWebhooks has
@@ -199,12 +204,21 @@ export function useOverviewData(
       deps.listBudgets({ status: 'FROZEN', limit: '10' }),
       // Budgets with debt — replaces overview.debt_scopes so the list
       // carries tenant_id and can be filtered against the closed set.
-      deps.listBudgets({ has_debt: 'true', limit: '10' }),
+      // Explicit debt-desc sort: the server default is utilization desc,
+      // so an unsorted page was "top 10 by utilization that have debt",
+      // not the top debtors the card presents.
+      deps.listBudgets({ has_debt: 'true', sort_by: 'debt', sort_dir: 'desc', limit: '10' }),
     ])
     if (ov.status === 'fulfilled') overview.value = ov.value
     if (audit.status === 'fulfilled') recentAudit.value = audit.value.logs
-    if (frozen.status === 'fulfilled') frozenBudgets.value = frozen.value.ledgers
-    if (debt.status === 'fulfilled') debtBudgets.value = debt.value.ledgers
+    if (frozen.status === 'fulfilled') {
+      frozenBudgets.value = frozen.value.ledgers
+      frozenBudgetsHasMore.value = !!frozen.value.has_more
+    }
+    if (debt.status === 'fulfilled') {
+      debtBudgets.value = debt.value.ledgers
+      debtBudgetsHasMore.value = !!debt.value.has_more
+    }
 
     // Phase 2 — the cursor walks, gated. A failed getOverview() yields no
     // signature; walk only if forced or fallback-due (can't detect change).
@@ -330,9 +344,11 @@ export function useOverviewData(
     recentAudit,
     closedTenantIds,
     debtBudgets,
+    debtBudgetsHasMore,
     failingWebhooksRaw,
     atCapBudgets,
     frozenBudgets,
+    frozenBudgetsHasMore,
     error,
     atCapPartial,
     closedTenantsPartial,

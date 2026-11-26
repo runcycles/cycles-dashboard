@@ -9,7 +9,7 @@ import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useTerminalAwareList } from '../composables/useTerminalAwareList'
 import { useListExport } from '../composables/useListExport'
-import { listWebhooks, listTenants, createWebhook, updateWebhook, getWebhookSecurityConfig, updateWebhookSecurityConfig } from '../api/client'
+import { listWebhooks, createWebhook, updateWebhook, getWebhookSecurityConfig, updateWebhookSecurityConfig } from '../api/client'
 import { rateLimitedBatch } from '../utils/rateLimitedBatch'
 import { synthesizeRowSelectBulkResult } from '../utils/rowSelectBulkResult'
 import type { RowSelectBulkResponse } from '../utils/rowSelectBulkResult'
@@ -39,6 +39,7 @@ import { writeClipboardJson } from '../utils/clipboard'
 import { useToast } from '../composables/useToast'
 import { useWebhookFilterBulk, type WebhookFilterBulkResult } from '../composables/useWebhookFilterBulk'
 import { toMessage } from '../utils/errors'
+import { listAllTenants } from '../utils/listAllTenants'
 
 const toast = useToast()
 
@@ -509,7 +510,7 @@ async function loadWebhooksPageOne(operatorTriggered = false) {
   nextCursor.value = ''
   hasMore.value = false
   try {
-    const [wRes, tRes] = await Promise.all([listWebhooks(withListParams()), listTenants()])
+    const [wRes, tRes] = await Promise.all([listWebhooks(withListParams()), listAllTenants()])
     if (generation !== listGeneration) return POLLING_STALE
     webhooks.value = wRes.subscriptions
     hasMore.value = !!wRes.has_more
