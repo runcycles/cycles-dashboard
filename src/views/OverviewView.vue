@@ -33,9 +33,13 @@ const {
   recentAudit,
   closedTenantIds,
   debtBudgets,
+  debtBudgetsHasMore,
+  debtPageFailed,
+  frozenPageFailed,
   failingWebhooksRaw,
   atCapBudgets,
   frozenBudgets,
+  frozenBudgetsHasMore,
   error,
   atCapPartial,
   closedTenantsPartial,
@@ -92,6 +96,16 @@ const atCapBudgetsFiltered = computed<BudgetLedger[]>(() =>
 )
 const frozenBudgetsFiltered = computed<BudgetLedger[]>(() => frozenBudgets.value.filter(isNotClosedTenant))
 const debtBudgetsFiltered = computed<BudgetLedger[]>(() => debtBudgets.value.filter(isNotClosedTenant))
+const debtStatusUnknown = computed(() =>
+  debtBudgetsFiltered.value.length === 0 && (debtBudgetsHasMore.value || debtPageFailed.value),
+)
+// Same idea for frozen budgets: no eligible row loaded, but the lookup
+// failed or stopped at its page cap, so "none" is not established. The
+// card already has its own "N frozen — details unavailable" line; this
+// only keeps the green all-clear banner from claiming more than we know.
+const frozenStatusUnknown = computed(() =>
+  frozenBudgetsFiltered.value.length === 0 && (frozenBudgetsHasMore.value || frozenPageFailed.value),
+)
 const keysFiltered = computed<ApiKey[]>(() => keys.value.filter(isNotClosedTenant))
 const failingWebhooksFiltered = computed<WebhookSubscription[]>(() =>
   failingWebhooksRaw.value
@@ -126,8 +140,8 @@ const frozenSorted = computed<BudgetLedger[]>(() => {
     .slice(0, 5)
 })
 
-// Budgets with debt — sort desc by debt amount (server returns ordered
-// but filtering may re-order on edge cases; re-sort defensively).
+// Budgets with debt — sort desc by debt amount. The fetch requests
+// sort_by=debt desc so this page IS the top debtors; re-sort defensively.
 // Slice to 5 for parity with the other two budget cards.
 const debtBudgetsSorted = computed<BudgetLedger[]>(() => {
   return [...debtBudgetsFiltered.value]
@@ -592,6 +606,9 @@ interface AlertAxis {
   id: string          // hash anchor — matches the card's id attribute
   label: string       // short human label, pluralized elsewhere
   count: number
+  // True when `count` is a lower bound — the backing fetch is a single
+  // capped page and the server reported more rows. Rendered as "N+".
+  more?: boolean
   severity: AxisSeverity
 }
 // Axis counts derive from the closed-tenant-filtered lists so the
@@ -624,13 +641,13 @@ const alertAxes = computed<AlertAxis[]>(() => {
     axes.push({ id: 'recent-denials', label: 'Recent denials', count: overview.value.recent_denials.length, severity: 'danger' })
   }
   if (debtBudgetsFiltered.value.length > 0) {
-    axes.push({ id: 'budgets-with-debt', label: 'Budgets with debt', count: debtBudgetsFiltered.value.length, severity: 'warning' })
+    axes.push({ id: 'budgets-with-debt', label: 'Budgets with debt', count: debtBudgetsFiltered.value.length, more: debtBudgetsHasMore.value, severity: 'warning' })
   }
   if (expiringTotal.value > 0) {
     axes.push({ id: 'expiring-keys', label: 'Expiring keys', count: expiringTotal.value, severity: 'warning' })
   }
   if (frozenBudgetsFiltered.value.length > 0) {
-    axes.push({ id: 'frozen-budgets', label: 'Frozen budgets', count: frozenBudgetsFiltered.value.length, severity: 'warning' })
+    axes.push({ id: 'frozen-budgets', label: 'Frozen budgets', count: frozenBudgetsFiltered.value.length, more: frozenBudgetsHasMore.value, severity: 'warning' })
   }
   return axes
 })
@@ -650,14 +667,25 @@ function jumpTo(id: string) {
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
+const BULK_ACTION_RESOURCE_ID = 'bulk-action'
+const BULK_ACTION_OPERATION_PREFIX = 'bulkAction'
 // Map an audit entry to the most useful detail-view link. Falls back
 // to the Audit view with a pre-filled filter so "click through for
 // context" always works.
 function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<string, string>; query?: Record<string, string> } {
-  if (entry.resource_type === 'tenant' && entry.resource_id) {
+  // Bulk operations write the literal resource_id "bulk-action" (there
+  // is no single resource) — routing that to a detail view produced
+  // /tenants/bulk-action (not found). Fall through to the audit row,
+  // whose metadata carries the per-row outcomes.
+  // "bulk-action" is also a legal tenant id, so the id alone is not
+  // proof — require the bulk operation name as well (bulkActionTenants /
+  // bulkActionWebhooks / bulkActionBudgets).
+  const isBulk = entry.resource_id === BULK_ACTION_RESOURCE_ID
+    && (entry.operation ?? '').startsWith(BULK_ACTION_OPERATION_PREFIX)
+  if (entry.resource_type === 'tenant' && entry.resource_id && !isBulk) {
     return { name: 'tenant-detail', params: { id: entry.resource_id } }
   }
-  if (entry.resource_type === 'webhook' && entry.resource_id) {
+  if (entry.resource_type === 'webhook' && entry.resource_id && !isBulk) {
     return { name: 'webhook-detail', params: { id: entry.resource_id } }
   }
   // Default: jump to audit with the log_id surfaced so the operator
@@ -711,11 +739,11 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
             class="chip cursor-pointer hover:underline"
             :class="a.severity === 'danger' ? 'chip-danger' : 'chip-warning'"
             :title="`Jump to ${a.label}`"
-          >{{ a.label }} <span class="ml-1 tabular-nums">·{{ a.count }}</span></button>
+          >{{ a.label }} <span class="ml-1 tabular-nums">·{{ a.count }}{{ a.more ? '+' : '' }}</span></button>
         </div>
       </div>
       <div
-        v-else
+        v-else-if="!debtStatusUnknown && !frozenStatusUnknown"
         role="status"
         class="mb-4 px-4 py-3 rounded-lg border border-green-200 bg-green-50 dark:bg-green-950/40 dark:border-green-800 flex items-center gap-3"
       >
@@ -1054,11 +1082,12 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
             <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
               <WarningIcon v-if="axisById['budgets-with-debt']" class="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" />
               Budgets with debt
-              <span v-if="debtBudgetsFiltered.length > 0" class="ml-1 badge-warning">{{ debtBudgetsFiltered.length }}</span>
+              <span v-if="debtBudgetsFiltered.length > 0" class="ml-1 badge-warning">{{ debtBudgetsFiltered.length }}{{ debtBudgetsHasMore ? '+' : '' }}</span>
             </h2>
             <router-link :to="{ name: 'budgets', query: { filter: 'has_debt' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
-          <div v-if="debtBudgetsSorted.length === 0" class="text-sm muted py-4 text-center">No outstanding debt</div>
+          <div v-if="debtStatusUnknown" class="text-sm muted py-4 text-center">Debt details are incomplete.</div>
+          <div v-else-if="debtBudgetsSorted.length === 0" class="text-sm muted py-4 text-center">No outstanding debt</div>
           <div
             v-for="b in debtBudgetsSorted"
             :key="b.scope + b.unit"
@@ -1083,7 +1112,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
             <h2 class="text-sm font-medium text-gray-700 dark:text-gray-200 flex items-center gap-1.5">
               <WarningIcon v-if="axisById['frozen-budgets']" class="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" />
               Frozen budgets
-              <span v-if="frozenBudgetsFiltered.length > 0" class="ml-1 badge-warning">{{ frozenBudgetsFiltered.length }}</span>
+              <span v-if="frozenBudgetsFiltered.length > 0" class="ml-1 badge-warning">{{ frozenBudgetsFiltered.length }}{{ frozenBudgetsHasMore ? '+' : '' }}</span>
             </h2>
             <router-link :to="{ name: 'budgets', query: { status: 'FROZEN' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>

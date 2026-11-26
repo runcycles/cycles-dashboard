@@ -1,4 +1,4 @@
-import { ref, watch } from 'vue'
+import { ref, watch, type Ref } from 'vue'
 import {
   getOverview as getOverviewDefault,
   listApiKeys as listApiKeysDefault,
@@ -18,7 +18,15 @@ import { POLLING_STALE } from './pollingResult'
 import { POLL_FAST_MS } from './pollingConstants'
 import { usePolling as usePollingDefault } from './usePolling'
 import { toMessage } from '../utils/errors'
-import { walkCursorPages, LIST_PAGE_LIMIT } from '../utils/cursorWalk'
+import { walkCursorPages, LIST_PAGE_LIMIT, CURSOR_WALK_MAX_PAGES } from '../utils/cursorWalk'
+
+// Rows the debt / frozen cards display (the view slices to this).
+const BUDGET_CARD_ROWS = 5
+// Explicit debt-desc sort: the server default is utilization desc, so an
+// unsorted page was "top 10 by utilization that have debt", not the top
+// debtors the card presents.
+const DEBT_CARD_QUERY: Record<string, string> = { has_debt: 'true', sort_by: 'debt', sort_dir: 'desc' }
+const FROZEN_CARD_QUERY: Record<string, string> = { status: 'FROZEN' }
 
 type OverviewPolling = (
   callback: Parameters<typeof usePollingDefault>[0],
@@ -79,6 +87,12 @@ export function useOverviewData(
   // listBudgets(has_debt=true) returns BudgetLedger rows that carry
   // tenant_id from v0.1.25.19+.
   const debtBudgets = ref<BudgetLedger[]>([])
+  // The initial pages and any top-ups keep the server's has_more flag
+  // so a capped result can be displayed as a lower bound.
+  const debtBudgetsHasMore = ref(false)
+  const debtPageFailed = ref(false)
+  const frozenPageFailed = ref(false)
+  const frozenBudgetsHasMore = ref(false)
   // Failing webhooks — replaces overview.failing_webhooks (narrower
   // shape without tenant_id). Fetch full WebhookSubscription rows, then
   // client-filter for (consecutive_failures ?? 0) > 0. listWebhooks has
@@ -184,6 +198,81 @@ export function useOverviewData(
     return JSON.stringify([ov.tenant_counts, ov.budget_counts, ov.webhook_counts])
   }
 
+  // The debt / frozen cards hide rows owned by CLOSED tenants (the view
+  // filters on closedTenantIds). With a single capped page that filter
+  // could empty the card — "No outstanding debt" — while an open tenant's
+  // budget sat on page two: e.g. the ten largest debts all belonging to
+  // closed tenants. When the first page yields fewer eligible rows than
+  // the card shows and the server has more, re-read from the top at the
+  // max page size until the card is full, the set is exhausted, or the
+  // page cap is hit (then has_more stays true and the count reads "N+").
+  //
+  // The first page is committed to the card ONLY when it needs no
+  // top-up. Committing it first and topping up afterwards made the card
+  // (and its banner pill) blink to the empty / "incomplete" state for
+  // the duration of the follow-up request on every 30s poll. When a
+  // top-up is needed the previous rows stay on screen until it settles.
+  // A failed top-up commits the first page with has_more so the card
+  // reads as incomplete, and rethrows for the error banner.
+  function isOpenTenantRow(b: BudgetLedger): boolean {
+    return !b.tenant_id || !closedTenantIds.value.has(b.tenant_id)
+  }
+  interface BudgetCard {
+    base: Record<string, string>
+    rows: Ref<BudgetLedger[]>
+    more: Ref<boolean>
+  }
+  type BudgetPage = { ledgers: BudgetLedger[]; has_more?: boolean }
+  function needsTopUp(page: BudgetPage): boolean {
+    return !!page.has_more && page.ledgers.filter(isOpenTenantRow).length < BUDGET_CARD_ROWS
+  }
+  function commitFirstPage(card: BudgetCard, page: BudgetPage): void {
+    card.rows.value = page.ledgers
+    card.more.value = !!page.has_more
+  }
+  // Phase 1: paint immediately when the first page is enough under the
+  // closed-tenant set known so far. Returns whether it was committed.
+  function commitIfComplete(card: BudgetCard, page: BudgetPage): boolean {
+    if (needsTopUp(page)) return false
+    commitFirstPage(card, page)
+    return true
+  }
+  // Phase 3: re-evaluate against the (possibly refreshed) closed set.
+  async function settleBudgetCard(card: BudgetCard, page: BudgetPage, committed: boolean): Promise<void> {
+    if (!needsTopUp(page)) {
+      if (!committed) commitFirstPage(card, page)
+      return
+    }
+    try {
+      const collected: BudgetLedger[] = []
+      let eligible = 0
+      let cursor = ''
+      let hasMore = true
+      let pages = 0
+      while (hasMore && pages < CURSOR_WALK_MAX_PAGES && eligible < BUDGET_CARD_ROWS) {
+        const res = await deps.listBudgets({
+          ...card.base,
+          limit: String(LIST_PAGE_LIMIT),
+          ...(cursor ? { cursor } : {}),
+        })
+        collected.push(...res.ledgers)
+        eligible += res.ledgers.filter(isOpenTenantRow).length
+        pages++
+        hasMore = !!res.has_more
+        cursor = res.next_cursor ?? ''
+        // Defensive: has_more without a cursor would loop on page one.
+        if (hasMore && !cursor) break
+      }
+      card.rows.value = collected
+      card.more.value = hasMore
+    } catch (cause) {
+      commitFirstPage(card, page)
+      throw cause
+    }
+  }
+  const debtCard: BudgetCard = { base: DEBT_CARD_QUERY, rows: debtBudgets, more: debtBudgetsHasMore }
+  const frozenCard: BudgetCard = { base: FROZEN_CARD_QUERY, rows: frozenBudgets, more: frozenBudgetsHasMore }
+
   // All fetches within a phase parallelize; any individual failure
   // degrades gracefully (error banner, but other sections keep rendering
   // so a flaky audit endpoint doesn't blank out the whole landing page).
@@ -196,15 +285,17 @@ export function useOverviewData(
       deps.listAuditLogs({ limit: '10' }),
       // Frozen budgets — scopes, not just a count. Lets the Frozen
       // Budgets card list the top 5 inline instead of a center link.
-      deps.listBudgets({ status: 'FROZEN', limit: '10' }),
+      deps.listBudgets({ ...FROZEN_CARD_QUERY, limit: '10' }),
       // Budgets with debt — replaces overview.debt_scopes so the list
       // carries tenant_id and can be filtered against the closed set.
-      deps.listBudgets({ has_debt: 'true', limit: '10' }),
+      deps.listBudgets({ ...DEBT_CARD_QUERY, limit: '10' }),
     ])
     if (ov.status === 'fulfilled') overview.value = ov.value
     if (audit.status === 'fulfilled') recentAudit.value = audit.value.logs
-    if (frozen.status === 'fulfilled') frozenBudgets.value = frozen.value.ledgers
-    if (debt.status === 'fulfilled') debtBudgets.value = debt.value.ledgers
+    frozenPageFailed.value = frozen.status === 'rejected'
+    debtPageFailed.value = debt.status === 'rejected'
+    const frozenCommitted = frozen.status === 'fulfilled' && commitIfComplete(frozenCard, frozen.value)
+    const debtCommitted = debt.status === 'fulfilled' && commitIfComplete(debtCard, debt.value)
 
     // Phase 2 — the cursor walks, gated. A failed getOverview() yields no
     // signature; walk only if forced or fallback-due (can't detect change).
@@ -282,18 +373,27 @@ export function useOverviewData(
         if (sig !== null) lastWalkSignature = sig
       }
     }
+    // Phase 3 — settle the two capped budget cards. Runs after the walk
+    // block so the closed-tenant exclusion set is current. No requests
+    // unless a card's first page is short of eligible rows AND the
+    // server has more.
+    const topUps = await Promise.allSettled([
+      debt.status === 'fulfilled' && settleBudgetCard(debtCard, debt.value, debtCommitted),
+      frozen.status === 'fulfilled' && settleBudgetCard(frozenCard, frozen.value, frozenCommitted),
+    ])
+
     // Surface the first failure so the operator sees *something* wrong —
     // but only error-banner; cards for the successful fetches still render.
     // Phase-1 failures win (they're fresher — re-checked every tick);
     // otherwise the last walk round's failure persists across the backoff
     // window instead of clearing between retries.
-    const phase1Fail = [ov, audit, frozen, debt].find(r => r.status === 'rejected')
-    error.value = phase1Fail && phase1Fail.status === 'rejected'
-      ? toMessage(phase1Fail.reason)
+    const requestFailure = [ov, audit, frozen, debt, ...topUps].find(r => r.status === 'rejected')
+    error.value = requestFailure?.status === 'rejected'
+      ? toMessage(requestFailure.reason)
       : walkError.value
     // Phase-1 failures use the shared network backoff. Walk failures preserve
     // freshness while their existing tick-based backoff owns retry cadence.
-    if (phase1Fail) return false
+    if (requestFailure) return false
     return walkError.value ? POLLING_STALE : true
   }, POLL_FAST_MS)
 
@@ -330,9 +430,13 @@ export function useOverviewData(
     recentAudit,
     closedTenantIds,
     debtBudgets,
+    debtBudgetsHasMore,
+    debtPageFailed,
+    frozenPageFailed,
     failingWebhooksRaw,
     atCapBudgets,
     frozenBudgets,
+    frozenBudgetsHasMore,
     error,
     atCapPartial,
     closedTenantsPartial,

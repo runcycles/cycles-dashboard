@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, shallowRef, computed, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRouter, useRoute } from 'vue-router'
 import { usePolling } from '../composables/usePolling'
@@ -9,6 +9,7 @@ import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useTerminalAwareList } from '../composables/useTerminalAwareList'
 import { useListExport } from '../composables/useListExport'
 import { listTenants, createTenant, updateTenantStatus } from '../api/client'
+import { listAllTenants } from '../utils/listAllTenants'
 import { rateLimitedBatch } from '../utils/rateLimitedBatch'
 import { synthesizeRowSelectBulkResult } from '../utils/rowSelectBulkResult'
 import type { RowSelectBulkResponse } from '../utils/rowSelectBulkResult'
@@ -137,27 +138,6 @@ const hasMore = ref(false)
 const nextCursor = ref('')
 const loadingMore = ref(false)
 
-// v0.1.25.21 (#2): show hierarchy. Derive child counts once per poll so
-// the column render doesn't re-filter tenants.value for every row.
-const childCountMap = computed<Record<string, number>>(() => {
-  const counts: Record<string, number> = {}
-  for (const t of tenants.value) {
-    if (t.parent_tenant_id) counts[t.parent_tenant_id] = (counts[t.parent_tenant_id] ?? 0) + 1
-  }
-  return counts
-})
-
-// V3 (scale-hardening): O(1) tenant lookup by id. Pre-fix, parentName()
-// called tenants.value.find() per-row in the template — that's
-// O(n) per row × n rows = O(n²) render cost. At 10k tenants that's
-// 100M comparisons every time Vue re-ran the parent-name cell.
-// Build a Map once per change in tenants.value and .get() in the row.
-const tenantById = computed<Map<string, Tenant>>(() => {
-  const m = new Map<string, Tenant>()
-  for (const t of tenants.value) m.set(t.tenant_id, t)
-  return m
-})
-
 const filteredTenants = computed(() => {
   let out = tenants.value
   if (parentFilter.value) {
@@ -183,7 +163,7 @@ const filteredTenants = computed(() => {
 //
 // V4 stage 2: server-side sort against listTenants (tenant_id, name,
 // status, created_at enum). Parent + Children columns are NOT server-
-// sortable — they're client-derived from tenantById / childCountMap
+// sortable — they're client-derived from knownTenants / childCountMap
 // and the server has no index over them — so those columns render as
 // plain headers below (no SortHeader). onChange refreshes page 1 so
 // the cursor tuple stays aligned with the new (sort_by, sort_dir).
@@ -192,7 +172,7 @@ const { sortKey, sortDir, toggle, sorted: columnSortedTenants } = useSort(
   'created_at',
   'desc',
   undefined,
-  { serverSide: true, onChange: () => { refresh() } },
+  { serverSide: true, onChange: () => { requestRefresh() } },
 )
 
 // v0.1.25.46: hide CLOSED tenants by default. Terminal state — nothing
@@ -221,9 +201,34 @@ const {
 // Parents available in the filter dropdown — union of tenants that have
 // at least one child, so the filter doesn't list tenants with no kids
 // (those would always produce an empty table).
-const parentOptions = computed<Tenant[]>(() => {
-  const withChildren = new Set(Object.keys(childCountMap.value))
-  return tenants.value.filter(t => withChildren.has(t.tenant_id))
+//
+// The parent filter is server-side (parent_tenant_id), so while it is
+// active the loaded rows are ONLY that parent's children — the parent
+// itself and every other parent drop out of tenants.value. Deriving the
+// options from the loaded rows alone would empty the dropdown (and
+// blank the selected value) the moment a filter is applied. So the
+// option set accumulates across loads for the lifetime of the view,
+// and always includes the active filter value (deep-link to a parent
+// that was never loaded).
+const knownTenants = ref(new Map<string, Tenant>())
+function rememberTenants(list: Tenant[]) {
+  for (const t of list) knownTenants.value.set(t.tenant_id, t)
+}
+// Each observed tenant contributes once, even across repeated polls or
+// a drill-down whose filtered response omits the next generation.
+const childCountMap = computed(() => {
+  const counts = new Map<string, number>()
+  for (const { parent_tenant_id: parent } of knownTenants.value.values()) {
+    if (parent) counts.set(parent, (counts.get(parent) ?? 0) + 1)
+  }
+  return counts
+})
+const parentOptions = computed<Array<{ tenant_id: string; name: string }>>(() => {
+  const ids = new Set(childCountMap.value.keys())
+  if (parentFilter.value && parentFilter.value !== '__root__') ids.add(parentFilter.value)
+  return [...ids]
+    .map(id => ({ tenant_id: id, name: knownTenants.value.get(id)?.name ?? '' }))
+    .sort((a, b) => (a.name || a.tenant_id).localeCompare(b.name || b.tenant_id))
 })
 
 // ─── #4 bulk suspend / reactivate ─────────────────────────────────────
@@ -394,6 +399,46 @@ function openCreate() {
   }
   createError.value = ''
   showCreate.value = true
+  void loadCreateParentOptions()
+}
+
+// Parent picker for Create Tenant. Independent of the list: the list is
+// server-filtered (search / status / parent), so on /tenants?parent=root
+// it holds only root's children and offering those rows as parents made
+// it impossible to add another child under root. Seeded from every
+// tenant this view has seen so the select is usable immediately, then
+// replaced by the full directory walk.
+const createParentOptions = ref<Tenant[]>([])
+const createParentsError = ref('')
+let createParentsSeq = 0
+async function loadCreateParentOptions() {
+  const seq = ++createParentsSeq
+  createParentsError.value = ''
+  createParentOptions.value = [...knownTenants.value.values()]
+  try {
+    const directory = await listAllTenants()
+    if (seq !== createParentsSeq) return
+    // Deliberately NOT folded into knownTenants: that set drives the
+    // list's Children counts and parent filter options, and feeding the
+    // whole directory into it made those numbers jump just because the
+    // dialog was opened.
+    if (directory.partial) {
+      const merged = new Map(knownTenants.value)
+      for (const t of directory.tenants) merged.set(t.tenant_id, t)
+      createParentOptions.value = [...merged.values()]
+      createParentsError.value = 'The tenant directory is incomplete. Some parents may be missing.'
+    } else {
+      createParentOptions.value = directory.tenants
+      const selected = createForm.value.parent_tenant_id
+      if (selected && !directory.tenants.some(t => t.tenant_id === selected)) {
+        createForm.value.parent_tenant_id = ''
+        createParentsError.value = 'The selected parent is no longer available.'
+      }
+    }
+  } catch (e) {
+    if (seq !== createParentsSeq) return
+    createParentsError.value = `Could not load the full tenant list: ${toMessage(e)}`
+  }
 }
 
 // M7 (form UX): live validation of the tenant-id input. Pre-fix the
@@ -487,6 +532,15 @@ async function executeStatusAction() {
 // older servers MUST ignore the unknown param, so the client-side
 // filter on filteredTenants stays as graceful degradation for
 // pre-0.1.25.21 deployments.
+//
+// status + parent_tenant_id are server-side too (spec listTenants).
+// Pre-fix they were applied only to the loaded page, so on a fleet
+// larger than one page an Overview drill-down like "3 suspended"
+// showed whichever suspended tenants happened to be in the newest 50.
+// "(root-level only)" has no server equivalent (no null-parent filter)
+// and stays client-side. The client-side filters on filteredTenants
+// remain as a second pass, which also keeps old-filter rows hidden
+// during the brief window before a refetch lands.
 function withListParams(params: Record<string, string> = {}): Record<string, string> {
   if (sortKey.value) {
     params.sort_by = sortKey.value
@@ -494,13 +548,34 @@ function withListParams(params: Record<string, string> = {}): Record<string, str
   }
   const q = debouncedSearch.value.trim()
   if (q) params.search = q
+  if (statusFilter.value) params.status = statusFilter.value
+  if (parentFilter.value && parentFilter.value !== '__root__') params.parent_tenant_id = parentFilter.value
   return params
 }
 
+// The (sort, filter) tuple that produced the rows + cursor on screen.
+// Load-more and export page-follows must send THIS tuple, not the live
+// refs: a filter can change while the page-one refetch is still in
+// flight, and a live-ref follow-up would pair the old cursor with new
+// filters (server 400s on the cursor's filter hash).
+const appliedListParams = shallowRef<Record<string, string>>({})
+// False from the moment a filter / search / sort changes until page one
+// for the new tuple lands (and before the first load). While false the
+// rows + cursor on screen belong to the PREVIOUS tuple, so export and
+// Load more are held: exporting then would download old-filter rows
+// under new-filter controls (clear SUSPENDED → "All" still exported
+// only the suspended tenants).
+const resultsMatchFilters = computed(() =>
+  JSON.stringify(withListParams()) === JSON.stringify(appliedListParams.value),
+)
+
 const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
   try {
-    const res = await listTenants(withListParams())
+    const params = withListParams()
+    const res = await listTenants({ ...params })
     tenants.value = res.tenants
+    rememberTenants(res.tenants)
+    appliedListParams.value = params
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
     error.value = ''
@@ -511,11 +586,33 @@ const { refresh, isLoading, lastSuccessAt } = usePolling(async () => {
   }
 }, POLL_SLOW_MS)
 
-// Refetch page 1 whenever the debounced search changes so the cursor
-// stays aligned with the server's (sort_by, sort_dir, search) tuple.
-// Same rationale as useSort's onChange — the opaque cursor is filter-
-// scoped, so carrying it across a filter change would 400.
-watch(debouncedSearch, () => { refresh() })
+// Operator-initiated refetch (search / filter / sort change). usePolling's
+// refresh() is a documented no-op while a tick is in flight, which
+// silently dropped a change made mid-tick until the next 60s poll.
+// Queue it instead and replay on the isLoading true→false edge — same
+// pattern as ApiKeysView.requestRefresh.
+const pendingRefresh = ref(false)
+function requestRefresh() {
+  if (isLoading.value) {
+    pendingRefresh.value = true
+    return
+  }
+  refresh()
+}
+watch(isLoading, (now, was) => {
+  if (was && !now && pendingRefresh.value) {
+    pendingRefresh.value = false
+    requestRefresh()
+  }
+})
+
+// Refetch page 1 whenever the debounced search or a server-side filter
+// changes so the cursor stays aligned with the server's (sort_by,
+// sort_dir, filter) tuple. Same rationale as useSort's onChange — the
+// opaque cursor is filter-scoped, so carrying it across a filter change
+// would 400.
+watch(debouncedSearch, () => { requestRefresh() })
+watch([parentFilter, statusFilter], () => { requestRefresh() })
 
 // Export. filterFn mirrors the client-side filteredTenants computed
 // so the exported set matches what the operator sees on screen. The
@@ -546,7 +643,7 @@ const {
   exportError,
   exportCancellable,
   maxRows: EXPORT_MAX_ROWS,
-  confirmExport,
+  confirmExport: openExportConfirm,
   cancelExport,
   cancelRunningExport,
   executeExport,
@@ -558,8 +655,9 @@ const {
   currentItems: sortedTenants,
   hasMore,
   nextCursor,
-  fetchPage: async (cursor) => {
-    const res = await listTenants(withListParams({ cursor }))
+  fetchPage: async (cursor, signal) => {
+    // Pinned at confirm time: one immutable tuple owns the whole walk.
+    const res = await listTenants({ ...exportListParams, cursor }, signal)
     return { items: res.tenants, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
   },
   filterFn: tenantMatchesFilter,
@@ -574,23 +672,44 @@ const {
 
 watch(exportError, (v) => { if (v) error.value = v })
 
+// The query tuple the export walks. Captured when the dialog opens so
+// later polls (which replace appliedListParams) can't change it mid-walk.
+let exportListParams: Record<string, string> = {}
+function confirmExport(format: 'csv' | 'json') {
+  if (!resultsMatchFilters.value) return
+  exportListParams = appliedListParams.value
+  openExportConfirm(format)
+}
+// A filter change while the confirm dialog is open or the walk is
+// running invalidates the export: its seed rows and cursor belong to the
+// old tuple, and filterFn would start applying the new one.
+watch([parentFilter, statusFilter, debouncedSearch, sortKey, sortDir, showTerminal], () => {
+  cancelExport()
+  if (exporting.value) cancelRunningExport()
+}, { flush: 'sync' })
+
 async function loadMore() {
-  if (!nextCursor.value || loadingMore.value) return
+  if (!nextCursor.value || loadingMore.value || !resultsMatchFilters.value) return
   loadingMore.value = true
+  const owner = appliedListParams.value
   try {
-    const res = await listTenants(withListParams({ cursor: nextCursor.value }))
+    const res = await listTenants({ ...owner, cursor: nextCursor.value })
+    // A page-one refetch (filter / sort / poll) replaced the list while
+    // this page was in flight — it belongs to a superseded result set.
+    if (owner !== appliedListParams.value) return
     tenants.value = [...tenants.value, ...res.tenants]
+    rememberTenants(res.tenants)
     hasMore.value = !!res.has_more
     nextCursor.value = res.next_cursor ?? ''
-  } catch (e) { error.value = toMessage(e) }
+  } catch (e) {
+    if (owner === appliedListParams.value) error.value = toMessage(e)
+  }
   finally { loadingMore.value = false }
 }
 
 function parentName(id: string | undefined): string {
   if (!id) return ''
-  // V3: O(1) Map lookup (was tenants.value.find() per-row — O(n²) total).
-  const p = tenantById.value.get(id)
-  return p?.name || id
+  return knownTenants.value.get(id)?.name || id
 }
 
 // V1 virtualization. See ReservationsView.vue for the pattern rationale —
@@ -647,11 +766,11 @@ const gridTemplate = computed(() =>
         </button>
       </template>
       <template #actions>
-        <button @click="confirmExport('csv')" :disabled="sortedTenants.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+        <button @click="confirmExport('csv')" :disabled="sortedTenants.length === 0 || !resultsMatchFilters" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
           <DownloadIcon class="w-3.5 h-3.5" />
           Export CSV
         </button>
-        <button @click="confirmExport('json')" :disabled="sortedTenants.length === 0" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
+        <button @click="confirmExport('json')" :disabled="sortedTenants.length === 0 || !resultsMatchFilters" class="inline-flex items-center gap-1 muted-sm hover:text-gray-700 cursor-pointer px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">
           <DownloadIcon class="w-3.5 h-3.5" />
           Export JSON
         </button>
@@ -787,7 +906,7 @@ const gridTemplate = computed(() =>
           </div>
           <SortHeader as="div" label="Tenant ID" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Name" column="name" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-          <!-- Parent + Children are client-derived (tenantById name +
+          <!-- Parent + Children are client-derived (knownTenants name +
                childCountMap count) and have no server-side index — the
                listTenants sort_by enum is limited to tenant_id, name,
                status, created_at. Rendered as plain columnheader divs
@@ -831,11 +950,11 @@ const gridTemplate = computed(() =>
             </div>
             <div role="cell" class="table-cell text-xs">
               <button
-                v-if="childCountMap[sortedTenants[v.index].tenant_id]"
+                v-if="childCountMap.get(sortedTenants[v.index].tenant_id)"
                 @click="parentFilter = sortedTenants[v.index].tenant_id"
                 class="text-blue-600 hover:underline cursor-pointer"
-                :aria-label="`Filter list to ${childCountMap[sortedTenants[v.index].tenant_id]} children of ${sortedTenants[v.index].name}`"
-              >{{ childCountMap[sortedTenants[v.index].tenant_id] }} child{{ childCountMap[sortedTenants[v.index].tenant_id] === 1 ? '' : 'ren' }}</button>
+                :aria-label="`Filter list to ${childCountMap.get(sortedTenants[v.index].tenant_id)} children of ${sortedTenants[v.index].name}`"
+              >{{ childCountMap.get(sortedTenants[v.index].tenant_id) }} child{{ childCountMap.get(sortedTenants[v.index].tenant_id) === 1 ? '' : 'ren' }}</button>
               <span v-else class="text-gray-500" aria-hidden="true">—</span>
             </div>
             <div role="cell" class="table-cell"><StatusBadge :status="sortedTenants[v.index].status" /></div>
@@ -886,7 +1005,7 @@ const gridTemplate = computed(() =>
       </p>
       <button
         @click="loadMore"
-        :disabled="loadingMore || !nextCursor"
+        :disabled="loadingMore || !nextCursor || !resultsMatchFilters"
         class="text-xs px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
       >
         {{ loadingMore ? 'Loading…' : 'Load more' }}
@@ -990,8 +1109,9 @@ const gridTemplate = computed(() =>
         <label for="ct-parent" class="form-label">Parent Tenant (optional)</label>
         <select id="ct-parent" v-model="createForm.parent_tenant_id" class="form-select w-full">
           <option value="">None</option>
-          <option v-for="t in tenants" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
+          <option v-for="t in createParentOptions" :key="t.tenant_id" :value="t.tenant_id">{{ t.name || t.tenant_id }}</option>
         </select>
+        <p v-if="createParentsError" class="muted-sm mt-0.5" role="status">{{ createParentsError }}</p>
       </div>
       <details class="border-t border-gray-200 dark:border-gray-700 pt-3">
         <summary class="text-sm font-medium text-gray-700 dark:text-gray-200 cursor-pointer">Reservation defaults (optional)</summary>

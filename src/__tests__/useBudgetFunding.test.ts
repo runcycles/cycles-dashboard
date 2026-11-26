@@ -90,10 +90,35 @@ describe('useBudgetFunding', () => {
     expect(funding.isOpen.value).toBe(false)
   })
 
-  it('prefers the selected tenant and supplies the default audit reason', async () => {
-    selectedTenant.value = 'selected-tenant'
+  it('funds under the ledger tenant even when the list filter names another tenant', async () => {
+    // Filter switched to Beta while Acme's rows are still on screen (or
+    // carried into the detail URL): the ledger, not the filter, owns
+    // the mutation — the server rejects a mismatched tenant_id.
+    selectedTenant.value = 'beta'
+    const funding = create()
+    funding.open(ledger({ tenant_id: 'acme' }))
+    funding.form.value.amount = 25
+
+    await funding.submit()
+
+    expect(fund.mock.calls[0][0]).toBe('acme')
+  })
+
+  it('uses the scope tenant for a legacy ledger when the list filter has changed', async () => {
+    selectedTenant.value = 'beta'
     const funding = create()
     funding.open(ledger())
+    funding.form.value.amount = 25
+
+    await funding.submit()
+
+    expect(fund.mock.calls[0][0]).toBe('acme')
+  })
+
+  it('uses the selected tenant for a legacy ledger with no tenant in its scope', async () => {
+    selectedTenant.value = 'selected-tenant'
+    const funding = create()
+    funding.open(ledger({ scope: 'system:global' }))
     funding.form.value.amount = 25
 
     await funding.submit()

@@ -146,9 +146,9 @@ export function useBudgetFunding(options: UseBudgetFundingOptions) {
       spent = parsed
     }
 
-    // Preserve the existing precedence: a selected list tenant owns the
-    // mutation; detail/deep-link entry points derive it from the scope.
-    const tenantId = options.selectedTenant.value || tenantFromScope(budget.scope)
+    // Legacy ledgers can still identify their tenant in the scope. The
+    // list filter is a last resort for scopes without a tenant prefix.
+    const tenantId = budget.tenant_id || tenantFromScope(budget.scope) || options.selectedTenant.value
     if (!tenantId) {
       error.value = `Cannot determine tenant for scope "${budget.scope}". Expected a "tenant:<id>" prefix.`
       return false

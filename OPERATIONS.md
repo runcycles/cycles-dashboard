@@ -213,7 +213,7 @@ dashboard image does not need to change for an admin-only version bump.
 
 ## Upgrades and rollback
 
-**Pinned server fleet (dashboard v0.1.25.85):** runtime `0.1.25.58`, admin
+**Pinned server fleet (dashboard v0.1.25.86):** runtime `0.1.25.58`, admin
 `0.1.25.55`, events `0.1.25.25`. These are exact tags, not floating aliases.
 
 Dashboard `.85` applies governance spec `.42`'s non-negative policy-priority
@@ -436,7 +436,29 @@ pick the terminal value in the status dropdown (auto-reveals those rows
 even with the toggle off). Toggle state mirrors to `?include_terminal=1` so
 a deep-linked list URL carries the operator's preference.
 
-**"Exported CSV is missing some rows."** Same cause. Export follows the
+**"A tenant is missing from a tenant dropdown."** As of **v0.1.25.86** the
+Budgets, API Keys, Webhooks, and Reservations tenant pickers load the whole
+tenant directory (cursor walk, 100 per page) instead of the API's 50-row
+default page. The walk is capped at 1,000 tenants; on a larger fleet, tenants
+past the cap are absent from the dropdowns. Reach them by deep link
+(`/reservations?tenant_id=<id>`, `/budgets?tenant_id=<id>`) or the command
+palette — Reservations keeps a deep-linked tenant even when it is beyond the
+cap.
+
+**"Budget Activity shows no audit entries."** Before **v0.1.25.86** the row
+action filtered on the budget scope, which matches nothing. The admin server
+records budget audit entries under two ids: `ledger_id` for create / update /
+freeze / unfreeze, and `<scope>:<UNIT>` for funding. The row menu now has two
+links, **Activity** and **Funding activity**, one per id. To query by hand:
+Audit → Resource type `budget` → Resource ID set to either value.
+
+**"Overview shows `10+` on Budgets with debt / Frozen budgets."** The cards
+start with ten rows and request more when closed tenants leave fewer than five
+eligible budgets. `N+` means more rows are available. If a request fails or
+the page cap is reached before any eligible debt is found, the debt card shows
+"Debt details are incomplete." Use **View all** to inspect the budget list.
+
+**"Exported CSV is missing some rows."** Terminal-row cause, as above. Export follows the
 visible list — if terminals are hidden, they are not in the export. This
 is deliberate ("export what I see"). Flip the toggle on before exporting
 if you need the terminals included.

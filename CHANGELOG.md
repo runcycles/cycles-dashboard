@@ -15,6 +15,57 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
+## [0.1.25.86] — 2026-11-26
+
+### Fixed
+
+- **Budget audit drill-down.** The Budgets row action **Activity** always
+  opened an empty audit list. It now filters by the budget's ledger id, and a
+  new **Funding activity** action covers funding entries, which the admin
+  server records under `<scope>:<UNIT>`.
+- **Overview → bulk actions.** "Recent operator activity" rows for bulk tenant
+  and webhook actions linked to a not-found page (`/tenants/bulk-action`). They
+  now open the audit entry.
+- **Tenant dropdowns stopped at 50 tenants.** The Budgets, API Keys, Webhooks,
+  and Reservations tenant pickers now load the full tenant directory (up to
+  1,000). Reservations no longer rejects a valid `?tenant_id=` deep link as
+  "Unknown tenant id" when the tenant is outside the first page.
+- **Overview "Budgets with debt".** The card now lists the largest debts; it
+  previously showed the highest-utilization budgets that happened to have
+  debt. Debt and frozen counts show `10+` when more rows exist than the card
+  loads.
+- **Tenants status and parent filters** are applied by the server, so they
+  cover the whole fleet instead of only the loaded rows. Drill-downs such as
+  Overview's "suspended" chip are now complete on fleets above one page.
+- **Tenants search / filter / sort changes made during a background refresh**
+  are no longer dropped until the next 60-second poll.
+- **Budgets filters survive a detail round trip.** Tenant, status, search, and
+  utilization range are written to the URL (`?tenant_id`, `?status`,
+  `?search`, `?utilization_min`, `?utilization_max`), preserved through the
+  budget detail view and its Back arrow, and are shareable. Unit and scope
+  prefix are not in the URL.
+
+- **Overview debt and frozen cards could read empty while budgets needed
+  attention.** When the first rows all belonged to closed tenants (which the
+  cards hide), the card showed "No outstanding debt". The cards now read
+  up to ten additional pages. An incomplete debt lookup is marked on the card,
+  and the "All clear" banner is withheld while a debt or frozen lookup is
+  incomplete.
+- **Funding a budget used the list's tenant filter instead of the budget's own
+  tenant**, so funding a row from a tenant other than the one selected was
+  rejected. Funding uses the ledger tenant or the tenant in its scope for legacy rows.
+- **Tenants export while a filter change is loading** could download the
+  previous filter's rows. Export and Load more are held until the list matches
+  the selected filters, and an open export is cancelled if a filter changes.
+- **Create Tenant parent picker** loads the tenant directory independently of
+  the list filters and retains known parents when the directory is partial.
+  Drilling into a parent also preserves links to its known grandchildren.
+
+### Changed
+
+- No API, spec-alignment, or server-fleet pin changes. Governance spec stays
+  at 0.1.25.42.
+
 ## [0.1.25.85] — 2026-07-21
 
 ### Fixed

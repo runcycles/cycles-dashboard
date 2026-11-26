@@ -7,6 +7,7 @@ import {
 } from '../api/client'
 import type { BudgetLedger, Event, Tenant } from '../types'
 import { toMessage } from '../utils/errors'
+import { listAllTenants } from '../utils/listAllTenants'
 import { useAppliedQuery } from './useAppliedQuery'
 import type { AppliedQuerySnapshot } from './useAppliedQuery'
 import { POLL_SLOW_MS } from './pollingConstants'
@@ -98,7 +99,9 @@ export function useBudgetData(options: UseBudgetDataOptions) {
 
   async function loadTenants(): Promise<boolean | typeof POLLING_STALE> {
     try {
-      const response = await listTenants()()
+      // Cursor-walk: a bare listTenants() stops at the server's
+      // 50-row default page and truncated the tenant dropdown.
+      const response = await listAllTenants(listTenants())
       if (options.isDetail()) return POLLING_STALE
       tenants.value = response.tenants
       tenantsError.value = ''

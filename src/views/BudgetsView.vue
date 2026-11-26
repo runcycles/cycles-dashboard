@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute, useRouter } from 'vue-router'
+import type { LocationQueryValue } from 'vue-router'
 import { useSort } from '../composables/useSort'
 import { useDebouncedRef } from '../composables/useDebouncedRef'
 import { useTerminalAwareList } from '../composables/useTerminalAwareList'
@@ -606,6 +607,11 @@ function cancelBulkStatus() {
 watch(selectedTenant, () => {
   if (!isCrossTenantFilter.value && !isDetail.value) void applyListParams()
 })
+// Vue Router supersedes the previous navigation when a new one starts.
+let pendingSelfWrite: { signature: string } | undefined
+function querySignature(q: Record<string, LocationQueryValue | LocationQueryValue[] | undefined>): string {
+  return JSON.stringify(Object.keys(q).filter(k => q[k] !== undefined).sort().map(k => [k, q[k]]))
+}
 watch(() => route.query, (q, previousQuery) => {
   // BulkActionResultDialog's View-budget link and the Overview
   // utilization donut's drill-down both navigate to the same /budgets
@@ -620,12 +626,32 @@ watch(() => route.query, (q, previousQuery) => {
   const wasDetail = !!previousQuery?.scope && !!previousQuery?.unit
   const nextTenant = stringParam(q.tenant_id)
   if (nextTenant !== selectedTenant.value) selectedTenant.value = nextTenant
-  const nextSearch = stringParam(q.search)
-  if (nextSearch !== search.value) search.value = nextSearch
-  const nextUtilMin = parseUtilPct(q.utilization_min)
-  if (nextUtilMin !== filterUtilMin.value) filterUtilMin.value = nextUtilMin
-  const nextUtilMax = parseUtilPct(q.utilization_max)
-  if (nextUtilMax !== filterUtilMax.value) filterUtilMax.value = nextUtilMax
+  // ?status is hydrated at setup and written back below, so it must be
+  // re-synced here too — otherwise the URL and the dropdown drift apart
+  // (a stale ?status=FROZEN surviving in a shared link after the
+  // operator switched the dropdown back to "All").
+  const nextStatus = stringParam(q.status)
+  if (nextStatus !== filterStatus.value) filterStatus.value = nextStatus
+  // The write-back below stamps the DEBOUNCED text/number values into
+  // the URL, so on its echo the live ref may already be ahead (operator
+  // still typing) and must not be clobbered. An echo is recognised by
+  // the exact query this view wrote — NOT by "URL equals the debounced
+  // value", which also holds for a genuine navigation (typing on
+  // /budgets?tenant_id=acme then going to bare /budgets within the
+  // debounce window: both have an empty search). A genuine navigation
+  // is URL-authoritative: it resets pending input, which also cancels
+  // the pending debounce so the old text is never written into the
+  // destination URL.
+  const isOwnEcho = pendingSelfWrite?.signature === querySignature(q)
+  pendingSelfWrite = undefined
+  if (!isOwnEcho) {
+    const nextSearch = stringParam(q.search)
+    if (nextSearch !== search.value.trim()) search.value = nextSearch
+    const nextUtilMin = parseUtilPct(q.utilization_min)
+    if (nextUtilMin !== parseUtilPct(filterUtilMin.value)) filterUtilMin.value = nextUtilMin
+    const nextUtilMax = parseUtilPct(q.utilization_max)
+    if (nextUtilMax !== parseUtilPct(filterUtilMax.value)) filterUtilMax.value = nextUtilMax
+  }
   if (isDetail.value) {
     cancelBudgetExport()
     invalidateList()
@@ -639,6 +665,58 @@ watch(() => route.query, (q, previousQuery) => {
     if (wasDetail) void loadListMode(paramsChanged)
     else if (paramsChanged) void applyListParams()
   }
+})
+
+// Filter → URL write-back for the filters the route.query watcher above
+// treats as URL-authoritative (tenant, status, search, utilization
+// range). Unit and scope prefix are not URL-backed: they live in refs
+// only, which survive the in-view detail round trip but not a reload.
+// Pre-fix they were hydrated FROM the URL but never written TO it, so a
+// drill into a budget and Back reset them to the bare URL's empty
+// values (while status / unit / scope-prefix, which the watcher doesn't
+// touch, survived) and filtered views weren't shareable. `replace`, not
+// push — filter fiddling shouldn't add history entries. Loop-safe: the
+// watcher only assigns refs that differ from the URL, and recognises
+// this function's own writes while the replacement is pending.
+function utilQueryValue(v: number | string): string | undefined {
+  const pct = parseUtilPct(v)
+  return pct === '' ? undefined : String(pct)
+}
+async function syncFiltersToUrl() {
+  if (route.name !== 'budgets' || isDetail.value) return
+  const desired = {
+    tenant_id: selectedTenant.value || undefined,
+    status: filterStatus.value || undefined,
+    search: debouncedSearch.value.trim() || undefined,
+    utilization_min: utilQueryValue(debouncedFilterUtilMin.value),
+    utilization_max: utilQueryValue(debouncedFilterUtilMax.value),
+  }
+  const unchanged = (Object.keys(desired) as Array<keyof typeof desired>)
+    .every(k => (stringParam(route.query[k]) || undefined) === desired[k])
+  if (unchanged) return
+  const next = { ...route.query, ...desired }
+  const write = { signature: querySignature(next) }
+  pendingSelfWrite = write
+  try {
+    await router.replace({ query: next })
+  } catch (cause) {
+    toast.error(`Could not update the budget URL: ${toMessage(cause)}`)
+  } finally {
+    // Cancelled, duplicated and redirected writes may never echo. An
+    // older completion must also leave a newer pending write intact.
+    if (pendingSelfWrite === write) pendingSelfWrite = undefined
+  }
+}
+watch([selectedTenant, filterStatus, debouncedSearch, debouncedFilterUtilMin, debouncedFilterUtilMax], syncFiltersToUrl)
+
+// List-mode query carried through the detail drill-in and restored by
+// the in-page Back arrow, so a round trip lands on the same filtered
+// list (browser Back already does, via the write-back above).
+const listQuery = computed(() => {
+  const rest = { ...route.query }
+  delete rest.scope
+  delete rest.unit
+  return rest
 })
 
 // V5 debounce auto-apply on text/numeric filter changes. All three
@@ -801,7 +879,7 @@ function rowTenantId(b: BudgetLedger): string {
       @refresh="refresh"
     >
       <template #back>
-        <button v-if="isDetail" @click="router.push({ name: 'budgets' })" aria-label="Back to budgets" class="muted hover:text-gray-700 cursor-pointer">
+        <button v-if="isDetail" @click="router.push({ name: 'budgets', query: listQuery })" aria-label="Back to budgets" class="muted hover:text-gray-700 cursor-pointer">
           <BackArrowIcon class="w-5 h-5" />
         </button>
       </template>
@@ -1035,7 +1113,7 @@ function rowTenantId(b: BudgetLedger): string {
                 <span v-else class="muted-sm">—</span>
               </div>
               <div role="cell" class="table-cell min-w-0">
-                <router-link :to="{ name: 'budgets', query: { scope: sortedBudgets[v.index].scope, unit: sortedBudgets[v.index].unit } }" class="text-blue-600 hover:underline font-mono text-xs truncate inline-block max-w-full align-middle">{{ sortedBudgets[v.index].scope }}</router-link>
+                <router-link :to="{ name: 'budgets', query: { ...listQuery, scope: sortedBudgets[v.index].scope, unit: sortedBudgets[v.index].unit } }" class="text-blue-600 hover:underline font-mono text-xs truncate inline-block max-w-full align-middle">{{ sortedBudgets[v.index].scope }}</router-link>
                 <span v-if="sortedBudgets[v.index].is_over_limit" class="ml-1.5 bg-red-100 text-red-700 px-1 py-0.5 rounded text-xs font-medium">OVER</span>
               </div>
               <div role="cell" class="table-cell font-mono text-xs muted">{{ sortedBudgets[v.index].unit }}</div>
@@ -1053,12 +1131,16 @@ function rowTenantId(b: BudgetLedger): string {
               <div v-if="canManage" role="cell" class="table-cell">
                 <!-- Activity + Copy scope are always shown so even
                      CLOSED budgets (which gate every other action off)
-                     still expose a 2-item kebab. Activity drills the
-                     audit log pre-filtered to this budget scope. -->
+                     still expose a read-only kebab. The audit filter is
+                     exact-match on resource_id and the server keys budget
+                     entries two ways: ledger_id for create / update /
+                     freeze / unfreeze, `scope:UNIT` for funding. Hence
+                     two links (a scope-only id matched nothing). -->
                 <RowActionsMenu
                   :aria-label="`Actions for budget ${sortedBudgets[v.index].scope}`"
                   :items="[
-                    { label: 'Activity', to: { name: 'audit', query: { resource_type: 'budget', resource_id: sortedBudgets[v.index].scope } } },
+                    { label: 'Activity', to: { name: 'audit', query: { resource_type: 'budget', resource_id: sortedBudgets[v.index].ledger_id } } },
+                    { label: 'Funding activity', to: { name: 'audit', query: { resource_type: 'budget', resource_id: `${sortedBudgets[v.index].scope}:${sortedBudgets[v.index].unit}` } } },
                     { label: 'Copy scope', onClick: () => copyScope(sortedBudgets[v.index].scope) },
                     { label: 'Copy as JSON', onClick: () => copyBudgetJson(sortedBudgets[v.index]) },
                     {
