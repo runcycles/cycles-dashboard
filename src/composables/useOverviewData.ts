@@ -91,6 +91,7 @@ export function useOverviewData(
   // so a capped result can be displayed as a lower bound.
   const debtBudgetsHasMore = ref(false)
   const debtPageFailed = ref(false)
+  const frozenPageFailed = ref(false)
   const frozenBudgetsHasMore = ref(false)
   // Failing webhooks — replaces overview.failing_webhooks (narrower
   // shape without tenant_id). Fetch full WebhookSubscription rows, then
@@ -205,39 +206,72 @@ export function useOverviewData(
   // the card shows and the server has more, re-read from the top at the
   // max page size until the card is full, the set is exhausted, or the
   // page cap is hit (then has_more stays true and the count reads "N+").
-  // Best-effort: a failure keeps the first page and its has_more flag.
+  //
+  // The first page is committed to the card ONLY when it needs no
+  // top-up. Committing it first and topping up afterwards made the card
+  // (and its banner pill) blink to the empty / "incomplete" state for
+  // the duration of the follow-up request on every 30s poll. When a
+  // top-up is needed the previous rows stay on screen until it settles.
+  // A failed top-up commits the first page with has_more so the card
+  // reads as incomplete, and rethrows for the error banner.
   function isOpenTenantRow(b: BudgetLedger): boolean {
     return !b.tenant_id || !closedTenantIds.value.has(b.tenant_id)
   }
-  async function topUpBudgetCard(
-    base: Record<string, string>,
-    rows: Ref<BudgetLedger[]>,
-    more: Ref<boolean>,
-  ): Promise<void> {
-    if (!more.value) return
-    if (rows.value.filter(isOpenTenantRow).length >= BUDGET_CARD_ROWS) return
-    const collected: BudgetLedger[] = []
-    let eligible = 0
-    let cursor = ''
-    let hasMore = true
-    let pages = 0
-    while (hasMore && pages < CURSOR_WALK_MAX_PAGES && eligible < BUDGET_CARD_ROWS) {
-      const res = await deps.listBudgets({
-        ...base,
-        limit: String(LIST_PAGE_LIMIT),
-        ...(cursor ? { cursor } : {}),
-      })
-      collected.push(...res.ledgers)
-      eligible += res.ledgers.filter(isOpenTenantRow).length
-      pages++
-      hasMore = !!res.has_more
-      cursor = res.next_cursor ?? ''
-      // Defensive: has_more without a cursor would loop on page one.
-      if (hasMore && !cursor) break
-    }
-    rows.value = collected
-    more.value = hasMore
+  interface BudgetCard {
+    base: Record<string, string>
+    rows: Ref<BudgetLedger[]>
+    more: Ref<boolean>
   }
+  type BudgetPage = { ledgers: BudgetLedger[]; has_more?: boolean }
+  function needsTopUp(page: BudgetPage): boolean {
+    return !!page.has_more && page.ledgers.filter(isOpenTenantRow).length < BUDGET_CARD_ROWS
+  }
+  function commitFirstPage(card: BudgetCard, page: BudgetPage): void {
+    card.rows.value = page.ledgers
+    card.more.value = !!page.has_more
+  }
+  // Phase 1: paint immediately when the first page is enough under the
+  // closed-tenant set known so far. Returns whether it was committed.
+  function commitIfComplete(card: BudgetCard, page: BudgetPage): boolean {
+    if (needsTopUp(page)) return false
+    commitFirstPage(card, page)
+    return true
+  }
+  // Phase 3: re-evaluate against the (possibly refreshed) closed set.
+  async function settleBudgetCard(card: BudgetCard, page: BudgetPage, committed: boolean): Promise<void> {
+    if (!needsTopUp(page)) {
+      if (!committed) commitFirstPage(card, page)
+      return
+    }
+    try {
+      const collected: BudgetLedger[] = []
+      let eligible = 0
+      let cursor = ''
+      let hasMore = true
+      let pages = 0
+      while (hasMore && pages < CURSOR_WALK_MAX_PAGES && eligible < BUDGET_CARD_ROWS) {
+        const res = await deps.listBudgets({
+          ...card.base,
+          limit: String(LIST_PAGE_LIMIT),
+          ...(cursor ? { cursor } : {}),
+        })
+        collected.push(...res.ledgers)
+        eligible += res.ledgers.filter(isOpenTenantRow).length
+        pages++
+        hasMore = !!res.has_more
+        cursor = res.next_cursor ?? ''
+        // Defensive: has_more without a cursor would loop on page one.
+        if (hasMore && !cursor) break
+      }
+      card.rows.value = collected
+      card.more.value = hasMore
+    } catch (cause) {
+      commitFirstPage(card, page)
+      throw cause
+    }
+  }
+  const debtCard: BudgetCard = { base: DEBT_CARD_QUERY, rows: debtBudgets, more: debtBudgetsHasMore }
+  const frozenCard: BudgetCard = { base: FROZEN_CARD_QUERY, rows: frozenBudgets, more: frozenBudgetsHasMore }
 
   // All fetches within a phase parallelize; any individual failure
   // degrades gracefully (error banner, but other sections keep rendering
@@ -258,15 +292,10 @@ export function useOverviewData(
     ])
     if (ov.status === 'fulfilled') overview.value = ov.value
     if (audit.status === 'fulfilled') recentAudit.value = audit.value.logs
-    if (frozen.status === 'fulfilled') {
-      frozenBudgets.value = frozen.value.ledgers
-      frozenBudgetsHasMore.value = !!frozen.value.has_more
-    }
+    frozenPageFailed.value = frozen.status === 'rejected'
     debtPageFailed.value = debt.status === 'rejected'
-    if (debt.status === 'fulfilled') {
-      debtBudgets.value = debt.value.ledgers
-      debtBudgetsHasMore.value = !!debt.value.has_more
-    }
+    const frozenCommitted = frozen.status === 'fulfilled' && commitIfComplete(frozenCard, frozen.value)
+    const debtCommitted = debt.status === 'fulfilled' && commitIfComplete(debtCard, debt.value)
 
     // Phase 2 — the cursor walks, gated. A failed getOverview() yields no
     // signature; walk only if forced or fallback-due (can't detect change).
@@ -344,13 +373,13 @@ export function useOverviewData(
         if (sig !== null) lastWalkSignature = sig
       }
     }
-    // Phase 3 — top up the two capped budget cards. Runs after the walk
-    // block so the closed-tenant exclusion set is current. No-op (zero
-    // requests) unless a card's first page is short of eligible rows AND
-    // the server has more.
+    // Phase 3 — settle the two capped budget cards. Runs after the walk
+    // block so the closed-tenant exclusion set is current. No requests
+    // unless a card's first page is short of eligible rows AND the
+    // server has more.
     const topUps = await Promise.allSettled([
-      debt.status === 'fulfilled' && topUpBudgetCard(DEBT_CARD_QUERY, debtBudgets, debtBudgetsHasMore),
-      frozen.status === 'fulfilled' && topUpBudgetCard(FROZEN_CARD_QUERY, frozenBudgets, frozenBudgetsHasMore),
+      debt.status === 'fulfilled' && settleBudgetCard(debtCard, debt.value, debtCommitted),
+      frozen.status === 'fulfilled' && settleBudgetCard(frozenCard, frozen.value, frozenCommitted),
     ])
 
     // Surface the first failure so the operator sees *something* wrong —
@@ -403,6 +432,7 @@ export function useOverviewData(
     debtBudgets,
     debtBudgetsHasMore,
     debtPageFailed,
+    frozenPageFailed,
     failingWebhooksRaw,
     atCapBudgets,
     frozenBudgets,

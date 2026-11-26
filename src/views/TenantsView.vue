@@ -418,9 +418,14 @@ async function loadCreateParentOptions() {
   try {
     const directory = await listAllTenants()
     if (seq !== createParentsSeq) return
-    rememberTenants(directory.tenants)
+    // Deliberately NOT folded into knownTenants: that set drives the
+    // list's Children counts and parent filter options, and feeding the
+    // whole directory into it made those numbers jump just because the
+    // dialog was opened.
     if (directory.partial) {
-      createParentOptions.value = [...knownTenants.value.values()]
+      const merged = new Map(knownTenants.value)
+      for (const t of directory.tenants) merged.set(t.tenant_id, t)
+      createParentOptions.value = [...merged.values()]
       createParentsError.value = 'The tenant directory is incomplete. Some parents may be missing.'
     } else {
       createParentOptions.value = directory.tenants

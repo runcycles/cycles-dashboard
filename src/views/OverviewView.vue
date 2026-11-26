@@ -35,6 +35,7 @@ const {
   debtBudgets,
   debtBudgetsHasMore,
   debtPageFailed,
+  frozenPageFailed,
   failingWebhooksRaw,
   atCapBudgets,
   frozenBudgets,
@@ -97,6 +98,13 @@ const frozenBudgetsFiltered = computed<BudgetLedger[]>(() => frozenBudgets.value
 const debtBudgetsFiltered = computed<BudgetLedger[]>(() => debtBudgets.value.filter(isNotClosedTenant))
 const debtStatusUnknown = computed(() =>
   debtBudgetsFiltered.value.length === 0 && (debtBudgetsHasMore.value || debtPageFailed.value),
+)
+// Same idea for frozen budgets: no eligible row loaded, but the lookup
+// failed or stopped at its page cap, so "none" is not established. The
+// card already has its own "N frozen — details unavailable" line; this
+// only keeps the green all-clear banner from claiming more than we know.
+const frozenStatusUnknown = computed(() =>
+  frozenBudgetsFiltered.value.length === 0 && (frozenBudgetsHasMore.value || frozenPageFailed.value),
 )
 const keysFiltered = computed<ApiKey[]>(() => keys.value.filter(isNotClosedTenant))
 const failingWebhooksFiltered = computed<WebhookSubscription[]>(() =>
@@ -735,7 +743,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
         </div>
       </div>
       <div
-        v-else-if="!debtStatusUnknown"
+        v-else-if="!debtStatusUnknown && !frozenStatusUnknown"
         role="status"
         class="mb-4 px-4 py-3 rounded-lg border border-green-200 bg-green-50 dark:bg-green-950/40 dark:border-green-800 flex items-center gap-3"
       >

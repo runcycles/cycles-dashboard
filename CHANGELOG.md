@@ -48,7 +48,9 @@ UX work that does not advance spec alignment.
 - **Overview debt and frozen cards could read empty while budgets needed
   attention.** When the first rows all belonged to closed tenants (which the
   cards hide), the card showed "No outstanding debt". The cards now read
-  up to ten additional pages. An incomplete debt lookup is marked on the card.
+  up to ten additional pages. An incomplete debt lookup is marked on the card,
+  and the "All clear" banner is withheld while a debt or frozen lookup is
+  incomplete.
 - **Funding a budget used the list's tenant filter instead of the budget's own
   tenant**, so funding a row from a tenant other than the one selected was
   rejected. Funding uses the ledger tenant or the tenant in its scope for legacy rows.

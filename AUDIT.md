@@ -128,22 +128,30 @@ No wire-contract or spec-alignment change.
 
 | Finding | Fix |
 |---|---|
-| Debt card empty when page one is all closed-tenant rows | `topUpBudgetCard` re-reads at limit 100 until 5 eligible rows, exhaustion, or 10 pages. An incomplete debt lookup has its own empty state. |
+| Debt card empty when page one is all closed-tenant rows | `settleBudgetCard` re-reads at limit 100 until 5 eligible rows, exhaustion, or 10 pages. An incomplete debt lookup has its own empty state. |
 | Fund sent the list filter's tenant, not the ledger's | Use the ledger tenant, then the scope tenant, then the selected tenant |
 | Tenants export used previous-filter rows mid-transition | Gate export and Load more on the applied query. Cancel an export when server or client filters change. |
 | Create Tenant parents came from filtered rows | Independent directory lookup preserves known parents when capped. Known children remain available for nested drill-down. |
 | Pending Budgets input leaked into a new navigation | Track the query for the current router replacement and release it when navigation settles |
 | Tenant id `bulk-action` lost its detail link | Bulk check also requires a `bulkAction*` operation |
 
+**Follow-up review of the review fixes**
+
+| Finding | Fix |
+|---|---|
+| Debt / frozen card blinked to empty on every poll while a top-up ran | First page is committed only when it needs no top-up; otherwise prior rows stay until the top-up settles |
+| "All clear" could show with an unresolved frozen lookup | `frozenStatusUnknown` withholds the banner (page failed or cap reached with no eligible row) |
+| Children counts jumped when Create Tenant opened | Directory lookup no longer feeds `knownTenants`; merged for the picker only |
+
 **Open (server repo)** `fundBudget` audits `scope:UNIT` while every other budget operation audits `ledger_id`; aligning them would remove the second link.
 
 **Tests**
 - NEW `listAllTenants.test.ts` — 4 specs (paging, cap, single page, failure).
-- NEW `TenantsView-server-filters.test.ts` — 16 cases (wire params, hierarchy, queued refresh, stale Load more, export cancellation, parent picker).
+- NEW `TenantsView-server-filters.test.ts` — 17 cases (wire params, hierarchy, queued refresh, stale Load more, export cancellation, parent picker).
 - NEW `BudgetsView-filter-url-write.test.ts` — 11 cases (write-back, status sync, round trip, cancelled navigation, debounce-window navigation, audit links).
-- Updated `OverviewView.test.ts` (+10), `ReservationsView-url-deeplink.test.ts` (+2), `useBudgetFunding.test.ts` (+2), `deployment-pins.test.ts` (version).
+- Updated `OverviewView.test.ts` (+14), `ReservationsView-url-deeplink.test.ts` (+2), `useBudgetFunding.test.ts` (+2), `deployment-pins.test.ts` (version).
 
-**Gates** typecheck clean • lint clean • vitest 1559 / 1559 across 131 files (98.30% line coverage) • build clean.
+**Gates** typecheck clean • lint clean • vitest 1564 / 1564 across 131 files (98.30% line coverage) • build clean.
 
 **Version bumps** package `.85 → .86` • dashboard image pin `.86` • server fleet unchanged.
 

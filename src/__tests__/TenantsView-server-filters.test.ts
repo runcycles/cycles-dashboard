@@ -387,4 +387,35 @@ describe('TenantsView — server-side status / parent filters', () => {
     expect(options).toEqual(expect.arrayContaining(['root', 'kid', 'susp']))
     expect(w.text()).toContain('Could not load the full tenant list')
   })
+
+  it('opening Create Tenant does not change the Children counts in the list', async () => {
+    // The dialog loads the whole directory for its parent picker. That
+    // must not leak into the list's hierarchy data — pre-fix the counts
+    // jumped from "seen so far" to fleet-wide just by opening the dialog.
+    listTenantsMock.mockImplementation((params: Record<string, string>) => {
+      if (params.limit === '100') {
+        return Promise.resolve({
+          tenants: [
+            tenant('root'), tenant('kid', 'ACTIVE', 'root'),
+            tenant('kid-b', 'ACTIVE', 'root'), tenant('kid-c', 'ACTIVE', 'root'),
+          ],
+          has_more: false,
+        })
+      }
+      return Promise.resolve({ tenants: [tenant('root'), tenant('kid', 'ACTIVE', 'root')], has_more: false })
+    })
+    const w = await mountView()
+    const countLabel = 'button[aria-label="Filter list to 1 children of Name root"]'
+    expect(w.find(countLabel).exists()).toBe(true)
+
+    const create = w.findAll('button').find(b => b.text().trim() === 'Create Tenant')!
+    await create.trigger('click')
+    await flushPromises()
+    // Picker has the full directory…
+    const options = Array.from(w.get<HTMLSelectElement>('#ct-parent').element.options).map(o => o.value)
+    expect(options).toEqual(expect.arrayContaining(['root', 'kid', 'kid-b', 'kid-c']))
+    // …while the list still reports what the list itself has loaded.
+    expect(w.find(countLabel).exists()).toBe(true)
+    expect(w.find('button[aria-label="Filter list to 3 children of Name root"]').exists()).toBe(false)
+  })
 })

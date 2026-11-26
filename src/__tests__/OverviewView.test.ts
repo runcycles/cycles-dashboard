@@ -1986,4 +1986,96 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       expect(w.find('#budgets-with-debt .badge-warning').text()).toBe('1')
     })
   })
+
+  describe('capped budget cards stay stable across polls', () => {
+    const closedRows = (kind: string, n: number, o: Partial<BudgetLedger>) =>
+      Array.from({ length: n }, (_, i) => atCapBudget(`closed-co/${kind}-${i}`, { tenant_id: 'closed-co', ...o }))
+
+    it('keeps the debt rows and banner pill on screen while a top-up is in flight', async () => {
+      // Pre-fix each poll committed page one (all closed-tenant rows)
+      // before the top-up, so the card blinked to "Debt details are
+      // incomplete." and the pill vanished for the request's duration.
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      listTenantsMock.mockResolvedValue({ tenants: [tenant('closed-co')], has_more: false })
+      const debt = { debt: { unit: 'tokens', amount: 900 } }
+      let hold: Promise<void> | null = null
+      listBudgetsMock.mockImplementation((params: Record<string, string>) => {
+        if (params.has_debt !== 'true') return Promise.resolve({ ledgers: [], has_more: false })
+        if (params.limit === '10') {
+          return Promise.resolve({ ledgers: closedRows('debt', 10, debt), has_more: true, next_cursor: 'p1' })
+        }
+        const page = {
+          ledgers: [
+            ...closedRows('debt', 10, debt),
+            atCapBudget('acme/owes', { tenant_id: 'acme', debt: { unit: 'tokens', amount: 5 } }),
+          ],
+          has_more: false,
+        }
+        return hold ? hold.then(() => page) : Promise.resolve(page)
+      })
+      const w = await mountOverview()
+      const hasPill = () => w.findAll('button').some(b => b.text().includes('Budgets with debt'))
+      expect(w.find('#budgets-with-debt').text()).toContain('acme/owes')
+      expect(hasPill()).toBe(true)
+
+      let release!: () => void
+      hold = new Promise<void>((res) => { release = res })
+      const tick = pollState.callback!()
+      await flushPromises()
+      // Mid-poll, top-up still pending.
+      expect(w.find('#budgets-with-debt').text()).toContain('acme/owes')
+      expect(w.find('#budgets-with-debt').text()).not.toContain('incomplete')
+      expect(hasPill()).toBe(true)
+
+      release()
+      await tick
+      await flushPromises()
+      expect(w.find('#budgets-with-debt').text()).toContain('acme/owes')
+    })
+
+    it('a failed top-up leaves the card marked incomplete, not empty', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      listTenantsMock.mockResolvedValue({ tenants: [tenant('closed-co')], has_more: false })
+      listBudgetsMock.mockImplementation((params: Record<string, string>) => {
+        if (params.has_debt !== 'true') return Promise.resolve({ ledgers: [], has_more: false })
+        if (params.limit === '10') {
+          return Promise.resolve({
+            ledgers: closedRows('debt', 10, { debt: { unit: 'tokens', amount: 9 } }),
+            has_more: true,
+            next_cursor: 'p1',
+          })
+        }
+        return Promise.reject(new Error('follow-up down'))
+      })
+      const w = await mountOverview()
+      expect(w.find('#budgets-with-debt').text()).toContain('Debt details are incomplete.')
+      expect(w.text()).not.toContain('All clear')
+    })
+
+    it('withholds "All clear" when the frozen lookup hits its cap with no eligible row', async () => {
+      // Every frozen page is closed-tenant rows with more behind it: the
+      // walk stops at its page cap without establishing "none".
+      getOverviewMock.mockResolvedValue(healthyOverview({
+        budget_counts: { total: 2000, active: 0, frozen: 2000, closed: 0, over_limit: 0, with_debt: 0, by_unit: {} },
+      }))
+      listTenantsMock.mockResolvedValue({ tenants: [tenant('closed-co')], has_more: false })
+      listBudgetsMock.mockImplementation((params: Record<string, string>) => {
+        if (params.status !== 'FROZEN') return Promise.resolve({ ledgers: [], has_more: false })
+        return Promise.resolve({
+          ledgers: closedRows('frozen', 10, { status: 'FROZEN' }),
+          has_more: true,
+          next_cursor: 'next',
+        })
+      })
+      const w = await mountOverview()
+      expect(w.text()).not.toContain('All clear')
+      expect(w.find('#frozen-budgets').text()).toContain('details unavailable')
+    })
+
+    it('still shows "All clear" when both capped lookups are complete and empty', async () => {
+      getOverviewMock.mockResolvedValue(healthyOverview())
+      const w = await mountOverview()
+      expect(w.text()).toContain('All clear')
+    })
+  })
 })
