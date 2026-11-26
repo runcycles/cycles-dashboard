@@ -452,9 +452,11 @@ freeze / unfreeze, and `<scope>:<UNIT>` for funding. The row menu now has two
 links, **Activity** and **Funding activity**, one per id. To query by hand:
 Audit → Resource type `budget` → Resource ID set to either value.
 
-**"Overview shows `10+` on Budgets with debt / Frozen budgets."** Those cards
-read a single 10-row page. `N+` means the server reported more rows than the
-card loaded; the counter strip and **View all** carry the full set.
+**"Overview shows `10+` on Budgets with debt / Frozen budgets."** The cards
+start with ten rows and request more when closed tenants leave fewer than five
+eligible budgets. `N+` means more rows are available. If a request fails or
+the page cap is reached before any eligible debt is found, the debt card shows
+"Debt details are incomplete." Use **View all** to inspect the budget list.
 
 **"Exported CSV is missing some rows."** Terminal-row cause, as above. Export follows the
 visible list — if terminals are hidden, they are not in the export. This

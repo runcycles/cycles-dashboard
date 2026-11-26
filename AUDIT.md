@@ -120,7 +120,7 @@ No wire-contract or spec-alignment change.
 **Edge cases**
 - Tenants "(root-level only)" stays client-side: no null-parent server filter.
 - Fleets above 1,000 tenants: pickers are partial; Reservations does not reject an unlisted deep-linked tenant.
-- Budgets URL echo never overwrites in-progress typing (compares against the debounced value).
+- Budgets compares the incoming query with the pending router replacement to preserve in-progress typing.
 - Budgets unit and scope prefix stay out of the URL; `?status` is now synced both ways.
 - Tenant pickers cost one request per 100 tenants per refresh (was one total).
 
@@ -128,22 +128,22 @@ No wire-contract or spec-alignment change.
 
 | Finding | Fix |
 |---|---|
-| Debt card empty when page one is all closed-tenant rows | `topUpBudgetCard` re-reads at limit 100 until 5 eligible rows, exhausted, or 10 pages; frozen card too |
-| Fund sent the list filter's tenant, not the ledger's | `budget.tenant_id` first; filter is the pre-`.19` fallback |
-| Tenants export used previous-filter rows mid-transition | `resultsMatchFilters` gates export + Load more; query pinned at confirm; filter change cancels |
-| Create Tenant parents came from filtered rows | Independent `listAllTenants` lookup, seeded from seen tenants |
-| Pending Budgets input leaked into a new navigation | Echo detected by the exact query written (`pendingSelfWrites`), not by debounced-value equality |
+| Debt card empty when page one is all closed-tenant rows | `topUpBudgetCard` re-reads at limit 100 until 5 eligible rows, exhaustion, or 10 pages. An incomplete debt lookup has its own empty state. |
+| Fund sent the list filter's tenant, not the ledger's | Use the ledger tenant, then the scope tenant, then the selected tenant |
+| Tenants export used previous-filter rows mid-transition | Gate export and Load more on the applied query. Cancel an export when server or client filters change. |
+| Create Tenant parents came from filtered rows | Independent directory lookup preserves known parents when capped. Known children remain available for nested drill-down. |
+| Pending Budgets input leaked into a new navigation | Track the query for the current router replacement and release it when navigation settles |
 | Tenant id `bulk-action` lost its detail link | Bulk check also requires a `bulkAction*` operation |
 
 **Open (server repo)** `fundBudget` audits `scope:UNIT` while every other budget operation audits `ledger_id`; aligning them would remove the second link.
 
 **Tests**
 - NEW `listAllTenants.test.ts` — 4 specs (paging, cap, single page, failure).
-- NEW `TenantsView-server-filters.test.ts` — 12 specs (wire params, parent options, queued refresh, stale Load more, export gating, create-parent lookup).
-- NEW `BudgetsView-filter-url-write.test.ts` — 10 specs (write-back, status sync, round trip, debounce-window navigation, audit links).
-- Updated `OverviewView.test.ts` (+7), `ReservationsView-url-deeplink.test.ts` (+2), `useBudgetFunding.test.ts` (+1), `deployment-pins.test.ts` (version).
+- NEW `TenantsView-server-filters.test.ts` — 16 cases (wire params, hierarchy, queued refresh, stale Load more, export cancellation, parent picker).
+- NEW `BudgetsView-filter-url-write.test.ts` — 11 cases (write-back, status sync, round trip, cancelled navigation, debounce-window navigation, audit links).
+- Updated `OverviewView.test.ts` (+10), `ReservationsView-url-deeplink.test.ts` (+2), `useBudgetFunding.test.ts` (+2), `deployment-pins.test.ts` (version).
 
-**Gates** typecheck clean • lint clean • vitest 1550 / 1550 across 131 files • build clean.
+**Gates** typecheck clean • lint clean • vitest 1559 / 1559 across 131 files (98.30% line coverage) • build clean.
 
 **Version bumps** package `.85 → .86` • dashboard image pin `.86` • server fleet unchanged.
 

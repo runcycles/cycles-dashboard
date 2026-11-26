@@ -104,10 +104,21 @@ describe('useBudgetFunding', () => {
     expect(fund.mock.calls[0][0]).toBe('acme')
   })
 
-  it('falls back to the selected tenant when the ledger carries no tenant_id (older servers)', async () => {
-    selectedTenant.value = 'selected-tenant'
+  it('uses the scope tenant for a legacy ledger when the list filter has changed', async () => {
+    selectedTenant.value = 'beta'
     const funding = create()
     funding.open(ledger())
+    funding.form.value.amount = 25
+
+    await funding.submit()
+
+    expect(fund.mock.calls[0][0]).toBe('acme')
+  })
+
+  it('uses the selected tenant for a legacy ledger with no tenant in its scope', async () => {
+    selectedTenant.value = 'selected-tenant'
+    const funding = create()
+    funding.open(ledger({ scope: 'system:global' }))
     funding.form.value.amount = 25
 
     await funding.submit()

@@ -6,6 +6,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
+import { reactive } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '../stores/auth'
 import type { Capabilities } from '../types'
@@ -13,16 +14,18 @@ import type { Capabilities } from '../types'
 enableAutoUnmount(afterEach)
 
 const listTenantsMock = vi.fn()
+const createTenantMock = vi.fn()
 
 vi.mock('../api/client', async () => {
   const actual = await vi.importActual<typeof import('../api/client')>('../api/client')
   return {
     ...actual,
+    createTenant: (...args: unknown[]) => createTenantMock(...args),
     listTenants: (...args: unknown[]) => listTenantsMock(...args),
   }
 })
 
-const routeRef: { name: string; query: Record<string, string> } = { name: 'tenants', query: {} }
+const routeRef = reactive({ name: 'tenants', query: {} as Record<string, string> })
 
 vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
@@ -126,6 +129,7 @@ describe('TenantsView — server-side status / parent filters', () => {
     const auth = useAuthStore()
     auth.apiKey = 'test-key'
     auth.capabilities = FULL_CAPS
+    createTenantMock.mockReset()
     listTenantsMock.mockReset()
     listTenantsMock.mockResolvedValue({
       tenants: [tenant('root'), tenant('kid', 'ACTIVE', 'root'), tenant('susp', 'SUSPENDED')],
@@ -185,6 +189,23 @@ describe('TenantsView — server-side status / parent filters', () => {
     // Parent NAME still resolves from the accumulated directory.
     const rootOption = Array.from(parent.element.options).find(o => o.value === 'root')!
     expect(rootOption.textContent).toContain('Name root')
+  })
+
+  it('preserves known child counts and links through a three-level drill-down', async () => {
+    const root = tenant('root')
+    const kid = tenant('kid', 'ACTIVE', 'root')
+    const grandkid = tenant('grandkid', 'ACTIVE', 'kid')
+    listTenantsMock.mockResolvedValueOnce({ tenants: [root, kid, grandkid] })
+      .mockResolvedValueOnce({ tenants: [kid] })
+      .mockResolvedValueOnce({ tenants: [grandkid] })
+    const w = await mountView()
+    const childrenOf = (id: string) => w.get(`button[aria-label="Filter list to 1 children of Name ${id}"]`)
+    await childrenOf('root').trigger('click')
+    await flushPromises()
+    await childrenOf('kid').trigger('click')
+    await flushPromises()
+    expect(lastParams().parent_tenant_id).toBe('kid')
+    expect(w.text()).toContain('Name grandkid')
   })
 
   it('offers a deep-linked parent that was never loaded (?parent=<id>)', async () => {
@@ -280,6 +301,29 @@ describe('TenantsView — server-side status / parent filters', () => {
     expect(w.findComponent(ExportDialog).props('format')).toBeNull()
   })
 
+  it.each<Record<string, string>>([{ parent: '__root__' }, { include_terminal: '1' }])(
+    'cancels a running export on navigation to client-side filters %o', async query => {
+      listTenantsMock.mockResolvedValue({ tenants: [tenant('root'), tenant('kid', 'ACTIVE', 'root')], has_more: true, next_cursor: 'c1' })
+      const w = await mountView()
+      let finishPage!: (page: unknown) => void
+      listTenantsMock.mockImplementationOnce(() => new Promise(resolve => { finishPage = resolve }))
+      await exportButtons(w)[0].trigger('click')
+      const { default: ExportDialog } = await import('../components/ExportDialog.vue')
+      w.getComponent(ExportDialog).vm.$emit('confirm')
+      await flushPromises()
+      const [params, signal] = listTenantsMock.mock.lastCall!
+      expect(params.cursor).toBe('c1')
+      expect(signal.aborted).toBe(false)
+
+      routeRef.query = query
+      await flushPromises()
+      expect(signal.aborted).toBe(true)
+      finishPage({ tenants: [tenant('other')], has_more: false })
+      await flushPromises()
+      expect(w.text()).toContain('Export cancelled.')
+    },
+  )
+
   it('Create Tenant offers the full directory as parents, not the filtered rows', async () => {
     // Review finding: on /tenants?parent=root the list holds only
     // root's children, so the dialog could not create another child
@@ -305,6 +349,31 @@ describe('TenantsView — server-side status / parent filters', () => {
     expect(directoryCall).toBeDefined()
     const options = Array.from(w.get<HTMLSelectElement>('#ct-parent').element.options).map(o => o.value)
     expect(options).toEqual(expect.arrayContaining(['', 'root', 'kid', 'other']))
+  })
+
+  it('retains a selected parent outside the capped directory and submits the visible choice', async () => {
+    listTenantsMock.mockResolvedValueOnce({ tenants: [tenant('older-parent')] })
+    const w = await mountView()
+    let finishFirstPage!: (page: unknown) => void
+    const directoryPage = (start: number) => ({
+      tenants: Array.from({ length: 100 }, (_, i) => tenant(`recent-${start + i}`)),
+      has_more: true,
+      next_cursor: String(start + 100),
+    })
+    listTenantsMock.mockImplementationOnce(() => new Promise(resolve => { finishFirstPage = resolve }))
+      .mockImplementation(({ cursor }) => Promise.resolve(directoryPage(Number(cursor))))
+    await w.findAll('button').find(b => b.text() === 'Create Tenant')!.trigger('click')
+    const parent = w.get<HTMLSelectElement>('#ct-parent')
+    await parent.setValue('older-parent')
+    finishFirstPage(directoryPage(0))
+    await flushPromises()
+
+    expect(w.text()).toContain('The tenant directory is incomplete')
+    expect(parent.element.selectedOptions[0]?.value).toBe('older-parent')
+    await w.get('#ct-id').setValue('new-child')
+    await w.get('#ct-name').setValue('New child')
+    await w.get('form').trigger('submit')
+    expect(createTenantMock).toHaveBeenCalledWith(expect.objectContaining({ parent_tenant_id: 'older-parent' }))
   })
 
   it('Create Tenant falls back to already-seen tenants when the directory fails', async () => {

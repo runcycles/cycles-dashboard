@@ -1912,6 +1912,32 @@ describe('OverviewView — I1 "What needs attention" layout', () => {
       expect(followUps[1].cursor).toBe('p2')
     })
 
+    it.each(['page cap', 'follow-up failure', 'first-page failure'])(
+      'shows incomplete debt details after a %s', async reason => {
+        getOverviewMock.mockResolvedValue(healthyOverview({
+          budget_counts: { total: 1001, active: 1, closed: 1000, frozen: 0, over_limit: 0, with_debt: 1001, by_unit: {} },
+        }))
+        listTenantsMock.mockResolvedValue({ tenants: [tenant('closed-co')], has_more: false })
+        listBudgetsMock.mockImplementation(async (params: Record<string, string>) => {
+          if (!params.has_debt) return { ledgers: [], has_more: false }
+          if (reason === 'first-page failure' || (reason === 'follow-up failure' && params.limit === '100')) {
+            throw new Error('Debt lookup failed')
+          }
+          const start = Number(params.cursor ?? 0)
+          if (start === 1000) return { ledgers: [atCapBudget('acme/debt', { tenant_id: 'acme' })], has_more: false }
+          const ledgers = Array.from({ length: Number(params.limit) }, (_, i) =>
+            atCapBudget(`closed-co/${start + i}`, { tenant_id: 'closed-co' }))
+          return { ledgers, has_more: true, next_cursor: String(start + ledgers.length) }
+        })
+
+        const w = await mountOverview()
+        expect(w.get('#budgets-with-debt').text()).toContain('Debt details are incomplete')
+        expect(w.text()).not.toContain('No outstanding debt')
+        expect(w.text()).not.toContain('All clear')
+        if (reason !== 'page cap') expect(w.text()).toContain('Debt lookup failed')
+      },
+    )
+
     it('keeps the first page when a debt follow-up request fails', async () => {
       getOverviewMock.mockResolvedValue(healthyOverview())
       listBudgetsMock.mockImplementation((params: Record<string, string>) => {

@@ -34,6 +34,7 @@ const {
   closedTenantIds,
   debtBudgets,
   debtBudgetsHasMore,
+  debtPageFailed,
   failingWebhooksRaw,
   atCapBudgets,
   frozenBudgets,
@@ -94,6 +95,9 @@ const atCapBudgetsFiltered = computed<BudgetLedger[]>(() =>
 )
 const frozenBudgetsFiltered = computed<BudgetLedger[]>(() => frozenBudgets.value.filter(isNotClosedTenant))
 const debtBudgetsFiltered = computed<BudgetLedger[]>(() => debtBudgets.value.filter(isNotClosedTenant))
+const debtStatusUnknown = computed(() =>
+  debtBudgetsFiltered.value.length === 0 && (debtBudgetsHasMore.value || debtPageFailed.value),
+)
 const keysFiltered = computed<ApiKey[]>(() => keys.value.filter(isNotClosedTenant))
 const failingWebhooksFiltered = computed<WebhookSubscription[]>(() =>
   failingWebhooksRaw.value
@@ -731,7 +735,7 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
         </div>
       </div>
       <div
-        v-else
+        v-else-if="!debtStatusUnknown"
         role="status"
         class="mb-4 px-4 py-3 rounded-lg border border-green-200 bg-green-50 dark:bg-green-950/40 dark:border-green-800 flex items-center gap-3"
       >
@@ -1074,7 +1078,8 @@ function auditLinkFor(entry: AuditLogEntry): { name: string; params?: Record<str
             </h2>
             <router-link :to="{ name: 'budgets', query: { filter: 'has_debt' } }" class="text-xs text-blue-600 hover:underline dark:text-blue-400">View all</router-link>
           </div>
-          <div v-if="debtBudgetsSorted.length === 0" class="text-sm muted py-4 text-center">No outstanding debt</div>
+          <div v-if="debtStatusUnknown" class="text-sm muted py-4 text-center">Debt details are incomplete.</div>
+          <div v-else-if="debtBudgetsSorted.length === 0" class="text-sm muted py-4 text-center">No outstanding debt</div>
           <div
             v-for="b in debtBudgetsSorted"
             :key="b.scope + b.unit"

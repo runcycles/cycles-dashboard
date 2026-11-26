@@ -607,16 +607,10 @@ function cancelBulkStatus() {
 watch(selectedTenant, () => {
   if (!isCrossTenantFilter.value && !isDetail.value) void applyListParams()
 })
-// Queries this view has written via router.replace and not yet seen
-// echoed back through the route.query watcher. Order-independent
-// signature so key order can't cause a miss.
-const pendingSelfWrites = new Set<string>()
+// Vue Router supersedes the previous navigation when a new one starts.
+let pendingSelfWrite: { signature: string } | undefined
 function querySignature(q: Record<string, LocationQueryValue | LocationQueryValue[] | undefined>): string {
-  return Object.keys(q)
-    .filter(k => q[k] !== undefined && q[k] !== null && q[k] !== '')
-    .sort()
-    .map(k => `${k}=${stringParam(q[k])}`)
-    .join('&')
+  return JSON.stringify(Object.keys(q).filter(k => q[k] !== undefined).sort().map(k => [k, q[k]]))
 }
 watch(() => route.query, (q, previousQuery) => {
   // BulkActionResultDialog's View-budget link and the Overview
@@ -648,7 +642,8 @@ watch(() => route.query, (q, previousQuery) => {
   // is URL-authoritative: it resets pending input, which also cancels
   // the pending debounce so the old text is never written into the
   // destination URL.
-  const isOwnEcho = pendingSelfWrites.delete(querySignature(q))
+  const isOwnEcho = pendingSelfWrite?.signature === querySignature(q)
+  pendingSelfWrite = undefined
   if (!isOwnEcho) {
     const nextSearch = stringParam(q.search)
     if (nextSearch !== search.value.trim()) search.value = nextSearch
@@ -682,12 +677,12 @@ watch(() => route.query, (q, previousQuery) => {
 // touch, survived) and filtered views weren't shareable. `replace`, not
 // push — filter fiddling shouldn't add history entries. Loop-safe: the
 // watcher only assigns refs that differ from the URL, and recognises
-// this function's own writes via pendingSelfWrites.
+// this function's own writes while the replacement is pending.
 function utilQueryValue(v: number | string): string | undefined {
   const pct = parseUtilPct(v)
   return pct === '' ? undefined : String(pct)
 }
-function syncFiltersToUrl() {
+async function syncFiltersToUrl() {
   if (route.name !== 'budgets' || isDetail.value) return
   const desired = {
     tenant_id: selectedTenant.value || undefined,
@@ -700,8 +695,17 @@ function syncFiltersToUrl() {
     .every(k => (stringParam(route.query[k]) || undefined) === desired[k])
   if (unchanged) return
   const next = { ...route.query, ...desired }
-  pendingSelfWrites.add(querySignature(next))
-  router.replace({ query: next })
+  const write = { signature: querySignature(next) }
+  pendingSelfWrite = write
+  try {
+    await router.replace({ query: next })
+  } catch (cause) {
+    toast.error(`Could not update the budget URL: ${toMessage(cause)}`)
+  } finally {
+    // Cancelled, duplicated and redirected writes may never echo. An
+    // older completion must also leave a newer pending write intact.
+    if (pendingSelfWrite === write) pendingSelfWrite = undefined
+  }
 }
 watch([selectedTenant, filterStatus, debouncedSearch, debouncedFilterUtilMin, debouncedFilterUtilMax], syncFiltersToUrl)
 

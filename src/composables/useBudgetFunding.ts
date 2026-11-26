@@ -146,13 +146,9 @@ export function useBudgetFunding(options: UseBudgetFundingOptions) {
       spent = parsed
     }
 
-    // The loaded ledger owns the tenant. The list filter is only a
-    // fallback for pre-v0.1.25.19 servers that omit tenant_id: it can
-    // legitimately differ from the row being funded (filter switched to
-    // another tenant while the previous tenant's rows are still on
-    // screen, or carried into the detail URL for Back navigation), and
-    // sending it made the server reject the funding call.
-    const tenantId = budget.tenant_id || options.selectedTenant.value || tenantFromScope(budget.scope)
+    // Legacy ledgers can still identify their tenant in the scope. The
+    // list filter is a last resort for scopes without a tenant prefix.
+    const tenantId = budget.tenant_id || tenantFromScope(budget.scope) || options.selectedTenant.value
     if (!tenantId) {
       error.value = `Cannot determine tenant for scope "${budget.scope}". Expected a "tenant:<id>" prefix.`
       return false

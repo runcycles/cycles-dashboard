@@ -312,6 +312,32 @@ describe('BudgetsView — filter URL write-back and audit links', () => {
     expect(routeRef.query.search).toBe('prod')
   })
 
+  it('hydrates a revisited URL after a competing navigation cancels replace', async () => {
+    const { createRouter, createMemoryHistory, isNavigationFailure } =
+      await vi.importActual<typeof import('vue-router')>('vue-router')
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ name: 'budgets', path: '/budgets', component: {} }],
+    })
+    router.afterEach((to, _from, failure) => {
+      if (!failure) routeRef.query = to.query as Record<string, string>
+    })
+    await router.push('/budgets')
+    let firstWrite!: ReturnType<typeof router.replace>
+    replaceMock.mockImplementationOnce(to => (firstWrite = router.replace(to)))
+    const w = await mountView()
+    const input = w.get<HTMLInputElement>('#budget-search')
+    await input.setValue('first')
+    await router.push('/budgets?search=second')
+    expect(isNavigationFailure(await firstWrite)).toBe(true)
+    expect(input.element.value).toBe('second')
+
+    await router.push('/budgets?search=first')
+    await flushPromises()
+    expect(input.element.value).toBe('first')
+    expect(listBudgetsMock.mock.lastCall?.[0].search).toBe('first')
+  })
+
   it('row Activity links filter the audit log by ledger_id, funding by scope:UNIT', async () => {
     const w = await mountView()
     const { default: RowActionsMenu } = await import('../components/RowActionsMenu.vue')

@@ -138,27 +138,6 @@ const hasMore = ref(false)
 const nextCursor = ref('')
 const loadingMore = ref(false)
 
-// v0.1.25.21 (#2): show hierarchy. Derive child counts once per poll so
-// the column render doesn't re-filter tenants.value for every row.
-const childCountMap = computed<Record<string, number>>(() => {
-  const counts: Record<string, number> = {}
-  for (const t of tenants.value) {
-    if (t.parent_tenant_id) counts[t.parent_tenant_id] = (counts[t.parent_tenant_id] ?? 0) + 1
-  }
-  return counts
-})
-
-// V3 (scale-hardening): O(1) tenant lookup by id. Pre-fix, parentName()
-// called tenants.value.find() per-row in the template — that's
-// O(n) per row × n rows = O(n²) render cost. At 10k tenants that's
-// 100M comparisons every time Vue re-ran the parent-name cell.
-// Build a Map once per change in tenants.value and .get() in the row.
-const tenantById = computed<Map<string, Tenant>>(() => {
-  const m = new Map<string, Tenant>()
-  for (const t of tenants.value) m.set(t.tenant_id, t)
-  return m
-})
-
 const filteredTenants = computed(() => {
   let out = tenants.value
   if (parentFilter.value) {
@@ -184,7 +163,7 @@ const filteredTenants = computed(() => {
 //
 // V4 stage 2: server-side sort against listTenants (tenant_id, name,
 // status, created_at enum). Parent + Children columns are NOT server-
-// sortable — they're client-derived from tenantById / childCountMap
+// sortable — they're client-derived from knownTenants / childCountMap
 // and the server has no index over them — so those columns render as
 // plain headers below (no SortHeader). onChange refreshes page 1 so
 // the cursor tuple stays aligned with the new (sort_by, sort_dir).
@@ -232,15 +211,20 @@ const {
 // and always includes the active filter value (deep-link to a parent
 // that was never loaded).
 const knownTenants = ref(new Map<string, Tenant>())
-const knownParentIds = ref(new Set<string>())
 function rememberTenants(list: Tenant[]) {
-  for (const t of list) {
-    knownTenants.value.set(t.tenant_id, t)
-    if (t.parent_tenant_id) knownParentIds.value.add(t.parent_tenant_id)
-  }
+  for (const t of list) knownTenants.value.set(t.tenant_id, t)
 }
+// Each observed tenant contributes once, even across repeated polls or
+// a drill-down whose filtered response omits the next generation.
+const childCountMap = computed(() => {
+  const counts = new Map<string, number>()
+  for (const { parent_tenant_id: parent } of knownTenants.value.values()) {
+    if (parent) counts.set(parent, (counts.get(parent) ?? 0) + 1)
+  }
+  return counts
+})
 const parentOptions = computed<Array<{ tenant_id: string; name: string }>>(() => {
-  const ids = new Set(knownParentIds.value)
+  const ids = new Set(childCountMap.value.keys())
   if (parentFilter.value && parentFilter.value !== '__root__') ids.add(parentFilter.value)
   return [...ids]
     .map(id => ({ tenant_id: id, name: knownTenants.value.get(id)?.name ?? '' }))
@@ -434,9 +418,17 @@ async function loadCreateParentOptions() {
   try {
     const directory = await listAllTenants()
     if (seq !== createParentsSeq) return
-    createParentOptions.value = directory.tenants
+    rememberTenants(directory.tenants)
     if (directory.partial) {
-      createParentsError.value = 'Showing the first 1,000 tenants. A parent beyond that cannot be selected here.'
+      createParentOptions.value = [...knownTenants.value.values()]
+      createParentsError.value = 'The tenant directory is incomplete. Some parents may be missing.'
+    } else {
+      createParentOptions.value = directory.tenants
+      const selected = createForm.value.parent_tenant_id
+      if (selected && !directory.tenants.some(t => t.tenant_id === selected)) {
+        createForm.value.parent_tenant_id = ''
+        createParentsError.value = 'The selected parent is no longer available.'
+      }
     }
   } catch (e) {
     if (seq !== createParentsSeq) return
@@ -658,9 +650,9 @@ const {
   currentItems: sortedTenants,
   hasMore,
   nextCursor,
-  fetchPage: async (cursor) => {
+  fetchPage: async (cursor, signal) => {
     // Pinned at confirm time: one immutable tuple owns the whole walk.
-    const res = await listTenants({ ...exportListParams, cursor })
+    const res = await listTenants({ ...exportListParams, cursor }, signal)
     return { items: res.tenants, hasMore: !!res.has_more, nextCursor: res.next_cursor ?? '' }
   },
   filterFn: tenantMatchesFilter,
@@ -686,11 +678,10 @@ function confirmExport(format: 'csv' | 'json') {
 // A filter change while the confirm dialog is open or the walk is
 // running invalidates the export: its seed rows and cursor belong to the
 // old tuple, and filterFn would start applying the new one.
-watch(resultsMatchFilters, (matches) => {
-  if (matches) return
+watch([parentFilter, statusFilter, debouncedSearch, sortKey, sortDir, showTerminal], () => {
   cancelExport()
   if (exporting.value) cancelRunningExport()
-})
+}, { flush: 'sync' })
 
 async function loadMore() {
   if (!nextCursor.value || loadingMore.value || !resultsMatchFilters.value) return
@@ -713,11 +704,7 @@ async function loadMore() {
 
 function parentName(id: string | undefined): string {
   if (!id) return ''
-  // V3: O(1) Map lookup (was tenants.value.find() per-row — O(n²) total).
-  // Falls back to the accumulated directory: under a server-side parent
-  // filter the parent row itself is not in the loaded page.
-  const p = tenantById.value.get(id) ?? knownTenants.value.get(id)
-  return p?.name || id
+  return knownTenants.value.get(id)?.name || id
 }
 
 // V1 virtualization. See ReservationsView.vue for the pattern rationale —
@@ -914,7 +901,7 @@ const gridTemplate = computed(() =>
           </div>
           <SortHeader as="div" label="Tenant ID" column="tenant_id" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
           <SortHeader as="div" label="Name" column="name" :active-column="sortKey" :direction="sortDir" @sort="toggle" />
-          <!-- Parent + Children are client-derived (tenantById name +
+          <!-- Parent + Children are client-derived (knownTenants name +
                childCountMap count) and have no server-side index — the
                listTenants sort_by enum is limited to tenant_id, name,
                status, created_at. Rendered as plain columnheader divs
@@ -958,11 +945,11 @@ const gridTemplate = computed(() =>
             </div>
             <div role="cell" class="table-cell text-xs">
               <button
-                v-if="childCountMap[sortedTenants[v.index].tenant_id]"
+                v-if="childCountMap.get(sortedTenants[v.index].tenant_id)"
                 @click="parentFilter = sortedTenants[v.index].tenant_id"
                 class="text-blue-600 hover:underline cursor-pointer"
-                :aria-label="`Filter list to ${childCountMap[sortedTenants[v.index].tenant_id]} children of ${sortedTenants[v.index].name}`"
-              >{{ childCountMap[sortedTenants[v.index].tenant_id] }} child{{ childCountMap[sortedTenants[v.index].tenant_id] === 1 ? '' : 'ren' }}</button>
+                :aria-label="`Filter list to ${childCountMap.get(sortedTenants[v.index].tenant_id)} children of ${sortedTenants[v.index].name}`"
+              >{{ childCountMap.get(sortedTenants[v.index].tenant_id) }} child{{ childCountMap.get(sortedTenants[v.index].tenant_id) === 1 ? '' : 'ren' }}</button>
               <span v-else class="text-gray-500" aria-hidden="true">—</span>
             </div>
             <div role="cell" class="table-cell"><StatusBadge :status="sortedTenants[v.index].status" /></div>
