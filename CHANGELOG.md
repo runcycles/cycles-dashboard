@@ -15,7 +15,7 @@ Dashboard versions track the governance spec (`cycles-governance-admin-v0.1.25.y
 end-to-end support. The fourth segment bumps independently for dashboard-only
 UX work that does not advance spec alignment.
 
-## Unreleased
+## [0.1.25.87] — 2026-11-27
 
 - Retrying the same funding request in an open dialog reuses its idempotency key for up to 24 hours. After a timeout, keep the dialog open to retry. Check the ledger before closing it and starting a new request.
 - Aligned the funding retry window and audit error-code filter with governance spec 0.1.25.44.
