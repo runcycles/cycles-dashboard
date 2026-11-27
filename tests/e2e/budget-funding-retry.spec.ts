@@ -1,11 +1,16 @@
 import { test, expect } from '@playwright/test'
-import { ADMIN_KEY, getFixtures, loginAsAdmin } from './fixtures'
+import { randomUUID } from 'node:crypto'
+import { ADMIN_KEY, loginAsAdmin } from './fixtures'
 
-test('retrying a credit after a lost response funds the ledger once', async ({ page, request }, testInfo) => {
-  const { tenantId } = getFixtures()
-  const scope = `tenant:${tenantId}/agent:funding-retry-${testInfo.retry}`
+test('retrying a credit after a lost response funds the ledger once', async ({ page, request }) => {
+  const tenantId = `funding-retry-${randomUUID()}`
+  const scope = `tenant:${tenantId}`
   const unit = 'USD_MICROCENTS'
   const headers = { 'X-Admin-API-Key': ADMIN_KEY }
+  const tenant = await request.post('/v1/admin/tenants', {
+    headers, data: { tenant_id: tenantId, name: 'Funding retry test' },
+  })
+  expect(tenant.ok()).toBe(true)
   const budget = await request.post('/v1/admin/budgets', {
     headers,
     data: { tenant_id: tenantId, scope, unit, allocated: { unit, amount: 1000 } },
