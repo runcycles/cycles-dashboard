@@ -213,16 +213,10 @@ dashboard image does not need to change for an admin-only version bump.
 
 ## Upgrades and rollback
 
-**Pinned server fleet (dashboard v0.1.25.86):** runtime `0.1.25.58`, admin
-`0.1.25.55`, events `0.1.25.25`. These are exact tags, not floating aliases.
+The bundled stack pins runtime `0.1.25.61`, admin `0.1.25.56`, and events
+`0.1.25.26`. Use a maintenance window for the first admin upgrade to this fleet.
 
-Dashboard `.85` applies governance spec `.42`'s non-negative policy-priority
-rule before submission and pins admin `.55`, which also rejects direct negative
-writes. The immutable admin image passed its published-image release smoke.
-
-**Upgrading an existing fleet to the pinned versions.** Upgrade events before
-admin: admin `.51+` assumes the ownership boundary enforced by events `.23+`.
-Events `.24` also changes the internal members of `evidence:processing` from
+Events `.24` changed the internal members of `evidence:processing` from
 raw source JSON to claim IDs. If evidence signing is enabled, stop every older
 events replica and use the older workers to drain or recover
 `evidence:processing` before starting `.24`; records in `evidence:pending` may
@@ -235,20 +229,42 @@ blocks loopback, RFC 1918, link-local, metadata, CGNAT, and IPv6 ULA webhook
 destinations by default; replace private production targets with appropriately
 routed public endpoints rather than enabling the local-only bypass. Existing
 plaintext secrets remain readable during migration, while new writes are
-encrypted. Then deploy events `.25`, admin `.54`, and runtime `.58`:
+encrypted.
+
+1. Upgrade every runtime producer and delivery worker. Wait for both to become healthy.
+2. Drain traffic to all older admin instances and stop them, including scheduled
+   admin jobs and replicas outside this Compose project. An older writer can
+   erase encrypted headers during an unrelated edit.
+3. Take a Redis backup. The example below streams a consistent RDB snapshot
+   into the Redis container, then copies it to the host.
+4. Start admin `.56` and restore traffic after readiness. Its default startup
+   sweep encrypts existing headers. If you override the defaults, set
+   `webhook.category-boundary.reconcile-on-startup=true` and
+   `webhook.category-boundary.reconcile-dry-run=false`.
 
 ```bash
-docker compose -f docker-compose.prod.yml pull \
-  cycles-events cycles-admin cycles-server
-docker compose -f docker-compose.prod.yml up -d cycles-events
-docker compose -f docker-compose.prod.yml up -d cycles-admin cycles-server
+set -e
+docker compose -f docker-compose.prod.yml pull cycles-server cycles-events cycles-admin
+docker compose -f docker-compose.prod.yml up -d --wait --no-deps cycles-server cycles-events
+# Drain admin traffic and stop any other admin replicas and jobs before continuing.
+docker compose -f docker-compose.prod.yml stop cycles-admin
+snapshot="pre-admin-0.1.25.56-$(date -u +%Y%m%dT%H%M%SZ).rdb"
+docker compose -f docker-compose.prod.yml exec -T redis sh -ec \
+  'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli --rdb "/tmp/$1"' sh "$snapshot"
+docker compose -f docker-compose.prod.yml cp "redis:/tmp/$snapshot" "./$snapshot"
+docker compose -f docker-compose.prod.yml exec -T redis rm "/tmp/$snapshot"
+docker compose -f docker-compose.prod.yml up -d --wait --no-deps cycles-admin
 ```
+
+After admin starts encrypting headers, rollback requires a compatible admin
+writer or coordinated restoration of the pre-upgrade snapshot. Restoring the
+snapshot also rewinds subsequent ledger and reservation activity.
 
 Fresh deployments and fleets with evidence signing disabled have no
 `evidence:processing` migration, but still require the shared webhook-secret
 key and must satisfy the events `.25` destination policy.
 
-**Admin-only bump.** Edit the `cycles-server-admin` image pin in
+**Subsequent admin-only bumps.** After completing the encrypted-header cutover, edit the `cycles-server-admin` image pin in
 `docker-compose.prod.yml`, then recycle just that service:
 
 ```bash
@@ -275,9 +291,8 @@ editing the pin back to the previous version and re-running `up -d` — compose
 recreates only the changed service. Previous dashboard versions are listed in
 [`CHANGELOG.md`](CHANGELOG.md); published tags are never reused. Roll back
 the dashboard alone unless the release notes say the admin minimum moved.
-An image rollback does not touch Redis data — but take a backup (below)
-before rolling the admin plane back across a release that changed data
-shapes.
+For the first `.56` admin migration, use the compatible-writer or snapshot
+rollback procedure above. Older admin writers can erase encrypted headers.
 
 ## Backup and restore
 

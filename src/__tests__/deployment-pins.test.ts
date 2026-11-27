@@ -3,9 +3,9 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const EXPECTED = {
-  'cycles-server': '0.1.25.58',
-  'cycles-server-admin': '0.1.25.55',
-  'cycles-server-events': '0.1.25.25',
+  'cycles-server': '0.1.25.61',
+  'cycles-server-admin': '0.1.25.56',
+  'cycles-server-events': '0.1.25.26',
 } as const
 
 function source(path: string): string {
@@ -35,9 +35,16 @@ describe('published server deployment pins', () => {
 
   it('documents the rollout-sensitive events upgrade and ordered fleet rollout', () => {
     const operations = source('OPERATIONS.md')
-    expect(operations).toContain('runtime `0.1.25.58`, admin')
+    expect(operations).toContain('runtime `0.1.25.61`, admin `0.1.25.56`')
     expect(operations).toContain('`evidence:processing`')
-    expect(operations).toContain('Upgrade events before')
+    const readers = operations.indexOf('up -d --wait --no-deps cycles-server cycles-events')
+    const stopAdmin = operations.indexOf('stop cycles-admin', readers)
+    const backup = operations.indexOf('redis-cli --rdb', stopAdmin)
+    const startAdmin = operations.indexOf('up -d --wait --no-deps cycles-admin', backup)
+    expect(readers).toBeGreaterThan(-1)
+    expect(stopAdmin).toBeGreaterThan(readers)
+    expect(backup).toBeGreaterThan(stopAdmin)
+    expect(startAdmin).toBeGreaterThan(backup)
   })
 
   it('keeps webhook-secret and private-network escape hatches development-only', () => {

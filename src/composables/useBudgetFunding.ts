@@ -63,6 +63,8 @@ export interface UseBudgetFundingOptions {
   createIdempotencyKey?: () => string
 }
 
+const FUNDING_REPLAY_WINDOW_MS = 24 * 60 * 60 * 1000
+
 function emptyForm(): BudgetFundingForm {
   return { operation: 'CREDIT', amount: '', reason: '', spent: '' }
 }
@@ -85,8 +87,13 @@ export function useBudgetFunding(options: UseBudgetFundingOptions) {
   const error = ref('')
   const createKey = options.createIdempotencyKey ?? generateIdempotencyKey
 
+  // One dialog represents one funding intent. Keep attempts by their wire
+  // values so editing and reverting after a timeout can recover the original.
+  const attempts = new Map<string, { key: string; expiresAt: number }>()
+
   function open(nextTarget: BudgetLedger | null | undefined): void {
     if (loading.value || refreshing.value || !nextTarget) return
+    attempts.clear()
     target.value = nextTarget
     form.value = emptyForm()
     error.value = ''
@@ -156,6 +163,16 @@ export function useBudgetFunding(options: UseBudgetFundingOptions) {
 
     loading.value = true
     try {
+      const reason = form.value.reason || `${operation} via admin dashboard`
+      const fingerprint = JSON.stringify([tenantId, budget.scope, budget.unit, operation, amount, reason, spent])
+      let attempt = attempts.get(fingerprint)
+      const now = Date.now()
+      if (!attempt) {
+        attempt = { key: createKey(), expiresAt: now + FUNDING_REPLAY_WINDOW_MS }
+        attempts.set(fingerprint, attempt)
+      } else if (now >= attempt.expiresAt) {
+        throw new Error('The 24-hour funding retry window has expired. Check the ledger before starting a new funding request.')
+      }
       // Resolve the production dependency only when a mutation is submitted.
       // Capability/layout tests intentionally provide partial API mocks and
       // should be able to mount BudgetsView without defining an unused writer.
@@ -165,8 +182,8 @@ export function useBudgetFunding(options: UseBudgetFundingOptions) {
         budget.unit,
         operation,
         amount,
-        createKey(),
-        form.value.reason || `${operation} via admin dashboard`,
+        attempt.key,
+        reason,
         spent,
       )
     } catch (cause) {
@@ -181,6 +198,7 @@ export function useBudgetFunding(options: UseBudgetFundingOptions) {
     // only "mutation in flight"; refreshing remains explicit so entry points
     // can explain why another funding action is temporarily unavailable.
     isOpen.value = false
+    attempts.clear()
     target.value = null
     loading.value = false
     refreshing.value = true
