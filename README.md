@@ -1,6 +1,6 @@
 [![CI](https://github.com/runcycles/cycles-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/runcycles/cycles-dashboard/actions)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Spec](https://img.shields.io/badge/spec-v0.1.25.42-blue)](https://github.com/runcycles/cycles-protocol/blob/402307a88906e9fd090159e5ccf2d0036e6aec83/cycles-governance-admin-v0.1.25.yaml)
+[![Spec](https://img.shields.io/badge/spec-v0.1.25.44-blue)](https://github.com/runcycles/cycles-protocol/blob/27d27394a602e2d8c61b997e81e40dae5e2f1418/cycles-governance-admin-v0.1.25.yaml)
 [![Vue](https://img.shields.io/badge/vue-3-brightgreen)](https://vuejs.org)
 [![TypeScript](https://img.shields.io/badge/typescript-strict-blue)](https://www.typescriptlang.org)
 
@@ -8,7 +8,7 @@
 
 **Operations-first admin dashboard for the Cycles AI agent governance platform — visualize tenant budgets, action-authority enforcement, reservations, and webhook delivery in real time.** Multi-tenant by default, designed around operator workflows for incident response, not CRUD entity lists.
 
-Pairs with the [Cycles Admin API](https://github.com/runcycles/cycles-server-admin) and the [Cycles Server](https://github.com/runcycles/cycles-server) to provide end-to-end observability into agent spend, risk, and tool action enforcement. Aligned with [governance spec v0.1.25.42](https://github.com/runcycles/cycles-protocol/blob/402307a88906e9fd090159e5ccf2d0036e6aec83/cycles-governance-admin-v0.1.25.yaml).
+Pairs with the [Cycles Admin API](https://github.com/runcycles/cycles-server-admin) and the [Cycles Server](https://github.com/runcycles/cycles-server) to provide end-to-end observability into agent spend, risk, and tool action enforcement. Aligned with [governance spec v0.1.25.44](https://github.com/runcycles/cycles-protocol/blob/27d27394a602e2d8c61b997e81e40dae5e2f1418/cycles-governance-admin-v0.1.25.yaml).
 
 **Documentation:** [CHANGELOG](CHANGELOG.md) (downstream release notes) · [OPERATIONS](OPERATIONS.md) (production runbook) · [AUDIT](AUDIT.md) (engineering narrative).
 
@@ -121,7 +121,9 @@ npm run dev
 
 ### Production (Docker)
 
-See [Production Deployment](#production-deployment) below. The recommended setup uses Caddy for automatic HTTPS:
+See [Production Deployment](#production-deployment) below. The production configuration uses Caddy for automatic HTTPS.
+
+For an existing stack, follow the [ordered backend upgrade](OPERATIONS.md#upgrades-and-rollback) before starting the new admin.
 
 ```bash
 cp Caddyfile.example Caddyfile   # edit domain
@@ -404,7 +406,7 @@ services:
       - cycles
 
   cycles-admin:
-    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.55
+    image: ghcr.io/runcycles/cycles-server-admin:0.1.25.56
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
@@ -436,7 +438,7 @@ services:
   # for the local demo identity, or set the CyclesEvidence env vars on both
   # cycles-server and cycles-events in your deployment.
   cycles-server:
-    image: ghcr.io/runcycles/cycles-server:0.1.25.58
+    image: ghcr.io/runcycles/cycles-server:0.1.25.61
     restart: unless-stopped
     environment:
       REDIS_HOST: redis
@@ -464,7 +466,7 @@ services:
   # .24+ must first drain evidence:processing with the old workers; see
   # OPERATIONS.md. .25 also enforces the private-network SSRF baseline.
   cycles-events:
-    image: ghcr.io/runcycles/cycles-server-events:0.1.25.25
+    image: ghcr.io/runcycles/cycles-server-events:0.1.25.26
     restart: unless-stopped
     environment:
       REDIS_HOST: redis

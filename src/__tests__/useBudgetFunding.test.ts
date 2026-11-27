@@ -231,6 +231,66 @@ describe('useBudgetFunding', () => {
     expect(funding.loading.value).toBe(false)
   })
 
+  it('recovers an unchanged request after a lost response and starts a fresh intent after success', async () => {
+    const funding = create()
+    createIdempotencyKey.mockReturnValueOnce('first').mockReturnValueOnce('next')
+    fund.mockRejectedValueOnce(new Error('Request timed out'))
+    funding.open(ledger())
+    funding.form.value.amount = '10'
+
+    expect(await funding.submit()).toBe(false)
+    funding.form.value.amount = 10
+    funding.form.value.reason = 'CREDIT via admin dashboard'
+    expect(await funding.submit()).toBe(true)
+    expect(fund.mock.calls[1]).toEqual(fund.mock.calls[0])
+    expect(createIdempotencyKey).toHaveBeenCalledOnce()
+
+    funding.open(ledger())
+    funding.form.value.amount = 10
+    expect(await funding.submit()).toBe(true)
+    expect(fund.mock.calls[2][5]).toBe('next')
+  })
+
+  it('separates changed requests and remembers a previous attempt when edits are reverted', async () => {
+    const funding = create()
+    fund.mockRejectedValue(new Error('Network error'))
+    createIdempotencyKey.mockReturnValueOnce('original').mockReturnValueOnce('with-spent')
+    funding.open(ledger())
+    funding.form.value.operation = 'RESET_SPENT'
+    await nextTick()
+
+    await funding.submit()
+    funding.form.value.spent = 0
+    await funding.submit()
+    funding.form.value.spent = ''
+    await funding.submit()
+    expect(fund.mock.calls.map(call => call[5])).toEqual(['original', 'with-spent', 'original'])
+  })
+
+  it('asks the operator to reconcile an expired attempt before sending more funding', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1000)
+    try {
+      const funding = create()
+      funding.open(ledger())
+      funding.form.value.amount = 10
+      fund.mockRejectedValueOnce(new Error('Request timed out'))
+      await funding.submit()
+      now.mockReturnValue(1000 + 24 * 60 * 60 * 1000)
+      expect(await funding.submit()).toBe(false)
+      expect(fund).toHaveBeenCalledOnce()
+      expect(funding.error.value).toContain('Check the ledger')
+      expect(funding.loading.value).toBe(false)
+
+      funding.close()
+      funding.open(ledger())
+      funding.form.value.amount = 10
+      expect(await funding.submit()).toBe(true)
+      expect(createIdempotencyKey).toHaveBeenCalledTimes(2)
+    } finally {
+      now.mockRestore()
+    }
+  })
+
   it('does not touch the funding dependency merely by opening the dialog', () => {
     const funding = create()
     funding.open(ledger())
